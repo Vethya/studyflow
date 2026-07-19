@@ -1,0 +1,3 @@
+# Use zero-cost Render and Neon deployment
+
+StudyFlow will deploy its Dockerized React/FastAPI service on Render Free and use Neon Free as managed PostgreSQL, with Resend Free for transactional email. This keeps operating cost at zero and avoids Render Free PostgreSQL's expiration, while accepting that Render may sleep after inactivity and incur a cold start. The three-second page requirement will therefore be measured on a warm production-like service, cold-start latency will be documented as a free-hosting limitation, the service will be awakened before demonstrations, and manual pre-review backups remain required.
