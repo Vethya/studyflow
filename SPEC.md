@@ -4,11 +4,12 @@
 
 This specification consolidates the StudyFlow proposal, presentation, and the product-design decisions resolved during the requirements grilling session.
 
-The detailed proposal is authoritative when it differs from the presentation:
+The approved revised requirements are authoritative when they differ from the original proposal or presentation:
 
-- `B11-P10_StudyFlow_Proposal.pdf` defines the binding FR-01 through FR-10 and NFR-01 through NFR-06 requirements.
+- FR-01 through FR-09 and NFR-01 through NFR-06 in this specification define the binding requirements baseline.
+- FR-10 from the original proposal is superseded. Effort Progress remains under FR-06, while estimation-accuracy analytics remain internal to adaptive qualification and thesis evaluation.
 - `B11-P10_StudyFlow_Presentation.pdf` is an explanatory summary.
-- The proposal's exclusions remain binding unless this specification explicitly records an agreed addition.
+- The proposal remains a historical source artifact; the scope decisions recorded here supersede its earlier requirement wording.
 - This specification resolves ambiguities left open by the proposal and presentation.
 
 Source artifacts:
@@ -24,12 +25,25 @@ StudyFlow must:
 
 1. Securely manage student accounts and student-owned planning data.
 2. Convert academic tasks into manageable study sessions.
-3. Generate schedules that respect deadlines, availability, pinned sessions, breaks, and session preferences.
+3. Generate schedules that respect deadlines, availability, breaks, and session preferences.
 4. Preserve student control over generated and revised schedules.
-5. Record actual study behavior with low-friction manual entry and an optional timer.
+5. Record actual study behavior with low-friction manual entry and show Effort Progress.
 6. Produce adaptive duration estimates only when personal evidence demonstrates that they are meaningfully more accurate.
 7. Detect overload quantitatively and never disguise infeasible work as a valid schedule.
-8. Show effort progress and transparent original-versus-adaptive-versus-actual comparisons.
+
+### 2.1 Binding Functional Requirements
+
+- **FR-01 — Account:** The system shall allow a student to register and authenticate using email and password, sign out, and manage essential account settings, including name, password, timezone, and study-session preferences. Google Sign-In, email verification, password recovery, and confirmed account linking remain supported authentication details.
+- **FR-02 — Academic Tasks:** The system shall allow a student to create, view, update, and delete Academic Tasks containing a Category, Deadline, Priority, and Original Estimate, subject to the defined task-lifecycle rules.
+- **FR-03 — Availability:** The system shall allow a student to manage recurring weekly Availability Windows and dated Unavailable Periods.
+- **FR-04 — Task Splitting:** The system shall divide Academic Tasks into manageable Study Sessions according to their Planned Duration and the student's Preferred Session Length.
+- **FR-05 — Scheduling:** The system shall generate conflict-free schedules using availability, Deadlines, urgency, Priority, remaining workload, and minimum breaks, and allow the student to accept, reject, or regenerate a proposed schedule.
+- **FR-06 — Outcomes and Progress:** The system shall allow a student to record Study Sessions as Completed, Delayed, or Missed, manually record Actual Duration, and update Effort Progress using recorded work and estimated remaining duration.
+- **FR-07 — Adaptive Estimation:** The system shall use one transparent personal correction method to generate Adaptive Estimates from the student's earlier estimated-versus-actual completion records. It shall use an Adaptive Estimate only after sufficient evidence shows that it is meaningfully more accurate; otherwise, it shall continue using the Original Estimate.
+- **FR-08 — Overload:** The system shall detect when remaining workload cannot fit within valid study time before its Deadline and display the affected work, capacity shortfall, relevant constraints, and possible remedies.
+- **FR-09 — Unfinished-Work Revision:** After a Study Session is recorded as Delayed or Missed, the system shall automatically generate a proposed Schedule Revision for the unfinished work and require the student to accept it before it replaces the active schedule.
+
+FR-10 is removed. Internal estimate-comparison metrics remain required for adaptive-estimation qualification and thesis evaluation but are not presented to students as estimation-error statistics or model-accuracy analytics.
 
 ## 3. Product Scope
 
@@ -41,25 +55,27 @@ StudyFlow must:
 - Academic Task CRUD.
 - Optional Course and Notes fields.
 - Recurring weekly availability and dated unavailable periods.
-- Session splitting with student-defined minimum and maximum lengths.
+- Session splitting using the student's Preferred Session Length.
 - Configurable breaks between sessions.
 - OR-Tools CP-SAT schedule generation.
-- Deterministic fallback scheduling when CP-SAT cannot conclude.
-- Manual session movement and pinning.
 - Completed, Delayed, and Missed outcomes.
 - Awaiting Outcome handling.
-- Optional hybrid Study Timer.
-- Automatic but student-approved Schedule Revisions.
+- Automatic but student-approved Schedule Revisions after Delayed or Missed sessions.
 - Overload and Unscheduled Work explanations.
-- Behavior-adaptive estimation with a correction baseline and Ridge Regression.
-- Effort Progress and estimate-comparison views.
-- Immutable accepted-schedule history.
+- Behavior-adaptive estimation with one transparent personal correction method.
+- Effort Progress without student-facing estimation-accuracy analytics.
 - Responsive desktop and mobile-width workflows.
 
 ### 3.2 Explicitly Excluded
 
 - Adviser, supervisor, administrator, or university-management application roles.
 - Account deletion.
+- Active-device management and sign-out-all-devices controls.
+- Study Timer functionality.
+- Manual session movement, drag-and-drop, and pinning.
+- Browsable immutable schedule history.
+- Ridge Regression or competing adaptive-estimation methods.
+- Student-facing estimation-error statistics or model-accuracy analytics.
 - Native Android or iOS applications.
 - Offline mode or installable PWA requirements.
 - LMS integration.
@@ -79,7 +95,7 @@ StudyFlow must:
 - WCAG 2.2 Level AA conformance.
 - Automated daily backups.
 
-Basic accessibility quality remains expected even though formal WCAG conformance is optional: keyboard access, semantic labels, visible focus, adequate contrast, non-color status indicators, and non-drag alternatives.
+Basic accessibility quality remains expected even though formal WCAG conformance is optional: keyboard access, semantic labels, visible focus, adequate contrast, and non-color status indicators.
 
 ## 4. Users and Ownership
 
@@ -89,18 +105,18 @@ The university student is the only direct application user type.
 
 ### 4.2 Ownership
 
-Every task, availability record, unavailable period, session, timer, schedule version, behavior record, and progress record belongs to exactly one Student Account.
+Every task, availability record, unavailable period, session, active schedule, proposed revision, behavior record, and progress record belongs to exactly one Student Account.
 
 All ownership checks must be enforced server-side. Querying another student's resource identifier returns `404 Not Found`, preventing disclosure that the resource exists. Unauthenticated requests return `401 Unauthorized`.
 
 ## 5. Canonical Domain Language
 
-The canonical glossary is maintained in `CONTEXT.md`. The following definitions are normative.
+The following definitions are normative for the revised requirements baseline. `CONTEXT.md` must be aligned separately before it is treated as the canonical glossary for implementation.
 
 ### 5.1 Accounts and Time
 
 **Student Account**  
-The student's identity and planning preferences. It includes name, password credentials when applicable, Account Timezone, session-length defaults, and Minimum Break.
+The student's identity and planning preferences. It includes name, linked authentication identities, Account Timezone, Preferred Session Length, and Minimum Break.
 
 **Account Timezone**  
 The student-selected timezone used to interpret deadlines, availability, and sessions. It is initially detected from the browser and remains editable.
@@ -139,9 +155,6 @@ The sum of minutes actually worked across all task sessions, including Delayed a
 **Study Session**  
 A scheduled block representing all or part of an Academic Task. Every task becomes one or more sessions.
 
-**Pinned Session**  
-A session manually placed by the student that Schedule Revision must not move until unpinned.
-
 **Session Outcome**  
 Completed, Delayed, or Missed.
 
@@ -160,7 +173,7 @@ A past session with no student-confirmed outcome. Its work remains outstanding b
 ### 5.4 Scheduling State
 
 **Schedule Revision**  
-A proposed replacement for future sessions after tasks, availability, estimates, outcomes, or constraints change. It becomes active only after complete acceptance.
+A proposed replacement for future sessions generated after a Delayed or Missed outcome. It becomes active only after complete acceptance.
 
 **Unscheduled Work**  
 Remaining work with no valid session. It stays visible until constraints change or a valid revision is accepted.
@@ -238,10 +251,9 @@ If Google returns an email matching an existing password account, do not link au
 - Rotate sessions after login and authentication-sensitive events.
 - Revoke sessions on logout.
 - Session expires after 24 hours of inactivity or seven total days, whichever occurs first.
-- Multiple devices are allowed.
-- Track each device session independently.
-- Provide "Sign out all devices."
-- Password changes and resets revoke all device sessions.
+- Password changes and resets revoke all active sessions.
+
+The application does not provide an active-device list or device-management controls.
 
 JWT browser authentication is rejected for the approved browser-only scope.
 
@@ -254,20 +266,16 @@ Students may manage:
 - Linked Google identity.
 - Account Timezone.
 - Preferred Session Length.
-- Minimum Session Length.
 - Minimum Break.
-- Active sessions/devices and sign-out controls.
+- Sign out.
 
 Account deletion is not supported because it is not explicitly required by the proposal. Student-owned planning records remain deletable.
 
-### 6.8 Transactional Email
+### 6.8 Authentication Email Delivery
 
-- Production/deployed email provider: Resend.
-- Local development email capture: Mailpit.
-- Verified sending domain: `studyflow.vethya.com`.
-- Expected sender: `StudyFlow <no-reply@studyflow.vethya.com>`.
-- Configure SPF and DKIM; configure DMARC.
-- Use a provider interface so the implementation is replaceable.
+- Email delivery exists only to support verification and password recovery.
+- Use a replaceable provider interface.
+- Provider selection, a dedicated email-management module, deliverability dashboards, and provider-specific infrastructure are not product requirements.
 
 ## 7. Academic Tasks
 
@@ -285,14 +293,12 @@ Optional:
 
 - Course: maximum 100 characters.
 - Notes: plain text, maximum 2,000 characters.
-- Minimum Session Length override.
-- Preferred Session Length override.
 
 Course and Notes:
 
 - Are for organization, grouping, filtering, and display.
 - Do not affect scheduling.
-- Do not affect correction-baseline or Ridge estimation.
+- Do not affect adaptive estimation.
 - Do not support rich text or attachments.
 
 ### 7.2 Categories
@@ -349,8 +355,9 @@ When a Deadline passes with remaining work:
 
 - Active scheduling uses the newest Deadline.
 - Preserve Deadline history.
-- Any Deadline change triggers a proposed Schedule Revision.
 - A changed earlier Deadline may produce Overload.
+- If a Deadline change invalidates a future session, remove that invalid session and mark its work Unscheduled.
+- The student may then request schedule regeneration.
 
 ### 7.8 Task Deletion
 
@@ -361,13 +368,13 @@ Deleting a task removes:
 - The task.
 - Associated sessions.
 - Completion records.
-- Timer data.
 - Associated behavior history.
 
 After deletion:
 
 - Recalculate adaptive-estimation eligibility and metrics without the deleted history.
-- Recompute affected future scheduling through a Schedule Revision.
+- Leave unaffected future sessions unchanged.
+- The student may request schedule regeneration when deletion changes the desired plan.
 
 ## 8. Availability and Time Semantics
 
@@ -382,7 +389,8 @@ After deletion:
 
 - Unavailable Periods are dated exceptions.
 - They override recurring Availability Windows.
-- A one-time exception that conflicts with accepted future sessions triggers a Schedule Revision.
+- If a new exception invalidates a future session, remove that session and mark its work Unscheduled.
+- The student may then request schedule regeneration.
 
 ### 8.3 Timezone Changes
 
@@ -391,7 +399,8 @@ When Account Timezone changes:
 - Preserve each Deadline's real-world instant.
 - Convert its displayed local date/time.
 - Require the student to confirm recurring Availability Windows in the new timezone.
-- Trigger a Schedule Revision.
+- Remove any future session made invalid by the confirmed conversion and mark its work Unscheduled.
+- The student may then request schedule regeneration.
 
 ### 8.4 Hard Time Rules
 
@@ -402,7 +411,6 @@ No accepted or generated session may:
 - Overlap another session.
 - Enter the past.
 - Cross its task Deadline.
-- Violate a Pinned Session.
 - Violate Minimum Break.
 
 ## 9. Session Preferences and Splitting
@@ -411,54 +419,32 @@ No accepted or generated session may:
 
 Every Academic Task becomes one or more Study Sessions:
 
-- If Planned Duration fits the maximum, create one session.
+- If Planned Duration fits the Preferred Session Length, create one session.
 - Otherwise split it.
 - Represent duration in exact whole minutes.
 - Preserve exact total minutes; never round workload upward.
 - Do not impose a 15-minute duration grid.
+- Permit the final session to be shorter than the Preferred Session Length.
 
 Example:
 
 - 130 total minutes.
 - Maximum 60.
-- No minimum consideration: 60, 60, 10.
+- Split: 60, 60, 10.
 
-### 9.2 Minimum and Maximum
+### 9.2 Account Preferences
 
 Account defaults:
 
-- Minimum Session Length: 20 minutes.
-- Preferred Session Length (maximum): 60 minutes.
+- Preferred Session Length: 60 minutes.
 - Minimum Break: 10 minutes.
 
 Allowed settings:
 
-- Minimum Session Length: 5–120 minutes.
-- Preferred maximum: 10–240 minutes.
+- Preferred Session Length: 10–240 minutes.
 - Minimum Break: 0–120 minutes.
-- Require minimum less than or equal to maximum.
 
-Task-level minimum and maximum overrides are optional. When absent, inherit account values.
-
-### 9.3 Rebalancing
-
-If naïve splitting leaves a final session shorter than the minimum:
-
-- Rebalance sessions.
-- Preserve exact total workload.
-- Keep every session within minimum/maximum when possible.
-
-Example:
-
-- Total 130.
-- Maximum 60.
-- Minimum 20.
-- Valid split: 60, 50, 20.
-- Invalid split: 60, 60, 10.
-
-If the entire task is shorter than the minimum, allow one exact short session.
-
-### 9.4 Breaks
+### 9.3 Breaks
 
 - Minimum Break applies between all consecutive sessions, including sessions of the same task.
 - Breaks consume otherwise available capacity.
@@ -478,9 +464,7 @@ The scheduler must enforce:
 - Unavailable periods.
 - No overlap.
 - Deadlines.
-- Pinned sessions.
-- Minimum session length, with the whole-task-shorter exception.
-- Preferred maximum session length.
+- Preferred Session Length, except for an exact final remainder.
 - Exact total workload.
 - Minimum Break.
 - No scheduling in the past.
@@ -492,7 +476,6 @@ When all work is feasible:
 - Schedule every active task through its latest Deadline.
 - Prefer earlier placement to preserve recovery time.
 - Distribute long-task sessions across available days instead of packing everything into the earliest day.
-- Keep accepted Pinned Sessions unchanged.
 
 When capacity is insufficient:
 
@@ -518,12 +501,10 @@ An Overload explanation must include:
 - Required remaining minutes.
 - Available minutes before Deadline.
 - Exact shortfall.
-- Relevant Pinned Sessions.
 - Relevant Unavailable Periods.
 - Student-controlled remedies:
   - Extend the Deadline.
   - Add availability.
-  - Unpin sessions.
 
 StudyFlow never changes those constraints automatically.
 
@@ -535,47 +516,29 @@ StudyFlow never changes those constraints automatically.
 - A "Next 14 Days" agenda provides a compact forward view.
 - Mobile uses day and scrollable agenda layouts, not 14 columns.
 
-### 10.7 CP-SAT Time Limit and Fallback
+### 10.7 CP-SAT Time Limit and Technical Failure
 
 The complete schedule-generation request must finish within five seconds under the agreed test conditions:
 
-- CP-SAT receives up to four seconds.
-- One second remains for fallback and response construction.
+- CP-SAT and response construction share the five-second budget.
+- If CP-SAT times out or fails technically, return a clearly labeled technical failure.
+- A technical failure never replaces the active schedule and is never reported as Overload.
+- Proven infeasibility returns Overload.
 
-Fallback:
+## 11. Schedule Proposal Control
 
-- Deterministic earliest-deadline-first greedy heuristic.
-- Runs only when CP-SAT times out or fails technically.
-- Must enforce all hard constraints.
-- Produces a clearly labeled fallback proposal.
-- Must not run to disguise a CP-SAT-proven infeasible workload.
-- A proven infeasible workload returns Overload.
+### 11.1 Initial Generation and Manual Regeneration
 
-## 11. Manual Session Control
+- Initial generation and student-requested regeneration create an inactive schedule proposal.
+- The student may request regeneration after task, availability, timezone, or preference changes.
+- Generated proposals never replace the active schedule automatically.
 
-### 11.1 Moving Sessions
+### 11.2 Acceptance and Rejection
 
-Students may move sessions through:
-
-- Drag-and-drop on desktop Calendar.
-- An "Edit time" form on desktop and mobile.
-
-Both methods apply identical validation.
-
-### 11.2 Pinning
-
-- A manual move pins the session.
-- Schedule Revisions cannot move it.
-- The student may unpin it.
-- Pinned sessions can contribute to Overload and must be named in the explanation.
-
-Students cannot pin or move a session:
-
-- Outside availability.
-- Into unavailable time.
-- Over another session.
-- Into the past.
-- Across/after its Deadline.
+- Preview the proposal's sessions, Unscheduled Work, and Overload warnings.
+- Accepting replaces the active future schedule with the complete proposal.
+- Rejecting leaves the active schedule unchanged.
+- Partial acceptance and manual session placement are not supported.
 
 ## 12. Session Outcomes and Remaining Work
 
@@ -625,6 +588,8 @@ Example:
 - Student believes 35 are needed.
 - Reschedule 35.
 
+Saving Delayed automatically creates a proposed Schedule Revision for the revised remaining work.
+
 ### 12.4 Missed
 
 - Actual minutes equal zero.
@@ -642,45 +607,22 @@ Example:
 - 30 completed.
 - Task Actual Duration: 125 minutes.
 
-## 13. Study Timer
+## 13. Effort Progress
 
-### 13.1 Hybrid Model
+For each task, calculate:
 
-The timer is included but optional.
+`Effort Progress = Actual Duration / (Actual Duration + estimated remaining duration)`
 
-- Start, Pause, and Finish controls.
-- Timer fills Actual Duration.
-- Student confirms or edits the result.
-- Manual duration entry always remains available.
-- Timer completion never determines Session Outcome.
-- The application need not remain open while studying.
+Display:
 
-### 13.2 Concurrency
+- Effort Progress percentage.
+- Actual minutes worked.
+- Estimated minutes remaining.
+- Completed-session count.
+- Upcoming-session count.
+- Task Status.
 
-- Only one active timer per Student Account.
-- Starting another requires pausing or finishing the current timer.
-- Enforce this across devices.
-
-### 13.3 Persistence
-
-- Record timer timestamps server-side.
-- Closing the browser does not stop the timer.
-- On return, show elapsed time and require confirmation.
-
-### 13.4 Long Timer Handling
-
-Flag a timer when:
-
-- Elapsed time exceeds 60 minutes and twice the planned session length; or
-- Elapsed time reaches four hours.
-
-At four hours:
-
-- If the app is open, show "Still studying?"
-- "Continue" keeps it running.
-- If the app is closed, keep recording.
-- On return, flag and require confirmation/correction.
-- Never silently pause, stop, or cap Actual Duration.
+Clearly label that Effort Progress measures expected effort consumed, not content completion, quality, or grade.
 
 ## 14. Schedule Revisions
 
@@ -688,57 +630,36 @@ At four hours:
 
 Generate a proposed Schedule Revision after:
 
-- Task creation.
-- Task update.
-- Task deletion.
-- Deadline change.
-- Availability change.
-- Unavailable-period change.
-- Completed, Delayed, or Missed outcome.
-- Planned estimate-source change.
-- Pin or unpin.
-- Account Timezone change.
+- Delayed outcome.
+- Missed outcome.
+
+Other planning changes do not trigger automatic revision. The student may request regeneration under Section 11.
 
 ### 14.2 Preview
 
 Preview must show:
 
 - Revision reason.
-- Moved sessions.
-- Old and new times for moved sessions.
-- Added sessions.
-- Removed sessions.
+- Proposed future sessions.
 - Unscheduled Work.
 - Overload warnings.
 - Accept and Reject.
 
-Pinned and completed sessions cannot move.
+Completed sessions never move or reappear.
 
 ### 14.3 Acceptance
 
 - Revision is inactive until accepted.
 - Accept the complete feasible revision.
 - Partial acceptance is not supported because it can invalidate feasibility guarantees.
-- A student who wants different placement may reject, manually move/pin sessions, and regenerate.
+- A student who wants a different result may reject and request regeneration after changing planning inputs.
 
-### 14.4 Rejection and Invalid Existing Sessions
+### 14.4 Rejection
 
-If the underlying change invalidates current sessions and the student rejects:
-
-- Remove only invalid sessions from the active calendar.
-- Convert their remaining work to Unscheduled Work.
-- Preserve unaffected sessions.
-- Continue showing the warning until resolved.
-
-### 14.5 Version History
-
-- Every accepted schedule is immutable.
-- Store creation time and revision reason.
-- New acceptance creates a new version.
-- Show only the current accepted version as active.
-- Allow inspection of old versions.
-- Do not restore an old version directly; it may contain past or invalid placements.
-- Regenerate under current constraints instead.
+- Rejecting leaves existing valid future sessions unchanged.
+- The Delayed or Missed session's unfinished work remains Unscheduled.
+- Continue showing the unresolved-work warning until the student accepts a valid revision or changes planning inputs.
+- Browsable historical schedule versions are not retained as a product feature.
 
 ## 15. Adaptive Duration Estimation
 
@@ -816,77 +737,35 @@ After the student acknowledges that Category:
 - Do not repeatedly block normal task creation for the same established pattern.
 - Require acknowledgment again only if the adjustment factor changes substantially; the precise material-change threshold remains an implementation acceptance detail.
 
-### 15.5 Ridge Regression Candidate
-
-After 30 completed tasks:
-
-- Begin generating hidden chronological Ridge predictions.
-- Require 10 hidden predictions.
-- Earliest Ridge activation is after task 40.
-
-Ridge input features, all known before work:
-
-- Original Estimate.
-- Category.
-- Priority.
-- Recent overall estimation ratio.
-- Recent category-specific estimation ratio.
-
-Excluded Ridge inputs:
-
-- Course.
-- Notes.
-- Future completion data.
-
-Activate Ridge only when its MAE is at least 10% lower than:
-
-- Original Estimate MAE; and
-- Correction-baseline MAE;
-
-on the same 10 eligible chronological predictions.
-
-### 15.6 Continued Qualification and Fallback
+### 15.5 Continued Qualification
 
 After activation:
 
 - Re-evaluate after every completed task.
-- Use the latest 10 eligible chronological predictions.
-- A method must maintain a 10% MAE advantage.
-- If it loses qualification, fall back to the best qualifying method.
-- If none qualifies, Adaptive Estimate becomes unavailable and Planned Duration uses Original Estimate.
+- Use the latest 10 eligible chronological predictions when 10 are available; otherwise use every hidden eligible prediction, with a minimum of five.
+- The correction method must maintain a 10% MAE advantage over Original Estimates on the same tasks.
+- If it loses qualification, Adaptive Estimate becomes unavailable and Planned Duration uses Original Estimate.
 
-This fallback affects new predictions only; existing task predictions remain frozen.
+This change affects new predictions only; existing task predictions remain frozen.
 
-### 15.7 Explanation
+### 15.6 Explanation
 
 For any Adaptive Estimate, show:
 
 - Original Estimate.
 - Adaptive Estimate.
-- Number of prior records.
-- Method status in understandable language.
-- Strongest understandable factors, such as a Category's recent tendency to take longer.
+- A short explanation that it is based on the student's earlier completion history.
+- The Planned Duration selected for scheduling.
 
-Do not expose raw model coefficients in the normal student interface. They may be retained as technical evidence.
+Do not expose MAE, signed bias, prediction errors, eligible sample counts, or other model-accuracy analytics in the student interface.
 
-## 16. Progress and Estimate Comparison
+## 16. Internal Estimation Evaluation
 
-### 16.1 Task Progress
+The following calculations are required for adaptive qualification and thesis evaluation, not as student-facing product analytics.
 
-Display:
+### 16.1 Per-Task Evaluation Record
 
-- Effort Progress percentage.
-- Actual minutes worked.
-- Estimated minutes remaining.
-- Completed-session count.
-- Upcoming-session count.
-- Task Status.
-
-Clearly label that Effort Progress does not represent percentage of content written, quality, or grade.
-
-### 16.2 Per-Task Estimate Comparison
-
-For a completed eligible task, show:
+For each completed eligible task, retain internally:
 
 - Original Estimate.
 - Adaptive Estimate if it existed before the task.
@@ -895,9 +774,9 @@ For a completed eligible task, show:
 - Signed estimation error.
 - Absolute estimation error.
 
-### 16.3 Aggregate Comparison
+### 16.2 Aggregate Evaluation
 
-Show:
+Calculate internally:
 
 - Original Estimate MAE.
 - Adaptive Estimate MAE.
@@ -909,15 +788,9 @@ Fairness requirements:
 - Compare Original and Adaptive only on the same eligible tasks.
 - Do not generate historical Adaptive Estimates retrospectively.
 - Use only information available before each prediction.
+- Sessions without a confirmed Actual Duration remain pending and are not treated as zero-duration completions.
 
-### 16.4 Static vs Adaptive Schedules
-
-Students do not see two competing daily schedules.
-
-- The active product shows one accepted schedule.
-- Planned Duration source determines that schedule.
-- Static-versus-adaptive schedule comparison belongs to technical evaluation/test tooling using identical task snapshots.
-- The student dashboard shows estimate differences, not two simultaneous plans.
+Static-versus-adaptive schedule comparison belongs to technical evaluation tooling using identical task snapshots. Students see one active schedule and no model-accuracy dashboard.
 
 ## 17. Navigation and User Interface
 
@@ -930,8 +803,6 @@ Students do not see two competing daily schedules.
 - Progress.
 - Settings.
 
-An active Study Timer remains globally visible.
-
 ### 17.2 Dashboard
 
 Dashboard is the default landing page and answers, "What needs attention now?"
@@ -939,14 +810,12 @@ Dashboard is the default landing page and answers, "What needs attention now?"
 Show:
 
 - Next session.
-- Active timer.
 - Today's remaining workload.
 - Upcoming Deadlines.
 - Overload warnings.
 - Unscheduled Work.
 - Awaiting Outcomes.
 - Weekly Effort Progress.
-- Latest estimate-accuracy summary.
 - Quick Add Task.
 - Links to detailed Calendar, Tasks, and Progress views.
 
@@ -974,7 +843,7 @@ Calendar task access:
 - `+ Task` opens the shared task form.
 - Task sidebar shows active, Unscheduled, Overdue, and completed tasks.
 - Clicking a session opens a task/session drawer.
-- Drawer actions: view/edit task, delete task, Start Timer, Record Outcome, Move, Pin/Unpin.
+- Drawer actions: view/edit task, delete task, and Record Outcome.
 - Clicking Unscheduled Work opens its explanation and remedies.
 - Desktop uses a side drawer.
 - Mobile uses a bottom sheet.
@@ -991,22 +860,24 @@ Tasks provides complete management and bulk browsing:
 - Filter by Task Status.
 - Filter by Deadline.
 - Filter by Priority.
-- View Original, Adaptive, Planned, Actual, and remaining durations.
+- View Planned Duration, Actual Duration, and estimated remaining duration.
 - View task session history.
 
 ### 17.5 Availability
 
 - Manage recurring weekly Availability Windows.
 - Manage dated Unavailable Periods.
-- Display conflicts that will trigger Schedule Revision.
+- Display future sessions invalidated by a saved availability change.
+- Allow the student to request schedule regeneration.
 
 ### 17.6 Progress
 
 - Task Effort Progress.
 - Completed-session history.
-- Original/Adaptive/Actual comparisons.
-- Aggregate MAE and signed bias.
-- Sample counts and adaptation availability.
+- Actual minutes worked.
+- Estimated minutes remaining.
+- Completed-session and upcoming-session counts.
+- Task Status.
 
 ### 17.7 Settings
 
@@ -1014,12 +885,9 @@ Tasks provides complete management and bulk browsing:
 - Password management.
 - Linked Google identity.
 - Account Timezone.
-- Minimum Session Length.
 - Preferred Session Length.
 - Minimum Break.
-- Active devices.
-- Sign out current device.
-- Sign out all devices.
+- Sign out.
 
 ## 18. Privacy and Deletion
 
@@ -1033,7 +901,7 @@ Collect only:
 - Availability.
 - Sessions and outcomes.
 - Actual-duration behavior.
-- Schedule versions.
+- Active schedules and proposed revisions.
 - Technical records required for security and evaluation.
 
 Course and Notes are optional. The application does not require confidential academic content.
@@ -1052,15 +920,16 @@ All cross-user access tests must pass for:
 - Availability.
 - Unavailable periods.
 - Sessions.
-- Timers.
-- Schedule versions.
+- Active schedules and proposed revisions.
 - Outcomes.
 - Behavior records.
-- Progress/estimate records.
+- Progress and internal estimation-evaluation records.
 
 ## 19. Non-Functional Requirements
 
 ### 19.1 Security
+
+**NFR-01:** All student-owned resources shall be protected by server-side authentication and authorization, and every tested cross-user access attempt shall fail without disclosing another student's data.
 
 - All authorization server-side.
 - Cross-user access denied in every tested endpoint.
@@ -1074,6 +943,8 @@ All cross-user access tests must pass for:
 - No authentication secrets in browser storage.
 
 ### 19.2 Performance
+
+**NFR-02:** Under documented warm test conditions, main pages shall become usable within three seconds and schedule-generation responses shall complete within five seconds at the 95th percentile.
 
 Page requirement:
 
@@ -1092,18 +963,18 @@ Schedule-generation requirement:
   - Up to 250 sessions.
   - 16-week horizon.
   - 50 unavailable periods.
-  - 25 pinned sessions.
   - Feasible and overloaded scenarios.
 
 Render Free cold-start latency is explicitly excluded from the warm performance measurement and documented as a free-hosting limitation.
 
 ### 19.3 Reliability
 
+**NFR-03:** Generated and accepted schedules shall contain no hard-constraint conflicts. Infeasible workloads shall produce explicit Overload and Unscheduled Work rather than an invalid schedule.
+
 - No hard-constraint violation in generated or accepted schedules.
 - Infeasible work returns Overload, not an invalid plan.
 - Invalidated existing sessions become Unscheduled Work.
-- Accepted schedule versions are immutable.
-- Solver technical failure may use only the constrained fallback.
+- Solver timeout or technical failure leaves the active schedule unchanged and is not mislabeled as Overload.
 
 Successful missed-session recovery means:
 
@@ -1114,21 +985,22 @@ Successful missed-session recovery means:
 
 ### 19.4 Usability
 
+**NFR-04:** At least four of five representative university students shall complete the defined task-to-schedule workflow without assistance.
+
 - Main workflow must be clear without assistance.
 - Duration/outcome entry must remain low friction.
 - Automatic changes require preview and acceptance.
 - Explanations must be understandable and actionable.
-- Manual alternatives must exist for timer entry and drag-and-drop.
 
-### 19.5 Compatibility
+### 19.5 Compatibility and Accessibility
 
-- Latest two stable versions of Chrome.
-- Latest two stable versions of Edge.
-- Latest two stable versions of Safari.
-- Responsive at 360px.
+**NFR-05:** Core workflows shall remain usable at 360, 768, and 1440 CSS pixels and in the latest stable versions of Chrome, Edge, and Safari, with keyboard-operable controls and visible focus.
+
+- Latest stable version of Chrome.
+- Latest stable version of Edge.
+- Latest stable version of Safari.
+- Responsive at 360, 768, and 1440 CSS pixels.
 - Mobile Chrome and Safari responsive testing.
-
-### 19.6 Accessibility
 
 WCAG 2.2 AA is a nice-to-have, not a release blocker.
 
@@ -1139,7 +1011,12 @@ Basic accessible behavior remains required as ordinary quality:
 - Visible focus.
 - Adequate contrast.
 - Status not communicated by color alone.
-- Edit-time alternative to dragging.
+
+### 19.6 Privacy
+
+**NFR-06:** The system shall collect only personal data necessary for authentication, planning, security, and evaluation, and allow students to view, update, or delete their supported planning records without affecting another student's records. Account deletion is excluded.
+
+Evidence uses the data inventory, deletion tests, and cross-user ownership tests defined in Section 18.
 
 ## 20. Architecture and Technology
 
@@ -1160,25 +1037,24 @@ Basic accessible behavior remains required as ordinary quality:
 - Server-side authorization.
 - Scheduling orchestration.
 - Estimation orchestration.
-- Email and Google OIDC integration.
+- Google OIDC integration and minimal authentication-email delivery.
 
 ### 20.3 Database
 
 - PostgreSQL.
 - SQLAlchemy.
 - Alembic.
-- Store accounts, identities, sessions, tasks, availability, schedule versions, study sessions, outcomes, timers, and behavior records.
+- Store accounts, identities, sessions, tasks, availability, active schedules, proposed revisions, study sessions, outcomes, and behavior records.
 
 ### 20.4 Scheduling
 
 - Google OR-Tools CP-SAT.
-- Deterministic greedy fallback under the constrained conditions in Section 10.7.
+- Safe timeout and technical-failure handling under Section 10.7.
 
 ### 20.5 Estimation
 
 - Python.
 - Transparent median correction baseline.
-- scikit-learn Ridge Regression after qualification.
 - Chronological prediction/evaluation only.
 
 ### 20.6 Testing
@@ -1194,7 +1070,8 @@ Zero-cost deployment:
 
 - Render Free for the Dockerized React/FastAPI service.
 - Neon Free for managed PostgreSQL.
-- Resend Free for transactional email.
+
+Authentication-email provider selection remains an environment configuration choice rather than a product requirement.
 
 Known limitation:
 
@@ -1241,7 +1118,7 @@ Full E2E is not required on every pushed commit.
 
 Maintain a matrix mapping:
 
-- FR-01 through FR-10.
+- FR-01 through FR-09.
 - NFR-01 through NFR-06.
 
 Each row must link to:
@@ -1252,7 +1129,7 @@ Each row must link to:
 
 A requirement is not complete without evidence.
 
-## 23. Proposal Requirement Mapping
+## 23. Revised Requirement Mapping
 
 ### FR-01: Secure Account
 
@@ -1272,27 +1149,23 @@ Covered by Sections 9 and 10.
 
 ### FR-05: Constraint-Based Scheduling
 
-Covered by Sections 10, 11, and 14.
+Covered by Sections 10 and 11.
 
-### FR-06: Session Status and Actual Duration
+### FR-06: Session Outcomes, Actual Duration, and Effort Progress
 
-Covered by Sections 12 and 13.
+Covered by Sections 12, 13, and 17.6.
 
-### FR-07: Personalized Estimate Updates
+### FR-07: Qualified Personal Correction
 
-Covered by Section 15.
+Covered by Sections 15, 16, and 24.6.
 
 ### FR-08: Overload Detection and Explanation
 
 Covered by Sections 10.4 and 10.5.
 
-### FR-09: Automatic Rescheduling
+### FR-09: Delayed/Missed Work Revision
 
 Covered by Section 14.
-
-### FR-10: Progress and Estimate Comparison
-
-Covered by Sections 16 and 17.6.
 
 ## 24. Separate Thesis Evaluation Decisions
 
@@ -1300,8 +1173,9 @@ These decisions were discussed and accepted but are not product features or in-p
 
 ### 24.1 Usability Participants
 
-- At least 10 representative university students.
-- The 80% threshold means at least 8 of 10 complete the main workflow without assistance.
+- At least 5 representative university students.
+- The 80% threshold means at least 4 of 5 complete the main workflow without assistance.
+- Because each participant represents 20 percentage points, report the limited statistical stability of the result.
 
 ### 24.2 Main Evaluated Workflow
 
@@ -1309,9 +1183,9 @@ These decisions were discussed and accepted but are not product features or in-p
 2. Create an Academic Task.
 3. Generate and accept a schedule.
 4. Record a Session Outcome and Actual Duration.
-5. View updated Effort Progress and estimate comparison.
+5. View updated Effort Progress.
 
-Registration, email verification, and Google setup are excluded from this core usability metric.
+Registration, email verification, password recovery, and Google setup are excluded from this core usability metric.
 
 ### 24.3 External Feedback Collection
 
@@ -1366,23 +1240,27 @@ These metrics measure replanning disruption and recovery cost. They do not prove
 
 ## 25. Rejected or Superseded Decisions
 
-- Presentation as authoritative source: rejected; proposal is authoritative.
+- Presentation or original proposal as the current requirements authority: superseded by the approved revised baseline in Section 2.1.
 - Three completed tasks as sufficient adaptive history: rejected.
 - Fifteen-minute duration rounding: rejected; exact whole minutes are preserved.
 - Copy Original Estimate into Adaptive Estimate during cold start: rejected; Adaptive is unavailable.
 - Hard 0.5×–2× correction cap: rejected; use an uncapped robust median plus acknowledgment.
 - Arbitrary third Planned Duration: rejected.
 - Automatic Missed status when no outcome is recorded: rejected.
-- Timer-only duration tracking: rejected; hybrid timer/manual approach selected.
-- Automatic four-hour timer stop: rejected; warn and confirm without silent stopping.
+- Study Timer: removed from the binding scope; Actual Duration uses manual entry.
 - Sessions after Deadline during Overload: rejected.
 - Silent automatic rescheduling: rejected.
 - Partial Schedule Revision acceptance: rejected.
-- Direct restoration of old schedules: rejected.
+- Automatic revisions for changes other than Delayed or Missed outcomes: superseded by student-requested regeneration.
+- Manual session movement, drag-and-drop, and pinning: removed from the binding scope.
+- Browsable immutable schedule history and direct restoration: removed from the binding scope.
+- Deterministic scheduling fallback: superseded by safe technical-failure handling.
 - Two simultaneous daily static/adaptive schedules: rejected.
 - JWT browser authentication: rejected.
 - Automatic Google/password account linking: rejected.
 - Unverified password-account access: rejected.
+- Ridge Regression and competing adaptive methods: superseded by one transparent correction method.
+- Student-facing estimation-error and model-accuracy analytics: removed; retained only as internal evaluation.
 - Account deletion: excluded because not required.
 - Required reminder/notification system: rejected as out of scope.
 - Required offline/PWA support: rejected as out of scope.
@@ -1397,23 +1275,23 @@ These metrics measure replanning disruption and recovery cost. They do not prove
 
 ## 26. Existing Decision Records
 
-The following ADRs remain normative and complement this specification:
+The following ADRs complement this specification subject to the stated revisions:
 
-- `docs/adr/0001-stage-and-performance-gate-adaptive-estimation.md`
-- `docs/adr/0002-use-server-managed-browser-sessions.md`
-- `docs/adr/0003-preserve-accepted-schedule-versions.md`
-- `docs/adr/0004-fallback-only-when-cp-sat-cannot-conclude.md`
-- `docs/adr/0005-use-zero-cost-render-and-neon-deployment.md`
+- `docs/adr/0001-stage-and-performance-gate-adaptive-estimation.md`: normative only for the transparent correction baseline and its qualification gate; all Ridge Regression decisions are superseded.
+- `docs/adr/0002-use-server-managed-browser-sessions.md`: remains normative, except active-device management is not required.
+- `docs/adr/0003-preserve-accepted-schedule-versions.md`: superseded by the active-schedule and single-proposal model.
+- `docs/adr/0004-fallback-only-when-cp-sat-cannot-conclude.md`: superseded by safe technical-failure handling without fallback.
+- `docs/adr/0005-use-zero-cost-render-and-neon-deployment.md`: remains normative for Render and Neon; the named email provider is no longer a product requirement.
 
 ## 27. Completion Boundary
 
 Core software is complete only when:
 
-- FR-01 through FR-10 are implemented.
+- FR-01 through FR-09 are implemented.
 - NFR-01 through NFR-06 have evidence under their agreed test conditions.
 - All hard scheduling invariants pass.
-- Adaptive methods remain unavailable until performance-qualified.
+- The personal correction method remains unavailable until performance-qualified.
 - Cross-user authorization tests all pass.
 - The complete task-to-schedule-to-outcome-to-progress workflow works at desktop and 360px width.
-- Proposal exclusions remain excluded.
+- Section 3 exclusions remain excluded.
 - Nice-to-have items do not block core delivery.
