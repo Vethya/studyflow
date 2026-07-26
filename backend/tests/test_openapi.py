@@ -18,3 +18,19 @@ async def test_versioned_openapi_describes_the_public_health_route() -> None:
         "version": "0.1.0",
     }
     assert "/api/v1/health" in schema["paths"]
+
+
+@pytest.mark.anyio
+async def test_documentation_routes_stay_under_the_versioned_api_prefix() -> None:
+    transport = ASGITransport(app=create_app())
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        versioned_docs = await client.get("/api/v1/docs")
+        versioned_oauth_redirect = await client.get("/api/v1/docs/oauth2-redirect")
+        unversioned_redoc = await client.get("/redoc")
+        unversioned_oauth_redirect = await client.get("/docs/oauth2-redirect")
+
+    assert versioned_docs.status_code == 200
+    assert versioned_oauth_redirect.status_code == 200
+    assert unversioned_redoc.status_code == 404
+    assert unversioned_oauth_redirect.status_code == 404

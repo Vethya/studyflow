@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from pytest import MonkeyPatch
+from pydantic import ValidationError
+from pytest import MonkeyPatch, raises
 
 from studyflow.app import create_app
 from studyflow.settings import Environment, Settings
@@ -29,3 +30,8 @@ def test_app_factory_uses_explicit_settings() -> None:
 
     assert app.debug is True
     assert app.state.settings is settings
+
+
+def test_production_rejects_debug_mode() -> None:
+    with raises(ValidationError, match="Debug mode must be disabled in production"):
+        Settings(environment=Environment.PRODUCTION, debug=True)
