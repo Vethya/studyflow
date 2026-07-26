@@ -31,7 +31,7 @@ services:
   migrate:
     build:
       context: ./backend
-    command: ["uv", "run", "--no-sync", "alembic", "upgrade", "head"]
+    command: [".venv/bin/alembic", "upgrade", "head"]
     environment: *backend-environment
     depends_on:
       postgres:

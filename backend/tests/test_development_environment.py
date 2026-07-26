@@ -28,7 +28,7 @@ def test_backend_waits_for_healthy_postgres_and_uses_its_service_name() -> None:
 
     assert backend["depends_on"]["migrate"]["condition"] == "service_completed_successfully"
     assert services["migrate"]["depends_on"]["postgres"]["condition"] == "service_healthy"
-    assert services["migrate"]["command"][-2:] == ["upgrade", "head"]
+    assert services["migrate"]["command"] == [".venv/bin/alembic", "upgrade", "head"]
     assert "@postgres:5432/" in backend["environment"]["STUDYFLOW_DATABASE_URL"]
     assert backend["environment"] == services["migrate"]["environment"]
     assert services["postgres"]["healthcheck"]["test"][0] == "CMD-SHELL"
@@ -57,7 +57,8 @@ def test_backend_image_is_locked_and_runs_as_non_root() -> None:
     assert dockerfile.count("@sha256:") == 2
     assert "uv sync --locked --no-dev" in dockerfile
     assert "USER studyflow" in dockerfile
-    assert 'CMD ["uv", "run", "--no-sync"' in dockerfile
+    assert 'CMD [".venv/bin/uvicorn"' in dockerfile
+    assert 'CMD ["uv", "run"' not in dockerfile
     assert "chown -R" not in dockerfile
 
 
