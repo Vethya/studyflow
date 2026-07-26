@@ -1,5 +1,8 @@
+import asyncio
+
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pytest import MonkeyPatch
 
 from studyflow.app import create_app
 from studyflow.settings import Environment, Settings
@@ -22,6 +25,11 @@ class ReachableDatabase:
 class UnreachableDatabase(ReachableDatabase):
     async def ping(self) -> None:
         raise RuntimeError("could not connect with password super-secret")
+
+
+class HangingDatabase(ReachableDatabase):
+    async def ping(self) -> None:
+        await asyncio.Event().wait()
 
 
 @pytest.mark.anyio
@@ -74,3 +82,24 @@ async def test_liveness_does_not_depend_on_database_readiness() -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+@pytest.mark.anyio
+async def test_readiness_bounds_a_hanging_database_probe(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("STUDYFLOW_DATABASE_READINESS_TIMEOUT_SECONDS", "0.01")
+    app = create_app(
+        Settings(environment=Environment.TEST),
+        database=HangingDatabase(),
+    )
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await asyncio.wait_for(
+            client.get("/api/v1/ready"),
+            timeout=0.25,
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Database is unavailable"}

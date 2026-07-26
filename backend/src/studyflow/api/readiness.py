@@ -1,9 +1,11 @@
+import asyncio
 from typing import Literal, cast
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
 from studyflow.database import DatabaseReadiness
+from studyflow.settings import Settings
 
 router = APIRouter(tags=["health"])
 
@@ -31,8 +33,10 @@ class DatabaseUnavailableResponse(BaseModel):
 )
 async def get_readiness(request: Request) -> ReadinessResponse:
     database = cast(DatabaseReadiness, request.app.state.database)
+    settings = cast(Settings, request.app.state.settings)
     try:
-        await database.ping()
+        async with asyncio.timeout(settings.database_readiness_timeout_seconds):
+            await database.ping()
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

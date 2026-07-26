@@ -1,8 +1,8 @@
 from enum import StrEnum
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 from urllib.parse import parse_qs, urlsplit
 
-from pydantic import SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     debug: bool = False
     log_level: Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"] = "INFO"
     database_url: SecretStr = SecretStr(DEFAULT_DATABASE_URL)
+    database_readiness_timeout_seconds: Annotated[float, Field(gt=0, le=10)] = 2.0
 
     @field_validator("database_url")
     @classmethod

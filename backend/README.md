@@ -40,8 +40,9 @@ refuses that default and requires an explicit URL with `sslmode=require`, `verif
 during shutdown; it does not connect at module import.
 
 The liveness endpoint remains available when PostgreSQL is down. The readiness endpoint executes
-`SELECT 1` and returns a generic `503` if PostgreSQL cannot be reached. The dedicated development
-environment PR will add the local PostgreSQL container.
+`SELECT 1` and returns a generic `503` if PostgreSQL cannot be reached within
+`STUDYFLOW_DATABASE_READINESS_TIMEOUT_SECONDS` (two seconds by default). The dedicated
+development environment PR will add the local PostgreSQL container.
 
 ## Verify
 
