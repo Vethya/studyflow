@@ -12,6 +12,27 @@ uv sync
 uv run uvicorn studyflow.app:app --reload
 ```
 
+Or start the complete development stack from the repository root:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+This runs migrations, then starts the API on <http://127.0.0.1:8000>, PostgreSQL on port `5432`,
+and Mailpit's inbox on <http://127.0.0.1:8025> with SMTP on port `1025`. All published ports bind
+to localhost only. The checked-in database credentials are local defaults only.
+
+To change local database credentials, set `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD`
+in the root `.env`, then set `STUDYFLOW_DATABASE_URL` to the matching complete URL. Percent-encode
+reserved characters in the URL password; for example, use `%40` for `@`. PostgreSQL applies its
+three `POSTGRES_*` initialization values only when the data directory is empty. For an existing
+volume, rotate credentials inside PostgreSQL before updating `.env`; for disposable local data,
+`docker compose down --volumes` deletes the volume so the next start can initialize it again.
+
+PostgreSQL data persists in the `studyflow_postgres_data` Docker volume. Run
+`docker compose down` to stop services without deleting that data.
+
 The initial public endpoints are:
 
 - Health: <http://127.0.0.1:8000/api/v1/health>
@@ -41,8 +62,7 @@ during shutdown; it does not connect at module import.
 
 The liveness endpoint remains available when PostgreSQL is down. The readiness endpoint executes
 `SELECT 1` and returns a generic `503` if PostgreSQL cannot be reached within
-`STUDYFLOW_DATABASE_READINESS_TIMEOUT_SECONDS` (two seconds by default). The dedicated
-development environment PR will add the local PostgreSQL container.
+`STUDYFLOW_DATABASE_READINESS_TIMEOUT_SECONDS` (two seconds by default).
 
 ## Verify
 
@@ -67,5 +87,5 @@ uv run alembic revision --autogenerate -m "describe the schema change"
 uv run alembic upgrade head --sql
 ```
 
-The first domain schema PR will add the first revision. Container and CI commands will be added by
-their dedicated infrastructure PRs.
+The first domain schema PR will add the first revision. CI commands will be added by its dedicated
+infrastructure PR.

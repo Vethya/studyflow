@@ -1,0 +1,69 @@
+name: studyflow
+
+x-backend-environment: &backend-environment
+  STUDYFLOW_DATABASE_URL: ${STUDYFLOW_DATABASE_URL:-postgresql+psycopg://studyflow:studyflow@postgres:5432/studyflow}
+  STUDYFLOW_ENVIRONMENT: development
+
+services:
+  backend:
+    build:
+      context: ./backend
+    environment: *backend-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/api/v1/ready', timeout=2)
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: ./backend
+    command: ["uv", "run", "--no-sync", "alembic", "upgrade", "head"]
+    environment: *backend-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  postgres:
+    image: postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-studyflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-studyflow}
+      POSTGRES_USER: ${POSTGRES_USER:-studyflow}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -h 127.0.0.1 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:v1.30.0@sha256:0059ef81e492a7192af3816281eed6859eb078bd7bdc58b76757c13e10e53a7d
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
