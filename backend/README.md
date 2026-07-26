@@ -54,4 +54,18 @@ uv run ruff check .
 uv run mypy
 ```
 
-Migration, container, and CI commands will be added by their dedicated infrastructure PRs.
+## Database migrations
+
+Alembic reads the same validated `STUDYFLOW_DATABASE_URL` and SQLAlchemy metadata as the
+application. Database credentials are never stored in `alembic.ini`, and application startup does
+not apply migrations automatically.
+
+```bash
+uv run alembic upgrade head
+uv run alembic downgrade -1
+uv run alembic revision --autogenerate -m "describe the schema change"
+uv run alembic upgrade head --sql
+```
+
+The first domain schema PR will add the first revision. Container and CI commands will be added by
+their dedicated infrastructure PRs.
