@@ -21,6 +21,16 @@ Application settings use the `STUDYFLOW_` prefix. For example,
 `STUDYFLOW_ENVIRONMENT=test` selects the test environment and `STUDYFLOW_DEBUG=true` enables
 FastAPI debug behavior.
 
+## Test with Postman
+
+Import `postman/StudyFlow.postman_collection.json` from the repository root. The collection uses
+`http://127.0.0.1:8000` by default and includes assertions for every request. Import and select one
+of the files in `postman/environments/` to target local, development, or production instead.
+
+The development and production URLs are safe placeholders: update `base_url` in your local
+Postman environment after importing. Keep credentials and other secrets in Postman's **current
+value** fields so they are not exported back into the repository.
+
 ## Verify
 
 ```bash
