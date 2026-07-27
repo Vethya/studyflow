@@ -7,6 +7,7 @@ runtime.
 ## Run locally
 
 ```bash
+cp .env.example .env
 uv sync
 uv run uvicorn studyflow.app:app --reload
 ```
@@ -14,6 +15,7 @@ uv run uvicorn studyflow.app:app --reload
 The initial public endpoints are:
 
 - Health: <http://127.0.0.1:8000/api/v1/health>
+- Database readiness: <http://127.0.0.1:8000/api/v1/ready>
 - API documentation: <http://127.0.0.1:8000/api/v1/docs>
 - OpenAPI schema: <http://127.0.0.1:8000/api/v1/openapi.json>
 
@@ -31,6 +33,17 @@ The development and production URLs are safe placeholders: update `base_url` in 
 Postman environment after importing. Keep credentials and other secrets in Postman's **current
 value** fields so they are not exported back into the repository.
 
+`STUDYFLOW_DATABASE_URL` must use the `postgresql+psycopg` driver and include a host and
+database name. The checked-in example contains local-only development credentials. Production
+refuses that default and requires an explicit URL with `sslmode=require`, `verify-ca`, or
+`verify-full`. The application starts its SQLAlchemy pool during FastAPI lifespan and disposes it
+during shutdown; it does not connect at module import.
+
+The liveness endpoint remains available when PostgreSQL is down. The readiness endpoint executes
+`SELECT 1` and returns a generic `503` if PostgreSQL cannot be reached within
+`STUDYFLOW_DATABASE_READINESS_TIMEOUT_SECONDS` (two seconds by default). The dedicated
+development environment PR will add the local PostgreSQL container.
+
 ## Verify
 
 ```bash
@@ -41,4 +54,4 @@ uv run ruff check .
 uv run mypy
 ```
 
-Database, container, and CI commands will be added by their dedicated infrastructure PRs.
+Migration, container, and CI commands will be added by their dedicated infrastructure PRs.

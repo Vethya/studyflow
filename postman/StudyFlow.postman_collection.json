@@ -69,6 +69,50 @@
           ]
         },
         {
+          "name": "Database readiness",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/ready",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ready"
+              ]
+            },
+            "description": "Checks that the API can reach PostgreSQL. A 503 response means the process is alive but the database is unavailable."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('returns JSON', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/json'));",
+                  "pm.test('matches the readiness contract', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.have.all.keys('service', 'status', 'database');",
+                  "  pm.expect(body.service).to.eql('studyflow-api');",
+                  "  pm.expect(body.status).to.eql('ready');",
+                  "  pm.expect(body.database).to.eql('reachable');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "OpenAPI schema",
           "request": {
             "method": "GET",
@@ -104,6 +148,7 @@
                   "  pm.expect(body.openapi).to.match(/^3\\./);",
                   "  pm.expect(body.info.title).to.eql('StudyFlow API');",
                   "  pm.expect(body.paths).to.have.property('/api/v1/health');",
+                  "  pm.expect(body.paths).to.have.property('/api/v1/ready');",
                   "});"
                 ]
               }

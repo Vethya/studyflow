@@ -34,3 +34,17 @@ async def test_documentation_routes_stay_under_the_versioned_api_prefix() -> Non
     assert versioned_oauth_redirect.status_code == 200
     assert unversioned_redoc.status_code == 404
     assert unversioned_oauth_redirect.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_openapi_documents_database_unavailability() -> None:
+    transport = ASGITransport(app=create_app())
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/v1/openapi.json")
+
+    unavailable_response = response.json()["paths"]["/api/v1/ready"]["get"]["responses"]["503"]
+    assert unavailable_response["description"] == "Database is unavailable"
+    assert unavailable_response["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/DatabaseUnavailableResponse"
+    }
