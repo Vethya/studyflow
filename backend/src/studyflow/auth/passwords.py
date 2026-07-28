@@ -1,5 +1,6 @@
 """Password validation and Argon2id hashing."""
 
+import anyio
 from argon2 import PasswordHasher, Type
 from argon2.exceptions import InvalidHashError, VerificationError
 
@@ -59,7 +60,11 @@ class PasswordService:
         self._hasher.validate_password(password)
         if await self._breached_passwords.is_breached(password):
             raise BreachedPasswordError("Password appears in a known breach")
-        return self._hasher.hash_password(password)
+        return await anyio.to_thread.run_sync(self._hasher.hash_password, password)
 
-    def verify_password(self, password: str, password_hash: str) -> bool:
-        return self._hasher.verify_password(password, password_hash)
+    async def verify_password(self, password: str, password_hash: str) -> bool:
+        return await anyio.to_thread.run_sync(
+            self._hasher.verify_password,
+            password,
+            password_hash,
+        )
