@@ -30,9 +30,6 @@ jobs:
     name: Backend quality gates
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      STUDYFLOW_DATABASE_URL: postgresql+psycopg://studyflow:studyflow@127.0.0.1:5432/studyflow
-      STUDYFLOW_ENVIRONMENT: test
     services:
       postgres:
         image: postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
@@ -81,6 +78,9 @@ jobs:
         run: uv run pytest --cov=studyflow --cov-branch
 
       - name: Apply and validate migrations
+        env:
+          STUDYFLOW_DATABASE_URL: postgresql+psycopg://studyflow:studyflow@127.0.0.1:5432/studyflow
+          STUDYFLOW_ENVIRONMENT: test
         run: |
           uv run alembic upgrade head
           uv run alembic check

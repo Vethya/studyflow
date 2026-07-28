@@ -40,6 +40,21 @@ def test_backend_ci_runs_every_quality_and_infrastructure_gate() -> None:
     assert "docker build" in commands
 
 
+def test_database_environment_is_scoped_to_migrations() -> None:
+    backend_job = load_workflow()["jobs"]["backend"]
+    migration_step = next(
+        step for step in backend_job["steps"] if step["name"] == "Apply and validate migrations"
+    )
+
+    assert "env" not in backend_job
+    assert migration_step["env"] == {
+        "STUDYFLOW_DATABASE_URL": (
+            "postgresql+psycopg://studyflow:studyflow@127.0.0.1:5432/studyflow"
+        ),
+        "STUDYFLOW_ENVIRONMENT": "test",
+    }
+
+
 def test_backend_ci_pins_actions_and_postgres_by_sha() -> None:
     workflow = load_workflow()
     backend_job = workflow["jobs"]["backend"]
