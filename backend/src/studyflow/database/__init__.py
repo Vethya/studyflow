@@ -1,5 +1,6 @@
 """Database runtime boundary."""
 
+from studyflow.database import models as models
 from studyflow.database.base import Base
 from studyflow.database.runtime import (
     Database,
@@ -14,4 +15,5 @@ __all__ = [
     "DatabaseLifecycle",
     "DatabaseReadiness",
     "DatabaseRuntime",
+    "models",
 ]
