@@ -14,7 +14,9 @@ class SessionAuthenticationStub:
     revoked: bool = True
     revoke_calls: list[tuple[str, str]] = field(default_factory=list)
 
-    async def authenticate(self, session_token: str) -> SessionPrincipal | None:
+    async def authenticate(
+        self, session_token: str, csrf_token: str | None = None
+    ) -> SessionPrincipal | None:
         return self.principal
 
     async def revoke(self, session_token: str, csrf_token: str) -> bool:

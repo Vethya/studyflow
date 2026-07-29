@@ -407,6 +407,51 @@
           ]
         }
       ]
+    },
+    {
+      "name": "Account",
+      "description": "Authenticated, student-owned account settings.",
+      "item": [
+        {
+          "name": "Get account profile",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/account/profile",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "account", "profile"]
+            },
+            "description": "Returns the authenticated student's immutable ID and email plus editable display name."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Update account profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Student Name\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/account/profile",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "account", "profile"]
+            },
+            "description": "Updates only the authenticated student's profile name and requires the session-bound CSRF token."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        }
+      ]
     }
   ],
   "variable": [
