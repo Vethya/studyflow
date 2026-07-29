@@ -18,9 +18,11 @@ from studyflow.auth.rate_limits import (
     DatabaseEmailVerificationRateLimiter,
     DatabaseLoginRateLimiter,
     DatabaseRegistrationRateLimiter,
+    DatabaseVerificationResendRateLimiter,
     EmailVerificationRateLimit,
     LoginRateLimit,
     RegistrationRateLimit,
+    VerificationResendRateLimit,
 )
 from studyflow.auth.registration import Registration, RegistrationService
 from studyflow.auth.repositories import (
@@ -30,7 +32,9 @@ from studyflow.auth.repositories import (
     SqlAlchemyRegistrationRepository,
     SqlAlchemySessionAuthenticationRepository,
     SqlAlchemySessionRepository,
+    SqlAlchemyVerificationResendRepository,
 )
+from studyflow.auth.resend import VerificationResend, VerificationResendService
 from studyflow.auth.session_authentication import (
     SessionAuthentication,
     SessionAuthenticationService,
@@ -68,6 +72,8 @@ def create_app(
     login: Login | None = None,
     login_rate_limiter: LoginRateLimit | None = None,
     session_authentication: SessionAuthentication | None = None,
+    verification_resend: VerificationResend | None = None,
+    verification_resend_rate_limiter: VerificationResendRateLimit | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     resolved_database = database or Database(resolved_settings.database_url.get_secret_value())
@@ -75,12 +81,13 @@ def create_app(
     authentication_http_client: httpx.AsyncClient | None = None
     resolved_registration = registration
     resolved_login = login
+    resolved_verification_resend = verification_resend
     if resolved_registration is None or resolved_login is None:
         authentication_http_client = httpx.AsyncClient(
             timeout=resolved_settings.password_breach_timeout_seconds
         )
         password_service = PasswordService(PwnedPasswordsClient(authentication_http_client))
-    if resolved_registration is None:
+    if resolved_registration is None or resolved_verification_resend is None:
         smtp_password = (
             resolved_settings.smtp_password.get_secret_value()
             if resolved_settings.smtp_password is not None
@@ -97,10 +104,15 @@ def create_app(
             from_address=str(resolved_settings.email_from_address),
             public_app_url=resolved_settings.public_app_url,
         )
+    if resolved_registration is None:
         resolved_registration = RegistrationService(
             repository=SqlAlchemyRegistrationRepository(transactions),
             passwords=password_service,
             email_sender=email_sender,
+        )
+    if resolved_verification_resend is None:
+        resolved_verification_resend = VerificationResendService(
+            SqlAlchemyVerificationResendRepository(transactions), email_sender
         )
     if resolved_login is None:
         resolved_login = LoginService(
@@ -137,6 +149,10 @@ def create_app(
     )
     application.state.session_authentication = session_authentication or (
         SessionAuthenticationService(SqlAlchemySessionAuthenticationRepository(transactions))
+    )
+    application.state.verification_resend = resolved_verification_resend
+    application.state.verification_resend_rate_limiter = (
+        verification_resend_rate_limiter or DatabaseVerificationResendRateLimiter(transactions)
     )
     application.include_router(api_router)
 

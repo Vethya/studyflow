@@ -25,6 +25,10 @@ class LoginRateLimitExceeded(RuntimeError):
     """Raised when an IP address or email exceeds the login window."""
 
 
+class VerificationResendRateLimitExceeded(RuntimeError):
+    """Raised when verification resend exceeds its window."""
+
+
 class RegistrationRateLimit(Protocol):
     async def check(self, client_ip: str, email: str) -> None: ...
 
@@ -34,6 +38,10 @@ class EmailVerificationRateLimit(Protocol):
 
 
 class LoginRateLimit(Protocol):
+    async def check(self, client_ip: str, email: str) -> None: ...
+
+
+class VerificationResendRateLimit(Protocol):
     async def check(self, client_ip: str, email: str) -> None: ...
 
 
@@ -135,4 +143,13 @@ class DatabaseLoginRateLimiter(_DatabaseRateLimiter):
             "login",
             (f"ip:{client_ip}", f"email:{canonicalize_email(email)}"),
             LoginRateLimitExceeded,
+        )
+
+
+class DatabaseVerificationResendRateLimiter(_DatabaseRateLimiter):
+    async def check(self, client_ip: str, email: str) -> None:
+        await self._check(
+            "verification_resend",
+            (f"ip:{client_ip}", f"email:{canonicalize_email(email)}"),
+            VerificationResendRateLimitExceeded,
         )
