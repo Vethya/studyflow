@@ -1,13 +1,15 @@
 """SQLAlchemy account-settings repositories."""
 
+import hmac
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from studyflow.accounts.preferences import StudyPreferences
 from studyflow.accounts.profile import AccountProfile
 from studyflow.auth.repositories import SessionTransactions
-from studyflow.database.models import StudentAccount
+from studyflow.database.models import AuthenticationSession, StudentAccount
 
 
 class SqlAlchemyAccountProfileRepository:
@@ -73,3 +75,40 @@ class SqlAlchemyStudyPreferencesRepository:
             minimum_break_minutes=account.minimum_break_minutes,
             availability_confirmation_required=not account.availability_timezone_confirmed,
         )
+
+
+class SqlAlchemyPasswordChangeRepository:
+    def __init__(self, database: SessionTransactions) -> None:
+        self._database = database
+
+    async def get_password_hash(self, account_id: UUID) -> str | None:
+        async with self._database.transaction() as session:
+            return await session.scalar(
+                select(StudentAccount.password_hash).where(StudentAccount.id == account_id)
+            )
+
+    async def replace_password(
+        self,
+        account_id: UUID,
+        expected_password_hash: str,
+        new_password_hash: str,
+        now: datetime,
+    ) -> bool:
+        async with self._database.transaction() as session:
+            account = await session.get(StudentAccount, account_id, with_for_update=True)
+            if (
+                account is None
+                or account.password_hash is None
+                or not hmac.compare_digest(account.password_hash, expected_password_hash)
+            ):
+                return False
+            account.password_hash = new_password_hash
+            await session.execute(
+                update(AuthenticationSession)
+                .where(
+                    AuthenticationSession.account_id == account_id,
+                    AuthenticationSession.revoked_at.is_(None),
+                )
+                .values(revoked_at=now)
+            )
+        return True

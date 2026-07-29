@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import UUID
 
 import pytest
@@ -34,10 +34,15 @@ class PasswordVerifierStub:
 @dataclass
 class SessionIssuerStub:
     account_ids: list[UUID]
+    created: bool = True
+    expected_password_hashes: list[str | None] = field(default_factory=list)
 
-    async def create(self, account_id: UUID) -> SessionCredentials:
+    async def create(
+        self, account_id: UUID, expected_password_hash: str | None = None
+    ) -> SessionCredentials | None:
         self.account_ids.append(account_id)
-        return SessionCredentials("opaque-session", "csrf-token")
+        self.expected_password_hashes.append(expected_password_hash)
+        return SessionCredentials("opaque-session", "csrf-token") if self.created else None
 
 
 @pytest.mark.anyio
@@ -68,6 +73,30 @@ async def test_verified_password_account_can_create_a_normal_session() -> None:
     assert result.csrf_token == "csrf-token"
     assert passwords.calls == [("correct password", "$argon2id$stored-hash")]
     assert sessions.account_ids == [account_id]
+    assert sessions.expected_password_hashes == ["$argon2id$stored-hash"]
+
+
+@pytest.mark.anyio
+async def test_login_fails_if_password_changes_before_session_issuance() -> None:
+    account_id = UUID("5b15bfef-8c44-45d5-a70e-574beb999fb3")
+    sessions = SessionIssuerStub(account_ids=[], created=False)
+    service = LoginService(
+        repository=LoginRepositoryStub(
+            LoginAccount(
+                id=account_id,
+                email="student@example.com",
+                name="Student Name",
+                password_hash="$argon2id$stale-hash",
+                email_verified=True,
+            )
+        ),
+        passwords=PasswordVerifierStub(valid=True, calls=[]),
+        sessions=sessions,
+    )
+
+    with pytest.raises(InvalidCredentialsError):
+        await service.login(LoginCommand("student@example.com", "old password"))
+    assert sessions.expected_password_hashes == ["$argon2id$stale-hash"]
 
 
 @pytest.mark.anyio

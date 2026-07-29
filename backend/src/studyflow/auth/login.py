@@ -58,7 +58,9 @@ class PasswordVerifier(Protocol):
 
 
 class SessionIssuer(Protocol):
-    async def create(self, account_id: UUID) -> SessionCredentials: ...
+    async def create(
+        self, account_id: UUID, expected_password_hash: str | None = None
+    ) -> SessionCredentials | None: ...
 
 
 class LoginService:
@@ -84,7 +86,9 @@ class LoginService:
             raise InvalidCredentialsError
         if not account.email_verified:
             raise EmailVerificationRequiredError
-        credentials = await self._sessions.create(account.id)
+        credentials = await self._sessions.create(account.id, account.password_hash)
+        if credentials is None:
+            raise InvalidCredentialsError
         return LoginResult(
             account_id=account.id,
             email=account.email,

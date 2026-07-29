@@ -37,6 +37,10 @@ class PasswordResetAttemptRateLimitExceeded(RuntimeError):
     """Raised when password-reset attempts exceed their window."""
 
 
+class AccountPasswordChangeRateLimitExceeded(RuntimeError):
+    """Raised when current-password checks exceed their window."""
+
+
 class RegistrationRateLimit(Protocol):
     async def check(self, client_ip: str, email: str) -> None: ...
 
@@ -59,6 +63,10 @@ class PasswordResetRequestRateLimit(Protocol):
 
 class PasswordResetAttemptRateLimit(Protocol):
     async def check(self, client_ip: str, token: str) -> None: ...
+
+
+class AccountPasswordChangeRateLimit(Protocol):
+    async def check(self, client_ip: str, account_id: str) -> None: ...
 
 
 class _DatabaseRateLimiter:
@@ -186,4 +194,13 @@ class DatabasePasswordResetAttemptRateLimiter(_DatabaseRateLimiter):
             "password_reset_attempt",
             (f"ip:{client_ip}", f"token:{token}"),
             PasswordResetAttemptRateLimitExceeded,
+        )
+
+
+class DatabaseAccountPasswordChangeRateLimiter(_DatabaseRateLimiter):
+    async def check(self, client_ip: str, account_id: str) -> None:
+        await self._check(
+            "account_password_change",
+            (f"ip:{client_ip}", f"account:{account_id}"),
+            AccountPasswordChangeRateLimitExceeded,
         )

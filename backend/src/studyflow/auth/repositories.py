@@ -1,5 +1,6 @@
 """SQLAlchemy authentication repositories."""
 
+import hmac
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
 from typing import Protocol
@@ -120,8 +121,20 @@ class SqlAlchemySessionRepository:
     def __init__(self, database: SessionTransactions) -> None:
         self._database = database
 
-    async def create(self, pending: PendingSession) -> None:
+    async def create(
+        self, pending: PendingSession, expected_password_hash: str | None = None
+    ) -> bool:
         async with self._database.transaction() as session:
+            if expected_password_hash is not None:
+                account = await session.get(
+                    StudentAccount, pending.account_id, with_for_update=True
+                )
+                if (
+                    account is None
+                    or account.password_hash is None
+                    or not hmac.compare_digest(account.password_hash, expected_password_hash)
+                ):
+                    return False
             session.add(
                 AuthenticationSession(
                     account_id=pending.account_id,
@@ -131,6 +144,7 @@ class SqlAlchemySessionRepository:
                     absolute_expires_at=pending.absolute_expires_at,
                 )
             )
+        return True
 
 
 class SqlAlchemyLoginRepository:

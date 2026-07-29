@@ -39,15 +39,16 @@ async def test_session_repository_persists_an_owned_revocable_session() -> None:
                 )
             )
 
-        await SqlAlchemySessionRepository(database).create(
-            PendingSession(
-                account_id=account_id,
-                token_hash="a" * 64,
-                csrf_token_hash="b" * 64,
-                idle_expires_at=now + timedelta(hours=24),
-                absolute_expires_at=now + timedelta(days=7),
-            )
+        pending = PendingSession(
+            account_id=account_id,
+            token_hash="a" * 64,
+            csrf_token_hash="b" * 64,
+            idle_expires_at=now + timedelta(hours=24),
+            absolute_expires_at=now + timedelta(days=7),
         )
+        repository = SqlAlchemySessionRepository(database)
+        assert not await repository.create(pending, "$argon2id$stale-hash")
+        assert await repository.create(pending, "$argon2id$stored-hash")
 
         async with database.transaction() as session:
             stored = (await session.scalars(select(AuthenticationSession))).one()
