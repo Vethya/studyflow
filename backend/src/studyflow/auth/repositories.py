@@ -9,7 +9,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.registration import PendingAccount
-from studyflow.database.models import AuthenticationEmailToken, StudentAccount
+from studyflow.auth.sessions import PendingSession
+from studyflow.database.models import (
+    AuthenticationEmailToken,
+    AuthenticationSession,
+    StudentAccount,
+)
 
 
 class SessionTransactions(Protocol):
@@ -107,3 +112,20 @@ class SqlAlchemyEmailVerificationRepository:
             token.consumed_at = now
             account.email_verified_at = now
         return True
+
+
+class SqlAlchemySessionRepository:
+    def __init__(self, database: SessionTransactions) -> None:
+        self._database = database
+
+    async def create(self, pending: PendingSession) -> None:
+        async with self._database.transaction() as session:
+            session.add(
+                AuthenticationSession(
+                    account_id=pending.account_id,
+                    token_hash=pending.token_hash,
+                    csrf_token_hash=pending.csrf_token_hash,
+                    idle_expires_at=pending.idle_expires_at,
+                    absolute_expires_at=pending.absolute_expires_at,
+                )
+            )
