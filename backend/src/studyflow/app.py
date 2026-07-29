@@ -23,6 +23,8 @@ from studyflow.auth.email_delivery import (
 from studyflow.auth.login import Login, LoginService
 from studyflow.auth.oidc import (
     GoogleOIDCProvider,
+    OIDCAccountLinking,
+    OIDCAccountLinkService,
     OIDCLogin,
     OIDCLoginService,
     UnconfiguredOIDCLogin,
@@ -33,6 +35,7 @@ from studyflow.auth.rate_limits import (
     DatabaseAccountPasswordChangeRateLimiter,
     DatabaseEmailVerificationRateLimiter,
     DatabaseLoginRateLimiter,
+    DatabaseOIDCLinkRateLimiter,
     DatabaseOIDCStartRateLimiter,
     DatabasePasswordResetAttemptRateLimiter,
     DatabasePasswordResetRequestRateLimiter,
@@ -40,6 +43,7 @@ from studyflow.auth.rate_limits import (
     DatabaseVerificationResendRateLimiter,
     EmailVerificationRateLimit,
     LoginRateLimit,
+    OIDCLinkRateLimit,
     OIDCStartRateLimit,
     PasswordResetAttemptRateLimit,
     PasswordResetRequestRateLimit,
@@ -123,6 +127,8 @@ def create_app(
     unavailable_periods: UnavailablePeriods | None = None,
     oidc_login: OIDCLogin | None = None,
     oidc_start_rate_limiter: OIDCStartRateLimit | None = None,
+    oidc_account_linking: OIDCAccountLinking | None = None,
+    oidc_link_rate_limiter: OIDCLinkRateLimit | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     resolved_database = database or Database(resolved_settings.database_url.get_secret_value())
@@ -134,12 +140,14 @@ def create_app(
     resolved_password_recovery = password_recovery
     resolved_account_passwords = account_passwords
     resolved_oidc_login = oidc_login
+    resolved_oidc_account_linking = oidc_account_linking
     if (
         resolved_registration is None
         or resolved_login is None
         or resolved_password_recovery is None
         or resolved_account_passwords is None
         or (resolved_oidc_login is None and resolved_settings.google_oidc_client_id is not None)
+        or resolved_oidc_account_linking is None
     ):
         authentication_http_client = httpx.AsyncClient(
             timeout=resolved_settings.password_breach_timeout_seconds
@@ -213,6 +221,11 @@ def create_app(
             )
         else:
             resolved_oidc_login = UnconfiguredOIDCLogin()
+    if resolved_oidc_account_linking is None:
+        resolved_oidc_account_linking = OIDCAccountLinkService(
+            SqlAlchemyOIDCRepository(transactions),
+            password_service,
+        )
     application = FastAPI(
         title="StudyFlow API",
         version=__version__,
@@ -240,6 +253,10 @@ def create_app(
     application.state.oidc_login = resolved_oidc_login
     application.state.oidc_start_rate_limiter = (
         oidc_start_rate_limiter or DatabaseOIDCStartRateLimiter(transactions)
+    )
+    application.state.oidc_account_linking = resolved_oidc_account_linking
+    application.state.oidc_link_rate_limiter = (
+        oidc_link_rate_limiter or DatabaseOIDCLinkRateLimiter(transactions)
     )
     application.state.login_rate_limiter = login_rate_limiter or DatabaseLoginRateLimiter(
         transactions

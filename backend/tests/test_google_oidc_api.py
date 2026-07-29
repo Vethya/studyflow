@@ -5,7 +5,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from studyflow.app import create_app
-from studyflow.auth.oidc import OIDCLoginResult, OIDCStart
+from studyflow.auth.oidc import AccountLinkRequiredError, OIDCLoginResult, OIDCStart
 
 
 @dataclass
@@ -35,6 +35,11 @@ class OIDCStub:
 class RateLimitStub:
     async def check(self, client_ip: str) -> None:
         assert client_ip == "127.0.0.1"
+
+
+class LinkRequiredOIDCStub(OIDCStub):
+    async def complete(self, code: str, state: str, state_cookie: str) -> OIDCLoginResult:
+        raise AccountLinkRequiredError("server-link-challenge-value")
 
 
 @pytest.mark.anyio
@@ -67,3 +72,20 @@ async def test_google_oidc_denial_is_generic_and_clears_state_cookie() -> None:
     assert denied.status_code == 400
     assert denied.json() == {"detail": "Google sign-in could not be completed"}
     assert "__Host-studyflow_oidc_state=" in denied.headers["set-cookie"]
+
+
+@pytest.mark.anyio
+async def test_google_oidc_returns_only_the_server_issued_link_challenge() -> None:
+    app = create_app(oidc_login=LinkRequiredOIDCStub(), oidc_start_rate_limiter=RateLimitStub())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
+        await client.get("/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh")
+        response = await client.get(
+            "/api/v1/auth/google/callback?code=code&state=state-state-state-state"
+        )
+
+    assert response.status_code == 409
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {
+        "detail": "Password-confirmed account linking required",
+        "link_challenge": "server-link-challenge-value",
+    }

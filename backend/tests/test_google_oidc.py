@@ -41,6 +41,12 @@ class RepositoryStub:
             return None
         return OIDCAccount(ACCOUNT_ID, claims.email, claims.name)
 
+    async def create_link_challenge(
+        self, claims: GoogleClaims, token_hash: str, expires_at: datetime
+    ) -> bool:
+        self.link_token_hash = token_hash
+        return True
+
 
 class ProviderStub:
     async def exchange(self, code: str, expected_nonce_hash: str) -> GoogleClaims:
@@ -90,11 +96,13 @@ async def test_google_oidc_rejects_browser_state_mismatch_and_requires_confirmed
         SessionsStub(),
         client_id="client-id",
         redirect_uri="https://studyflow.example/api/v1/auth/google/callback",
-        token_factory=iter(["state-secret", "nonce-secret"]).__next__,
+        token_factory=iter(["state-secret", "nonce-secret", "link-challenge"]).__next__,
     )
     started = await service.start("Asia/Phnom_Penh")
 
     with pytest.raises(InvalidOIDCResponseError):
         await service.complete("authorization-code", started.state, "different-cookie")
-    with pytest.raises(AccountLinkRequiredError):
+    with pytest.raises(AccountLinkRequiredError) as raised:
         await service.complete("authorization-code", started.state, started.state)
+    assert raised.value.challenge == "link-challenge"
+    assert repository.link_token_hash != "link-challenge"
