@@ -142,6 +142,18 @@ def test_account_authentication_schema_is_in_the_upgrade_path() -> None:
     assert "ADD COLUMN availability_timezone_confirmed BOOLEAN DEFAULT true NOT NULL" in (
         result.stdout
     )
+    assert "CREATE TABLE academic_tasks" in result.stdout
+    assert "CREATE TABLE task_deadline_history" in result.stdout
+    for constraint_name in (
+        "ck_academic_tasks_category",
+        "ck_academic_tasks_priority",
+        "ck_academic_tasks_positive_estimates",
+        "ck_academic_tasks_planned_duration_source",
+        "ck_academic_tasks_title_required",
+        "ck_academic_tasks_course_length",
+        "ck_academic_tasks_notes_length",
+    ):
+        assert f"CONSTRAINT {constraint_name} CHECK" in result.stdout
 
 
 def test_online_environment_runs_migrations_and_disposes_engine(
