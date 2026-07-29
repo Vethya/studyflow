@@ -96,6 +96,15 @@ def test_settings_reject_an_unsafe_public_app_url() -> None:
         Settings(public_app_url="javascript:alert(1)")
 
 
+@mark.parametrize(
+    "public_app_url",
+    ["https://studyflow.example/?tenant=1", "https://studyflow.example/#fragment"],
+)
+def test_settings_rejects_query_or_fragment_in_public_app_url(public_app_url: str) -> None:
+    with raises(ValidationError, match="must not include a query or fragment"):
+        Settings(public_app_url=public_app_url)
+
+
 def test_settings_reject_a_non_postgresql_database_url() -> None:
     with raises(ValidationError, match="must use postgresql\\+psycopg"):
         Settings(database_url=SecretStr("sqlite+aiosqlite:///:memory:"))

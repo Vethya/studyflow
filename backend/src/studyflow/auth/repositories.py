@@ -51,6 +51,9 @@ class SqlAlchemyRegistrationRepository:
                     raise
                 if existing_account.email_verified_at is not None:
                     return False
+                existing_account.name = pending.name
+                existing_account.password_hash = pending.password_hash
+                existing_account.timezone = pending.timezone
                 await session.execute(
                     delete(AuthenticationEmailToken).where(
                         AuthenticationEmailToken.account_id == existing_account.id,

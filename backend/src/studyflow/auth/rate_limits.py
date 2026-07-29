@@ -5,7 +5,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from studyflow.auth.email import canonicalize_email
@@ -54,6 +54,11 @@ class _DatabaseRateLimiter:
         for attempt in range(3):
             try:
                 async with self._database.transaction() as session:
+                    await session.execute(
+                        delete(AuthenticationRateLimit).where(
+                            AuthenticationRateLimit.window_started_at <= now - self._window
+                        )
+                    )
                     rows = {
                         row.key_hash: row
                         for row in await session.scalars(

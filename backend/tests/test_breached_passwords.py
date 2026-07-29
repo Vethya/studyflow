@@ -56,3 +56,14 @@ async def test_upstream_timeout_is_not_treated_as_a_safe_password() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(httpx.ReadTimeout):
             await PwnedPasswordsClient(client).is_breached("password")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("body", ["", "not-a-range-response", "A" * 35 + ":unknown"])
+async def test_malformed_upstream_response_is_not_treated_as_safe(body: str) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=body, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(httpx.DecodingError):
+            await PwnedPasswordsClient(client).is_breached("password")

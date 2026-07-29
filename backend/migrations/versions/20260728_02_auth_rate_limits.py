@@ -32,7 +32,16 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name="pk_authentication_rate_limits"),
         sa.UniqueConstraint("action", "key_hash", name="uq_authentication_rate_limits_action_key"),
     )
+    op.create_index(
+        "ix_authentication_rate_limits_window_started_at",
+        "authentication_rate_limits",
+        ["window_started_at"],
+    )
 
 
 def downgrade() -> None:
+    op.drop_index(
+        "ix_authentication_rate_limits_window_started_at",
+        table_name="authentication_rate_limits",
+    )
     op.drop_table("authentication_rate_limits")

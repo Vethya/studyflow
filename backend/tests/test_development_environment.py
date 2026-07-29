@@ -58,8 +58,19 @@ def test_backend_image_is_locked_and_runs_as_non_root() -> None:
     assert "uv sync --locked --no-dev" in dockerfile
     assert "USER studyflow" in dockerfile
     assert 'CMD [".venv/bin/uvicorn"' in dockerfile
+    assert 'FORWARDED_ALLOW_IPS="*"' not in dockerfile
     assert 'CMD ["uv", "run"' not in dockerfile
     assert "chown -R" not in dockerfile
+
+
+def test_trusted_proxy_addresses_are_explicit_and_safe_by_default() -> None:
+    compose = load_compose()
+
+    assert (
+        compose["x-backend-environment"]["FORWARDED_ALLOW_IPS"]
+        == "${FORWARDED_ALLOW_IPS:-127.0.0.1}"
+    )
+    assert "FORWARDED_ALLOW_IPS=127.0.0.1" in (REPOSITORY_ROOT / ".env.example").read_text()
 
 
 def test_compose_images_are_pinned_by_digest() -> None:

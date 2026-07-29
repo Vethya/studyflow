@@ -146,7 +146,7 @@ class AuthenticationRateLimit(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     action: Mapped[str] = mapped_column(String(32))
     key_hash: Mapped[str] = mapped_column(String(64))
-    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     attempts: Mapped[int] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

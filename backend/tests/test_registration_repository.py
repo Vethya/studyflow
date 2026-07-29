@@ -51,7 +51,9 @@ async def test_repository_atomically_creates_unverified_account_and_token() -> N
         assert created is True
         assert duplicate_created is True
         assert account.email == "student@example.com"
-        assert account.name == "Student Name"
+        assert account.name == "Different Name"
+        assert account.password_hash == "$argon2id$different-hash"
+        assert account.timezone == "UTC"
         assert account.email_verified_at is None
         assert token.account_id == account.id
         assert token.purpose == "email_verification"

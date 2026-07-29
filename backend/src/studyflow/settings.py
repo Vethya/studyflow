@@ -54,6 +54,8 @@ class Settings(BaseSettings):
         parsed_url = urlsplit(value)
         if parsed_url.scheme not in {"http", "https"} or parsed_url.hostname is None:
             raise ValueError("Public app URL must use HTTP or HTTPS and include a host")
+        if parsed_url.query or parsed_url.fragment:
+            raise ValueError("Public app URL must not include a query or fragment")
         return value.rstrip("/")
 
     @field_validator("smtp_username", mode="before")

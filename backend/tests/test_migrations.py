@@ -138,6 +138,7 @@ def test_account_authentication_schema_is_in_the_upgrade_path() -> None:
     for constraint_name in expected_check_constraints:
         assert f"CONSTRAINT {constraint_name} CHECK" in result.stdout
         assert f"ck_{constraint_name}" not in result.stdout
+    assert "CREATE INDEX ix_authentication_rate_limits_window_started_at" in result.stdout
 
 
 def test_online_environment_runs_migrations_and_disposes_engine(
