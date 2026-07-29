@@ -200,3 +200,32 @@ class SqlAlchemySessionAuthenticationRepository:
                 return False
             authentication_session.revoked_at = now
         return True
+
+
+class SqlAlchemyVerificationResendRepository:
+    def __init__(self, database: SessionTransactions) -> None:
+        self._database = database
+
+    async def rotate(self, email: str, token_hash: str, expires_at: datetime) -> bool:
+        async with self._database.transaction() as session:
+            account = await session.scalar(
+                select(StudentAccount).where(StudentAccount.email == email).with_for_update()
+            )
+            if account is None or account.email_verified_at is not None:
+                return False
+            await session.execute(
+                delete(AuthenticationEmailToken).where(
+                    AuthenticationEmailToken.account_id == account.id,
+                    AuthenticationEmailToken.purpose == "email_verification",
+                    AuthenticationEmailToken.consumed_at.is_(None),
+                )
+            )
+            session.add(
+                AuthenticationEmailToken(
+                    account_id=account.id,
+                    purpose="email_verification",
+                    token_hash=token_hash,
+                    expires_at=expires_at,
+                )
+            )
+        return True

@@ -31,8 +31,11 @@ from studyflow.auth.rate_limits import (
     LoginRateLimitExceeded,
     RegistrationRateLimit,
     RegistrationRateLimitExceeded,
+    VerificationResendRateLimit,
+    VerificationResendRateLimitExceeded,
 )
 from studyflow.auth.registration import Registration, RegistrationCommand
+from studyflow.auth.resend import VerificationResend
 from studyflow.auth.session_authentication import SessionAuthentication
 from studyflow.auth.verification import EmailVerification
 
@@ -80,6 +83,10 @@ class LoginRequest(BaseModel):
     password: Annotated[str, Field(min_length=1, max_length=128)]
 
 
+class VerificationResendRequest(BaseModel):
+    email: Annotated[EmailStr, Field(max_length=320)]
+
+
 class AuthenticatedAccount(BaseModel):
     id: str
     email: EmailStr
@@ -121,6 +128,42 @@ def get_login_rate_limit(request: Request) -> LoginRateLimit:
 
 def get_session_authentication(request: Request) -> SessionAuthentication:
     return cast(SessionAuthentication, request.app.state.session_authentication)
+
+
+def get_verification_resend(request: Request) -> VerificationResend:
+    return cast(VerificationResend, request.app.state.verification_resend)
+
+
+def get_verification_resend_rate_limit(request: Request) -> VerificationResendRateLimit:
+    return cast(VerificationResendRateLimit, request.app.state.verification_resend_rate_limiter)
+
+
+@router.post(
+    "/resend-verification",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=AuthenticationMessage,
+    responses={status.HTTP_429_TOO_MANY_REQUESTS: {"model": AuthenticationError}},
+)
+async def resend_verification(
+    payload: VerificationResendRequest,
+    http_request: Request,
+    background_tasks: BackgroundTasks,
+    resend: Annotated[VerificationResend, Depends(get_verification_resend)],
+    rate_limit: Annotated[VerificationResendRateLimit, Depends(get_verification_resend_rate_limit)],
+) -> AuthenticationMessage:
+    client_ip = http_request.client.host if http_request.client is not None else "unknown"
+    try:
+        await rate_limit.check(client_ip, str(payload.email))
+        await resend.resend(str(payload.email), background_tasks)
+    except VerificationResendRateLimitExceeded as error:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many verification resend attempts",
+            headers={"Retry-After": "900"},
+        ) from error
+    return AuthenticationMessage(
+        message="If the address is eligible, a verification email has been sent."
+    )
 
 
 @router.get(
