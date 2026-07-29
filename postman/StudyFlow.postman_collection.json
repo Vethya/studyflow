@@ -598,6 +598,47 @@
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
         }
       ]
+    },
+    {
+      "name": "Availability",
+      "description": "Authenticated recurring weekly availability in the account timezone.",
+      "item": [
+        {
+          "name": "List Availability Windows",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/availability/windows", "host": ["{{base_url}}"], "path": ["api", "v1", "availability", "windows"] },
+            "description": "Lists the authenticated student's canonical recurring weekly availability."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Replace Availability Windows",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"windows\": [\n    {\"weekday\": 0, \"start_time\": \"18:00\", \"end_time\": \"22:00\"},\n    {\"weekday\": 2, \"start_time\": \"18:00\", \"end_time\": \"22:00\"}\n  ]\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/availability/windows", "host": ["{{base_url}}"], "path": ["api", "v1", "availability", "windows"] },
+            "description": "Atomically creates, updates, or deletes the complete owned weekly availability set and merges touching windows."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Confirm Availability Timezone",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"confirmed\": true\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/availability/confirm-timezone", "host": ["{{base_url}}"], "path": ["api", "v1", "availability", "confirm-timezone"] },
+            "description": "Confirms that local-time availability remains correct after a timezone change."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
+        }
+      ]
     }
   ],
   "variable": [
