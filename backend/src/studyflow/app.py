@@ -57,7 +57,15 @@ from studyflow.auth.session_authentication import (
 )
 from studyflow.auth.sessions import SessionService
 from studyflow.auth.verification import EmailVerification, EmailVerificationService
-from studyflow.availability.repositories import SqlAlchemyAvailabilityWindowRepository
+from studyflow.availability.repositories import (
+    SqlAlchemyAvailabilityWindowRepository,
+    SqlAlchemyUnavailablePeriodRepository,
+)
+from studyflow.availability.unavailable import (
+    NoFutureSessions,
+    UnavailablePeriods,
+    UnavailablePeriodService,
+)
 from studyflow.availability.windows import AvailabilityWindows, AvailabilityWindowService
 from studyflow.database import Database, DatabaseRuntime
 from studyflow.settings import Settings
@@ -103,6 +111,7 @@ def create_app(
     account_password_change_rate_limiter: AccountPasswordChangeRateLimit | None = None,
     academic_tasks: AcademicTasks | None = None,
     availability_windows: AvailabilityWindows | None = None,
+    unavailable_periods: UnavailablePeriods | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     resolved_database = database or Database(resolved_settings.database_url.get_secret_value())
@@ -227,6 +236,9 @@ def create_app(
     )
     application.state.availability_windows = availability_windows or AvailabilityWindowService(
         SqlAlchemyAvailabilityWindowRepository(transactions)
+    )
+    application.state.unavailable_periods = unavailable_periods or UnavailablePeriodService(
+        SqlAlchemyUnavailablePeriodRepository(transactions), NoFutureSessions()
     )
     application.include_router(api_router)
 

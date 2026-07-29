@@ -1,16 +1,19 @@
 """SQLAlchemy availability repositories."""
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import delete, select
 
 from studyflow.auth.repositories import SessionTransactions
+from studyflow.availability.unavailable import UnavailablePeriod, UnavailablePeriodDraft
 from studyflow.availability.windows import (
     AvailabilityWindow,
     AvailabilityWindowDraft,
 )
 from studyflow.database.models import AvailabilityWindow as AvailabilityWindowRow
 from studyflow.database.models import StudentAccount
+from studyflow.database.models import UnavailablePeriod as UnavailablePeriodRow
 
 
 class SqlAlchemyAvailabilityWindowRepository:
@@ -70,4 +73,80 @@ class SqlAlchemyAvailabilityWindowRepository:
             row.local_start_time,
             row.local_end_time,
             row.crosses_midnight,
+        )
+
+
+class SqlAlchemyUnavailablePeriodRepository:
+    def __init__(self, database: SessionTransactions) -> None:
+        self._database = database
+
+    async def list_periods(self, account_id: UUID) -> list[UnavailablePeriod]:
+        async with self._database.transaction() as session:
+            rows = await session.scalars(
+                select(UnavailablePeriodRow)
+                .where(UnavailablePeriodRow.account_id == account_id)
+                .order_by(UnavailablePeriodRow.starts_at, UnavailablePeriodRow.id)
+            )
+            return [self._to_period(row) for row in rows]
+
+    async def create(self, account_id: UUID, draft: UnavailablePeriodDraft) -> UnavailablePeriod:
+        async with self._database.transaction() as session:
+            row = UnavailablePeriodRow(
+                account_id=account_id,
+                starts_at=draft.starts_at,
+                ends_at=draft.ends_at,
+                reason=draft.reason,
+            )
+            session.add(row)
+            await session.flush()
+            await session.refresh(row)
+            return self._to_period(row)
+
+    async def update(
+        self, account_id: UUID, period_id: UUID, draft: UnavailablePeriodDraft
+    ) -> UnavailablePeriod | None:
+        async with self._database.transaction() as session:
+            row = await session.scalar(
+                select(UnavailablePeriodRow)
+                .where(
+                    UnavailablePeriodRow.id == period_id,
+                    UnavailablePeriodRow.account_id == account_id,
+                )
+                .with_for_update()
+            )
+            if row is None:
+                return None
+            row.starts_at = draft.starts_at
+            row.ends_at = draft.ends_at
+            row.reason = draft.reason
+            await session.flush()
+            await session.refresh(row)
+            return self._to_period(row)
+
+    async def delete(self, account_id: UUID, period_id: UUID) -> bool:
+        async with self._database.transaction() as session:
+            row = await session.scalar(
+                select(UnavailablePeriodRow)
+                .where(
+                    UnavailablePeriodRow.id == period_id,
+                    UnavailablePeriodRow.account_id == account_id,
+                )
+                .with_for_update()
+            )
+            if row is None:
+                return False
+            await session.delete(row)
+        return True
+
+    @staticmethod
+    def _aware(value: datetime) -> datetime:
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+    @classmethod
+    def _to_period(cls, row: UnavailablePeriodRow) -> UnavailablePeriod:
+        return UnavailablePeriod(
+            row.id,
+            cls._aware(row.starts_at),
+            cls._aware(row.ends_at),
+            row.reason,
         )
