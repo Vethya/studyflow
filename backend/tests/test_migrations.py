@@ -147,6 +147,7 @@ def test_account_authentication_schema_is_in_the_upgrade_path() -> None:
     assert "CREATE TABLE availability_windows" in result.stdout
     assert "CREATE TABLE unavailable_periods" in result.stdout
     assert "CREATE TABLE authentication_oidc_states" in result.stdout
+    assert "CREATE TABLE authentication_oidc_link_challenges" in result.stdout
     for constraint_name in (
         "ck_academic_tasks_category",
         "ck_academic_tasks_priority",

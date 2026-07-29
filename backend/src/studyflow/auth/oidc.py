@@ -17,7 +17,7 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from jwt.algorithms import RSAAlgorithm
 from pydantic import EmailStr, TypeAdapter, ValidationError
 
-from studyflow.auth.sessions import SessionCredentials
+from studyflow.auth.sessions import PendingSession, SessionCredentials
 
 GOOGLE_AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"  # noqa: S105
@@ -32,6 +32,13 @@ class InvalidOIDCResponseError(ValueError):
 
 class AccountLinkRequiredError(ValueError):
     """A matching account requires password-confirmed linking."""
+
+    def __init__(self, challenge: str) -> None:
+        self.challenge = challenge
+
+
+class InvalidLinkChallengeError(ValueError):
+    """A link challenge or password is invalid without revealing which."""
 
 
 class OIDCNotConfiguredError(RuntimeError):
@@ -73,12 +80,31 @@ class OIDCStateRecord:
     timezone: str
 
 
+@dataclass(frozen=True, slots=True)
+class OIDCLinkChallenge:
+    id: UUID
+    account_id: UUID
+    subject: str
+    email: str
+    password_hash: str
+
+
+@dataclass(frozen=True, slots=True)
+class LinkedIdentity:
+    provider: str
+    email: str
+    linked_at: datetime
+
+
 class OIDCRepository(Protocol):
     async def store_state(
         self, state_hash: str, nonce_hash: str, timezone: str, expires_at: datetime
     ) -> None: ...
     async def consume_state(self, state_hash: str, now: datetime) -> OIDCStateRecord | None: ...
     async def resolve_identity(self, claims: GoogleClaims, timezone: str) -> OIDCAccount | None: ...
+    async def create_link_challenge(
+        self, claims: GoogleClaims, token_hash: str, expires_at: datetime
+    ) -> bool: ...
 
 
 class GoogleProvider(Protocol):
@@ -149,7 +175,14 @@ class OIDCLoginService:
         claims = await self._provider.exchange(code, state_record.nonce_hash)
         account = await self._repository.resolve_identity(claims, state_record.timezone)
         if account is None:
-            raise AccountLinkRequiredError
+            challenge = self._token_factory()
+            if not await self._repository.create_link_challenge(
+                claims,
+                hash_oidc_secret(challenge),
+                self._clock() + timedelta(minutes=10),
+            ):
+                raise InvalidOIDCResponseError
+            raise AccountLinkRequiredError(challenge)
         credentials = await self._sessions.create(account.id)
         if credentials is None:
             raise InvalidOIDCResponseError
@@ -273,3 +306,82 @@ class UnconfiguredOIDCLogin:
 
     async def complete(self, code: str, state: str, state_cookie: str) -> OIDCLoginResult:
         raise OIDCNotConfiguredError
+
+
+class OIDCAccountLinkRepository(Protocol):
+    async def get_link_challenge(
+        self, token_hash: str, now: datetime
+    ) -> OIDCLinkChallenge | None: ...
+    async def link_identity_and_create_session(
+        self,
+        challenge_id: UUID,
+        expected_password_hash: str,
+        pending_session: PendingSession,
+        now: datetime,
+    ) -> OIDCAccount | None: ...
+    async def list_identities(self, account_id: UUID) -> list[LinkedIdentity]: ...
+
+
+class LinkPasswordVerifier(Protocol):
+    async def verify_password(self, password: str, password_hash: str) -> bool: ...
+
+
+class OIDCAccountLinking(Protocol):
+    async def link(self, challenge: str, password: str) -> OIDCLoginResult: ...
+    async def list_identities(self, account_id: UUID) -> list[LinkedIdentity]: ...
+
+
+DUMMY_PASSWORD_HASH = (
+    "$argon2id$v=19$m=19456,t=2,p=1$kr9yet9qmcCQe8ifl5uCaQ$"  # noqa: S105
+    "KAkOAkgQdidCQ1REruEs9XXdR7E1QL1qw1PaAJ9cZhk"
+)
+
+
+class OIDCAccountLinkService:
+    def __init__(
+        self,
+        repository: OIDCAccountLinkRepository,
+        passwords: LinkPasswordVerifier,
+        token_factory: Callable[[], str] = lambda: secrets.token_urlsafe(32),
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
+        self._repository = repository
+        self._passwords = passwords
+        self._token_factory = token_factory
+        self._clock = clock
+
+    async def link(self, challenge: str, password: str) -> OIDCLoginResult:
+        record = await self._repository.get_link_challenge(
+            hash_oidc_secret(challenge), self._clock()
+        )
+        password_hash = record.password_hash if record is not None else DUMMY_PASSWORD_HASH
+        valid = await self._passwords.verify_password(password, password_hash)
+        if record is None or not valid:
+            raise InvalidLinkChallengeError
+        now = self._clock()
+        session_token = self._token_factory()
+        csrf_token = self._token_factory()
+        account = await self._repository.link_identity_and_create_session(
+            record.id,
+            record.password_hash,
+            PendingSession(
+                account_id=record.account_id,
+                token_hash=hash_oidc_secret(session_token),
+                csrf_token_hash=hash_oidc_secret(csrf_token),
+                idle_expires_at=now + timedelta(hours=24),
+                absolute_expires_at=now + timedelta(days=7),
+            ),
+            now,
+        )
+        if account is None:
+            raise InvalidLinkChallengeError
+        return OIDCLoginResult(
+            account.id,
+            account.email,
+            account.name,
+            session_token,
+            csrf_token,
+        )
+
+    async def list_identities(self, account_id: UUID) -> list[LinkedIdentity]:
+        return await self._repository.list_identities(account_id)

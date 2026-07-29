@@ -4,19 +4,27 @@ import hmac
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
+from uuid import UUID
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.login import LoginAccount
-from studyflow.auth.oidc import GoogleClaims, OIDCAccount, OIDCStateRecord
+from studyflow.auth.oidc import (
+    GoogleClaims,
+    LinkedIdentity,
+    OIDCAccount,
+    OIDCLinkChallenge,
+    OIDCStateRecord,
+)
 from studyflow.auth.registration import PendingAccount
 from studyflow.auth.session_authentication import PersistedSessionPrincipal
 from studyflow.auth.sessions import PendingSession
 from studyflow.database.models import (
     AuthenticationEmailToken,
     AuthenticationIdentity,
+    AuthenticationOIDCLinkChallenge,
     AuthenticationOIDCState,
     AuthenticationSession,
     StudentAccount,
@@ -416,6 +424,134 @@ class SqlAlchemyOIDCRepository:
                     return None
                 account = await session.get(StudentAccount, identity.account_id)
                 return self._to_account(account) if account is not None else None
+
+    async def create_link_challenge(
+        self, claims: GoogleClaims, token_hash: str, expires_at: datetime
+    ) -> bool:
+        async with self._database.transaction() as session:
+            account = await session.scalar(
+                select(StudentAccount).where(StudentAccount.email == claims.email).with_for_update()
+            )
+            if account is None or account.password_hash is None:
+                return False
+            await session.execute(
+                delete(AuthenticationOIDCLinkChallenge).where(
+                    AuthenticationOIDCLinkChallenge.account_id == account.id,
+                    AuthenticationOIDCLinkChallenge.consumed_at.is_(None),
+                )
+            )
+            session.add(
+                AuthenticationOIDCLinkChallenge(
+                    account_id=account.id,
+                    subject=claims.subject,
+                    email=claims.email,
+                    token_hash=token_hash,
+                    expires_at=expires_at,
+                )
+            )
+        return True
+
+    async def get_link_challenge(self, token_hash: str, now: datetime) -> OIDCLinkChallenge | None:
+        async with self._database.transaction() as session:
+            row = await session.scalar(
+                select(AuthenticationOIDCLinkChallenge).where(
+                    AuthenticationOIDCLinkChallenge.token_hash == token_hash,
+                    AuthenticationOIDCLinkChallenge.consumed_at.is_(None),
+                    AuthenticationOIDCLinkChallenge.expires_at > now,
+                )
+            )
+            if row is None:
+                return None
+            account = await session.get(StudentAccount, row.account_id)
+            if account is None or account.password_hash is None:
+                return None
+            return OIDCLinkChallenge(
+                row.id,
+                row.account_id,
+                row.subject,
+                row.email,
+                account.password_hash,
+            )
+
+    async def link_identity_and_create_session(
+        self,
+        challenge_id: UUID,
+        expected_password_hash: str,
+        pending_session: PendingSession,
+        now: datetime,
+    ) -> OIDCAccount | None:
+        try:
+            async with self._database.transaction() as session:
+                row = await session.scalar(
+                    select(AuthenticationOIDCLinkChallenge)
+                    .where(
+                        AuthenticationOIDCLinkChallenge.id == challenge_id,
+                        AuthenticationOIDCLinkChallenge.consumed_at.is_(None),
+                        AuthenticationOIDCLinkChallenge.expires_at > now,
+                    )
+                    .with_for_update()
+                )
+                if row is None:
+                    return None
+                account = await session.get(StudentAccount, row.account_id, with_for_update=True)
+                if (
+                    account is None
+                    or pending_session.account_id != row.account_id
+                    or not hmac.compare_digest(account.password_hash or "", expected_password_hash)
+                ):
+                    return None
+                existing = await session.scalar(
+                    select(AuthenticationIdentity).where(
+                        (AuthenticationIdentity.provider == "google")
+                        & (
+                            (AuthenticationIdentity.subject == row.subject)
+                            | (AuthenticationIdentity.account_id == account.id)
+                        )
+                    )
+                )
+                if existing is not None:
+                    return None
+                session.add(
+                    AuthenticationIdentity(
+                        account_id=account.id,
+                        provider="google",
+                        subject=row.subject,
+                        email=row.email,
+                    )
+                )
+                session.add(
+                    AuthenticationSession(
+                        account_id=account.id,
+                        token_hash=pending_session.token_hash,
+                        csrf_token_hash=pending_session.csrf_token_hash,
+                        idle_expires_at=pending_session.idle_expires_at,
+                        absolute_expires_at=pending_session.absolute_expires_at,
+                    )
+                )
+                row.consumed_at = now
+                account.email_verified_at = account.email_verified_at or now
+                await session.flush()
+                return self._to_account(account)
+        except IntegrityError:
+            return None
+
+    async def list_identities(self, account_id: UUID) -> list[LinkedIdentity]:
+        async with self._database.transaction() as session:
+            rows = await session.scalars(
+                select(AuthenticationIdentity)
+                .where(AuthenticationIdentity.account_id == account_id)
+                .order_by(AuthenticationIdentity.provider)
+            )
+            return [
+                LinkedIdentity(
+                    row.provider,
+                    row.email,
+                    row.created_at
+                    if row.created_at.tzinfo is not None
+                    else row.created_at.replace(tzinfo=UTC),
+                )
+                for row in rows
+            ]
 
     @staticmethod
     def _to_account(account: StudentAccount) -> OIDCAccount:

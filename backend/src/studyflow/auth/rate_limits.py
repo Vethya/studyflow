@@ -45,6 +45,10 @@ class OIDCStartRateLimitExceeded(RuntimeError):
     """Raised when an IP address creates too many OIDC states."""
 
 
+class OIDCLinkRateLimitExceeded(RuntimeError):
+    """Raised when Google account-link confirmation is attempted too often."""
+
+
 class RegistrationRateLimit(Protocol):
     async def check(self, client_ip: str, email: str) -> None: ...
 
@@ -75,6 +79,10 @@ class AccountPasswordChangeRateLimit(Protocol):
 
 class OIDCStartRateLimit(Protocol):
     async def check(self, client_ip: str) -> None: ...
+
+
+class OIDCLinkRateLimit(Protocol):
+    async def check(self, client_ip: str, challenge: str) -> None: ...
 
 
 class _DatabaseRateLimiter:
@@ -220,4 +228,13 @@ class DatabaseOIDCStartRateLimiter(_DatabaseRateLimiter):
             "oidc_start",
             (f"ip:{client_ip}",),
             OIDCStartRateLimitExceeded,
+        )
+
+
+class DatabaseOIDCLinkRateLimiter(_DatabaseRateLimiter):
+    async def check(self, client_ip: str, challenge: str) -> None:
+        await self._check(
+            "oidc_link",
+            (f"ip:{client_ip}", f"challenge:{challenge}"),
+            OIDCLinkRateLimitExceeded,
         )

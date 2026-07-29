@@ -26,7 +26,9 @@ from studyflow.auth.login import (
 )
 from studyflow.auth.oidc import (
     AccountLinkRequiredError,
+    InvalidLinkChallengeError,
     InvalidOIDCResponseError,
+    OIDCAccountLinking,
     OIDCLogin,
     OIDCNotConfiguredError,
 )
@@ -36,6 +38,8 @@ from studyflow.auth.rate_limits import (
     EmailVerificationRateLimitExceeded,
     LoginRateLimit,
     LoginRateLimitExceeded,
+    OIDCLinkRateLimit,
+    OIDCLinkRateLimitExceeded,
     OIDCStartRateLimit,
     OIDCStartRateLimitExceeded,
     PasswordResetAttemptRateLimit,
@@ -128,6 +132,11 @@ class OIDCStartResponse(BaseModel):
     authorization_url: str
 
 
+class OIDCLinkRequest(BaseModel):
+    challenge: Annotated[str, Field(min_length=20, max_length=512)]
+    password: Annotated[str, Field(min_length=1, max_length=128)]
+
+
 def get_registration(request: Request) -> Registration:
     return cast(Registration, request.app.state.registration)
 
@@ -160,6 +169,14 @@ def get_oidc_start_rate_limit(request: Request) -> OIDCStartRateLimit:
     return cast(OIDCStartRateLimit, request.app.state.oidc_start_rate_limiter)
 
 
+def get_oidc_account_linking(request: Request) -> OIDCAccountLinking:
+    return cast(OIDCAccountLinking, request.app.state.oidc_account_linking)
+
+
+def get_oidc_link_rate_limit(request: Request) -> OIDCLinkRateLimit:
+    return cast(OIDCLinkRateLimit, request.app.state.oidc_link_rate_limiter)
+
+
 def _set_authentication_cookies(response: Response, session_token: str, csrf_token: str) -> None:
     response.set_cookie(
         key="__Host-studyflow_session",
@@ -182,7 +199,24 @@ def _set_authentication_cookies(response: Response, session_token: str, csrf_tok
 
 
 def _oidc_error_response(status_code: int, detail: str) -> JSONResponse:
-    response = JSONResponse(status_code=status_code, content={"detail": detail})
+    response = JSONResponse(
+        status_code=status_code,
+        content={"detail": detail},
+        headers={"Cache-Control": "no-store"},
+    )
+    response.delete_cookie("__Host-studyflow_oidc_state", path="/", secure=True, httponly=True)
+    return response
+
+
+def _oidc_link_required_response(challenge: str) -> JSONResponse:
+    response = JSONResponse(
+        status_code=409,
+        content={
+            "detail": "Password-confirmed account linking required",
+            "link_challenge": challenge,
+        },
+        headers={"Cache-Control": "no-store"},
+    )
     response.delete_cookie("__Host-studyflow_oidc_state", path="/", secure=True, httponly=True)
     return response
 
@@ -270,17 +304,54 @@ async def complete_google_oidc(
     error: Annotated[str | None, Query(max_length=200)] = None,
     state_cookie: Annotated[str | None, Cookie(alias="__Host-studyflow_oidc_state")] = None,
 ) -> LoginResponse | Response:
+    response.headers["Cache-Control"] = "no-store"
     try:
         if error is not None or code is None or state_cookie is None:
             raise InvalidOIDCResponseError
         result = await oidc.complete(code, state, state_cookie)
-    except AccountLinkRequiredError:
-        return _oidc_error_response(409, "Password-confirmed account linking required")
+    except AccountLinkRequiredError as error:
+        return _oidc_link_required_response(error.challenge)
     except InvalidOIDCResponseError:
         return _oidc_error_response(400, "Google sign-in could not be completed")
     except OIDCNotConfiguredError:
         return _oidc_error_response(503, "Google sign-in is not configured")
     response.delete_cookie("__Host-studyflow_oidc_state", path="/", secure=True, httponly=True)
+    _set_authentication_cookies(response, result.session_token, result.csrf_token)
+    return LoginResponse(
+        account=AuthenticatedAccount(
+            id=str(result.account_id), email=result.email, name=result.name
+        ),
+        csrf_token=result.csrf_token,
+    )
+
+
+@router.post(
+    "/google/link",
+    response_model=LoginResponse,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError},
+        status.HTTP_429_TOO_MANY_REQUESTS: {"model": AuthenticationError},
+    },
+)
+async def confirm_google_account_link(
+    payload: OIDCLinkRequest,
+    response: Response,
+    http_request: Request,
+    linking: Annotated[OIDCAccountLinking, Depends(get_oidc_account_linking)],
+    rate_limit: Annotated[OIDCLinkRateLimit, Depends(get_oidc_link_rate_limit)],
+) -> LoginResponse:
+    client_ip = http_request.client.host if http_request.client is not None else "unknown"
+    try:
+        await rate_limit.check(client_ip, payload.challenge)
+        result = await linking.link(payload.challenge, payload.password)
+    except OIDCLinkRateLimitExceeded as error:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many account-link attempts",
+            headers={"Retry-After": "900"},
+        ) from error
+    except InvalidLinkChallengeError as error:
+        raise HTTPException(status_code=401, detail="Invalid link challenge or password") from error
     _set_authentication_cookies(response, result.session_token, result.csrf_token)
     return LoginResponse(
         account=AuthenticatedAccount(

@@ -5,9 +5,11 @@ from sqlalchemy import select
 
 from studyflow.auth.rate_limits import (
     DatabaseEmailVerificationRateLimiter,
+    DatabaseOIDCLinkRateLimiter,
     DatabaseOIDCStartRateLimiter,
     DatabaseRegistrationRateLimiter,
     EmailVerificationRateLimitExceeded,
+    OIDCLinkRateLimitExceeded,
     OIDCStartRateLimitExceeded,
     RegistrationRateLimitExceeded,
 )
@@ -104,5 +106,23 @@ async def test_oidc_start_rate_limit_bounds_unauthenticated_state_creation() -> 
             await limiter.check("203.0.113.10")
         with pytest.raises(OIDCStartRateLimitExceeded):
             await limiter.check("203.0.113.10")
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_oidc_link_rate_limit_bounds_password_attempts_by_ip_and_challenge() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        limiter = DatabaseOIDCLinkRateLimiter(database)
+        for _ in range(5):
+            await limiter.check("203.0.113.10", "challenge")
+        with pytest.raises(OIDCLinkRateLimitExceeded):
+            await limiter.check("203.0.113.10", "challenge")
     finally:
         await database.stop()
