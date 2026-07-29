@@ -158,19 +158,26 @@ class SqlAlchemySessionAuthenticationRepository:
         self._database = database
 
     async def authenticate(
-        self, token_hash: str, now: datetime, refreshed_idle_expiry: datetime
+        self,
+        token_hash: str,
+        now: datetime,
+        refreshed_idle_expiry: datetime,
+        csrf_hash: str | None = None,
     ) -> PersistedSessionPrincipal | None:
         async with self._database.transaction() as session:
+            conditions = [
+                AuthenticationSession.token_hash == token_hash,
+                AuthenticationSession.revoked_at.is_(None),
+                AuthenticationSession.idle_expires_at > now,
+                AuthenticationSession.absolute_expires_at > now,
+            ]
+            if csrf_hash is not None:
+                conditions.append(AuthenticationSession.csrf_token_hash == csrf_hash)
             row = (
                 await session.execute(
                     select(AuthenticationSession, StudentAccount)
                     .join(StudentAccount, StudentAccount.id == AuthenticationSession.account_id)
-                    .where(
-                        AuthenticationSession.token_hash == token_hash,
-                        AuthenticationSession.revoked_at.is_(None),
-                        AuthenticationSession.idle_expires_at > now,
-                        AuthenticationSession.absolute_expires_at > now,
-                    )
+                    .where(*conditions)
                     .with_for_update()
                 )
             ).one_or_none()
