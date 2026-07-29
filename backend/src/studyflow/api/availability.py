@@ -1,14 +1,20 @@
 """Authenticated availability endpoints."""
 
-from datetime import time
+from datetime import datetime, time
 from typing import Annotated, Literal, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field, field_validator
 
 from studyflow.api.account import AccountError, require_csrf_session, require_session
 from studyflow.auth.session_authentication import SessionPrincipal
+from studyflow.availability.unavailable import (
+    UnavailablePeriod,
+    UnavailablePeriodChange,
+    UnavailablePeriodDraft,
+    UnavailablePeriods,
+)
 from studyflow.availability.windows import (
     AvailabilityWindow,
     AvailabilityWindowDraft,
@@ -49,6 +55,10 @@ class AvailabilityWindowResponse(BaseModel):
 
 def get_availability_windows(request: Request) -> AvailabilityWindows:
     return cast(AvailabilityWindows, request.app.state.availability_windows)
+
+
+def get_unavailable_periods(request: Request) -> UnavailablePeriods:
+    return cast(UnavailablePeriods, request.app.state.unavailable_periods)
 
 
 def _response(window: AvailabilityWindow) -> AvailabilityWindowResponse:
@@ -116,3 +126,120 @@ async def confirm_availability_timezone(
 ) -> None:
     if not await availability.confirm_timezone(principal.account_id):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+
+class UnavailablePeriodRequest(BaseModel):
+    starts_at: datetime
+    ends_at: datetime
+    reason: Annotated[str | None, Field(max_length=200)] = None
+
+
+class UnavailablePeriodResponse(BaseModel):
+    id: UUID
+    starts_at: datetime
+    ends_at: datetime
+    reason: str | None
+
+
+class UnavailablePeriodChangeResponse(BaseModel):
+    period: UnavailablePeriodResponse
+    invalidated_future_session_ids: list[UUID]
+
+
+def _period_response(period: UnavailablePeriod) -> UnavailablePeriodResponse:
+    return UnavailablePeriodResponse(
+        id=period.id,
+        starts_at=period.starts_at,
+        ends_at=period.ends_at,
+        reason=period.reason,
+    )
+
+
+def _change_response(change: UnavailablePeriodChange) -> UnavailablePeriodChangeResponse:
+    return UnavailablePeriodChangeResponse(
+        period=_period_response(change.period),
+        invalidated_future_session_ids=change.invalidated_future_session_ids,
+    )
+
+
+@router.get(
+    "/unavailable-periods",
+    response_model=list[UnavailablePeriodResponse],
+    responses={status.HTTP_401_UNAUTHORIZED: {"model": AccountError}},
+)
+async def list_unavailable_periods(
+    principal: Annotated[SessionPrincipal, Depends(require_session)],
+    unavailable: Annotated[UnavailablePeriods, Depends(get_unavailable_periods)],
+) -> list[UnavailablePeriodResponse]:
+    return [
+        _period_response(period) for period in await unavailable.list_periods(principal.account_id)
+    ]
+
+
+def _draft(payload: UnavailablePeriodRequest) -> UnavailablePeriodDraft:
+    return UnavailablePeriodDraft(payload.starts_at, payload.ends_at, payload.reason)
+
+
+@router.post(
+    "/unavailable-periods",
+    status_code=status.HTTP_201_CREATED,
+    response_model=UnavailablePeriodChangeResponse,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
+        status.HTTP_403_FORBIDDEN: {"model": AccountError},
+    },
+)
+async def create_unavailable_period(
+    payload: UnavailablePeriodRequest,
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    unavailable: Annotated[UnavailablePeriods, Depends(get_unavailable_periods)],
+) -> UnavailablePeriodChangeResponse:
+    try:
+        return _change_response(await unavailable.create(principal.account_id, _draft(payload)))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.put(
+    "/unavailable-periods/{period_id}",
+    response_model=UnavailablePeriodChangeResponse,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
+        status.HTTP_403_FORBIDDEN: {"model": AccountError},
+        status.HTTP_404_NOT_FOUND: {"model": AccountError},
+    },
+)
+async def update_unavailable_period(
+    period_id: UUID,
+    payload: UnavailablePeriodRequest,
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    unavailable: Annotated[UnavailablePeriods, Depends(get_unavailable_periods)],
+) -> UnavailablePeriodChangeResponse:
+    try:
+        change = await unavailable.update(principal.account_id, period_id, _draft(payload))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if change is None:
+        raise HTTPException(status_code=404, detail="Unavailable period not found")
+    return _change_response(change)
+
+
+@router.delete(
+    "/unavailable-periods/{period_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
+        status.HTTP_403_FORBIDDEN: {"model": AccountError},
+        status.HTTP_404_NOT_FOUND: {"model": AccountError},
+    },
+)
+async def delete_unavailable_period(
+    period_id: UUID,
+    confirmed: Annotated[bool, Query()],
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    unavailable: Annotated[UnavailablePeriods, Depends(get_unavailable_periods)],
+) -> None:
+    if not confirmed:
+        raise HTTPException(status_code=422, detail="Deletion requires confirmation")
+    if not await unavailable.delete(principal.account_id, period_id):
+        raise HTTPException(status_code=404, detail="Unavailable period not found")

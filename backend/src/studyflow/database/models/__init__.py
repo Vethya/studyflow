@@ -7,7 +7,7 @@ from studyflow.database.models.authentication import (
     AuthenticationSession,
     StudentAccount,
 )
-from studyflow.database.models.availability import AvailabilityWindow
+from studyflow.database.models.availability import AvailabilityWindow, UnavailablePeriod
 from studyflow.database.models.tasks import AcademicTask, TaskDeadlineHistory
 
 __all__ = [
@@ -19,4 +19,5 @@ __all__ = [
     "AvailabilityWindow",
     "StudentAccount",
     "TaskDeadlineHistory",
+    "UnavailablePeriod",
 ]

@@ -637,6 +637,52 @@
           },
           "response": [],
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
+        },
+        {
+          "name": "List Unavailable Periods",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/availability/unavailable-periods", "host": ["{{base_url}}"], "path": ["api", "v1", "availability", "unavailable-periods"] },
+            "description": "Lists owned dated exceptions in absolute UTC instants."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Create Unavailable Period",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"starts_at\": \"2026-08-01T12:00:00Z\",\n  \"ends_at\": \"2026-08-01T14:00:00Z\",\n  \"reason\": \"Exam\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/availability/unavailable-periods", "host": ["{{base_url}}"], "path": ["api", "v1", "availability", "unavailable-periods"] },
+            "description": "Creates an owned dated exception and reports future sessions invalidated by it."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 201', () => pm.response.to.have.status(201));", "if (pm.response.code === 201) pm.collectionVariables.set('period_id', pm.response.json().period.id);"] } }]
+        },
+        {
+          "name": "Update Unavailable Period",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"starts_at\": \"2026-08-01T12:00:00Z\",\n  \"ends_at\": \"2026-08-01T15:00:00Z\",\n  \"reason\": \"Extended exam\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/availability/unavailable-periods/{{period_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "availability", "unavailable-periods", "{{period_id}}"] },
+            "description": "Updates one owned exception; missing and cross-user IDs both return 404."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Delete Unavailable Period",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/availability/unavailable-periods/{{period_id}}?confirmed=true", "host": ["{{base_url}}"], "path": ["api", "v1", "availability", "unavailable-periods", "{{period_id}}"], "query": [{ "key": "confirmed", "value": "true" }] },
+            "description": "Deletes one owned exception after explicit confirmation."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
         }
       ]
     }
@@ -659,6 +705,12 @@
       "value": "",
       "type": "string",
       "description": "Automatically populated by the create Academic Task request."
+    },
+    {
+      "key": "period_id",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by the create unavailable period request."
     }
   ]
 }
