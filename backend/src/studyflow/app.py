@@ -59,6 +59,8 @@ from studyflow.auth.sessions import SessionService
 from studyflow.auth.verification import EmailVerification, EmailVerificationService
 from studyflow.database import Database, DatabaseRuntime
 from studyflow.settings import Settings
+from studyflow.tasks.repositories import SqlAlchemyAcademicTaskRepository
+from studyflow.tasks.service import AcademicTasks, AcademicTaskService
 
 
 @asynccontextmanager
@@ -97,6 +99,7 @@ def create_app(
     account_preferences: AccountPreferences | None = None,
     account_passwords: AccountPasswords | None = None,
     account_password_change_rate_limiter: AccountPasswordChangeRateLimit | None = None,
+    academic_tasks: AcademicTasks | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     resolved_database = database or Database(resolved_settings.database_url.get_secret_value())
@@ -215,6 +218,9 @@ def create_app(
     application.state.account_password_change_rate_limiter = (
         account_password_change_rate_limiter
         or DatabaseAccountPasswordChangeRateLimiter(transactions)
+    )
+    application.state.academic_tasks = academic_tasks or AcademicTaskService(
+        SqlAlchemyAcademicTaskRepository(transactions)
     )
     application.include_router(api_router)
 
