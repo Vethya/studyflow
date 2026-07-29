@@ -158,3 +158,20 @@ class AuthenticationRateLimit(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class AuthenticationOIDCState(Base):
+    __tablename__ = "authentication_oidc_states"
+    __table_args__ = (
+        CheckConstraint("length(state_hash) = 64", name="state_hash_length"),
+        CheckConstraint("length(nonce_hash) = 64", name="nonce_hash_length"),
+        CheckConstraint("created_at < expires_at", name="expiry_order"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    state_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    nonce_hash: Mapped[str] = mapped_column(String(64))
+    timezone: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

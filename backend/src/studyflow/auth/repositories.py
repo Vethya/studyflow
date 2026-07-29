@@ -2,7 +2,7 @@
 
 import hmac
 from contextlib import AbstractAsyncContextManager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from sqlalchemy import delete, select, update
@@ -10,11 +10,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.login import LoginAccount
+from studyflow.auth.oidc import GoogleClaims, OIDCAccount, OIDCStateRecord
 from studyflow.auth.registration import PendingAccount
 from studyflow.auth.session_authentication import PersistedSessionPrincipal
 from studyflow.auth.sessions import PendingSession
 from studyflow.database.models import (
     AuthenticationEmailToken,
+    AuthenticationIdentity,
+    AuthenticationOIDCState,
     AuthenticationSession,
     StudentAccount,
 )
@@ -323,3 +326,97 @@ class SqlAlchemyPasswordRecoveryRepository:
                 .values(revoked_at=now)
             )
         return True
+
+
+class SqlAlchemyOIDCRepository:
+    def __init__(self, database: SessionTransactions) -> None:
+        self._database = database
+
+    async def store_state(
+        self, state_hash: str, nonce_hash: str, timezone: str, expires_at: datetime
+    ) -> None:
+        async with self._database.transaction() as session:
+            await session.execute(
+                delete(AuthenticationOIDCState).where(
+                    AuthenticationOIDCState.expires_at <= expires_at - timedelta(minutes=10)
+                )
+            )
+            session.add(
+                AuthenticationOIDCState(
+                    state_hash=state_hash,
+                    nonce_hash=nonce_hash,
+                    timezone=timezone,
+                    expires_at=expires_at,
+                )
+            )
+
+    async def consume_state(self, state_hash: str, now: datetime) -> OIDCStateRecord | None:
+        async with self._database.transaction() as session:
+            row = await session.scalar(
+                select(AuthenticationOIDCState)
+                .where(
+                    AuthenticationOIDCState.state_hash == state_hash,
+                    AuthenticationOIDCState.consumed_at.is_(None),
+                    AuthenticationOIDCState.expires_at > now,
+                )
+                .with_for_update()
+            )
+            if row is None:
+                return None
+            row.consumed_at = now
+            return OIDCStateRecord(row.nonce_hash, row.timezone)
+
+    async def resolve_identity(self, claims: GoogleClaims, timezone: str) -> OIDCAccount | None:
+        try:
+            async with self._database.transaction() as session:
+                identity = await session.scalar(
+                    select(AuthenticationIdentity).where(
+                        AuthenticationIdentity.provider == "google",
+                        AuthenticationIdentity.subject == claims.subject,
+                    )
+                )
+                if identity is not None:
+                    account = await session.get(StudentAccount, identity.account_id)
+                    return self._to_account(account) if account is not None else None
+                account = await session.scalar(
+                    select(StudentAccount)
+                    .where(StudentAccount.email == claims.email)
+                    .with_for_update()
+                )
+                if account is not None:
+                    return None
+                account = StudentAccount(
+                    email=claims.email,
+                    name=claims.name,
+                    password_hash=None,
+                    email_verified_at=datetime.now(UTC),
+                    timezone=timezone,
+                )
+                session.add(account)
+                await session.flush()
+                session.add(
+                    AuthenticationIdentity(
+                        account_id=account.id,
+                        provider="google",
+                        subject=claims.subject,
+                        email=claims.email,
+                    )
+                )
+                await session.flush()
+                return self._to_account(account)
+        except IntegrityError:
+            async with self._database.transaction() as session:
+                identity = await session.scalar(
+                    select(AuthenticationIdentity).where(
+                        AuthenticationIdentity.provider == "google",
+                        AuthenticationIdentity.subject == claims.subject,
+                    )
+                )
+                if identity is None:
+                    return None
+                account = await session.get(StudentAccount, identity.account_id)
+                return self._to_account(account) if account is not None else None
+
+    @staticmethod
+    def _to_account(account: StudentAccount) -> OIDCAccount:
+        return OIDCAccount(account.id, account.email, account.name)

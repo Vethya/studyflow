@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     smtp_start_tls: bool = False
     email_from_address: EmailStr = "no-reply@example.com"
     public_app_url: str = "http://localhost:5173"
+    google_oidc_client_id: str | None = None
+    google_oidc_client_secret: SecretStr | None = None
+    google_oidc_redirect_uri: str | None = None
 
     @field_validator("database_url")
     @classmethod
@@ -70,8 +73,41 @@ class Settings(BaseSettings):
             return None
         return value
 
+    @field_validator(
+        "google_oidc_client_id",
+        "google_oidc_client_secret",
+        "google_oidc_redirect_uri",
+        mode="before",
+    )
+    @classmethod
+    def normalize_blank_oidc_setting(cls, value: object) -> object:
+        if value == "" or (isinstance(value, SecretStr) and value.get_secret_value() == ""):
+            return None
+        return value
+
+    @field_validator("google_oidc_redirect_uri")
+    @classmethod
+    def require_http_oidc_redirect_uri(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed_url = urlsplit(value)
+        if parsed_url.scheme not in {"http", "https"} or parsed_url.hostname is None:
+            raise ValueError("Google OIDC redirect URI must use HTTP or HTTPS and include a host")
+        if parsed_url.query or parsed_url.fragment:
+            raise ValueError("Google OIDC redirect URI must not include a query or fragment")
+        return value
+
     @model_validator(mode="after")
     def reject_debug_in_production(self) -> Self:
+        configured_oidc_values = (
+            self.google_oidc_client_id,
+            self.google_oidc_client_secret,
+            self.google_oidc_redirect_uri,
+        )
+        if any(configured_oidc_values) and not all(configured_oidc_values):
+            raise ValueError(
+                "Google OIDC client ID, secret, and redirect URI must be configured together"
+            )
         if self.environment is Environment.PRODUCTION and self.debug:
             raise ValueError("Debug mode must be disabled in production")
         if self.environment is Environment.PRODUCTION:
@@ -90,4 +126,9 @@ class Settings(BaseSettings):
                 raise ValueError("Production public app URL must use HTTPS")
             if not self.smtp_start_tls:
                 raise ValueError("Production SMTP delivery must use TLS")
+            if (
+                self.google_oidc_redirect_uri is not None
+                and urlsplit(self.google_oidc_redirect_uri).scheme != "https"
+            ):
+                raise ValueError("Production Google OIDC redirect URI must use HTTPS")
         return self

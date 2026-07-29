@@ -41,6 +41,10 @@ class AccountPasswordChangeRateLimitExceeded(RuntimeError):
     """Raised when current-password checks exceed their window."""
 
 
+class OIDCStartRateLimitExceeded(RuntimeError):
+    """Raised when an IP address creates too many OIDC states."""
+
+
 class RegistrationRateLimit(Protocol):
     async def check(self, client_ip: str, email: str) -> None: ...
 
@@ -69,6 +73,10 @@ class AccountPasswordChangeRateLimit(Protocol):
     async def check(self, client_ip: str, account_id: str) -> None: ...
 
 
+class OIDCStartRateLimit(Protocol):
+    async def check(self, client_ip: str) -> None: ...
+
+
 class _DatabaseRateLimiter:
     def __init__(
         self,
@@ -86,7 +94,7 @@ class _DatabaseRateLimiter:
     async def _check(
         self,
         action: str,
-        key_values: tuple[str, str],
+        key_values: tuple[str, ...],
         exceeded: type[RuntimeError],
     ) -> None:
         now = self._clock()
@@ -203,4 +211,13 @@ class DatabaseAccountPasswordChangeRateLimiter(_DatabaseRateLimiter):
             "account_password_change",
             (f"ip:{client_ip}", f"account:{account_id}"),
             AccountPasswordChangeRateLimitExceeded,
+        )
+
+
+class DatabaseOIDCStartRateLimiter(_DatabaseRateLimiter):
+    async def check(self, client_ip: str) -> None:
+        await self._check(
+            "oidc_start",
+            (f"ip:{client_ip}",),
+            OIDCStartRateLimitExceeded,
         )

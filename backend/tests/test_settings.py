@@ -91,6 +91,20 @@ def test_blank_smtp_credentials_disable_authentication(
     assert settings.smtp_password is None
 
 
+def test_google_oidc_configuration_is_secret_and_all_or_nothing() -> None:
+    secret = SecretStr("google-secret")
+    settings = Settings(
+        google_oidc_client_id="google-client",
+        google_oidc_client_secret=secret,
+        google_oidc_redirect_uri="https://studyflow.example/api/v1/auth/google/callback",
+    )
+
+    assert settings.google_oidc_client_secret is secret
+    assert "google-secret" not in repr(settings)
+    with raises(ValidationError, match="must be configured together"):
+        Settings(google_oidc_client_id="google-client")
+
+
 def test_settings_reject_an_unsafe_public_app_url() -> None:
     with raises(ValidationError, match="Public app URL must use HTTP or HTTPS"):
         Settings(public_app_url="javascript:alert(1)")

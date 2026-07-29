@@ -154,6 +154,28 @@
               }
             }
           ]
+        },
+        {
+          "name": "Start Google OIDC",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "google", "start"], "query": [{ "key": "timezone", "value": "Asia/Phnom_Penh" }] },
+            "description": "Creates one-time state and nonce values and returns Google's authorization URL with only openid, email, and profile scopes."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) { const url = new URL(pm.response.json().authorization_url); pm.collectionVariables.set('google_oidc_state', url.searchParams.get('state')); }"] } }]
+        },
+        {
+          "name": "Complete Google OIDC",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/auth/google/callback?code={{google_oidc_code}}&state={{google_oidc_state}}", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "google", "callback"], "query": [{ "key": "code", "value": "{{google_oidc_code}}" }, { "key": "state", "value": "{{google_oidc_state}}" }] },
+            "description": "Exchanges a Google authorization code, validates signature/issuer/audience/state/nonce/verified-email claims, and creates a normal StudyFlow session."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) pm.collectionVariables.set('csrf_token', pm.response.json().csrf_token);"] } }]
         }
       ]
     },
@@ -711,6 +733,18 @@
       "value": "",
       "type": "string",
       "description": "Automatically populated by the create unavailable period request."
+    },
+    {
+      "key": "google_oidc_code",
+      "value": "",
+      "type": "string",
+      "description": "Paste the one-time authorization code returned by Google."
+    },
+    {
+      "key": "google_oidc_state",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by the Google OIDC start request."
     }
   ]
 }
