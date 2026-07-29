@@ -4,7 +4,7 @@ from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
 from typing import Protocol
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -227,5 +227,78 @@ class SqlAlchemyVerificationResendRepository:
                     token_hash=token_hash,
                     expires_at=expires_at,
                 )
+            )
+        return True
+
+
+class SqlAlchemyPasswordRecoveryRepository:
+    def __init__(self, database: SessionTransactions) -> None:
+        self._database = database
+
+    async def create_reset_token(self, email: str, token_hash: str, expires_at: datetime) -> bool:
+        async with self._database.transaction() as session:
+            account = await session.scalar(
+                select(StudentAccount).where(StudentAccount.email == email).with_for_update()
+            )
+            if (
+                account is None
+                or account.email_verified_at is None
+                or account.password_hash is None
+            ):
+                return False
+            await session.execute(
+                delete(AuthenticationEmailToken).where(
+                    AuthenticationEmailToken.account_id == account.id,
+                    AuthenticationEmailToken.purpose == "password_reset",
+                    AuthenticationEmailToken.consumed_at.is_(None),
+                )
+            )
+            session.add(
+                AuthenticationEmailToken(
+                    account_id=account.id,
+                    purpose="password_reset",
+                    token_hash=token_hash,
+                    expires_at=expires_at,
+                )
+            )
+        return True
+
+    async def reset_password(self, token_hash: str, password_hash: str, now: datetime) -> bool:
+        async with self._database.transaction() as session:
+            account_id = await session.scalar(
+                select(AuthenticationEmailToken.account_id).where(
+                    AuthenticationEmailToken.purpose == "password_reset",
+                    AuthenticationEmailToken.token_hash == token_hash,
+                    AuthenticationEmailToken.consumed_at.is_(None),
+                    AuthenticationEmailToken.expires_at > now,
+                )
+            )
+            if account_id is None:
+                return False
+            account = await session.get(StudentAccount, account_id, with_for_update=True)
+            if account is None:
+                return False
+            token = await session.scalar(
+                select(AuthenticationEmailToken)
+                .where(
+                    AuthenticationEmailToken.account_id == account_id,
+                    AuthenticationEmailToken.purpose == "password_reset",
+                    AuthenticationEmailToken.token_hash == token_hash,
+                    AuthenticationEmailToken.consumed_at.is_(None),
+                    AuthenticationEmailToken.expires_at > now,
+                )
+                .with_for_update()
+            )
+            if token is None:
+                return False
+            account.password_hash = password_hash
+            token.consumed_at = now
+            await session.execute(
+                update(AuthenticationSession)
+                .where(
+                    AuthenticationSession.account_id == account_id,
+                    AuthenticationSession.revoked_at.is_(None),
+                )
+                .values(revoked_at=now)
             )
         return True
