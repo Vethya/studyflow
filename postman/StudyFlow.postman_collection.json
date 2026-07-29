@@ -247,11 +247,45 @@
                   "pm.test('returns account and CSRF token', () => {",
                   "  const body = pm.response.json();",
                   "  pm.expect(body).to.have.all.keys('account', 'csrf_token');",
+                  "  pm.collectionVariables.set('csrf_token', body.csrf_token);",
                   "});"
                 ]
               }
             }
           ]
+        },
+        {
+          "name": "Current session",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/session",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "session"]
+            },
+            "description": "Validates the opaque session cookie and refreshes its idle expiry."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "logout"]
+            },
+            "description": "Validates CSRF, revokes the server session, and clears both browser cookies."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
         },
         {
           "name": "Verify email",
@@ -312,6 +346,12 @@
       "value": "http://127.0.0.1:8000",
       "type": "string",
       "description": "API origin without a trailing slash. Postman environments override this default."
+    },
+    {
+      "key": "csrf_token",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by the email login request."
     }
   ]
 }
