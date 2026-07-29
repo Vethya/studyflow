@@ -17,18 +17,24 @@ from studyflow.auth.passwords import PasswordService
 from studyflow.auth.rate_limits import (
     DatabaseEmailVerificationRateLimiter,
     DatabaseLoginRateLimiter,
+    DatabasePasswordResetAttemptRateLimiter,
+    DatabasePasswordResetRequestRateLimiter,
     DatabaseRegistrationRateLimiter,
     DatabaseVerificationResendRateLimiter,
     EmailVerificationRateLimit,
     LoginRateLimit,
+    PasswordResetAttemptRateLimit,
+    PasswordResetRequestRateLimit,
     RegistrationRateLimit,
     VerificationResendRateLimit,
 )
+from studyflow.auth.recovery import PasswordRecovery, PasswordRecoveryService
 from studyflow.auth.registration import Registration, RegistrationService
 from studyflow.auth.repositories import (
     SessionTransactions,
     SqlAlchemyEmailVerificationRepository,
     SqlAlchemyLoginRepository,
+    SqlAlchemyPasswordRecoveryRepository,
     SqlAlchemyRegistrationRepository,
     SqlAlchemySessionAuthenticationRepository,
     SqlAlchemySessionRepository,
@@ -74,6 +80,9 @@ def create_app(
     session_authentication: SessionAuthentication | None = None,
     verification_resend: VerificationResend | None = None,
     verification_resend_rate_limiter: VerificationResendRateLimit | None = None,
+    password_recovery: PasswordRecovery | None = None,
+    password_reset_request_rate_limiter: PasswordResetRequestRateLimit | None = None,
+    password_reset_attempt_rate_limiter: PasswordResetAttemptRateLimit | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     resolved_database = database or Database(resolved_settings.database_url.get_secret_value())
@@ -82,12 +91,21 @@ def create_app(
     resolved_registration = registration
     resolved_login = login
     resolved_verification_resend = verification_resend
-    if resolved_registration is None or resolved_login is None:
+    resolved_password_recovery = password_recovery
+    if (
+        resolved_registration is None
+        or resolved_login is None
+        or resolved_password_recovery is None
+    ):
         authentication_http_client = httpx.AsyncClient(
             timeout=resolved_settings.password_breach_timeout_seconds
         )
         password_service = PasswordService(PwnedPasswordsClient(authentication_http_client))
-    if resolved_registration is None or resolved_verification_resend is None:
+    if (
+        resolved_registration is None
+        or resolved_verification_resend is None
+        or resolved_password_recovery is None
+    ):
         smtp_password = (
             resolved_settings.smtp_password.get_secret_value()
             if resolved_settings.smtp_password is not None
@@ -119,6 +137,12 @@ def create_app(
             repository=SqlAlchemyLoginRepository(transactions),
             passwords=password_service,
             sessions=SessionService(SqlAlchemySessionRepository(transactions)),
+        )
+    if resolved_password_recovery is None:
+        resolved_password_recovery = PasswordRecoveryService(
+            repository=SqlAlchemyPasswordRecoveryRepository(transactions),
+            email_sender=email_sender,
+            passwords=password_service,
         )
     application = FastAPI(
         title="StudyFlow API",
@@ -153,6 +177,13 @@ def create_app(
     application.state.verification_resend = resolved_verification_resend
     application.state.verification_resend_rate_limiter = (
         verification_resend_rate_limiter or DatabaseVerificationResendRateLimiter(transactions)
+    )
+    application.state.password_recovery = resolved_password_recovery
+    application.state.password_reset_request_rate_limiter = (
+        password_reset_request_rate_limiter or DatabasePasswordResetRequestRateLimiter(transactions)
+    )
+    application.state.password_reset_attempt_rate_limiter = (
+        password_reset_attempt_rate_limiter or DatabasePasswordResetAttemptRateLimiter(transactions)
     )
     application.include_router(api_router)
 

@@ -29,6 +29,14 @@ class VerificationResendRateLimitExceeded(RuntimeError):
     """Raised when verification resend exceeds its window."""
 
 
+class PasswordResetRequestRateLimitExceeded(RuntimeError):
+    """Raised when password-reset requests exceed their window."""
+
+
+class PasswordResetAttemptRateLimitExceeded(RuntimeError):
+    """Raised when password-reset attempts exceed their window."""
+
+
 class RegistrationRateLimit(Protocol):
     async def check(self, client_ip: str, email: str) -> None: ...
 
@@ -43,6 +51,14 @@ class LoginRateLimit(Protocol):
 
 class VerificationResendRateLimit(Protocol):
     async def check(self, client_ip: str, email: str) -> None: ...
+
+
+class PasswordResetRequestRateLimit(Protocol):
+    async def check(self, client_ip: str, email: str) -> None: ...
+
+
+class PasswordResetAttemptRateLimit(Protocol):
+    async def check(self, client_ip: str, token: str) -> None: ...
 
 
 class _DatabaseRateLimiter:
@@ -152,4 +168,22 @@ class DatabaseVerificationResendRateLimiter(_DatabaseRateLimiter):
             "verification_resend",
             (f"ip:{client_ip}", f"email:{canonicalize_email(email)}"),
             VerificationResendRateLimitExceeded,
+        )
+
+
+class DatabasePasswordResetRequestRateLimiter(_DatabaseRateLimiter):
+    async def check(self, client_ip: str, email: str) -> None:
+        await self._check(
+            "password_reset_request",
+            (f"ip:{client_ip}", f"email:{canonicalize_email(email)}"),
+            PasswordResetRequestRateLimitExceeded,
+        )
+
+
+class DatabasePasswordResetAttemptRateLimiter(_DatabaseRateLimiter):
+    async def check(self, client_ip: str, token: str) -> None:
+        await self._check(
+            "password_reset_attempt",
+            (f"ip:{client_ip}", f"token:{token}"),
+            PasswordResetAttemptRateLimitExceeded,
         )
