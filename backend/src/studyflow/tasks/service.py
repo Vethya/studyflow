@@ -27,6 +27,17 @@ class InvalidTaskDeadlineError(ValueError):
     """Raised when a task deadline is not a future absolute instant."""
 
 
+class EstimateFrozenError(ValueError):
+    """Raised when an update changes an estimate after work starts."""
+
+
+class TaskStatus(StrEnum):
+    NOT_STARTED = "not_started"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    OVERDUE = "overdue"
+
+
 @dataclass(frozen=True, slots=True)
 class NewAcademicTask:
     title: str
@@ -45,6 +56,7 @@ class TaskFilters:
     priority: TaskPriority | None = None
     deadline_from: datetime | None = None
     deadline_to: datetime | None = None
+    status: TaskStatus | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +73,7 @@ class AcademicTaskRecord:
     planned_duration_minutes: int
     created_at: datetime
     updated_at: datetime
+    status: TaskStatus = TaskStatus.NOT_STARTED
 
 
 class AcademicTaskRepository(Protocol):
@@ -69,6 +82,12 @@ class AcademicTaskRepository(Protocol):
         self, account_id: UUID, filters: TaskFilters | None = None
     ) -> list[AcademicTaskRecord]: ...
     async def get(self, account_id: UUID, task_id: UUID) -> AcademicTaskRecord | None: ...
+    async def update(
+        self, account_id: UUID, task_id: UUID, task: NewAcademicTask, now: datetime
+    ) -> AcademicTaskRecord | None: ...
+    async def delete(self, account_id: UUID, task_id: UUID) -> bool: ...
+    async def finish_early(self, account_id: UUID, task_id: UUID, now: datetime) -> bool: ...
+    async def mark_started(self, account_id: UUID, task_id: UUID, now: datetime) -> bool: ...
 
 
 class AcademicTasks(Protocol):
@@ -77,6 +96,12 @@ class AcademicTasks(Protocol):
         self, account_id: UUID, filters: TaskFilters | None = None
     ) -> list[AcademicTaskRecord]: ...
     async def get(self, account_id: UUID, task_id: UUID) -> AcademicTaskRecord | None: ...
+    async def update(
+        self, account_id: UUID, task_id: UUID, task: NewAcademicTask
+    ) -> AcademicTaskRecord | None: ...
+    async def delete(self, account_id: UUID, task_id: UUID) -> bool: ...
+    async def finish_early(self, account_id: UUID, task_id: UUID) -> bool: ...
+    async def mark_started(self, account_id: UUID, task_id: UUID) -> bool: ...
 
 
 class AcademicTaskService:
@@ -102,3 +127,25 @@ class AcademicTaskService:
 
     async def get(self, account_id: UUID, task_id: UUID) -> AcademicTaskRecord | None:
         return await self._repository.get(account_id, task_id)
+
+    async def update(
+        self, account_id: UUID, task_id: UUID, task: NewAcademicTask
+    ) -> AcademicTaskRecord | None:
+        now = self._clock()
+        if task.deadline_at.tzinfo is None:
+            raise InvalidTaskDeadlineError
+        return await self._repository.update(
+            account_id,
+            task_id,
+            replace(task, deadline_at=task.deadline_at.astimezone(UTC)),
+            now,
+        )
+
+    async def delete(self, account_id: UUID, task_id: UUID) -> bool:
+        return await self._repository.delete(account_id, task_id)
+
+    async def finish_early(self, account_id: UUID, task_id: UUID) -> bool:
+        return await self._repository.finish_early(account_id, task_id, self._clock())
+
+    async def mark_started(self, account_id: UUID, task_id: UUID) -> bool:
+        return await self._repository.mark_started(account_id, task_id, self._clock())

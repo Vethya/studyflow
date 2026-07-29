@@ -545,7 +545,7 @@
           "request": {
             "method": "GET",
             "header": [{ "key": "Accept", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/tasks?course=Algorithms&category=reading&priority=medium", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks"], "query": [{ "key": "course", "value": "Algorithms" }, { "key": "category", "value": "reading" }, { "key": "priority", "value": "medium" }] },
+            "url": { "raw": "{{base_url}}/api/v1/tasks?course=Algorithms&category=reading&priority=medium&status=not_started", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks"], "query": [{ "key": "course", "value": "Algorithms" }, { "key": "category", "value": "reading" }, { "key": "priority", "value": "medium" }, { "key": "status", "value": "not_started" }] },
             "description": "Lists only owned tasks, ordered by deadline. Supports Course, Category, Priority, and deadline-range filters; Task Status is added with lifecycle derivation."
           },
           "response": [],
@@ -561,6 +561,41 @@
           },
           "response": [],
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Update Academic Task",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Updated task\",\n  \"category\": \"assignment\",\n  \"priority\": \"high\",\n  \"deadline_at\": \"2026-08-12T12:00:00Z\",\n  \"original_estimate_minutes\": 120\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/tasks/{{task_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks", "{{task_id}}"] },
+            "description": "Replaces editable fields, preserves deadline history, and rejects estimate changes after work starts."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Finish Academic Task Early",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"confirmed\": true\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/tasks/{{task_id}}/finish-early", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks", "{{task_id}}", "finish-early"] },
+            "description": "Explicitly confirms early completion while preserving work history."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
+        },
+        {
+          "name": "Delete Academic Task",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/tasks/{{task_id}}?confirmed=true", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks", "{{task_id}}"], "query": [{ "key": "confirmed", "value": "true" }] },
+            "description": "Deletes the owned task and cascading task history only after explicit confirmation."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
         }
       ]
     }
