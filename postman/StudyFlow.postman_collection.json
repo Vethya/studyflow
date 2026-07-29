@@ -515,6 +515,54 @@
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
         }
       ]
+    },
+    {
+      "name": "Academic Tasks",
+      "description": "Authenticated, student-owned academic work.",
+      "item": [
+        {
+          "name": "Create Academic Task",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Read chapter 4\",\n  \"category\": \"reading\",\n  \"priority\": \"medium\",\n  \"course\": \"Algorithms\",\n  \"notes\": \"Focus on dynamic programming.\",\n  \"deadline_at\": \"2026-08-10T12:00:00Z\",\n  \"original_estimate_minutes\": 90\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/v1/tasks", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks"] },
+            "description": "Creates a task owned by the authenticated student. Planned duration initially equals the original estimate."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 201', () => pm.response.to.have.status(201));", "if (pm.response.code === 201) pm.collectionVariables.set('task_id', pm.response.json().id);"] } }]
+        },
+        {
+          "name": "List Academic Tasks",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/tasks?course=Algorithms&category=reading&priority=medium", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks"], "query": [{ "key": "course", "value": "Algorithms" }, { "key": "category", "value": "reading" }, { "key": "priority", "value": "medium" }] },
+            "description": "Lists only owned tasks, ordered by deadline. Supports Course, Category, Priority, and deadline-range filters; Task Status is added with lifecycle derivation."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Get Academic Task",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/tasks/{{task_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks", "{{task_id}}"] },
+            "description": "Returns one owned task. Missing and cross-user identifiers both return 404."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        }
+      ]
     }
   ],
   "variable": [
@@ -529,6 +577,12 @@
       "value": "",
       "type": "string",
       "description": "Automatically populated by the email login request."
+    },
+    {
+      "key": "task_id",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by the create Academic Task request."
     }
   ]
 }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
@@ -24,12 +25,17 @@ def iter_requests(items: list[dict[str, Any]]) -> Iterator[dict[str, Any]]:
         yield from iter_requests(cast(list[dict[str, Any]], item.get("item", [])))
 
 
+def normalize_postman_path(raw_url: str) -> str:
+    path = raw_url.removeprefix("{{base_url}}").partition("?")[0]
+    return re.sub(r"\{\{([^}]+)\}\}", r"{\1}", path)
+
+
 def test_postman_collection_matches_the_openapi_endpoint_set() -> None:
     collection = load_json(COLLECTION_PATH)
     postman_operations = {
         (
             request["method"].lower(),
-            request["url"]["raw"].removeprefix("{{base_url}}"),
+            normalize_postman_path(request["url"]["raw"]),
         )
         for request in iter_requests(collection["item"])
     }
