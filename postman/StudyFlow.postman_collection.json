@@ -450,6 +450,45 @@
           },
           "response": [],
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Get study preferences",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/account/preferences",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "account", "preferences"]
+            },
+            "description": "Returns the account timezone, session length, break preference, and whether recurring availability needs reconfirmation."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Update study preferences",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"timezone\": \"Asia/Phnom_Penh\",\n  \"preferred_session_length_minutes\": 60,\n  \"minimum_break_minutes\": 10\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/account/preferences",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "account", "preferences"]
+            },
+            "description": "Updates validated planning preferences. A timezone change marks recurring availability for confirmation without changing stored deadline instants."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
         }
       ]
     }

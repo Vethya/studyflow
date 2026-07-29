@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -38,6 +39,10 @@ class StudentAccount(Base):
     password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     timezone: Mapped[str] = mapped_column(String(64), server_default="UTC")
+    availability_timezone_confirmed: Mapped[bool] = mapped_column(
+        Boolean,
+        server_default="true",
+    )
     preferred_session_length_minutes: Mapped[int] = mapped_column(
         Integer,
         server_default="60",

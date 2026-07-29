@@ -139,6 +139,9 @@ def test_account_authentication_schema_is_in_the_upgrade_path() -> None:
         assert f"CONSTRAINT {constraint_name} CHECK" in result.stdout
         assert f"ck_{constraint_name}" not in result.stdout
     assert "CREATE INDEX ix_authentication_rate_limits_window_started_at" in result.stdout
+    assert "ADD COLUMN availability_timezone_confirmed BOOLEAN DEFAULT true NOT NULL" in (
+        result.stdout
+    )
 
 
 def test_online_environment_runs_migrations_and_disposes_engine(
