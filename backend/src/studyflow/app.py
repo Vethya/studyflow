@@ -1,10 +1,31 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import cast
 
+import httpx
 from fastapi import FastAPI
 
 from studyflow import __version__
 from studyflow.api.router import API_V1_PREFIX, api_router
+from studyflow.auth.breached_passwords import PwnedPasswordsClient
+from studyflow.auth.email_delivery import (
+    AiosmtplibEmailTransport,
+    SmtpAuthenticationEmailSender,
+)
+from studyflow.auth.passwords import PasswordService
+from studyflow.auth.rate_limits import (
+    DatabaseEmailVerificationRateLimiter,
+    DatabaseRegistrationRateLimiter,
+    EmailVerificationRateLimit,
+    RegistrationRateLimit,
+)
+from studyflow.auth.registration import Registration, RegistrationService
+from studyflow.auth.repositories import (
+    SessionTransactions,
+    SqlAlchemyEmailVerificationRepository,
+    SqlAlchemyRegistrationRepository,
+)
+from studyflow.auth.verification import EmailVerification, EmailVerificationService
 from studyflow.database import Database, DatabaseRuntime
 from studyflow.settings import Settings
 
@@ -16,15 +37,55 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        await database.stop()
+        try:
+            await database.stop()
+        finally:
+            authentication_http_client: httpx.AsyncClient | None = (
+                application.state.authentication_http_client
+            )
+            if authentication_http_client is not None:
+                await authentication_http_client.aclose()
 
 
 def create_app(
     settings: Settings | None = None,
     database: DatabaseRuntime | None = None,
+    registration: Registration | None = None,
+    registration_rate_limiter: RegistrationRateLimit | None = None,
+    email_verification: EmailVerification | None = None,
+    email_verification_rate_limiter: EmailVerificationRateLimit | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     resolved_database = database or Database(resolved_settings.database_url.get_secret_value())
+    transactions = cast(SessionTransactions, resolved_database)
+    authentication_http_client: httpx.AsyncClient | None = None
+    resolved_registration = registration
+    if resolved_registration is None:
+        authentication_http_client = httpx.AsyncClient(
+            timeout=resolved_settings.password_breach_timeout_seconds
+        )
+        password_service = PasswordService(PwnedPasswordsClient(authentication_http_client))
+        smtp_password = (
+            resolved_settings.smtp_password.get_secret_value()
+            if resolved_settings.smtp_password is not None
+            else None
+        )
+        email_sender = SmtpAuthenticationEmailSender(
+            transport=AiosmtplibEmailTransport(
+                hostname=resolved_settings.smtp_host,
+                port=resolved_settings.smtp_port,
+                username=resolved_settings.smtp_username,
+                password=smtp_password,
+                start_tls=resolved_settings.smtp_start_tls,
+            ),
+            from_address=str(resolved_settings.email_from_address),
+            public_app_url=resolved_settings.public_app_url,
+        )
+        resolved_registration = RegistrationService(
+            repository=SqlAlchemyRegistrationRepository(transactions),
+            passwords=password_service,
+            email_sender=email_sender,
+        )
     application = FastAPI(
         title="StudyFlow API",
         version=__version__,
@@ -37,6 +98,17 @@ def create_app(
     )
     application.state.settings = resolved_settings
     application.state.database = resolved_database
+    application.state.authentication_http_client = authentication_http_client
+    application.state.registration = resolved_registration
+    application.state.registration_rate_limiter = registration_rate_limiter or (
+        DatabaseRegistrationRateLimiter(transactions)
+    )
+    application.state.email_verification = email_verification or EmailVerificationService(
+        SqlAlchemyEmailVerificationRepository(transactions)
+    )
+    application.state.email_verification_rate_limiter = email_verification_rate_limiter or (
+        DatabaseEmailVerificationRateLimiter(transactions)
+    )
     application.include_router(api_router)
 
     return application

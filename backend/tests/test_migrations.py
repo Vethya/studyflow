@@ -117,6 +117,7 @@ def test_account_authentication_schema_is_in_the_upgrade_path() -> None:
         "authentication_identities",
         "authentication_sessions",
         "authentication_email_tokens",
+        "authentication_rate_limits",
     ):
         assert f"CREATE TABLE {table_name}" in result.stdout
 
@@ -131,6 +132,8 @@ def test_account_authentication_schema_is_in_the_upgrade_path() -> None:
         "ck_authentication_email_tokens_supported_purpose",
         "ck_authentication_email_tokens_token_hash_length",
         "ck_authentication_email_tokens_expiry_order",
+        "ck_authentication_rate_limits_key_hash_length",
+        "ck_authentication_rate_limits_positive_attempts",
     )
     for constraint_name in expected_check_constraints:
         assert f"CONSTRAINT {constraint_name} CHECK" in result.stdout

@@ -1,0 +1,116 @@
+"""Durable abuse control for authentication endpoints."""
+
+import hashlib
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from typing import Protocol
+
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+
+from studyflow.auth.email import canonicalize_email
+from studyflow.auth.repositories import SessionTransactions
+from studyflow.database.models import AuthenticationRateLimit
+
+
+class RegistrationRateLimitExceeded(RuntimeError):
+    """Raised when an IP address or email exceeds the registration window."""
+
+
+class EmailVerificationRateLimitExceeded(RuntimeError):
+    """Raised when an IP address or token exceeds the verification window."""
+
+
+class RegistrationRateLimit(Protocol):
+    async def check(self, client_ip: str, email: str) -> None: ...
+
+
+class EmailVerificationRateLimit(Protocol):
+    async def check(self, client_ip: str, token: str) -> None: ...
+
+
+class _DatabaseRateLimiter:
+    def __init__(
+        self,
+        database: SessionTransactions,
+        *,
+        maximum_attempts: int = 5,
+        window_seconds: int = 900,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
+        self._database = database
+        self._maximum_attempts = maximum_attempts
+        self._window = timedelta(seconds=window_seconds)
+        self._clock = clock
+
+    async def _check(
+        self,
+        action: str,
+        key_values: tuple[str, str],
+        exceeded: type[RuntimeError],
+    ) -> None:
+        now = self._clock()
+        keys = tuple(self._hash_key(value) for value in key_values)
+        for attempt in range(3):
+            try:
+                async with self._database.transaction() as session:
+                    rows = {
+                        row.key_hash: row
+                        for row in await session.scalars(
+                            select(AuthenticationRateLimit)
+                            .where(
+                                AuthenticationRateLimit.action == action,
+                                AuthenticationRateLimit.key_hash.in_(keys),
+                            )
+                            .with_for_update()
+                        )
+                    }
+                    for key in keys:
+                        row = rows.get(key)
+                        if row is None:
+                            session.add(
+                                AuthenticationRateLimit(
+                                    action=action,
+                                    key_hash=key,
+                                    window_started_at=now,
+                                    attempts=1,
+                                )
+                            )
+                            continue
+                        window_started_at = row.window_started_at
+                        if window_started_at.tzinfo is None:
+                            window_started_at = window_started_at.replace(tzinfo=UTC)
+                        if now - window_started_at >= self._window:
+                            row.window_started_at = now
+                            row.attempts = 1
+                        elif row.attempts >= self._maximum_attempts:
+                            raise exceeded
+                        else:
+                            row.attempts += 1
+                    await session.flush()
+                return
+            except IntegrityError:
+                if attempt == 2:
+                    raise
+
+    @staticmethod
+    def _hash_key(value: str) -> str:
+        return hashlib.sha256(value.encode()).hexdigest()
+
+
+class DatabaseRegistrationRateLimiter(_DatabaseRateLimiter):
+    async def check(self, client_ip: str, email: str) -> None:
+        await self._check(
+            "registration",
+            (f"ip:{client_ip}", f"email:{canonicalize_email(email)}"),
+            RegistrationRateLimitExceeded,
+        )
+
+
+class DatabaseEmailVerificationRateLimiter(_DatabaseRateLimiter):
+    async def check(self, client_ip: str, token: str) -> None:
+        await self._check(
+            "email_verification",
+            (f"ip:{client_ip}", f"token:{token}"),
+            EmailVerificationRateLimitExceeded,
+        )

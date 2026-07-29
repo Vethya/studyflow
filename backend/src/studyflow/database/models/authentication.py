@@ -133,3 +133,23 @@ class AuthenticationEmailToken(Base):
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AuthenticationRateLimit(Base):
+    __tablename__ = "authentication_rate_limits"
+    __table_args__ = (
+        CheckConstraint("length(key_hash) = 64", name="key_hash_length"),
+        CheckConstraint("attempts > 0", name="positive_attempts"),
+        UniqueConstraint("action", "key_hash", name="uq_authentication_rate_limits_action_key"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    action: Mapped[str] = mapped_column(String(32))
+    key_hash: Mapped[str] = mapped_column(String(64))
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

@@ -48,3 +48,32 @@ async def test_openapi_documents_database_unavailability() -> None:
     assert unavailable_response["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/DatabaseUnavailableResponse"
     }
+
+
+@pytest.mark.anyio
+async def test_openapi_documents_registration_dependency_unavailability() -> None:
+    transport = ASGITransport(app=create_app())
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/v1/openapi.json")
+
+    registration_responses = response.json()["paths"]["/api/v1/auth/register"]["post"]["responses"]
+    unavailable_response = registration_responses["503"]
+    assert unavailable_response["description"] == "Password safety service is unavailable"
+    assert unavailable_response["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AuthenticationError"
+    }
+    assert registration_responses["429"]["description"] == "Too many registration attempts"
+
+
+@pytest.mark.anyio
+async def test_openapi_documents_verification_rate_limiting() -> None:
+    transport = ASGITransport(app=create_app())
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/v1/openapi.json")
+
+    verification_responses = response.json()["paths"]["/api/v1/auth/verify-email"]["post"][
+        "responses"
+    ]
+    assert verification_responses["429"]["description"] == "Too many verification attempts"
