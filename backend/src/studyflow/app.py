@@ -12,19 +12,25 @@ from studyflow.auth.email_delivery import (
     AiosmtplibEmailTransport,
     SmtpAuthenticationEmailSender,
 )
+from studyflow.auth.login import Login, LoginService
 from studyflow.auth.passwords import PasswordService
 from studyflow.auth.rate_limits import (
     DatabaseEmailVerificationRateLimiter,
+    DatabaseLoginRateLimiter,
     DatabaseRegistrationRateLimiter,
     EmailVerificationRateLimit,
+    LoginRateLimit,
     RegistrationRateLimit,
 )
 from studyflow.auth.registration import Registration, RegistrationService
 from studyflow.auth.repositories import (
     SessionTransactions,
     SqlAlchemyEmailVerificationRepository,
+    SqlAlchemyLoginRepository,
     SqlAlchemyRegistrationRepository,
+    SqlAlchemySessionRepository,
 )
+from studyflow.auth.sessions import SessionService
 from studyflow.auth.verification import EmailVerification, EmailVerificationService
 from studyflow.database import Database, DatabaseRuntime
 from studyflow.settings import Settings
@@ -54,17 +60,21 @@ def create_app(
     registration_rate_limiter: RegistrationRateLimit | None = None,
     email_verification: EmailVerification | None = None,
     email_verification_rate_limiter: EmailVerificationRateLimit | None = None,
+    login: Login | None = None,
+    login_rate_limiter: LoginRateLimit | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     resolved_database = database or Database(resolved_settings.database_url.get_secret_value())
     transactions = cast(SessionTransactions, resolved_database)
     authentication_http_client: httpx.AsyncClient | None = None
     resolved_registration = registration
-    if resolved_registration is None:
+    resolved_login = login
+    if resolved_registration is None or resolved_login is None:
         authentication_http_client = httpx.AsyncClient(
             timeout=resolved_settings.password_breach_timeout_seconds
         )
         password_service = PasswordService(PwnedPasswordsClient(authentication_http_client))
+    if resolved_registration is None:
         smtp_password = (
             resolved_settings.smtp_password.get_secret_value()
             if resolved_settings.smtp_password is not None
@@ -85,6 +95,12 @@ def create_app(
             repository=SqlAlchemyRegistrationRepository(transactions),
             passwords=password_service,
             email_sender=email_sender,
+        )
+    if resolved_login is None:
+        resolved_login = LoginService(
+            repository=SqlAlchemyLoginRepository(transactions),
+            passwords=password_service,
+            sessions=SessionService(SqlAlchemySessionRepository(transactions)),
         )
     application = FastAPI(
         title="StudyFlow API",
@@ -108,6 +124,10 @@ def create_app(
     )
     application.state.email_verification_rate_limiter = email_verification_rate_limiter or (
         DatabaseEmailVerificationRateLimiter(transactions)
+    )
+    application.state.login = resolved_login
+    application.state.login_rate_limiter = login_rate_limiter or DatabaseLoginRateLimiter(
+        transactions
     )
     application.include_router(api_router)
 
