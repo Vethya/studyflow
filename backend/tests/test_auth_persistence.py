@@ -23,6 +23,7 @@ def test_student_account_persists_identity_and_planning_defaults() -> None:
         "password_hash",
         "email_verified_at",
         "timezone",
+        "availability_timezone_confirmed",
         "preferred_session_length_minutes",
         "minimum_break_minutes",
         "created_at",
@@ -32,9 +33,11 @@ def test_student_account_persists_identity_and_planning_defaults() -> None:
     assert table.c.password_hash.nullable is True
     assert table.c.email_verified_at.nullable is True
     assert isinstance(table.c.timezone.server_default, DefaultClause)
+    assert isinstance(table.c.availability_timezone_confirmed.server_default, DefaultClause)
     assert isinstance(table.c.preferred_session_length_minutes.server_default, DefaultClause)
     assert isinstance(table.c.minimum_break_minutes.server_default, DefaultClause)
     assert str(table.c.timezone.server_default.arg) == "UTC"
+    assert str(table.c.availability_timezone_confirmed.server_default.arg) == "true"
     assert str(table.c.preferred_session_length_minutes.server_default.arg) == "60"
     assert str(table.c.minimum_break_minutes.server_default.arg) == "10"
 

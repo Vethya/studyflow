@@ -6,8 +6,12 @@ import httpx
 from fastapi import FastAPI
 
 from studyflow import __version__
+from studyflow.accounts.preferences import AccountPreferences, StudyPreferencesService
 from studyflow.accounts.profile import AccountProfiles, AccountProfileService
-from studyflow.accounts.repositories import SqlAlchemyAccountProfileRepository
+from studyflow.accounts.repositories import (
+    SqlAlchemyAccountProfileRepository,
+    SqlAlchemyStudyPreferencesRepository,
+)
 from studyflow.api.router import API_V1_PREFIX, api_router
 from studyflow.auth.breached_passwords import PwnedPasswordsClient
 from studyflow.auth.email_delivery import (
@@ -86,6 +90,7 @@ def create_app(
     password_reset_request_rate_limiter: PasswordResetRequestRateLimit | None = None,
     password_reset_attempt_rate_limiter: PasswordResetAttemptRateLimit | None = None,
     account_profiles: AccountProfiles | None = None,
+    account_preferences: AccountPreferences | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     resolved_database = database or Database(resolved_settings.database_url.get_secret_value())
@@ -190,6 +195,9 @@ def create_app(
     )
     application.state.account_profiles = account_profiles or AccountProfileService(
         SqlAlchemyAccountProfileRepository(transactions)
+    )
+    application.state.account_preferences = account_preferences or StudyPreferencesService(
+        SqlAlchemyStudyPreferencesRepository(transactions)
     )
     application.include_router(api_router)
 

@@ -1,7 +1,6 @@
 """Email authentication endpoints."""
 
 from typing import Annotated, cast
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 from fastapi import (
@@ -43,6 +42,7 @@ from studyflow.auth.registration import Registration, RegistrationCommand
 from studyflow.auth.resend import VerificationResend
 from studyflow.auth.session_authentication import SessionAuthentication
 from studyflow.auth.verification import EmailVerification
+from studyflow.timezones import is_iana_timezone
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -64,10 +64,8 @@ class RegistrationRequest(BaseModel):
     @field_validator("timezone")
     @classmethod
     def require_iana_timezone(cls, value: str) -> str:
-        try:
-            ZoneInfo(value)
-        except ZoneInfoNotFoundError as error:
-            raise ValueError("Timezone must be a valid IANA timezone") from error
+        if not is_iana_timezone(value):
+            raise ValueError("Timezone must be a valid IANA timezone")
         return value
 
 
