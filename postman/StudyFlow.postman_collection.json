@@ -489,6 +489,30 @@
           },
           "response": [],
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Change password",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"current_password\": \"correct horse battery staple\",\n  \"new_password\": \"a different secure password phrase\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/account/password",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "account", "password"]
+            },
+            "description": "Verifies the current password, applies breach and Argon2id policy to the replacement, then revokes all sessions."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
         }
       ]
     }

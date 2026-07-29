@@ -25,7 +25,9 @@ class SessionCredentials:
 
 
 class SessionRepository(Protocol):
-    async def create(self, session: PendingSession) -> None: ...
+    async def create(
+        self, session: PendingSession, expected_password_hash: str | None = None
+    ) -> bool: ...
 
 
 def generate_session_token() -> str:
@@ -47,17 +49,22 @@ class SessionService:
         self._token_factory = token_factory
         self._clock = clock
 
-    async def create(self, account_id: UUID) -> SessionCredentials:
+    async def create(
+        self, account_id: UUID, expected_password_hash: str | None = None
+    ) -> SessionCredentials | None:
         session_token = self._token_factory()
         csrf_token = self._token_factory()
         now = self._clock()
-        await self._repository.create(
+        created = await self._repository.create(
             PendingSession(
                 account_id=account_id,
                 token_hash=hash_session_token(session_token),
                 csrf_token_hash=hash_session_token(csrf_token),
                 idle_expires_at=now + timedelta(hours=24),
                 absolute_expires_at=now + timedelta(days=7),
-            )
+            ),
+            expected_password_hash,
         )
+        if not created:
+            return None
         return SessionCredentials(session_token=session_token, csrf_token=csrf_token)

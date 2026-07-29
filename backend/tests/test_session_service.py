@@ -11,8 +11,11 @@ from studyflow.auth.sessions import PendingSession, SessionService
 class SessionRepositoryStub:
     sessions: list[PendingSession] = field(default_factory=list)
 
-    async def create(self, session: PendingSession) -> None:
+    async def create(
+        self, session: PendingSession, expected_password_hash: str | None = None
+    ) -> bool:
         self.sessions.append(session)
+        return True
 
 
 @pytest.mark.anyio
@@ -29,6 +32,7 @@ async def test_session_service_issues_opaque_credentials_and_persists_only_hashe
 
     credentials = await service.create(account_id)
 
+    assert credentials is not None
     assert credentials.session_token == "opaque-session-token"
     assert credentials.csrf_token == "csrf-request-token"
     assert repository.sessions == [
