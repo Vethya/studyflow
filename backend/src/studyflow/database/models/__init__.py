@@ -3,6 +3,7 @@
 from studyflow.database.models.authentication import (
     AuthenticationEmailToken,
     AuthenticationIdentity,
+    AuthenticationOIDCState,
     AuthenticationRateLimit,
     AuthenticationSession,
     StudentAccount,
@@ -14,6 +15,7 @@ __all__ = [
     "AcademicTask",
     "AuthenticationEmailToken",
     "AuthenticationIdentity",
+    "AuthenticationOIDCState",
     "AuthenticationRateLimit",
     "AuthenticationSession",
     "AvailabilityWindow",
