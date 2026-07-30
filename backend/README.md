@@ -74,6 +74,10 @@ uv run ruff check .
 uv run mypy
 ```
 
+GitHub Actions runs the same checks for backend, infrastructure, and Postman changes. It also
+applies and validates Alembic against PostgreSQL, validates the Compose model, builds the backend
+image, and enforces that the Postman request set stays synchronized with OpenAPI.
+
 ## Database migrations
 
 Alembic reads the same validated `STUDYFLOW_DATABASE_URL` and SQLAlchemy metadata as the
