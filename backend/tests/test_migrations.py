@@ -108,6 +108,35 @@ def test_alembic_can_render_the_current_upgrade_path_offline() -> None:
     assert "studyflow:studyflow" not in result.stdout
 
 
+def test_account_authentication_schema_is_in_the_upgrade_path() -> None:
+    result = run_alembic("upgrade", "head", "--sql")
+
+    assert result.returncode == 0, result.stderr
+    for table_name in (
+        "student_accounts",
+        "authentication_identities",
+        "authentication_sessions",
+        "authentication_email_tokens",
+    ):
+        assert f"CREATE TABLE {table_name}" in result.stdout
+
+    expected_check_constraints = (
+        "ck_student_accounts_email_canonical",
+        "ck_student_accounts_preferred_session_length",
+        "ck_student_accounts_minimum_break",
+        "ck_authentication_identities_supported_provider",
+        "ck_authentication_sessions_token_hash_length",
+        "ck_authentication_sessions_csrf_token_hash_length",
+        "ck_authentication_sessions_expiry_order",
+        "ck_authentication_email_tokens_supported_purpose",
+        "ck_authentication_email_tokens_token_hash_length",
+        "ck_authentication_email_tokens_expiry_order",
+    )
+    for constraint_name in expected_check_constraints:
+        assert f"CONSTRAINT {constraint_name} CHECK" in result.stdout
+        assert f"ck_{constraint_name}" not in result.stdout
+
+
 def test_online_environment_runs_migrations_and_disposes_engine(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
