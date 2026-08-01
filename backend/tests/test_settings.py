@@ -51,6 +51,60 @@ def test_settings_load_a_secret_postgresql_database_url(
     assert "super-secret" not in repr(settings)
 
 
+def test_settings_load_authentication_email_delivery_configuration(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("STUDYFLOW_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("STUDYFLOW_SMTP_PORT", "587")
+    monkeypatch.setenv("STUDYFLOW_SMTP_USERNAME", "mailer")
+    monkeypatch.setenv("STUDYFLOW_SMTP_PASSWORD", "smtp-secret")
+    monkeypatch.setenv("STUDYFLOW_SMTP_START_TLS", "true")
+    monkeypatch.setenv("STUDYFLOW_EMAIL_FROM_ADDRESS", "no-reply@example.com")
+    monkeypatch.setenv("STUDYFLOW_PUBLIC_APP_URL", "https://studyflow.example.com")
+
+    settings = Settings()
+
+    assert settings.smtp_host == "smtp.example.com"
+    assert settings.smtp_port == 587
+    assert settings.smtp_username == "mailer"
+    assert settings.smtp_password is not None
+    assert settings.smtp_password.get_secret_value() == "smtp-secret"
+    assert settings.smtp_start_tls is True
+    assert settings.email_from_address == "no-reply@example.com"
+    assert settings.public_app_url == "https://studyflow.example.com"
+    assert "smtp-secret" not in repr(settings)
+
+
+def test_blank_smtp_credentials_disable_authentication(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("STUDYFLOW_SMTP_USERNAME", "")
+    monkeypatch.setenv("STUDYFLOW_SMTP_PASSWORD", "")
+
+    settings = Settings()
+
+    assert settings.smtp_username is None
+    assert settings.smtp_password is None
+
+
+def test_settings_reject_an_unsafe_public_app_url() -> None:
+    with raises(ValidationError, match="Public app URL must use HTTP or HTTPS"):
+        Settings(public_app_url="javascript:alert(1)")
+
+
+@mark.parametrize(
+    "public_app_url",
+    ["https://studyflow.example/?tenant=1", "https://studyflow.example/#fragment"],
+)
+def test_settings_rejects_query_or_fragment_in_public_app_url(public_app_url: str) -> None:
+    with raises(ValidationError, match="must not include a query or fragment"):
+        Settings(public_app_url=public_app_url)
+
+
 def test_settings_reject_a_non_postgresql_database_url() -> None:
     with raises(ValidationError, match="must use postgresql\\+psycopg"):
         Settings(database_url=SecretStr("sqlite+aiosqlite:///:memory:"))
@@ -95,6 +149,36 @@ def test_production_accepts_an_explicit_encrypted_database_url() -> None:
     settings = Settings(
         environment=Environment.PRODUCTION,
         database_url=database_url,
+        public_app_url="https://studyflow.example.com",
+        smtp_start_tls=True,
     )
 
     assert settings.database_url is database_url
+
+
+def test_production_requires_https_verification_links() -> None:
+    database_url = SecretStr(
+        "postgresql+psycopg://studyflow:secret@database/studyflow?sslmode=require"
+    )
+
+    with raises(ValidationError, match="Production public app URL must use HTTPS"):
+        Settings(
+            environment=Environment.PRODUCTION,
+            database_url=database_url,
+            public_app_url="http://studyflow.example.com",
+            smtp_start_tls=True,
+        )
+
+
+def test_production_requires_tls_for_authentication_email() -> None:
+    database_url = SecretStr(
+        "postgresql+psycopg://studyflow:secret@database/studyflow?sslmode=require"
+    )
+
+    with raises(ValidationError, match="Production SMTP delivery must use TLS"):
+        Settings(
+            environment=Environment.PRODUCTION,
+            database_url=database_url,
+            public_app_url="https://studyflow.example.com",
+            smtp_start_tls=False,
+        )

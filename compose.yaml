@@ -1,8 +1,13 @@
 name: studyflow
 
 x-backend-environment: &backend-environment
+  FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
   STUDYFLOW_DATABASE_URL: ${STUDYFLOW_DATABASE_URL:-postgresql+psycopg://studyflow:studyflow@postgres:5432/studyflow}
   STUDYFLOW_ENVIRONMENT: development
+  STUDYFLOW_SMTP_HOST: ${STUDYFLOW_SMTP_HOST:-mailpit}
+  STUDYFLOW_SMTP_PORT: ${STUDYFLOW_SMTP_PORT:-1025}
+  STUDYFLOW_EMAIL_FROM_ADDRESS: ${STUDYFLOW_EMAIL_FROM_ADDRESS:-no-reply@example.com}
+  STUDYFLOW_PUBLIC_APP_URL: ${STUDYFLOW_PUBLIC_APP_URL:-http://localhost:5173}
 
 services:
   backend:

@@ -26,8 +26,27 @@ class PwnedPasswordsClient:
             headers={"Add-Padding": "true"},
         )
         response.raise_for_status()
-        for line in response.text.splitlines():
+        lines = [line for line in response.text.splitlines() if line]
+        if not lines:
+            raise httpx.DecodingError("Empty Pwned Passwords response", request=response.request)
+        breached = False
+        for line in lines:
             candidate_suffix, separator, count = line.partition(":")
-            if separator and candidate_suffix.strip().upper() == suffix and int(count.strip()) > 0:
-                return True
-        return False
+            normalized_suffix = candidate_suffix.strip().upper()
+            try:
+                occurrence_count = int(count.strip())
+            except ValueError as error:
+                raise httpx.DecodingError(
+                    "Malformed Pwned Passwords response", request=response.request
+                ) from error
+            if (
+                not separator
+                or len(normalized_suffix) != 35
+                or any(character not in "0123456789ABCDEF" for character in normalized_suffix)
+                or occurrence_count < 0
+            ):
+                raise httpx.DecodingError(
+                    "Malformed Pwned Passwords response", request=response.request
+                )
+            breached = breached or (normalized_suffix == suffix and occurrence_count > 0)
+        return breached

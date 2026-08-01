@@ -9,6 +9,7 @@ def test_authentication_tables_are_registered_with_application_metadata() -> Non
         "authentication_identities",
         "authentication_sessions",
         "authentication_email_tokens",
+        "authentication_rate_limits",
     }.issubset(Base.metadata.tables)
 
 
@@ -118,4 +119,23 @@ def test_email_action_token_is_hashed_expiring_and_single_use() -> None:
         "ck_authentication_email_tokens_supported_purpose",
         "ck_authentication_email_tokens_token_hash_length",
         "ck_authentication_email_tokens_expiry_order",
+    }.issubset(constraints)
+
+
+def test_authentication_rate_limit_is_hashed_and_unique_per_action() -> None:
+    table = Base.metadata.tables["authentication_rate_limits"]
+
+    assert set(table.columns.keys()) == {
+        "id",
+        "action",
+        "key_hash",
+        "window_started_at",
+        "attempts",
+        "updated_at",
+    }
+    constraints = {constraint.name for constraint in table.constraints}
+    assert {
+        "ck_authentication_rate_limits_key_hash_length",
+        "ck_authentication_rate_limits_positive_attempts",
+        "uq_authentication_rate_limits_action_key",
     }.issubset(constraints)
