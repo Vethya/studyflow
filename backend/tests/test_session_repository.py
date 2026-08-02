@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -15,6 +15,7 @@ async def test_session_repository_persists_an_owned_revocable_session() -> None:
     database = Database("sqlite+aiosqlite:///:memory:")
     await database.start()
     account_id = uuid4()
+    now = datetime.now(UTC)
     try:
         async with database.transaction() as session:
             await session.run_sync(
@@ -36,8 +37,8 @@ async def test_session_repository_persists_an_owned_revocable_session() -> None:
                 account_id=account_id,
                 token_hash="a" * 64,
                 csrf_token_hash="b" * 64,
-                idle_expires_at=datetime(2026, 7, 30, 12, tzinfo=UTC),
-                absolute_expires_at=datetime(2026, 8, 5, 12, tzinfo=UTC),
+                idle_expires_at=now + timedelta(hours=24),
+                absolute_expires_at=now + timedelta(days=7),
             )
         )
 
