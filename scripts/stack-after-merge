@@ -1,0 +1,333 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+DRY_RUN=0
+NO_PUSH=0
+SETUP_ONLY=0
+ASSUME_YES=0
+MERGED_BRANCH=""
+
+usage() {
+  cat <<'EOF'
+Usage:
+  stack-after-merge <merged-branch> [options]
+  stack-after-merge --setup [options]
+
+Update a local Graphite stack after its lowest PR is squash-merged, then
+push every rewritten descendant with Git's lease protection.
+
+Options:
+  --dry-run   Print planned mutations without running them.
+  --no-push   Restack locally without pushing branches.
+  --setup     Install/initialize/validate Graphite only.
+  --yes       Accept installation, worktree-detach, and push prompts.
+  -h, --help  Show this help.
+EOF
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+print_command() {
+  printf '+'
+  printf ' %q' "$@"
+  printf '\n'
+}
+
+run_mutation() {
+  print_command "$@"
+  if (( ! DRY_RUN )); then
+    "$@"
+  fi
+}
+
+confirm() {
+  local prompt=$1
+  local answer
+  if (( ASSUME_YES )); then
+    return 0
+  fi
+  [[ -t 0 ]] || die "$prompt Re-run with --yes to approve non-interactively."
+  read -r -p "$prompt [y/N] " answer
+  [[ "$answer" == "y" || "$answer" == "Y" ]]
+}
+
+install_graphite() {
+  local -a install_command
+  if command -v brew >/dev/null 2>&1; then
+    install_command=(brew install withgraphite/tap/graphite)
+  elif command -v npm >/dev/null 2>&1; then
+    install_command=(npm install -g @withgraphite/graphite-cli@stable)
+  else
+    die "Graphite is missing. Install it from https://graphite.com/docs/install-the-cli"
+  fi
+
+  if (( ! DRY_RUN )); then
+    confirm "Graphite CLI is missing. Install it now?" || die "Graphite installation declined."
+  fi
+  run_mutation "${install_command[@]}"
+  if (( DRY_RUN )); then
+    printf 'Run this command again after Graphite is installed.\n'
+    exit 0
+  fi
+  command -v gt >/dev/null 2>&1 || die "Graphite installation completed but gt is unavailable."
+}
+
+detect_trunk() {
+  local remote_head current_branch
+  remote_head=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
+  if [[ -n "$remote_head" ]]; then
+    printf '%s\n' "${remote_head#origin/}"
+    return
+  fi
+  if git show-ref --verify --quiet refs/heads/main; then
+    printf 'main\n'
+    return
+  fi
+  if git show-ref --verify --quiet refs/heads/master; then
+    printf 'master\n'
+    return
+  fi
+  current_branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+  [[ -n "$current_branch" ]] || die "Cannot detect a trunk branch. Run gt init manually."
+  printf '%s\n' "$current_branch"
+}
+
+graphite_config_path() {
+  printf '%s/.graphite_repo_config\n' "$(git rev-parse --git-common-dir)"
+}
+
+initialize_graphite_repo() {
+  local graphite_config detected_trunk
+  graphite_config=$(graphite_config_path)
+  if [[ -f "$graphite_config" ]]; then
+    return
+  fi
+  detected_trunk=$(detect_trunk)
+  printf 'Graphite is not initialized in this repository.\n'
+  run_mutation gt init --trunk "$detected_trunk"
+  if (( DRY_RUN )); then
+    return
+  fi
+  [[ -f "$graphite_config" ]] || die "gt init completed without creating $graphite_config"
+}
+
+graphite_trunk() {
+  local graphite_config trunk
+  graphite_config=$(graphite_config_path)
+  trunk=$(sed -n 's/.*"trunk":[[:space:]]*"\([^"]*\)".*/\1/p' "$graphite_config" | head -n 1)
+  [[ -n "$trunk" ]] || die "Cannot read Graphite trunk from $graphite_config"
+  printf '%s\n' "$trunk"
+}
+
+graphite_branches() {
+  local candidate
+  gt log short --reverse --no-interactive |
+    awk 'NF >= 2 { print $2 }' |
+    while IFS= read -r candidate; do
+      if git check-ref-format --branch "$candidate" >/dev/null 2>&1 &&
+        git show-ref --verify --quiet "refs/heads/$candidate"; then
+        printf '%s\n' "$candidate"
+      fi
+    done
+}
+
+validate_graphite_setup() {
+  local current_branch trunk tracked_branches
+  current_branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+  trunk=$(graphite_trunk)
+  tracked_branches=$(graphite_branches)
+
+  if [[ -n "$current_branch" && "$current_branch" != "$trunk" ]] &&
+    ! printf '%s\n' "$tracked_branches" | grep -Fxq "$current_branch"; then
+    if (( ! DRY_RUN )); then
+      confirm "Track the existing stack ending at $current_branch?" || die "Graphite tracking declined."
+    fi
+    run_mutation gt track "$current_branch" --force
+  elif [[ "$current_branch" == "$trunk" ]] &&
+    [[ "$(printf '%s\n' "$tracked_branches" | grep -Fvx "$trunk" || true)" == "" ]]; then
+    printf 'Graphite tracks only %s. To import an existing stack, check out its tip and rerun --setup.\n' "$trunk"
+  else
+    printf 'Graphite setup is ready.\n'
+  fi
+}
+
+ensure_clean_worktree() {
+  local changes
+  changes=$(git status --porcelain)
+  [[ -z "$changes" ]] || die "Working tree is not clean. Commit or stash changes before restacking."
+}
+
+worktree_for_branch() {
+  local branch=$1
+  git worktree list --porcelain | awk -v wanted="refs/heads/$branch" '
+    $1 == "worktree" { path = substr($0, 10) }
+    $1 == "branch" && $2 == wanted { print path; exit }
+  '
+}
+
+release_locked_worktree() {
+  local branch=$1
+  local worktree_path changes
+  worktree_path=$(worktree_for_branch "$branch")
+  [[ -n "$worktree_path" && "$worktree_path" != "$REPO_ROOT" ]] || return 0
+  [[ -d "$worktree_path" ]] || die "Worktree for $branch is stale: $worktree_path. Run git worktree prune."
+  changes=$(git -C "$worktree_path" status --porcelain)
+  [[ -z "$changes" ]] || die "Worktree $worktree_path has changes; refusing to detach $branch."
+  if (( ! DRY_RUN )); then
+    confirm "Detach clean worktree $worktree_path from $branch?" || die "Worktree detach declined."
+  fi
+  run_mutation git -C "$worktree_path" switch --detach
+}
+
+collect_affected_stack() {
+  local trunk=$1 merged_branch=$2 candidate previous
+  local -a tracked=() affected=()
+  while IFS= read -r candidate; do
+    tracked+=("$candidate")
+  done < <(graphite_branches)
+
+  for candidate in "${tracked[@]}"; do
+    [[ "$candidate" != "$trunk" ]] || continue
+    if [[ "$candidate" == "$merged_branch" ]] ||
+      git merge-base --is-ancestor "$merged_branch" "$candidate" 2>/dev/null; then
+      affected+=("$candidate")
+    fi
+  done
+
+  (( ${#affected[@]} > 0 )) || die "$merged_branch is not part of a tracked Graphite stack."
+  [[ "${affected[0]}" == "$merged_branch" ]] || die "Cannot determine a safe stack order for $merged_branch."
+
+  previous=${affected[0]}
+  for candidate in "${affected[@]:1}"; do
+    git merge-base --is-ancestor "$previous" "$candidate" ||
+      die "The affected stack is not linear between $previous and $candidate."
+    previous=$candidate
+  done
+
+  printf '%s\n' "${affected[@]}"
+}
+
+verify_restacked_branches() {
+  local parent=$1 branch
+  shift
+  for branch in "$@"; do
+    git merge-base --is-ancestor "$parent" "$branch" ||
+      die "$branch was not restacked onto $parent. Run gt undo or resolve the stack manually."
+    parent=$branch
+  done
+}
+
+ensure_remote_branches_match() {
+  local branch local_sha remote_sha
+  for branch in "$@"; do
+    git show-ref --verify --quiet "refs/remotes/origin/$branch" ||
+      die "Remote branch not found: origin/$branch"
+    local_sha=$(git rev-parse "$branch")
+    remote_sha=$(git rev-parse "origin/$branch")
+    [[ "$local_sha" == "$remote_sha" ]] ||
+      die "origin/$branch differs from local $branch; update it before restacking."
+  done
+}
+
+run_after_merge() {
+  local trunk branch
+  local -a affected=() remaining=()
+
+  git check-ref-format --branch "$MERGED_BRANCH" >/dev/null 2>&1 || die "Invalid branch name: $MERGED_BRANCH"
+  git show-ref --verify --quiet "refs/heads/$MERGED_BRANCH" || die "Local branch not found: $MERGED_BRANCH"
+  ensure_clean_worktree
+  trunk=$(graphite_trunk)
+
+  while IFS= read -r branch; do
+    affected+=("$branch")
+  done < <(collect_affected_stack "$trunk" "$MERGED_BRANCH")
+  remaining=("${affected[@]:1}")
+
+  printf 'Affected stack:\n'
+  printf '  %s\n' "${affected[@]}"
+
+  run_mutation git fetch origin
+  if (( ! DRY_RUN )) && (( ${#remaining[@]} > 0 )); then
+    ensure_remote_branches_match "${remaining[@]}"
+  fi
+  run_mutation git switch "$trunk"
+  run_mutation git pull --ff-only origin "$trunk"
+
+  for branch in "${affected[@]}"; do
+    release_locked_worktree "$branch"
+  done
+
+  run_mutation gt delete "$MERGED_BRANCH" --force
+
+  if (( ${#remaining[@]} > 0 )); then
+    run_mutation gt restack --branch "${remaining[0]}" --upstack
+    if (( ! DRY_RUN )); then
+      verify_restacked_branches "$trunk" "${remaining[@]}"
+    fi
+  fi
+
+  if (( NO_PUSH )); then
+    printf 'Push skipped (--no-push).\n'
+  elif (( ${#remaining[@]} == 0 )); then
+    printf 'No descendant branches remain to push.\n'
+  else
+    printf 'Branches to push:\n'
+    printf '  %s\n' "${remaining[@]}"
+    if (( ! DRY_RUN )); then
+      confirm "Force-push these branches with lease protection?" || die "Push declined."
+    fi
+    run_mutation git push --atomic --force-with-lease origin "${remaining[@]}"
+  fi
+}
+
+while (( $# )); do
+  case "$1" in
+    --dry-run) DRY_RUN=1 ;;
+    --no-push) NO_PUSH=1 ;;
+    --setup) SETUP_ONLY=1 ;;
+    --yes) ASSUME_YES=1 ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --*)
+      die "Unknown option: $1"
+      ;;
+    *)
+      [[ -z "$MERGED_BRANCH" ]] || die "Only one merged branch may be provided."
+      MERGED_BRANCH=$1
+      ;;
+  esac
+  shift
+done
+
+if (( ! SETUP_ONLY )) && [[ -z "$MERGED_BRANCH" ]]; then
+  usage >&2
+  exit 2
+fi
+
+if ! command -v gt >/dev/null 2>&1; then
+  install_graphite
+fi
+
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || die "Run this command inside a Git repository."
+cd "$REPO_ROOT"
+initialize_graphite_repo
+
+if (( DRY_RUN )) && [[ ! -f "$(graphite_config_path)" ]]; then
+  printf 'Run this command again after Graphite is initialized.\n'
+  exit 0
+fi
+
+if (( SETUP_ONLY )); then
+  printf 'Graphite CLI is installed: %s\n' "$(gt --version)"
+  validate_graphite_setup
+  gt log short --reverse --no-interactive
+  exit 0
+fi
+
+run_after_merge
