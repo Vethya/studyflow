@@ -4,13 +4,21 @@ from typing import Annotated, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from studyflow.auth.login import (
+    EmailVerificationRequiredError,
+    InvalidCredentialsError,
+    Login,
+    LoginCommand,
+)
 from studyflow.auth.passwords import PasswordPolicyError
 from studyflow.auth.rate_limits import (
     EmailVerificationRateLimit,
     EmailVerificationRateLimitExceeded,
+    LoginRateLimit,
+    LoginRateLimitExceeded,
     RegistrationRateLimit,
     RegistrationRateLimitExceeded,
 )
@@ -56,6 +64,22 @@ class EmailVerificationRequest(BaseModel):
     token: Annotated[str, Field(min_length=20, max_length=512)]
 
 
+class LoginRequest(BaseModel):
+    email: Annotated[EmailStr, Field(max_length=320)]
+    password: Annotated[str, Field(min_length=1, max_length=128)]
+
+
+class AuthenticatedAccount(BaseModel):
+    id: str
+    email: EmailStr
+    name: str
+
+
+class LoginResponse(BaseModel):
+    account: AuthenticatedAccount
+    csrf_token: str
+
+
 def get_registration(request: Request) -> Registration:
     return cast(Registration, request.app.state.registration)
 
@@ -70,6 +94,69 @@ def get_email_verification(request: Request) -> EmailVerification:
 
 def get_email_verification_rate_limit(request: Request) -> EmailVerificationRateLimit:
     return cast(EmailVerificationRateLimit, request.app.state.email_verification_rate_limiter)
+
+
+def get_login(request: Request) -> Login:
+    return cast(Login, request.app.state.login)
+
+
+def get_login_rate_limit(request: Request) -> LoginRateLimit:
+    return cast(LoginRateLimit, request.app.state.login_rate_limiter)
+
+
+@router.post(
+    "/login",
+    response_model=LoginResponse,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError},
+        status.HTTP_403_FORBIDDEN: {"model": AuthenticationError},
+        status.HTTP_429_TOO_MANY_REQUESTS: {"model": AuthenticationError},
+    },
+)
+async def login_with_email(
+    payload: LoginRequest,
+    response: Response,
+    http_request: Request,
+    login: Annotated[Login, Depends(get_login)],
+    rate_limit: Annotated[LoginRateLimit, Depends(get_login_rate_limit)],
+) -> LoginResponse:
+    try:
+        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        await rate_limit.check(client_ip, str(payload.email))
+        result = await login.login(LoginCommand(email=payload.email, password=payload.password))
+    except LoginRateLimitExceeded as error:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts",
+            headers={"Retry-After": "900"},
+        ) from error
+    except InvalidCredentialsError as error:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        ) from error
+    except EmailVerificationRequiredError as error:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email verification required",
+        ) from error
+    response.set_cookie(
+        key="__Host-studyflow_session",
+        value=result.session_token,
+        max_age=7 * 24 * 60 * 60,
+        path="/",
+        secure=True,
+        httponly=True,
+        samesite="strict",
+    )
+    return LoginResponse(
+        account=AuthenticatedAccount(
+            id=str(result.account_id),
+            email=result.email,
+            name=result.name,
+        ),
+        csrf_token=result.csrf_token,
+    )
 
 
 @router.post(

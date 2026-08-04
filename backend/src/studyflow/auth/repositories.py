@@ -8,6 +8,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from studyflow.auth.login import LoginAccount
 from studyflow.auth.registration import PendingAccount
 from studyflow.auth.sessions import PendingSession
 from studyflow.database.models import (
@@ -129,3 +130,23 @@ class SqlAlchemySessionRepository:
                     absolute_expires_at=pending.absolute_expires_at,
                 )
             )
+
+
+class SqlAlchemyLoginRepository:
+    def __init__(self, database: SessionTransactions) -> None:
+        self._database = database
+
+    async def find_by_email(self, email: str) -> LoginAccount | None:
+        async with self._database.transaction() as session:
+            account = await session.scalar(
+                select(StudentAccount).where(StudentAccount.email == email)
+            )
+        if account is None:
+            return None
+        return LoginAccount(
+            id=account.id,
+            email=account.email,
+            name=account.name,
+            password_hash=account.password_hash,
+            email_verified=account.email_verified_at is not None,
+        )
