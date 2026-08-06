@@ -333,6 +333,143 @@ class StackAfterMergeTests(unittest.TestCase):
         )
         self.assertNotIn("gt delete", result.stdout)
 
+    def test_submodule_change_is_not_hidden_by_git_diff_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "repo"
+            root.mkdir()
+            env = create_stack_repository(root)
+            child_sha = subprocess.run(
+                ["git", "-C", root, "rev-parse", "feature/child"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            merged_sha = subprocess.run(
+                ["git", "-C", root, "rev-parse", "feature/merged"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            subprocess.run(
+                ["git", "-C", root, "switch", "feature/top"],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    root,
+                    "update-index",
+                    "--add",
+                    "--cacheinfo",
+                    "160000",
+                    child_sha,
+                    "vendor/dependency",
+                ],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", root, "commit", "--amend", "--no-edit"],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "-C", root, "switch", "main"],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "-C", root, "config", "diff.ignoreSubmodules", "all"],
+                check=True,
+            )
+
+            remote = base / "remote.git"
+            subprocess.run(
+                ["git", "init", "--bare", remote], check=True, capture_output=True
+            )
+            subprocess.run(
+                ["git", "-C", root, "remote", "add", "origin", remote], check=True
+            )
+            subprocess.run(
+                ["git", "-C", root, "push", "origin", "--all"],
+                check=True,
+                capture_output=True,
+            )
+
+            collaborator = base / "collaborator"
+            subprocess.run(
+                ["git", "clone", remote, collaborator], check=True, capture_output=True
+            )
+            subprocess.run(
+                ["git", "-C", collaborator, "switch", "feature/top"],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    collaborator,
+                    "config",
+                    "user.email",
+                    "other@example.com",
+                ],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", collaborator, "config", "user.name", "Other"],
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    collaborator,
+                    "update-index",
+                    "--cacheinfo",
+                    "160000",
+                    merged_sha,
+                    "vendor/dependency",
+                ],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", collaborator, "commit", "--amend", "--no-edit"],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    collaborator,
+                    "push",
+                    "--force",
+                    "origin",
+                    "feature/top",
+                ],
+                check=True,
+                capture_output=True,
+            )
+
+            result = subprocess.run(
+                [SCRIPT, "feature/merged", "--yes", "--no-push"],
+                cwd=root,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "origin/feature/top differs in content from local feature/top",
+            result.stderr,
+        )
+        self.assertNotIn("gt delete", result.stdout)
+
     def test_accepts_a_remote_history_rewrite_with_identical_content(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)

@@ -222,7 +222,7 @@ verify_restacked_branches() {
 }
 
 ensure_remote_branches_are_safe() {
-  local branch local_sha remote_sha
+  local branch local_sha remote_sha local_tree remote_tree
   for branch in "$@"; do
     git show-ref --verify --quiet "refs/remotes/origin/$branch" ||
       die "Remote branch not found: origin/$branch"
@@ -231,7 +231,9 @@ ensure_remote_branches_are_safe() {
     if [[ "$local_sha" == "$remote_sha" ]]; then
       continue
     fi
-    if git diff --quiet "$branch" "origin/$branch"; then
+    local_tree=$(git rev-parse "$branch^{tree}")
+    remote_tree=$(git rev-parse "origin/$branch^{tree}")
+    if [[ "$local_tree" == "$remote_tree" ]]; then
       printf '  %s: accepting remote history rewrite with identical content\n' "$branch"
       continue
     fi
