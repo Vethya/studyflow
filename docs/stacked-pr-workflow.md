@@ -10,10 +10,12 @@ scripts/stack-after-merge feature/password-security
 ```
 
 The command prints the affected stack and asks before installing Graphite,
-detaching clean linked worktrees, or pushing. It stops instead of overwriting:
+detaching clean linked worktrees, or pushing. It accepts remote branches whose
+history was rewritten but whose tip content is identical to the local branch.
+It stops instead of overwriting:
 
 - changes in the current or linked worktrees;
-- remote branch updates that are not present locally;
+- remote branch updates with content differences from the local branch;
 - a non-linear or invalid Graphite stack;
 - a non-fast-forward trunk update.
 
