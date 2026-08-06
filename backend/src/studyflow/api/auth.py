@@ -4,7 +4,17 @@ from typing import Annotated, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Cookie,
+    Depends,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from studyflow.auth.login import (
@@ -23,6 +33,7 @@ from studyflow.auth.rate_limits import (
     RegistrationRateLimitExceeded,
 )
 from studyflow.auth.registration import Registration, RegistrationCommand
+from studyflow.auth.session_authentication import SessionAuthentication
 from studyflow.auth.verification import EmailVerification
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -80,6 +91,10 @@ class LoginResponse(BaseModel):
     csrf_token: str
 
 
+class CurrentSessionResponse(BaseModel):
+    account: AuthenticatedAccount
+
+
 def get_registration(request: Request) -> Registration:
     return cast(Registration, request.app.state.registration)
 
@@ -102,6 +117,56 @@ def get_login(request: Request) -> Login:
 
 def get_login_rate_limit(request: Request) -> LoginRateLimit:
     return cast(LoginRateLimit, request.app.state.login_rate_limiter)
+
+
+def get_session_authentication(request: Request) -> SessionAuthentication:
+    return cast(SessionAuthentication, request.app.state.session_authentication)
+
+
+@router.get(
+    "/session",
+    response_model=CurrentSessionResponse,
+    responses={status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError}},
+)
+async def get_current_session(
+    authentication: Annotated[SessionAuthentication, Depends(get_session_authentication)],
+    session_token: Annotated[str | None, Cookie(alias="__Host-studyflow_session")] = None,
+) -> CurrentSessionResponse:
+    principal = (
+        await authentication.authenticate(session_token) if session_token is not None else None
+    )
+    if principal is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return CurrentSessionResponse(
+        account=AuthenticatedAccount(
+            id=str(principal.account_id), email=principal.email, name=principal.name
+        )
+    )
+
+
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={status.HTTP_403_FORBIDDEN: {"model": AuthenticationError}},
+)
+async def logout(
+    response: Response,
+    authentication: Annotated[SessionAuthentication, Depends(get_session_authentication)],
+    session_token: Annotated[str | None, Cookie(alias="__Host-studyflow_session")] = None,
+    csrf_token: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
+) -> None:
+    if (
+        session_token is None
+        or csrf_token is None
+        or not await authentication.revoke(session_token, csrf_token)
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
+    response.delete_cookie(
+        "__Host-studyflow_session", path="/", secure=True, httponly=True, samesite="strict"
+    )
+    response.delete_cookie(
+        "__Host-studyflow_csrf", path="/", secure=True, httponly=False, samesite="strict"
+    )
 
 
 @router.post(
@@ -147,6 +212,15 @@ async def login_with_email(
         path="/",
         secure=True,
         httponly=True,
+        samesite="strict",
+    )
+    response.set_cookie(
+        key="__Host-studyflow_csrf",
+        value=result.csrf_token,
+        max_age=7 * 24 * 60 * 60,
+        path="/",
+        secure=True,
+        httponly=False,
         samesite="strict",
     )
     return LoginResponse(

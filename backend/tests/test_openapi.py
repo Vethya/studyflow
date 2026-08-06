@@ -77,3 +77,10 @@ async def test_openapi_documents_verification_rate_limiting() -> None:
         "responses"
     ]
     assert verification_responses["429"]["description"] == "Too many verification attempts"
+
+
+def test_openapi_documents_session_authentication_failures() -> None:
+    schema = create_app().openapi()
+
+    assert "401" in schema["paths"]["/api/v1/auth/session"]["get"]["responses"]
+    assert "403" in schema["paths"]["/api/v1/auth/logout"]["post"]["responses"]

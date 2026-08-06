@@ -1,7 +1,7 @@
 """SQLAlchemy authentication repositories."""
 
 from contextlib import AbstractAsyncContextManager
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Protocol
 
 from sqlalchemy import delete, select
@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.login import LoginAccount
 from studyflow.auth.registration import PendingAccount
+from studyflow.auth.session_authentication import PersistedSessionPrincipal
 from studyflow.auth.sessions import PendingSession
 from studyflow.database.models import (
     AuthenticationEmailToken,
@@ -150,3 +151,52 @@ class SqlAlchemyLoginRepository:
             password_hash=account.password_hash,
             email_verified=account.email_verified_at is not None,
         )
+
+
+class SqlAlchemySessionAuthenticationRepository:
+    def __init__(self, database: SessionTransactions) -> None:
+        self._database = database
+
+    async def authenticate(
+        self, token_hash: str, now: datetime, refreshed_idle_expiry: datetime
+    ) -> PersistedSessionPrincipal | None:
+        async with self._database.transaction() as session:
+            row = (
+                await session.execute(
+                    select(AuthenticationSession, StudentAccount)
+                    .join(StudentAccount, StudentAccount.id == AuthenticationSession.account_id)
+                    .where(
+                        AuthenticationSession.token_hash == token_hash,
+                        AuthenticationSession.revoked_at.is_(None),
+                        AuthenticationSession.idle_expires_at > now,
+                        AuthenticationSession.absolute_expires_at > now,
+                    )
+                    .with_for_update()
+                )
+            ).one_or_none()
+            if row is None:
+                return None
+            authentication_session, account = row
+            absolute_expiry = authentication_session.absolute_expires_at
+            if absolute_expiry.tzinfo is None:
+                absolute_expiry = absolute_expiry.replace(tzinfo=UTC)
+            authentication_session.idle_expires_at = min(refreshed_idle_expiry, absolute_expiry)
+            return PersistedSessionPrincipal(account.id, account.email, account.name)
+
+    async def revoke(self, token_hash: str, csrf_hash: str, now: datetime) -> bool:
+        async with self._database.transaction() as session:
+            authentication_session = await session.scalar(
+                select(AuthenticationSession)
+                .where(
+                    AuthenticationSession.token_hash == token_hash,
+                    AuthenticationSession.csrf_token_hash == csrf_hash,
+                    AuthenticationSession.revoked_at.is_(None),
+                    AuthenticationSession.idle_expires_at > now,
+                    AuthenticationSession.absolute_expires_at > now,
+                )
+                .with_for_update()
+            )
+            if authentication_session is None:
+                return False
+            authentication_session.revoked_at = now
+        return True

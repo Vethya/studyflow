@@ -28,7 +28,12 @@ from studyflow.auth.repositories import (
     SqlAlchemyEmailVerificationRepository,
     SqlAlchemyLoginRepository,
     SqlAlchemyRegistrationRepository,
+    SqlAlchemySessionAuthenticationRepository,
     SqlAlchemySessionRepository,
+)
+from studyflow.auth.session_authentication import (
+    SessionAuthentication,
+    SessionAuthenticationService,
 )
 from studyflow.auth.sessions import SessionService
 from studyflow.auth.verification import EmailVerification, EmailVerificationService
@@ -62,6 +67,7 @@ def create_app(
     email_verification_rate_limiter: EmailVerificationRateLimit | None = None,
     login: Login | None = None,
     login_rate_limiter: LoginRateLimit | None = None,
+    session_authentication: SessionAuthentication | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     resolved_database = database or Database(resolved_settings.database_url.get_secret_value())
@@ -128,6 +134,9 @@ def create_app(
     application.state.login = resolved_login
     application.state.login_rate_limiter = login_rate_limiter or DatabaseLoginRateLimiter(
         transactions
+    )
+    application.state.session_authentication = session_authentication or (
+        SessionAuthenticationService(SqlAlchemySessionAuthenticationRepository(transactions))
     )
     application.include_router(api_router)
 

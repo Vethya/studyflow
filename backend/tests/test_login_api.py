@@ -65,12 +65,18 @@ async def test_email_login_sets_the_host_session_cookie_and_returns_csrf_token()
         },
         "csrf_token": "csrf-request-token",
     }
-    cookie = response.headers["set-cookie"]
-    assert "__Host-studyflow_session=opaque-session-token" in cookie
-    assert "HttpOnly" in cookie
-    assert "Secure" in cookie
-    assert "SameSite=strict" in cookie
-    assert "Path=/" in cookie
+    cookies = response.headers.get_list("set-cookie")
+    session_cookie = next(value for value in cookies if "studyflow_session" in value)
+    csrf_cookie = next(value for value in cookies if "studyflow_csrf" in value)
+    assert "__Host-studyflow_session=opaque-session-token" in session_cookie
+    assert "HttpOnly" in session_cookie
+    assert "Secure" in session_cookie
+    assert "SameSite=strict" in session_cookie
+    assert "Path=/" in session_cookie
+    assert "__Host-studyflow_csrf=csrf-request-token" in csrf_cookie
+    assert "HttpOnly" not in csrf_cookie
+    assert "Secure" in csrf_cookie
+    assert "SameSite=strict" in csrf_cookie
     assert login.commands == [
         LoginCommand(email="Student@example.com", password="correct password")
     ]
