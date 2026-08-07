@@ -65,3 +65,17 @@ class SmtpAuthenticationEmailSender:
             "This link expires in eight hours."
         )
         await self._transport.send(message)
+
+    async def send_password_reset(self, email: str, token: str) -> None:
+        query = urlencode({"token": token})
+        reset_url = f"{self._public_app_url}/reset-password?{query}"
+        message = EmailMessage()
+        message["To"] = email
+        message["From"] = self._from_address
+        message["Subject"] = "Reset your StudyFlow password"
+        message.set_content(
+            "Reset your StudyFlow password using this single-use link:\n\n"
+            f"{reset_url}\n\n"
+            "This link expires in one hour. Ignore this email if you did not request it."
+        )
+        await self._transport.send(message)

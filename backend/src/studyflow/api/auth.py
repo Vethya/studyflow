@@ -29,11 +29,16 @@ from studyflow.auth.rate_limits import (
     EmailVerificationRateLimitExceeded,
     LoginRateLimit,
     LoginRateLimitExceeded,
+    PasswordResetAttemptRateLimit,
+    PasswordResetAttemptRateLimitExceeded,
+    PasswordResetRequestRateLimit,
+    PasswordResetRequestRateLimitExceeded,
     RegistrationRateLimit,
     RegistrationRateLimitExceeded,
     VerificationResendRateLimit,
     VerificationResendRateLimitExceeded,
 )
+from studyflow.auth.recovery import InvalidPasswordResetTokenError, PasswordRecovery
 from studyflow.auth.registration import Registration, RegistrationCommand
 from studyflow.auth.resend import VerificationResend
 from studyflow.auth.session_authentication import SessionAuthentication
@@ -87,6 +92,15 @@ class VerificationResendRequest(BaseModel):
     email: Annotated[EmailStr, Field(max_length=320)]
 
 
+class PasswordResetRequest(BaseModel):
+    email: Annotated[EmailStr, Field(max_length=320)]
+
+
+class PasswordResetConfirmation(BaseModel):
+    token: Annotated[str, Field(min_length=20, max_length=512)]
+    password: Annotated[str, Field(min_length=12, max_length=128)]
+
+
 class AuthenticatedAccount(BaseModel):
     id: str
     email: EmailStr
@@ -136,6 +150,109 @@ def get_verification_resend(request: Request) -> VerificationResend:
 
 def get_verification_resend_rate_limit(request: Request) -> VerificationResendRateLimit:
     return cast(VerificationResendRateLimit, request.app.state.verification_resend_rate_limiter)
+
+
+def get_password_recovery(request: Request) -> PasswordRecovery:
+    return cast(PasswordRecovery, request.app.state.password_recovery)
+
+
+def get_password_reset_request_rate_limit(request: Request) -> PasswordResetRequestRateLimit:
+    return cast(
+        PasswordResetRequestRateLimit, request.app.state.password_reset_request_rate_limiter
+    )
+
+
+def get_password_reset_attempt_rate_limit(request: Request) -> PasswordResetAttemptRateLimit:
+    return cast(
+        PasswordResetAttemptRateLimit, request.app.state.password_reset_attempt_rate_limiter
+    )
+
+
+@router.post(
+    "/forgot-password",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=AuthenticationMessage,
+    responses={status.HTTP_429_TOO_MANY_REQUESTS: {"model": AuthenticationError}},
+)
+async def forgot_password(
+    payload: PasswordResetRequest,
+    http_request: Request,
+    background_tasks: BackgroundTasks,
+    recovery: Annotated[PasswordRecovery, Depends(get_password_recovery)],
+    rate_limit: Annotated[
+        PasswordResetRequestRateLimit, Depends(get_password_reset_request_rate_limit)
+    ],
+) -> AuthenticationMessage:
+    client_ip = http_request.client.host if http_request.client is not None else "unknown"
+    try:
+        await rate_limit.check(client_ip, str(payload.email))
+        await recovery.request_reset(str(payload.email), background_tasks)
+    except PasswordResetRequestRateLimitExceeded as error:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many password reset requests",
+            headers={"Retry-After": "900"},
+        ) from error
+    return AuthenticationMessage(
+        message="If the address is eligible, a password reset email has been sent."
+    )
+
+
+@router.post(
+    "/reset-password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": AuthenticationError},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "description": "Invalid request or disallowed password",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "oneOf": [
+                            {"$ref": "#/components/schemas/AuthenticationError"},
+                            {"$ref": "#/components/schemas/HTTPValidationError"},
+                        ]
+                    }
+                }
+            },
+        },
+        status.HTTP_429_TOO_MANY_REQUESTS: {"model": AuthenticationError},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": AuthenticationError},
+    },
+)
+async def reset_password(
+    payload: PasswordResetConfirmation,
+    http_request: Request,
+    recovery: Annotated[PasswordRecovery, Depends(get_password_recovery)],
+    rate_limit: Annotated[
+        PasswordResetAttemptRateLimit, Depends(get_password_reset_attempt_rate_limit)
+    ],
+) -> None:
+    client_ip = http_request.client.host if http_request.client is not None else "unknown"
+    try:
+        await rate_limit.check(client_ip, payload.token)
+        await recovery.reset_password(payload.token, payload.password)
+    except PasswordResetAttemptRateLimitExceeded as error:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many password reset attempts",
+            headers={"Retry-After": "900"},
+        ) from error
+    except InvalidPasswordResetTokenError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password reset token is invalid or expired",
+        ) from error
+    except PasswordPolicyError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Password is not allowed",
+        ) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Password safety service is unavailable",
+        ) from error
 
 
 @router.post(

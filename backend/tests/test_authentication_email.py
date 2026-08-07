@@ -36,6 +36,23 @@ async def test_verification_email_contains_only_the_single_use_link() -> None:
 
 
 @pytest.mark.anyio
+async def test_password_reset_email_contains_single_use_link_and_expiry() -> None:
+    transport = EmailTransportStub()
+    sender = SmtpAuthenticationEmailSender(
+        transport=transport,
+        from_address="no-reply@studyflow.test",
+        public_app_url="https://studyflow.test",
+    )
+
+    await sender.send_password_reset("student@example.com", "a+b/=")
+
+    [message] = transport.messages
+    assert message["Subject"] == "Reset your StudyFlow password"
+    assert "https://studyflow.test/reset-password?token=a%2Bb%2F%3D" in message.get_content()
+    assert "expires in one hour" in message.get_content()
+
+
+@pytest.mark.anyio
 async def test_smtp_transport_forwards_security_and_credential_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
