@@ -288,6 +288,29 @@
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
         },
         {
+          "name": "Resend verification",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"student@example.com\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/resend-verification",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "resend-verification"]
+            },
+            "description": "Returns a non-enumerating response and rotates the verification token for an eligible unverified account."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 202', () => pm.response.to.have.status(202));"] } }]
+        },
+        {
           "name": "Verify email",
           "request": {
             "method": "POST",
