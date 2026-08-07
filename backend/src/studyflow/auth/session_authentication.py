@@ -15,7 +15,9 @@ class SessionPrincipal:
 
 
 class SessionAuthentication(Protocol):
-    async def authenticate(self, session_token: str) -> SessionPrincipal | None: ...
+    async def authenticate(
+        self, session_token: str, csrf_token: str | None = None
+    ) -> SessionPrincipal | None: ...
 
     async def revoke(self, session_token: str, csrf_token: str) -> bool: ...
 
@@ -33,6 +35,7 @@ class SessionAuthenticationRepository(Protocol):
         token_hash: str,
         now: datetime,
         refreshed_idle_expiry: datetime,
+        csrf_hash: str | None = None,
     ) -> PersistedSessionPrincipal | None: ...
 
     async def revoke(self, token_hash: str, csrf_hash: str, now: datetime) -> bool: ...
@@ -53,10 +56,15 @@ class SessionAuthenticationService:
         self._repository = repository
         self._clock = clock
 
-    async def authenticate(self, session_token: str) -> SessionPrincipal | None:
+    async def authenticate(
+        self, session_token: str, csrf_token: str | None = None
+    ) -> SessionPrincipal | None:
         now = self._clock()
         persisted = await self._repository.authenticate(
-            hash_browser_token(session_token), now, now + timedelta(hours=24)
+            hash_browser_token(session_token),
+            now,
+            now + timedelta(hours=24),
+            hash_browser_token(csrf_token) if csrf_token is not None else None,
         )
         if persisted is None:
             return None

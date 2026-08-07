@@ -94,7 +94,11 @@ async def test_session_authentication_refreshes_then_revokes_with_csrf() -> None
             SqlAlchemySessionAuthenticationRepository(database), clock=lambda: now
         )
 
-        assert await authentication.authenticate("opaque-session-token") is not None
+        assert await authentication.authenticate("opaque-session-token", "wrong-csrf-token") is None
+        assert (
+            await authentication.authenticate("opaque-session-token", "csrf-request-token")
+            is not None
+        )
         async with database.transaction() as session:
             refreshed = (await session.scalars(select(AuthenticationSession))).one()
         assert refreshed.idle_expires_at.replace(tzinfo=UTC) == now + timedelta(hours=2)
