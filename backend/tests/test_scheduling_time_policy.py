@@ -117,6 +117,38 @@ def test_every_long_task_gets_a_second_day_before_any_gets_a_third() -> None:
     }
 
 
+def test_spread_depth_is_capped_by_schedulable_session_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_solve = cp_model.CpSolver.solve
+    solve_calls = 0
+
+    def count_solve(
+        solver: cp_model.CpSolver,
+        model: cp_model.CpModel,
+    ) -> cp_model.CpSolverStatus:
+        nonlocal solve_calls
+        solve_calls += 1
+        return original_solve(solver, model)
+
+    monkeypatch.setattr(
+        "studyflow.scheduling.overload.cp_model.CpSolver.solve",
+        count_solve,
+    )
+    result = solve_with_overload(
+        FeasibilityProblem(
+            (demand("only", "task", 1, (0, 100), deadline=100),),
+            planning_start_minute=0,
+            planning_days=tuple(
+                PlanningDay(index, index * 10, (index + 1) * 10) for index in range(10)
+            ),
+        )
+    )
+
+    assert result.status is KernelStatus.FEASIBLE
+    assert solve_calls == 2  # allocation and earliness; no pointless spread passes
+
+
 def test_day_metadata_does_not_forbid_a_session_crossing_local_midnight() -> None:
     result = solve_with_overload(
         FeasibilityProblem(
