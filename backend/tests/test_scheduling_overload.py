@@ -10,12 +10,30 @@ from studyflow.scheduling import (
     FeasibilityProblem,
     KernelStatus,
     MinuteWindow,
+    PlanningDay,
     SessionDemand,
     SolverDiagnostics,
     TaskPriority,
     classify_overload_status,
     solve_with_overload,
 )
+
+DEFAULT_PLANNING_DAYS = (PlanningDay(0, -1_000_000, 1_000_000),)
+
+
+def overload_problem(
+    sessions: tuple[SessionDemand, ...],
+    planning_start_minute: int,
+    minimum_break_minutes: int = 0,
+    max_solve_seconds: float = 4.0,
+) -> FeasibilityProblem:
+    return FeasibilityProblem(
+        sessions,
+        planning_start_minute,
+        minimum_break_minutes,
+        max_solve_seconds,
+        DEFAULT_PLANNING_DAYS,
+    )
 
 
 def demand(
@@ -68,7 +86,7 @@ def allocation_by_task(problem: FeasibilityProblem) -> dict[str, tuple[int, int,
 
 
 def test_empty_problem_is_feasible() -> None:
-    result = solve_with_overload(FeasibilityProblem((), planning_start_minute=0))
+    result = solve_with_overload(overload_problem((), planning_start_minute=0))
 
     assert result.status is KernelStatus.FEASIBLE
     assert result.sessions == ()
@@ -77,7 +95,7 @@ def test_empty_problem_is_feasible() -> None:
 
 
 def test_returns_every_session_when_all_work_fits() -> None:
-    problem = FeasibilityProblem(
+    problem = overload_problem(
         (
             demand("a", "alpha", 3, (0, 10), deadline=10),
             demand("b", "beta", 2, (0, 10), deadline=10),
@@ -98,7 +116,7 @@ def test_returns_every_session_when_all_work_fits() -> None:
 
 
 def test_returns_proven_overload_with_exact_per_task_shortfall() -> None:
-    problem = FeasibilityProblem(
+    problem = overload_problem(
         (
             demand(
                 "important",
@@ -133,7 +151,7 @@ def test_returns_proven_overload_with_exact_per_task_shortfall() -> None:
 
 
 def test_session_with_no_valid_domain_stays_unscheduled_without_blocking_other_work() -> None:
-    problem = FeasibilityProblem(
+    problem = overload_problem(
         (
             demand("too-long", "alpha", 7, (0, 6), deadline=6),
             demand("fits", "beta", 4, (0, 6), deadline=6),
@@ -152,7 +170,7 @@ def test_session_with_no_valid_domain_stays_unscheduled_without_blocking_other_w
 
 
 def test_all_empty_domains_are_proven_overload() -> None:
-    problem = FeasibilityProblem(
+    problem = overload_problem(
         (demand("past", "task", 2, (0, 5), deadline=5),),
         planning_start_minute=10,
     )
@@ -187,7 +205,7 @@ def test_classifies_partial_solutions_only_when_overload_is_proven(
 
 
 def test_low_priority_due_soon_beats_high_priority_due_much_later() -> None:
-    problem = FeasibilityProblem(
+    problem = overload_problem(
         (
             demand(
                 "soon",
@@ -216,7 +234,7 @@ def test_low_priority_due_soon_beats_high_priority_due_much_later() -> None:
 
 
 def test_least_calendar_slack_wins_before_priority() -> None:
-    problem = FeasibilityProblem(
+    problem = overload_problem(
         (
             demand(
                 "tight",
@@ -245,7 +263,7 @@ def test_least_calendar_slack_wins_before_priority() -> None:
 
 
 def test_least_slack_strictly_dominates_a_larger_lower_ranked_task() -> None:
-    problem = FeasibilityProblem(
+    problem = overload_problem(
         (
             demand(
                 "tight",
@@ -275,7 +293,7 @@ def test_least_slack_strictly_dominates_a_larger_lower_ranked_task() -> None:
 
 def test_minimum_break_capacity_is_included_in_slack() -> None:
     shared_window = ((0, 10),)
-    problem = FeasibilityProblem(
+    problem = overload_problem(
         (
             demand(
                 "tight-a",
@@ -313,7 +331,7 @@ def test_minimum_break_capacity_is_included_in_slack() -> None:
 
 
 def test_unavailable_gap_can_satisfy_the_entire_minimum_break() -> None:
-    problem = FeasibilityProblem(
+    problem = overload_problem(
         (
             demand("gapped-a", "gapped-task", 4, (0, 5), (10, 15), deadline=15),
             demand("gapped-b", "gapped-task", 4, (0, 5), (10, 15), deadline=15),
@@ -330,7 +348,7 @@ def test_unavailable_gap_can_satisfy_the_entire_minimum_break() -> None:
 
 
 def test_unavailable_gap_can_satisfy_part_of_the_minimum_break() -> None:
-    problem = FeasibilityProblem(
+    problem = overload_problem(
         (
             demand("gapped-a", "gapped-task", 4, (0, 5), (6, 11), deadline=11),
             demand("gapped-b", "gapped-task", 4, (0, 5), (6, 11), deadline=11),
@@ -347,7 +365,7 @@ def test_unavailable_gap_can_satisfy_part_of_the_minimum_break() -> None:
 
 
 def test_larger_remaining_work_wins_before_priority_when_slack_and_deadline_match() -> None:
-    problem = FeasibilityProblem(
+    problem = overload_problem(
         (
             demand(
                 "larger",
@@ -376,7 +394,7 @@ def test_larger_remaining_work_wins_before_priority_when_slack_and_deadline_matc
 
 
 def test_priority_breaks_an_otherwise_equal_case() -> None:
-    problem = FeasibilityProblem(
+    problem = overload_problem(
         (
             demand(
                 "low",
@@ -406,7 +424,7 @@ def test_priority_breaks_an_otherwise_equal_case() -> None:
 
 def test_objective_maximizes_minutes_instead_of_session_count() -> None:
     shared_windows = ((0, 6),)
-    problem = FeasibilityProblem(
+    problem = overload_problem(
         (
             demand("full", "task", 6, *shared_windows, deadline=6),
             demand("remainder", "task", 2, *shared_windows, deadline=6),
@@ -422,7 +440,7 @@ def test_objective_maximizes_minutes_instead_of_session_count() -> None:
 
 
 def test_calendar_capacity_clips_and_merges_windows() -> None:
-    problem = FeasibilityProblem(
+    problem = overload_problem(
         (demand("session", "task", 1, (-5, 5), (3, 12), (20, 30), deadline=10),),
         planning_start_minute=0,
     )
@@ -434,7 +452,7 @@ def test_calendar_capacity_clips_and_merges_windows() -> None:
 
 
 def test_available_minutes_and_shortfall_come_from_the_feasible_allocation() -> None:
-    problem = FeasibilityProblem(
+    problem = overload_problem(
         (
             demand(
                 "winner",
@@ -466,7 +484,7 @@ def test_available_minutes_and_shortfall_come_from_the_feasible_allocation() -> 
 
 
 def test_rejects_inconsistent_metadata_for_sessions_of_one_task() -> None:
-    problem = FeasibilityProblem(
+    problem = overload_problem(
         (
             demand("a", "task", 2, (0, 6), deadline=6),
             demand("b", "task", 2, (0, 6), deadline=5),
@@ -492,7 +510,7 @@ def test_invalid_model_becomes_a_typed_technical_failure(
     )
 
     result = solve_with_overload(
-        FeasibilityProblem(
+        overload_problem(
             (demand("session", "task", 1, (0, 2)),),
             planning_start_minute=0,
         )
@@ -515,7 +533,7 @@ def test_solver_exception_becomes_a_typed_technical_failure(
     )
 
     result = solve_with_overload(
-        FeasibilityProblem(
+        overload_problem(
             (demand("session", "task", 1, (0, 2)),),
             planning_start_minute=0,
         )
@@ -539,7 +557,7 @@ def test_unproven_solver_result_discards_the_partial_schedule(
     )
 
     result = solve_with_overload(
-        FeasibilityProblem(
+        overload_problem(
             (demand("session", "task", 1, (0, 2)),),
             planning_start_minute=0,
         )
@@ -559,7 +577,7 @@ def test_staged_policy_uses_one_shared_time_budget(monkeypatch: pytest.MonkeyPat
     )
 
     result = solve_with_overload(
-        FeasibilityProblem(
+        overload_problem(
             (demand("session", "task", 1, (0, 2)),),
             planning_start_minute=0,
             max_solve_seconds=0.5,
