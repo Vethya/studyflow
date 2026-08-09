@@ -50,7 +50,7 @@ class FeasibilityProblem:
     """A normalized, in-memory scheduling problem."""
 
     sessions: tuple[SessionDemand, ...]
-    planning_start_minute: int = 0
+    planning_start_minute: int
     minimum_break_minutes: int = 0
     max_solve_seconds: float = 4.0
 
