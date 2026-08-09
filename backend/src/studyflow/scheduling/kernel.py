@@ -9,13 +9,18 @@ from dataclasses import dataclass
 
 from ortools.sat.python import cp_model
 
+from studyflow.scheduling._solver import (
+    candidate_start_intervals,
+    configured_solver,
+    empty_diagnostics,
+    solver_diagnostics,
+)
 from studyflow.scheduling.contracts import (
     FeasibilityProblem,
     FeasibilityResult,
     KernelStatus,
     ScheduledSession,
     SessionDemand,
-    SolverDiagnostics,
 )
 
 
@@ -25,31 +30,6 @@ class _SessionVariable:
     start: cp_model.IntVar
 
 
-def _candidate_start_intervals(
-    demand: SessionDemand, planning_start_minute: int
-) -> list[list[int]]:
-    intervals: list[list[int]] = []
-    for window in demand.allowed_windows:
-        latest_start = min(window.end, demand.deadline_minute) - demand.duration_minutes
-        earliest_start = max(window.start, planning_start_minute)
-        if earliest_start <= latest_start:
-            intervals.append([earliest_start, latest_start])
-    return intervals
-
-
-def _diagnostics(solver: cp_model.CpSolver, status: cp_model.CpSolverStatus) -> SolverDiagnostics:
-    return SolverDiagnostics(
-        solver_status=solver.status_name(status),
-        wall_time_seconds=solver.wall_time,
-        conflicts=solver.num_conflicts,
-        branches=solver.num_branches,
-    )
-
-
-def _empty_diagnostics(status: str) -> SolverDiagnostics:
-    return SolverDiagnostics(status, 0.0, 0, 0)
-
-
 def solve_feasibility(problem: FeasibilityProblem) -> FeasibilityResult:
     """Place every session or report why no complete placement was produced."""
 
@@ -57,7 +37,7 @@ def solve_feasibility(problem: FeasibilityProblem) -> FeasibilityResult:
         return FeasibilityResult(
             KernelStatus.FEASIBLE,
             (),
-            _empty_diagnostics("EMPTY"),
+            empty_diagnostics("EMPTY"),
         )
 
     model = cp_model.CpModel()
@@ -65,12 +45,12 @@ def solve_feasibility(problem: FeasibilityProblem) -> FeasibilityResult:
     intervals: list[cp_model.IntervalVar] = []
 
     for demand in problem.sessions:
-        candidate_intervals = _candidate_start_intervals(demand, problem.planning_start_minute)
+        candidate_intervals = candidate_start_intervals(demand, problem.planning_start_minute)
         if not candidate_intervals:
             return FeasibilityResult(
                 KernelStatus.INFEASIBLE,
                 (),
-                _empty_diagnostics("EMPTY_DOMAIN"),
+                empty_diagnostics("EMPTY_DOMAIN"),
                 f"Session {demand.session_id!r} has no valid start time",
             )
 
@@ -93,14 +73,11 @@ def solve_feasibility(problem: FeasibilityProblem) -> FeasibilityResult:
         return FeasibilityResult(
             KernelStatus.TECHNICAL_FAILURE,
             (),
-            _empty_diagnostics("MODEL_INVALID"),
+            empty_diagnostics("MODEL_INVALID"),
             validation_error,
         )
 
-    solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = problem.max_solve_seconds
-    solver.parameters.num_search_workers = 1
-    solver.parameters.random_seed = 0
+    solver = configured_solver(problem.max_solve_seconds)
 
     try:
         status = solver.solve(model)
@@ -108,11 +85,11 @@ def solve_feasibility(problem: FeasibilityProblem) -> FeasibilityResult:
         return FeasibilityResult(
             KernelStatus.TECHNICAL_FAILURE,
             (),
-            _empty_diagnostics("EXCEPTION"),
+            empty_diagnostics("EXCEPTION"),
             str(error),
         )
 
-    diagnostics = _diagnostics(solver, status)
+    diagnostics = solver_diagnostics(solver, status)
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         scheduled = tuple(
             sorted(
