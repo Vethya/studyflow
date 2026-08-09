@@ -32,7 +32,7 @@ class TaskPriority(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class SessionDemand:
-    """One fixed-duration session that must be placed in an allowed window."""
+    """One indivisible fixed-duration session produced by exact task splitting."""
 
     session_id: str
     task_id: str
@@ -113,14 +113,15 @@ class FeasibilityResult:
 
 @dataclass(frozen=True, slots=True)
 class TaskAllocation:
-    """Scheduled and unscheduled minutes for one task."""
+    """Per-task allocation with raw ranking capacity and solver-usable capacity."""
 
     task_id: str
     deadline_minute: int
     required_minutes: int
     scheduled_minutes: int
     unscheduled_minutes: int
-    calendar_capacity_minutes: int
+    raw_calendar_capacity_minutes: int
+    available_minutes_before_deadline: int
     shortfall_minutes: int
 
 
