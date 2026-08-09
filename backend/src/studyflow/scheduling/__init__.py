@@ -5,19 +5,28 @@ from studyflow.scheduling.contracts import (
     FeasibilityResult,
     KernelStatus,
     MinuteWindow,
+    OverloadResult,
     ScheduledSession,
     SessionDemand,
     SolverDiagnostics,
+    TaskAllocation,
+    TaskPriority,
 )
 from studyflow.scheduling.kernel import solve_feasibility
+from studyflow.scheduling.overload import classify_overload_status, solve_with_overload
 
 __all__ = [
     "FeasibilityProblem",
     "FeasibilityResult",
     "KernelStatus",
     "MinuteWindow",
+    "OverloadResult",
     "ScheduledSession",
     "SessionDemand",
     "SolverDiagnostics",
+    "TaskAllocation",
+    "TaskPriority",
+    "classify_overload_status",
     "solve_feasibility",
+    "solve_with_overload",
 ]
