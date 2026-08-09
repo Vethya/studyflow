@@ -359,6 +359,14 @@ def solve_with_overload(problem: FeasibilityProblem) -> OverloadResult:
             (),
             empty_diagnostics("EMPTY"),
         )
+    if not problem.planning_days:
+        return OverloadResult(
+            KernelStatus.TECHNICAL_FAILURE,
+            (),
+            (),
+            empty_diagnostics("DAY_DOMAIN_REQUIRED"),
+            "Local planning-day metadata is required for schedule policy",
+        )
 
     solve_deadline = monotonic() + float(problem.max_solve_seconds)
     try:
@@ -548,13 +556,13 @@ def solve_with_overload(problem: FeasibilityProblem) -> OverloadResult:
                 str(error),
             )
 
-        if placement_status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        if placement_status != cp_model.OPTIMAL:
             return OverloadResult(
                 KernelStatus.TECHNICAL_FAILURE,
                 (),
                 (),
                 solver_diagnostics(placement_solver, placement_status),
-                "The solver stopped without a usable placement",
+                f"The {objective_name} placement objective was not proven optimal",
             )
 
         solver = placement_solver
