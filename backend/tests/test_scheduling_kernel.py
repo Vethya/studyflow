@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from itertools import pairwise, product
 from random import Random
+from typing import Any, cast
 
 import pytest
 
@@ -52,10 +53,20 @@ def assert_valid(problem: FeasibilityProblem) -> None:
 def brute_force_feasible(problem: FeasibilityProblem) -> bool:
     starts_by_session: list[list[int]] = []
     for session in problem.sessions:
-        starts: list[int] = []
-        for window in session.allowed_windows:
-            latest = min(window.end, session.deadline_minute) - session.duration_minutes
-            starts.extend(range(window.start, latest + 1))
+        if not session.allowed_windows:
+            return False
+        earliest = min(window.start for window in session.allowed_windows)
+        latest = max(window.end for window in session.allowed_windows)
+        starts = [
+            start
+            for start in range(earliest, latest + 1)
+            if start >= problem.planning_start_minute
+            and start + session.duration_minutes <= session.deadline_minute
+            and any(
+                window.start <= start and start + session.duration_minutes <= window.end
+                for window in session.allowed_windows
+            )
+        ]
         if not starts:
             return False
         starts_by_session.append(sorted(set(starts)))
@@ -103,6 +114,36 @@ def test_enforces_deadlines_and_does_not_straddle_windows() -> None:
     assert result.sessions[0].end_minute <= 7
 
 
+def test_allows_a_session_to_end_exactly_at_its_deadline() -> None:
+    result = solve_feasibility(FeasibilityProblem((demand("exact", 4, (3, 9), deadline=7),)))
+
+    assert result.status is KernelStatus.FEASIBLE
+    assert result.sessions[0].start_minute == 3
+    assert result.sessions[0].end_minute == 7
+
+
+def test_excludes_every_start_before_the_planning_instant() -> None:
+    result = solve_feasibility(
+        FeasibilityProblem(
+            (demand("past", 3, (0, 5)),),
+            planning_start_minute=6,
+        )
+    )
+
+    assert result.status is KernelStatus.INFEASIBLE
+
+
+def test_uses_disjoint_windows_without_allowing_a_session_to_bridge_them() -> None:
+    problem = FeasibilityProblem(
+        (
+            demand("first", 2, (0, 2), (5, 7)),
+            demand("second", 2, (0, 2), (5, 7)),
+        )
+    )
+
+    assert_valid(problem)
+
+
 def test_enforces_minimum_break_between_every_session() -> None:
     problem = FeasibilityProblem(
         (demand("a", 2, (0, 6)), demand("b", 2, (0, 6))),
@@ -110,6 +151,20 @@ def test_enforces_minimum_break_between_every_session() -> None:
     )
 
     assert_valid(problem)
+
+
+def test_accepts_an_exact_break_boundary_and_rejects_one_minute_less() -> None:
+    exact = FeasibilityProblem(
+        (demand("a", 2, (0, 6)), demand("b", 2, (0, 6))),
+        minimum_break_minutes=2,
+    )
+    short = FeasibilityProblem(
+        (demand("a", 2, (0, 5)), demand("b", 2, (0, 5))),
+        minimum_break_minutes=2,
+    )
+
+    assert solve_feasibility(exact).status is KernelStatus.FEASIBLE
+    assert solve_feasibility(short).status is KernelStatus.INFEASIBLE
 
 
 def test_reports_infeasible_when_a_session_has_no_candidate_start() -> None:
@@ -132,8 +187,19 @@ def test_reports_infeasible_when_sessions_cannot_all_fit() -> None:
         (lambda: MinuteWindow(2, 2), "minute window"),
         (lambda: demand("", 1, (0, 2)), "session_id"),
         (lambda: demand("session", 0, (0, 2)), "duration_minutes"),
+        (
+            lambda: demand("session", cast(Any, 1.5), (0, 2)),
+            "duration_minutes",
+        ),
+        (lambda: demand("session", True, (0, 2)), "duration_minutes"),
+        (lambda: MinuteWindow(cast(Any, 0.5), 2), "integer"),
+        (
+            lambda: FeasibilityProblem((), planning_start_minute=cast(Any, 0.5)),
+            "planning_start",
+        ),
         (lambda: FeasibilityProblem((), minimum_break_minutes=-1), "minimum_break"),
-        (lambda: FeasibilityProblem((), max_solve_seconds=6), "max_solve_seconds"),
+        (lambda: FeasibilityProblem((), minimum_break_minutes=121), "minimum_break"),
+        (lambda: FeasibilityProblem((), max_solve_seconds=5), "max_solve_seconds"),
         (
             lambda: FeasibilityProblem((demand("same", 1, (0, 2)), demand("same", 1, (2, 4)))),
             "unique",
@@ -141,7 +207,7 @@ def test_reports_infeasible_when_sessions_cannot_all_fit() -> None:
     ],
 )
 def test_rejects_invalid_inputs(factory: object, message: str) -> None:
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises((TypeError, ValueError), match=message):
         assert callable(factory)
         factory()
 
@@ -169,6 +235,25 @@ def test_cp_sat_matches_an_independent_brute_force_oracle() -> None:
         expected = brute_force_feasible(problem)
         actual = solve_feasibility(problem)
 
-        assert (actual.status is KernelStatus.FEASIBLE) is expected, case
+        expected_status = KernelStatus.FEASIBLE if expected else KernelStatus.INFEASIBLE
+        assert actual.status is expected_status, case
         if expected:
             assert_valid(problem)
+
+
+def test_solver_exception_becomes_a_typed_technical_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_solve(_solver: object, _model: object) -> object:
+        raise RuntimeError("injected solver failure")
+
+    monkeypatch.setattr(
+        "studyflow.scheduling.kernel.cp_model.CpSolver.solve",
+        fail_solve,
+    )
+
+    result = solve_feasibility(FeasibilityProblem((demand("session", 1, (0, 2)),)))
+
+    assert result.status is KernelStatus.TECHNICAL_FAILURE
+    assert result.diagnostics.solver_status == "EXCEPTION"
+    assert result.detail == "injected solver failure"
