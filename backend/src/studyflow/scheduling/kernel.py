@@ -25,12 +25,15 @@ class _SessionVariable:
     start: cp_model.IntVar
 
 
-def _candidate_start_intervals(demand: SessionDemand) -> list[list[int]]:
+def _candidate_start_intervals(
+    demand: SessionDemand, planning_start_minute: int
+) -> list[list[int]]:
     intervals: list[list[int]] = []
     for window in demand.allowed_windows:
         latest_start = min(window.end, demand.deadline_minute) - demand.duration_minutes
-        if window.start <= latest_start:
-            intervals.append([window.start, latest_start])
+        earliest_start = max(window.start, planning_start_minute)
+        if earliest_start <= latest_start:
+            intervals.append([earliest_start, latest_start])
     return intervals
 
 
@@ -62,7 +65,7 @@ def solve_feasibility(problem: FeasibilityProblem) -> FeasibilityResult:
     intervals: list[cp_model.IntervalVar] = []
 
     for demand in problem.sessions:
-        candidate_intervals = _candidate_start_intervals(demand)
+        candidate_intervals = _candidate_start_intervals(demand, problem.planning_start_minute)
         if not candidate_intervals:
             return FeasibilityResult(
                 KernelStatus.INFEASIBLE,
