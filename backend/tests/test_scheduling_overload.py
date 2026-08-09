@@ -273,6 +273,45 @@ def test_least_slack_strictly_dominates_a_larger_lower_ranked_task() -> None:
     assert {session.session_id for session in result.sessions} == {"tight"}
 
 
+def test_minimum_break_capacity_is_included_in_slack() -> None:
+    shared_window = ((0, 10),)
+    problem = FeasibilityProblem(
+        (
+            demand(
+                "tight-a",
+                "tight-task",
+                4,
+                *shared_window,
+                deadline=10,
+                priority=TaskPriority.LOW,
+            ),
+            demand(
+                "tight-b",
+                "tight-task",
+                4,
+                *shared_window,
+                deadline=10,
+                priority=TaskPriority.LOW,
+            ),
+            demand(
+                "apparently-tighter",
+                "other-task",
+                9,
+                *shared_window,
+                deadline=10,
+                priority=TaskPriority.HIGH,
+            ),
+        ),
+        planning_start_minute=0,
+        minimum_break_minutes=2,
+    )
+
+    result = solve_with_overload(problem)
+
+    assert result.status is KernelStatus.OVERLOAD
+    assert {session.session_id for session in result.sessions} == {"tight-a", "tight-b"}
+
+
 def test_larger_remaining_work_wins_before_priority_when_slack_and_deadline_match() -> None:
     problem = FeasibilityProblem(
         (
