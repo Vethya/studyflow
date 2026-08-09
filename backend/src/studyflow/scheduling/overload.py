@@ -38,11 +38,12 @@ class _TaskDemand:
     priority: TaskPriority
     allowed_windows: tuple[MinuteWindow, ...]
     required_minutes: int
+    required_break_minutes: int
     calendar_capacity_minutes: int
 
     @property
     def slack_minutes(self) -> int:
-        return self.calendar_capacity_minutes - self.required_minutes
+        return self.calendar_capacity_minutes - self.required_minutes - self.required_break_minutes
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +98,7 @@ def _task_demands(problem: FeasibilityProblem) -> tuple[_TaskDemand, ...]:
                 reference.priority,
                 reference.allowed_windows,
                 required_minutes,
+                max(0, len(sessions) - 1) * problem.minimum_break_minutes,
                 _calendar_capacity(
                     reference.allowed_windows,
                     problem.planning_start_minute,
