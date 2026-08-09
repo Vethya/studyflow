@@ -161,7 +161,7 @@ def test_all_empty_domains_are_proven_overload() -> None:
 
     assert result.status is KernelStatus.OVERLOAD
     assert result.sessions == ()
-    assert result.allocations[0].calendar_capacity_minutes == 0
+    assert result.allocations[0].raw_calendar_capacity_minutes == 0
     assert result.allocations[0].shortfall_minutes == 2
 
 
@@ -230,6 +230,35 @@ def test_least_calendar_slack_wins_before_priority() -> None:
                 "loose",
                 "loose-task",
                 4,
+                (0, 6),
+                deadline=10,
+                priority=TaskPriority.HIGH,
+            ),
+        ),
+        planning_start_minute=0,
+    )
+
+    result = solve_with_overload(problem)
+
+    assert result.status is KernelStatus.OVERLOAD
+    assert {session.session_id for session in result.sessions} == {"tight"}
+
+
+def test_least_slack_strictly_dominates_a_larger_lower_ranked_task() -> None:
+    problem = FeasibilityProblem(
+        (
+            demand(
+                "tight",
+                "tight-task",
+                2,
+                (0, 2),
+                deadline=10,
+                priority=TaskPriority.LOW,
+            ),
+            demand(
+                "larger",
+                "larger-task",
+                5,
                 (0, 6),
                 deadline=10,
                 priority=TaskPriority.HIGH,
@@ -328,7 +357,39 @@ def test_calendar_capacity_clips_and_merges_windows() -> None:
     result = solve_with_overload(problem)
 
     assert result.status is KernelStatus.FEASIBLE
-    assert result.allocations[0].calendar_capacity_minutes == 10
+    assert result.allocations[0].raw_calendar_capacity_minutes == 10
+
+
+def test_available_minutes_and_shortfall_come_from_the_feasible_allocation() -> None:
+    problem = FeasibilityProblem(
+        (
+            demand(
+                "winner",
+                "winner-task",
+                2,
+                (0, 2),
+                deadline=2,
+                priority=TaskPriority.HIGH,
+            ),
+            demand(
+                "blocked",
+                "blocked-task",
+                2,
+                (0, 2),
+                deadline=2,
+                priority=TaskPriority.LOW,
+            ),
+        ),
+        planning_start_minute=0,
+    )
+
+    result = solve_with_overload(problem)
+    blocked = next(item for item in result.allocations if item.task_id == "blocked-task")
+
+    assert blocked.required_minutes == 2
+    assert blocked.raw_calendar_capacity_minutes == 2
+    assert blocked.available_minutes_before_deadline == 0
+    assert blocked.shortfall_minutes == 2
 
 
 def test_rejects_inconsistent_metadata_for_sessions_of_one_task() -> None:
@@ -415,3 +476,23 @@ def test_unproven_solver_result_discards_the_partial_schedule(
     assert result.sessions == ()
     assert result.allocations == ()
     assert result.detail == "The solver stopped without a proven overload allocation"
+
+
+def test_staged_policy_uses_one_shared_time_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    times = iter((0.0, 1.0))
+    monkeypatch.setattr(
+        "studyflow.scheduling.overload.monotonic",
+        lambda: next(times),
+    )
+
+    result = solve_with_overload(
+        FeasibilityProblem(
+            (demand("session", "task", 1, (0, 2)),),
+            planning_start_minute=0,
+            max_solve_seconds=0.5,
+        )
+    )
+
+    assert result.status is KernelStatus.TECHNICAL_FAILURE
+    assert result.diagnostics.solver_status == "TIME_LIMIT"
+    assert result.detail == "The overload policy exhausted its shared solve budget"

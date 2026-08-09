@@ -2,6 +2,8 @@
 
 from collections import defaultdict
 from dataclasses import dataclass
+from time import monotonic
+from typing import cast
 
 from ortools.sat.python import cp_model
 
@@ -149,7 +151,8 @@ def _allocations(
             required_minutes=task.required_minutes,
             scheduled_minutes=scheduled_by_task[task.task_id],
             unscheduled_minutes=task.required_minutes - scheduled_by_task[task.task_id],
-            calendar_capacity_minutes=task.calendar_capacity_minutes,
+            raw_calendar_capacity_minutes=task.calendar_capacity_minutes,
+            available_minutes_before_deadline=scheduled_by_task[task.task_id],
             shortfall_minutes=task.required_minutes - scheduled_by_task[task.task_id],
         )
         for task in sorted(tasks, key=lambda item: item.task_id)
@@ -168,14 +171,12 @@ def solve_with_overload(problem: FeasibilityProblem) -> OverloadResult:
         )
 
     tasks = _task_demands(problem)
-    task_scores = {
-        task.task_id: len(tasks) - index for index, task in enumerate(_policy_order(tasks))
-    }
+    ordered_tasks = _policy_order(tasks)
 
     model = cp_model.CpModel()
     variables: list[_OptionalSessionVariable] = []
     intervals: list[cp_model.IntervalVar] = []
-    objective_terms: list[cp_model.LinearExpr] = []
+    objective_terms_by_task: dict[str, list[cp_model.LinearExpr]] = defaultdict(list)
 
     for demand in problem.sessions:
         candidate_intervals = candidate_start_intervals(demand, problem.planning_start_minute)
@@ -196,10 +197,9 @@ def solve_with_overload(problem: FeasibilityProblem) -> OverloadResult:
         )
         variables.append(_OptionalSessionVariable(demand, start, presence))
         intervals.append(interval)
-        objective_terms.append(presence * demand.duration_minutes * task_scores[demand.task_id])
+        objective_terms_by_task[demand.task_id].append(presence * demand.duration_minutes)
 
     model.add_no_overlap(intervals)
-    model.maximize(sum(objective_terms))
     validation_error = model.validate()
     if validation_error:
         return OverloadResult(
@@ -210,28 +210,74 @@ def solve_with_overload(problem: FeasibilityProblem) -> OverloadResult:
             validation_error,
         )
 
-    solver = configured_solver(problem.max_solve_seconds)
-    try:
-        solver_status = solver.solve(model)
-    except (RuntimeError, ValueError) as error:
-        return OverloadResult(
-            KernelStatus.TECHNICAL_FAILURE,
-            (),
-            (),
-            empty_diagnostics("EXCEPTION"),
-            str(error),
-        )
+    objectives = [
+        (task, sum(objective_terms_by_task[task.task_id]))
+        for task in ordered_tasks
+        if objective_terms_by_task[task.task_id]
+    ]
+    if not objectives:
+        objectives = [(ordered_tasks[0], 0)]
 
-    diagnostics = solver_diagnostics(solver, solver_status)
-    present_variables = (
-        [
-            variable
-            for variable in variables
-            if variable.presence is not None and solver.boolean_value(variable.presence)
-        ]
-        if solver_status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
-        else []
-    )
+    solve_deadline = monotonic() + float(problem.max_solve_seconds)
+    solver: cp_model.CpSolver | None = None
+    solver_status = cp_model.UNKNOWN
+    present_variables: list[_OptionalSessionVariable] = []
+
+    for task, objective in objectives:
+        remaining_seconds = solve_deadline - monotonic()
+        if remaining_seconds <= 0:
+            return OverloadResult(
+                KernelStatus.TECHNICAL_FAILURE,
+                (),
+                (),
+                empty_diagnostics("TIME_LIMIT"),
+                "The overload policy exhausted its shared solve budget",
+            )
+
+        model.maximize(objective)
+        solver = configured_solver(remaining_seconds)
+        try:
+            solver_status = solver.solve(model)
+        except (RuntimeError, ValueError) as error:
+            return OverloadResult(
+                KernelStatus.TECHNICAL_FAILURE,
+                (),
+                (),
+                empty_diagnostics("EXCEPTION"),
+                str(error),
+            )
+
+        present_variables = (
+            [
+                variable
+                for variable in variables
+                if variable.presence is not None and solver.boolean_value(variable.presence)
+            ]
+            if solver_status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+            else []
+        )
+        all_sessions_scheduled = len(present_variables) == len(problem.sessions)
+        if all_sessions_scheduled:
+            break
+        if solver_status != cp_model.OPTIMAL:
+            diagnostics = solver_diagnostics(solver, solver_status)
+            return OverloadResult(
+                KernelStatus.TECHNICAL_FAILURE,
+                (),
+                (),
+                diagnostics,
+                "The solver stopped without a proven overload allocation",
+            )
+
+        optimum_minutes = sum(
+            variable.demand.duration_minutes
+            for variable in present_variables
+            if variable.demand.task_id == task.task_id
+        )
+        model.add(objective == optimum_minutes)
+
+    final_solver = cast(cp_model.CpSolver, solver)
+    diagnostics = solver_diagnostics(final_solver, solver_status)
     all_sessions_scheduled = len(present_variables) == len(problem.sessions)
     status = classify_overload_status(
         solver_status,
@@ -252,8 +298,8 @@ def solve_with_overload(problem: FeasibilityProblem) -> OverloadResult:
                 ScheduledSession(
                     variable.demand.session_id,
                     variable.demand.task_id,
-                    solver.value(variable.start),
-                    solver.value(variable.start) + variable.demand.duration_minutes,
+                    final_solver.value(variable.start),
+                    final_solver.value(variable.start) + variable.demand.duration_minutes,
                 )
                 for variable in present_variables
                 if variable.start is not None
