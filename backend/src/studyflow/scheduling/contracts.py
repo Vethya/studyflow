@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from enum import StrEnum
+from itertools import pairwise
 from math import isfinite
 
 
@@ -22,6 +23,24 @@ class MinuteWindow:
         _require_int("minute window end", self.end)
         if self.end <= self.start:
             raise ValueError("minute window end must be after start")
+
+
+@dataclass(frozen=True, slots=True, order=True)
+class PlanningDay:
+    """One account-local calendar day expressed as UTC-minute boundaries."""
+
+    day_index: int
+    start_minute: int
+    end_minute: int
+
+    def __post_init__(self) -> None:
+        _require_int("planning day index", self.day_index)
+        _require_int("planning day start", self.start_minute)
+        _require_int("planning day end", self.end_minute)
+        if self.day_index < 0:
+            raise ValueError("planning day index must not be negative")
+        if self.end_minute <= self.start_minute:
+            raise ValueError("planning day end must be after start")
 
 
 class TaskPriority(StrEnum):
@@ -62,6 +81,7 @@ class FeasibilityProblem:
     planning_start_minute: int
     minimum_break_minutes: int = 0
     max_solve_seconds: float = 4.0
+    planning_days: tuple[PlanningDay, ...] = ()
 
     def __post_init__(self) -> None:
         _require_int("planning_start_minute", self.planning_start_minute)
@@ -78,6 +98,15 @@ class FeasibilityProblem:
         session_ids = [session.session_id for session in self.sessions]
         if len(session_ids) != len(set(session_ids)):
             raise ValueError("session_id values must be unique")
+        day_indices = [day.day_index for day in self.planning_days]
+        if len(day_indices) != len(set(day_indices)):
+            raise ValueError("planning day indices must be unique")
+        chronological_days = sorted(self.planning_days, key=lambda day: day.start_minute)
+        if any(
+            following.start_minute < previous.end_minute
+            for previous, following in pairwise(chronological_days)
+        ):
+            raise ValueError("planning days must not overlap")
 
 
 class KernelStatus(StrEnum):
