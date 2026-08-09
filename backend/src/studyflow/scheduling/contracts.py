@@ -24,6 +24,12 @@ class MinuteWindow:
             raise ValueError("minute window end must be after start")
 
 
+class TaskPriority(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
 @dataclass(frozen=True, slots=True)
 class SessionDemand:
     """One fixed-duration session that must be placed in an allowed window."""
@@ -33,6 +39,7 @@ class SessionDemand:
     duration_minutes: int
     deadline_minute: int
     allowed_windows: tuple[MinuteWindow, ...]
+    priority: TaskPriority = TaskPriority.MEDIUM
 
     def __post_init__(self) -> None:
         if not self.session_id:
@@ -43,6 +50,8 @@ class SessionDemand:
         _require_int("deadline_minute", self.deadline_minute)
         if self.duration_minutes <= 0:
             raise ValueError("duration_minutes must be positive")
+        if not isinstance(self.priority, TaskPriority):
+            raise TypeError("priority must be a TaskPriority")
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +83,7 @@ class FeasibilityProblem:
 class KernelStatus(StrEnum):
     FEASIBLE = "feasible"
     INFEASIBLE = "infeasible"
+    OVERLOAD = "overload"
     TECHNICAL_FAILURE = "technical_failure"
 
 
@@ -97,5 +107,29 @@ class SolverDiagnostics:
 class FeasibilityResult:
     status: KernelStatus
     sessions: tuple[ScheduledSession, ...]
+    diagnostics: SolverDiagnostics
+    detail: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TaskAllocation:
+    """Scheduled and unscheduled minutes for one task."""
+
+    task_id: str
+    deadline_minute: int
+    required_minutes: int
+    scheduled_minutes: int
+    unscheduled_minutes: int
+    calendar_capacity_minutes: int
+    shortfall_minutes: int
+
+
+@dataclass(frozen=True, slots=True)
+class OverloadResult:
+    """A complete schedule, proven overload, or technical failure."""
+
+    status: KernelStatus
+    sessions: tuple[ScheduledSession, ...]
+    allocations: tuple[TaskAllocation, ...]
     diagnostics: SolverDiagnostics
     detail: str | None = None
