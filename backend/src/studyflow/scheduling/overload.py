@@ -436,11 +436,28 @@ def solve_with_overload(problem: FeasibilityProblem) -> OverloadResult:
             model.add(sum(day_choices) == presence)
 
     model.add_no_overlap(intervals)
-    used_day_variables: list[cp_model.IntVar] = []
+    used_days_by_task: dict[str, list[cp_model.IntVar]] = defaultdict(list)
     for (task_id, day_index), day_choices in sorted(day_choices_by_task.items()):
         used_day = model.new_bool_var(f"used_day_{task_id}_{day_index}")
         model.add_max_equality(used_day, day_choices)
-        used_day_variables.append(used_day)
+        used_days_by_task[task_id].append(used_day)
+
+    spread_objectives: list[cp_model.LinearExpr] = []
+    maximum_candidate_days = max(
+        (len(used_days) for used_days in used_days_by_task.values()),
+        default=1,
+    )
+    for day_count in range(2, maximum_candidate_days + 1):
+        reaches_day_count: list[cp_model.IntVar] = []
+        for task_id, used_days in sorted(used_days_by_task.items()):
+            if len(used_days) < day_count:
+                continue
+            reaches = model.new_bool_var(f"task_{task_id}_uses_{day_count}_days")
+            model.add(sum(used_days) >= day_count).only_enforce_if(reaches)
+            model.add(sum(used_days) <= day_count - 1).only_enforce_if(reaches.negated())
+            reaches_day_count.append(reaches)
+        if reaches_day_count:
+            spread_objectives.append(cp_model.LinearExpr.sum(reaches_day_count))
     validation_error = model.validate()
     if validation_error:
         return OverloadResult(
@@ -523,9 +540,9 @@ def solve_with_overload(problem: FeasibilityProblem) -> OverloadResult:
             if variable.presence is not None:
                 model.add(variable.presence == 1)
 
-    placement_objectives: list[tuple[str, cp_model.LinearExpr]] = []
-    if used_day_variables:
-        placement_objectives.append(("spread", cp_model.LinearExpr.sum(used_day_variables)))
+    placement_objectives: list[tuple[str, cp_model.LinearExpr]] = [
+        ("spread", objective) for objective in spread_objectives
+    ]
     if earliness_terms:
         placement_objectives.append(("earliness", cp_model.LinearExpr.sum(earliness_terms)))
 
@@ -573,9 +590,7 @@ def solve_with_overload(problem: FeasibilityProblem) -> OverloadResult:
             if variable.presence is not None and placement_solver.boolean_value(variable.presence)
         ]
         if objective_name == "spread":
-            achieved_spread = sum(
-                placement_solver.boolean_value(variable) for variable in used_day_variables
-            )
+            achieved_spread = round(placement_solver.objective_value)
             model.add(objective == achieved_spread)
 
     final_solver = cast(cp_model.CpSolver, solver)
