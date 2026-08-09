@@ -84,6 +84,39 @@ def test_earliness_is_deterministic_within_the_maximum_spread() -> None:
     assert {session.start_minute // 10 for session in schedules[0]} == {0, 1}
 
 
+def test_every_long_task_gets_a_second_day_before_any_gets_a_third() -> None:
+    windows = ((0, 4), (10, 11), (20, 21))
+    problem = FeasibilityProblem(
+        tuple(
+            demand(f"{task_id}-{index}", task_id, 1, *windows, deadline=21)
+            for task_id in ("alpha", "beta")
+            for index in range(3)
+        ),
+        planning_start_minute=0,
+        planning_days=(
+            PlanningDay(0, 0, 10),
+            PlanningDay(1, 10, 20),
+            PlanningDay(2, 20, 30),
+        ),
+    )
+
+    result = solve_with_overload(problem)
+    days_by_task = {
+        task_id: {
+            0 if session.start_minute < 10 else 1 if session.start_minute < 20 else 2
+            for session in result.sessions
+            if session.task_id == task_id
+        }
+        for task_id in ("alpha", "beta")
+    }
+
+    assert result.status is KernelStatus.FEASIBLE
+    assert {task_id: len(days) for task_id, days in days_by_task.items()} == {
+        "alpha": 2,
+        "beta": 2,
+    }
+
+
 def test_day_metadata_does_not_forbid_a_session_crossing_local_midnight() -> None:
     result = solve_with_overload(
         FeasibilityProblem(
@@ -194,9 +227,12 @@ def test_unproven_placement_objective_is_a_technical_failure(
     )
     result = solve_with_overload(
         FeasibilityProblem(
-            (demand("session", "task", 2, (0, 10), deadline=10),),
+            (
+                demand("a", "task", 2, (0, 4), (10, 14), deadline=14),
+                demand("b", "task", 2, (0, 4), (10, 14), deadline=14),
+            ),
             planning_start_minute=0,
-            planning_days=(PlanningDay(0, 0, 10),),
+            planning_days=(PlanningDay(0, 0, 10), PlanningDay(1, 10, 20)),
         )
     )
 
