@@ -312,6 +312,40 @@ def test_minimum_break_capacity_is_included_in_slack() -> None:
     assert {session.session_id for session in result.sessions} == {"tight-a", "tight-b"}
 
 
+def test_unavailable_gap_can_satisfy_the_entire_minimum_break() -> None:
+    problem = FeasibilityProblem(
+        (
+            demand("gapped-a", "gapped-task", 4, (0, 5), (10, 15), deadline=15),
+            demand("gapped-b", "gapped-task", 4, (0, 5), (10, 15), deadline=15),
+            demand("tighter", "other-task", 8, (0, 9), deadline=15),
+        ),
+        planning_start_minute=0,
+        minimum_break_minutes=2,
+    )
+
+    result = solve_with_overload(problem)
+
+    assert result.status is KernelStatus.OVERLOAD
+    assert "tighter" in {session.session_id for session in result.sessions}
+
+
+def test_unavailable_gap_can_satisfy_part_of_the_minimum_break() -> None:
+    problem = FeasibilityProblem(
+        (
+            demand("gapped-a", "gapped-task", 4, (0, 5), (6, 11), deadline=11),
+            demand("gapped-b", "gapped-task", 4, (0, 5), (6, 11), deadline=11),
+            demand("tighter", "other-task", 4, (0, 4), deadline=11),
+        ),
+        planning_start_minute=0,
+        minimum_break_minutes=2,
+    )
+
+    result = solve_with_overload(problem)
+
+    assert result.status is KernelStatus.OVERLOAD
+    assert "tighter" in {session.session_id for session in result.sessions}
+
+
 def test_larger_remaining_work_wins_before_priority_when_slack_and_deadline_match() -> None:
     problem = FeasibilityProblem(
         (
