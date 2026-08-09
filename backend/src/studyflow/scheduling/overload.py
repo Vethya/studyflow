@@ -53,16 +53,22 @@ class _OptionalSessionVariable:
     presence: cp_model.IntVar | None
 
 
-def _calendar_capacity(
+class _PolicyPreparationError(RuntimeError):
+    def __init__(self, solver_status: str, detail: str) -> None:
+        self.solver_status = solver_status
+        super().__init__(detail)
+
+
+def _merged_windows(
     windows: tuple[MinuteWindow, ...], planning_start_minute: int, deadline_minute: int
-) -> int:
+) -> tuple[tuple[int, int], ...]:
     clipped = sorted(
         (max(window.start, planning_start_minute), min(window.end, deadline_minute))
         for window in windows
         if max(window.start, planning_start_minute) < min(window.end, deadline_minute)
     )
     if not clipped:
-        return 0
+        return ()
 
     merged: list[tuple[int, int]] = []
     for start, end in clipped:
@@ -70,10 +76,155 @@ def _calendar_capacity(
             merged[-1] = (merged[-1][0], max(merged[-1][1], end))
         else:
             merged.append((start, end))
-    return sum(end - start for start, end in merged)
+    return tuple(merged)
 
 
-def _task_demands(problem: FeasibilityProblem) -> tuple[_TaskDemand, ...]:
+def _calendar_capacity(
+    windows: tuple[MinuteWindow, ...], planning_start_minute: int, deadline_minute: int
+) -> int:
+    return sum(
+        end - start
+        for start, end in _merged_windows(windows, planning_start_minute, deadline_minute)
+    )
+
+
+def _break_credit(
+    end_minute: int,
+    minimum_break_minutes: int,
+    availability_windows: tuple[tuple[int, int], ...],
+) -> int:
+    break_end = end_minute + minimum_break_minutes
+    available_minutes = sum(
+        max(0, min(break_end, end) - max(end_minute, start)) for start, end in availability_windows
+    )
+    return minimum_break_minutes - available_minutes
+
+
+def _minimum_break_capacity(
+    sessions: list[SessionDemand],
+    problem: FeasibilityProblem,
+    solve_deadline: float,
+) -> int:
+    """Minimize break minutes that consume actual calendar availability."""
+
+    minimum_break = problem.minimum_break_minutes
+    if minimum_break == 0 or len(sessions) <= 1:
+        return 0
+
+    maximum_break_capacity = (len(sessions) - 1) * minimum_break
+    candidates_by_session = {
+        session.session_id: candidate_start_intervals(
+            session,
+            problem.planning_start_minute,
+        )
+        for session in sessions
+    }
+    if any(not candidates for candidates in candidates_by_session.values()):
+        return maximum_break_capacity
+
+    reference = sessions[0]
+    scheduling_windows = _merged_windows(
+        reference.allowed_windows,
+        problem.planning_start_minute,
+        reference.deadline_minute,
+    )
+    availability_windows = _merged_windows(
+        reference.allowed_windows,
+        problem.planning_start_minute,
+        reference.deadline_minute + minimum_break,
+    )
+
+    model = cp_model.CpModel()
+    starts: list[cp_model.IntVar] = []
+    intervals: list[cp_model.IntervalVar] = []
+    final_session: list[cp_model.IntVar] = []
+    credit_terms: list[tuple[cp_model.IntVar, int]] = []
+
+    for session in sessions:
+        candidate_intervals = candidates_by_session[session.session_id]
+        start = model.new_int_var_from_domain(
+            cp_model.Domain.from_intervals(candidate_intervals),
+            f"slack_start_{session.session_id}",
+        )
+        interval = model.new_fixed_size_interval_var(
+            start,
+            session.duration_minutes + minimum_break,
+            f"slack_session_with_break_{session.session_id}",
+        )
+        is_final = model.new_bool_var(f"slack_final_{session.session_id}")
+        starts.append(start)
+        intervals.append(interval)
+        final_session.append(is_final)
+
+        credited_endings: list[cp_model.IntVar] = []
+        for _, window_end in scheduling_windows:
+            first_relevant_end = max(
+                window_end - minimum_break + 1,
+                problem.planning_start_minute + session.duration_minutes,
+            )
+            for end_minute in range(first_relevant_end, window_end + 1):
+                start_minute = end_minute - session.duration_minutes
+                if not any(first <= start_minute <= last for first, last in candidate_intervals):
+                    continue
+                credit = _break_credit(
+                    end_minute,
+                    minimum_break,
+                    availability_windows,
+                )
+                if credit <= 0:
+                    continue
+
+                ends_here = model.new_bool_var(f"slack_end_{session.session_id}_{end_minute}")
+                earns_credit = model.new_bool_var(f"slack_credit_{session.session_id}_{end_minute}")
+                model.add(start == start_minute).only_enforce_if(ends_here)
+                model.add(earns_credit <= ends_here)
+                model.add(earns_credit + is_final <= 1)
+                model.add(earns_credit >= ends_here - is_final)
+                credited_endings.append(ends_here)
+                credit_terms.append((earns_credit, credit))
+
+        if credited_endings:
+            model.add(sum(credited_endings) <= 1)
+
+    model.add_no_overlap(intervals)
+    model.add_exactly_one(final_session)
+    for index, is_final in enumerate(final_session):
+        for other_index, other_start in enumerate(starts):
+            if other_index != index:
+                model.add(starts[index] >= other_start).only_enforce_if(is_final)
+
+    model.maximize(sum(variable * credit for variable, credit in credit_terms))
+    validation_error = model.validate()
+    if validation_error:
+        raise _PolicyPreparationError("MODEL_INVALID", validation_error)
+
+    remaining_seconds = solve_deadline - monotonic()
+    if remaining_seconds <= 0:
+        raise _PolicyPreparationError(
+            "TIME_LIMIT",
+            "Break-adjusted slack exhausted the shared solve budget",
+        )
+    solver = configured_solver(remaining_seconds)
+    try:
+        solver_status = solver.solve(model)
+    except (RuntimeError, ValueError) as error:
+        raise _PolicyPreparationError("EXCEPTION", str(error)) from error
+
+    if solver_status == cp_model.INFEASIBLE:
+        return maximum_break_capacity
+    if solver_status != cp_model.OPTIMAL:
+        raise _PolicyPreparationError(
+            solver.status_name(solver_status),
+            "Break-adjusted slack was not proven before the shared solve budget expired",
+        )
+
+    earned_credit = sum(
+        credit for variable, credit in credit_terms if solver.boolean_value(variable)
+    )
+    return maximum_break_capacity - earned_credit
+
+
+def _task_demands(problem: FeasibilityProblem, solve_deadline: float) -> tuple[_TaskDemand, ...]:
     sessions_by_task: dict[str, list[SessionDemand]] = defaultdict(list)
     for session in problem.sessions:
         sessions_by_task[session.task_id].append(session)
@@ -98,7 +249,7 @@ def _task_demands(problem: FeasibilityProblem) -> tuple[_TaskDemand, ...]:
                 reference.priority,
                 reference.allowed_windows,
                 required_minutes,
-                max(0, len(sessions) - 1) * problem.minimum_break_minutes,
+                _minimum_break_capacity(sessions, problem, solve_deadline),
                 _calendar_capacity(
                     reference.allowed_windows,
                     problem.planning_start_minute,
@@ -172,7 +323,17 @@ def solve_with_overload(problem: FeasibilityProblem) -> OverloadResult:
             empty_diagnostics("EMPTY"),
         )
 
-    tasks = _task_demands(problem)
+    solve_deadline = monotonic() + float(problem.max_solve_seconds)
+    try:
+        tasks = _task_demands(problem, solve_deadline)
+    except _PolicyPreparationError as error:
+        return OverloadResult(
+            KernelStatus.TECHNICAL_FAILURE,
+            (),
+            (),
+            empty_diagnostics(error.solver_status),
+            str(error),
+        )
     ordered_tasks = _policy_order(tasks)
 
     model = cp_model.CpModel()
@@ -220,7 +381,6 @@ def solve_with_overload(problem: FeasibilityProblem) -> OverloadResult:
     if not objectives:
         objectives = [(ordered_tasks[0], 0)]
 
-    solve_deadline = monotonic() + float(problem.max_solve_seconds)
     solver: cp_model.CpSolver | None = None
     solver_status = cp_model.UNKNOWN
     present_variables: list[_OptionalSessionVariable] = []
