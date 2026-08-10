@@ -6,10 +6,12 @@ import httpx
 from fastapi import FastAPI
 
 from studyflow import __version__
+from studyflow.accounts.password import AccountPasswords, PasswordChangeService
 from studyflow.accounts.preferences import AccountPreferences, StudyPreferencesService
 from studyflow.accounts.profile import AccountProfiles, AccountProfileService
 from studyflow.accounts.repositories import (
     SqlAlchemyAccountProfileRepository,
+    SqlAlchemyPasswordChangeRepository,
     SqlAlchemyStudyPreferencesRepository,
 )
 from studyflow.api.router import API_V1_PREFIX, api_router
@@ -21,6 +23,8 @@ from studyflow.auth.email_delivery import (
 from studyflow.auth.login import Login, LoginService
 from studyflow.auth.passwords import PasswordService
 from studyflow.auth.rate_limits import (
+    AccountPasswordChangeRateLimit,
+    DatabaseAccountPasswordChangeRateLimiter,
     DatabaseEmailVerificationRateLimiter,
     DatabaseLoginRateLimiter,
     DatabasePasswordResetAttemptRateLimiter,
@@ -91,6 +95,8 @@ def create_app(
     password_reset_attempt_rate_limiter: PasswordResetAttemptRateLimit | None = None,
     account_profiles: AccountProfiles | None = None,
     account_preferences: AccountPreferences | None = None,
+    account_passwords: AccountPasswords | None = None,
+    account_password_change_rate_limiter: AccountPasswordChangeRateLimit | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     resolved_database = database or Database(resolved_settings.database_url.get_secret_value())
@@ -100,10 +106,12 @@ def create_app(
     resolved_login = login
     resolved_verification_resend = verification_resend
     resolved_password_recovery = password_recovery
+    resolved_account_passwords = account_passwords
     if (
         resolved_registration is None
         or resolved_login is None
         or resolved_password_recovery is None
+        or resolved_account_passwords is None
     ):
         authentication_http_client = httpx.AsyncClient(
             timeout=resolved_settings.password_breach_timeout_seconds
@@ -152,6 +160,10 @@ def create_app(
             email_sender=email_sender,
             passwords=password_service,
         )
+    if resolved_account_passwords is None:
+        resolved_account_passwords = PasswordChangeService(
+            SqlAlchemyPasswordChangeRepository(transactions), password_service
+        )
     application = FastAPI(
         title="StudyFlow API",
         version=__version__,
@@ -198,6 +210,11 @@ def create_app(
     )
     application.state.account_preferences = account_preferences or StudyPreferencesService(
         SqlAlchemyStudyPreferencesRepository(transactions)
+    )
+    application.state.account_passwords = resolved_account_passwords
+    application.state.account_password_change_rate_limiter = (
+        account_password_change_rate_limiter
+        or DatabaseAccountPasswordChangeRateLimiter(transactions)
     )
     application.include_router(api_router)
 

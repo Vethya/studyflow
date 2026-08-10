@@ -2,11 +2,18 @@
 
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, status
+import httpx
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from studyflow.accounts.password import AccountPasswords, InvalidCurrentPasswordError
 from studyflow.accounts.preferences import AccountPreferences, StudyPreferences
 from studyflow.accounts.profile import AccountProfile, AccountProfiles
+from studyflow.auth.passwords import PasswordPolicyError
+from studyflow.auth.rate_limits import (
+    AccountPasswordChangeRateLimit,
+    AccountPasswordChangeRateLimitExceeded,
+)
 from studyflow.auth.session_authentication import SessionAuthentication, SessionPrincipal
 from studyflow.timezones import is_iana_timezone
 
@@ -55,6 +62,11 @@ class StudyPreferencesUpdate(BaseModel):
         return value
 
 
+class PasswordChangeRequest(BaseModel):
+    current_password: Annotated[str, Field(min_length=1, max_length=128)]
+    new_password: Annotated[str, Field(min_length=12, max_length=128)]
+
+
 def get_session_authentication(request: Request) -> SessionAuthentication:
     return cast(SessionAuthentication, request.app.state.session_authentication)
 
@@ -65,6 +77,17 @@ def get_account_profiles(request: Request) -> AccountProfiles:
 
 def get_account_preferences(request: Request) -> AccountPreferences:
     return cast(AccountPreferences, request.app.state.account_preferences)
+
+
+def get_account_passwords(request: Request) -> AccountPasswords:
+    return cast(AccountPasswords, request.app.state.account_passwords)
+
+
+def get_account_password_change_rate_limit(request: Request) -> AccountPasswordChangeRateLimit:
+    return cast(
+        AccountPasswordChangeRateLimit,
+        request.app.state.account_password_change_rate_limiter,
+    )
 
 
 async def require_session(
@@ -178,3 +201,69 @@ async def update_preferences(
     if updated is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     return _preferences_response(updated)
+
+
+@router.patch(
+    "/password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": AccountError},
+        status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
+        status.HTTP_403_FORBIDDEN: {"model": AccountError},
+        status.HTTP_429_TOO_MANY_REQUESTS: {"model": AccountError},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "description": "Invalid request or disallowed password",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "oneOf": [
+                            {"$ref": "#/components/schemas/AccountError"},
+                            {"$ref": "#/components/schemas/HTTPValidationError"},
+                        ]
+                    }
+                }
+            },
+        },
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": AccountError},
+    },
+)
+async def change_password(
+    payload: PasswordChangeRequest,
+    response: Response,
+    http_request: Request,
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    passwords: Annotated[AccountPasswords, Depends(get_account_passwords)],
+    rate_limit: Annotated[
+        AccountPasswordChangeRateLimit, Depends(get_account_password_change_rate_limit)
+    ],
+) -> None:
+    try:
+        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        await rate_limit.check(client_ip, str(principal.account_id))
+        await passwords.change(principal.account_id, payload.current_password, payload.new_password)
+    except AccountPasswordChangeRateLimitExceeded as error:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many password change attempts",
+            headers={"Retry-After": "900"},
+        ) from error
+    except InvalidCurrentPasswordError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect"
+        ) from error
+    except PasswordPolicyError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Password is not allowed",
+        ) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Password safety service is unavailable",
+        ) from error
+    response.delete_cookie(
+        "__Host-studyflow_session", path="/", secure=True, httponly=True, samesite="strict"
+    )
+    response.delete_cookie(
+        "__Host-studyflow_csrf", path="/", secure=True, httponly=False, samesite="strict"
+    )
