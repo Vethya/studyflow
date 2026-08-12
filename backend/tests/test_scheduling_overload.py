@@ -511,7 +511,10 @@ def test_invalid_model_becomes_a_typed_technical_failure(
 
     result = solve_with_overload(
         overload_problem(
-            (demand("session", "task", 1, (0, 2)),),
+            (
+                demand("a", "task", 2, (0, 2)),
+                demand("b", "task", 1, (0, 2)),
+            ),
             planning_start_minute=0,
         )
     )
@@ -534,7 +537,10 @@ def test_solver_exception_becomes_a_typed_technical_failure(
 
     result = solve_with_overload(
         overload_problem(
-            (demand("session", "task", 1, (0, 2)),),
+            (
+                demand("a", "task", 2, (0, 2)),
+                demand("b", "task", 1, (0, 2)),
+            ),
             planning_start_minute=0,
         )
     )
@@ -558,7 +564,10 @@ def test_unproven_solver_result_discards_the_partial_schedule(
 
     result = solve_with_overload(
         overload_problem(
-            (demand("session", "task", 1, (0, 2)),),
+            (
+                demand("a", "task", 2, (0, 2)),
+                demand("b", "task", 1, (0, 2)),
+            ),
             planning_start_minute=0,
         )
     )
@@ -578,7 +587,10 @@ def test_staged_policy_uses_one_shared_time_budget(monkeypatch: pytest.MonkeyPat
 
     result = solve_with_overload(
         overload_problem(
-            (demand("session", "task", 1, (0, 2)),),
+            (
+                demand("a", "task", 2, (0, 2)),
+                demand("b", "task", 1, (0, 2)),
+            ),
             planning_start_minute=0,
             max_solve_seconds=0.5,
         )
