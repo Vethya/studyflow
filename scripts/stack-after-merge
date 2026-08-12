@@ -221,15 +221,23 @@ verify_restacked_branches() {
   done
 }
 
-ensure_remote_branches_match() {
-  local branch local_sha remote_sha
+ensure_remote_branches_are_safe() {
+  local branch local_sha remote_sha local_tree remote_tree
   for branch in "$@"; do
     git show-ref --verify --quiet "refs/remotes/origin/$branch" ||
       die "Remote branch not found: origin/$branch"
     local_sha=$(git rev-parse "$branch")
     remote_sha=$(git rev-parse "origin/$branch")
-    [[ "$local_sha" == "$remote_sha" ]] ||
-      die "origin/$branch differs from local $branch; update it before restacking."
+    if [[ "$local_sha" == "$remote_sha" ]]; then
+      continue
+    fi
+    local_tree=$(git rev-parse "$branch^{tree}")
+    remote_tree=$(git rev-parse "origin/$branch^{tree}")
+    if [[ "$local_tree" == "$remote_tree" ]]; then
+      printf '  %s: accepting remote history rewrite with identical content\n' "$branch"
+      continue
+    fi
+    die "origin/$branch differs in content from local $branch; update it before restacking."
   done
 }
 
@@ -252,7 +260,7 @@ run_after_merge() {
 
   run_mutation git fetch origin
   if (( ! DRY_RUN )) && (( ${#remaining[@]} > 0 )); then
-    ensure_remote_branches_match "${remaining[@]}"
+    ensure_remote_branches_are_safe "${remaining[@]}"
   fi
   run_mutation git switch "$trunk"
   run_mutation git pull --ff-only origin "$trunk"
