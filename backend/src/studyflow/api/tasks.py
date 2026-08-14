@@ -1,7 +1,7 @@
 """Student-owned Academic Task endpoints."""
 
 from datetime import UTC, datetime
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -12,11 +12,13 @@ from studyflow.auth.session_authentication import SessionPrincipal
 from studyflow.tasks.service import (
     AcademicTaskRecord,
     AcademicTasks,
+    EstimateFrozenError,
     InvalidTaskDeadlineError,
     NewAcademicTask,
     TaskCategory,
     TaskFilters,
     TaskPriority,
+    TaskStatus,
 )
 
 router = APIRouter(prefix="/tasks", tags=["Academic Tasks"])
@@ -69,6 +71,11 @@ class AcademicTaskResponse(BaseModel):
     planned_duration_minutes: int
     created_at: datetime
     updated_at: datetime
+    status: TaskStatus
+
+
+class FinishEarlyRequest(BaseModel):
+    confirmed: Literal[True]
 
 
 class TaskError(BaseModel):
@@ -92,6 +99,7 @@ def _response(task: AcademicTaskRecord) -> AcademicTaskResponse:
         planned_duration_minutes=task.planned_duration_minutes,
         created_at=task.created_at,
         updated_at=task.updated_at,
+        status=task.status,
     )
 
 
@@ -156,6 +164,7 @@ async def list_tasks(
     priority: TaskPriority | None = None,
     deadline_from: datetime | None = None,
     deadline_to: datetime | None = None,
+    task_status: Annotated[TaskStatus | None, Query(alias="status")] = None,
 ) -> list[AcademicTaskResponse]:
     for deadline in (deadline_from, deadline_to):
         if deadline is not None and deadline.tzinfo is None:
@@ -174,6 +183,7 @@ async def list_tasks(
         priority=priority,
         deadline_from=deadline_from.astimezone(UTC) if deadline_from is not None else None,
         deadline_to=deadline_to.astimezone(UTC) if deadline_to is not None else None,
+        status=task_status,
     )
     return [_response(task) for task in await tasks.list(principal.account_id, filters)]
 
@@ -195,3 +205,91 @@ async def get_task(
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     return _response(task)
+
+
+@router.put(
+    "/{task_id}",
+    response_model=AcademicTaskResponse,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
+        status.HTTP_403_FORBIDDEN: {"model": AccountError},
+        status.HTTP_404_NOT_FOUND: {"model": TaskError},
+        status.HTTP_409_CONFLICT: {"model": TaskError},
+    },
+)
+async def update_task(
+    task_id: UUID,
+    payload: AcademicTaskRequest,
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    tasks: Annotated[AcademicTasks, Depends(get_academic_tasks)],
+) -> AcademicTaskResponse:
+    try:
+        task = await tasks.update(
+            principal.account_id,
+            task_id,
+            NewAcademicTask(
+                title=payload.title,
+                category=payload.category,
+                priority=payload.priority,
+                course=payload.course,
+                notes=payload.notes,
+                deadline_at=payload.deadline_at,
+                original_estimate_minutes=payload.original_estimate_minutes,
+            ),
+        )
+    except InvalidTaskDeadlineError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Deadline must be a future absolute date and time",
+        ) from error
+    except EstimateFrozenError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Original estimate is frozen after work starts",
+        ) from error
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    return _response(task)
+
+
+@router.post(
+    "/{task_id}/finish-early",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
+        status.HTTP_403_FORBIDDEN: {"model": AccountError},
+        status.HTTP_404_NOT_FOUND: {"model": TaskError},
+    },
+)
+async def finish_task_early(
+    task_id: UUID,
+    payload: FinishEarlyRequest,
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    tasks: Annotated[AcademicTasks, Depends(get_academic_tasks)],
+) -> None:
+    if not await tasks.finish_early(principal.account_id, task_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+
+@router.delete(
+    "/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
+        status.HTTP_403_FORBIDDEN: {"model": AccountError},
+        status.HTTP_404_NOT_FOUND: {"model": TaskError},
+    },
+)
+async def delete_task(
+    task_id: UUID,
+    confirmed: Annotated[bool, Query()],
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    tasks: Annotated[AcademicTasks, Depends(get_academic_tasks)],
+) -> None:
+    if not confirmed:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Task deletion requires confirmation",
+        )
+    if not await tasks.delete(principal.account_id, task_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")

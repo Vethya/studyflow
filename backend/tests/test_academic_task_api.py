@@ -9,11 +9,13 @@ from studyflow.app import create_app
 from studyflow.auth.session_authentication import SessionPrincipal
 from studyflow.tasks.service import (
     AcademicTaskRecord,
+    EstimateFrozenError,
     InvalidTaskDeadlineError,
     NewAcademicTask,
     TaskCategory,
     TaskFilters,
     TaskPriority,
+    TaskStatus,
 )
 
 ACCOUNT_ID = UUID("5b15bfef-8c44-45d5-a70e-574beb999fb3")
@@ -43,6 +45,10 @@ class TasksStub:
     creates: list[tuple[UUID, NewAcademicTask]] = field(default_factory=list)
     filters: list[TaskFilters] = field(default_factory=list)
     create_failure: bool = False
+    update_failure: str | None = None
+    updates: list[tuple[UUID, UUID, NewAcademicTask]] = field(default_factory=list)
+    deletes: list[tuple[UUID, UUID]] = field(default_factory=list)
+    finishes: list[tuple[UUID, UUID]] = field(default_factory=list)
 
     async def create(self, account_id: UUID, task: NewAcademicTask) -> AcademicTaskRecord:
         if self.create_failure:
@@ -58,6 +64,27 @@ class TasksStub:
 
     async def get(self, account_id: UUID, task_id: UUID) -> AcademicTaskRecord | None:
         return next((task for task in self.records if task.id == task_id), None)
+
+    async def update(
+        self, account_id: UUID, task_id: UUID, task: NewAcademicTask
+    ) -> AcademicTaskRecord | None:
+        self.updates.append((account_id, task_id, task))
+        if self.update_failure == "frozen":
+            raise EstimateFrozenError
+        if self.update_failure == "missing":
+            return None
+        return next((record for record in self.records if record.id == task_id), None)
+
+    async def delete(self, account_id: UUID, task_id: UUID) -> bool:
+        self.deletes.append((account_id, task_id))
+        return any(record.id == task_id for record in self.records)
+
+    async def finish_early(self, account_id: UUID, task_id: UUID) -> bool:
+        self.finishes.append((account_id, task_id))
+        return any(record.id == task_id for record in self.records)
+
+    async def mark_started(self, account_id: UUID, task_id: UUID) -> bool:
+        return any(record.id == task_id for record in self.records)
 
 
 def task_record() -> AcademicTaskRecord:
@@ -99,7 +126,12 @@ async def test_task_create_list_and_detail_contract() -> None:
         )
         listed = await client.get(
             "/api/v1/tasks",
-            params={"course": "Algorithms", "category": "reading", "priority": "medium"},
+            params={
+                "course": "Algorithms",
+                "category": "reading",
+                "priority": "medium",
+                "status": "not_started",
+            },
         )
         detail = await client.get(f"/api/v1/tasks/{TASK_ID}")
 
@@ -110,7 +142,10 @@ async def test_task_create_list_and_detail_contract() -> None:
     assert tasks.creates[0][0] == ACCOUNT_ID
     assert tasks.creates[0][1].priority is TaskPriority.MEDIUM
     assert tasks.filters[0] == TaskFilters(
-        course="Algorithms", category=TaskCategory.READING, priority=TaskPriority.MEDIUM
+        course="Algorithms",
+        category=TaskCategory.READING,
+        priority=TaskPriority.MEDIUM,
+        status=TaskStatus.NOT_STARTED,
     )
 
 
@@ -174,3 +209,100 @@ async def test_task_endpoints_require_authentication_csrf_and_valid_absolute_fie
     assert naive.status_code == 422
     assert overflow.status_code == 422
     assert past.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_task_update_finish_early_and_delete_contract() -> None:
+    tasks = TasksStub([task_record()])
+    app = create_app(session_authentication=AuthenticationStub(), academic_tasks=tasks)
+    payload = {
+        "title": "Updated chapter",
+        "category": "reading",
+        "priority": "high",
+        "deadline_at": "2026-08-01T12:00:00Z",
+        "original_estimate_minutes": 120,
+    }
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://test",
+        cookies={"__Host-studyflow_session": "session-token"},
+    ) as client:
+        updated = await client.put(
+            f"/api/v1/tasks/{TASK_ID}",
+            headers={"X-CSRF-Token": "csrf-token"},
+            json=payload,
+        )
+        finished = await client.post(
+            f"/api/v1/tasks/{TASK_ID}/finish-early",
+            headers={"X-CSRF-Token": "csrf-token"},
+            json={"confirmed": True},
+        )
+        deleted = await client.delete(
+            f"/api/v1/tasks/{TASK_ID}",
+            headers={"X-CSRF-Token": "csrf-token"},
+            params={"confirmed": "true"},
+        )
+
+    assert updated.status_code == 200
+    assert finished.status_code == 204
+    assert deleted.status_code == 204
+    assert tasks.updates[0][:2] == (ACCOUNT_ID, TASK_ID)
+    assert tasks.updates[0][2].original_estimate_minutes == 120
+    assert tasks.finishes == [(ACCOUNT_ID, TASK_ID)]
+    assert tasks.deletes == [(ACCOUNT_ID, TASK_ID)]
+
+
+@pytest.mark.anyio
+async def test_task_lifecycle_maps_confirmation_csrf_missing_and_frozen_failures() -> None:
+    record = task_record()
+    frozen = TasksStub([record], update_failure="frozen")
+    missing = TasksStub([], update_failure="missing")
+    payload = {
+        "title": "Updated chapter",
+        "category": "reading",
+        "deadline_at": "2026-08-01T12:00:00Z",
+        "original_estimate_minutes": 120,
+    }
+    cookies = {"__Host-studyflow_session": "session-token"}
+    frozen_app = create_app(session_authentication=AuthenticationStub(), academic_tasks=frozen)
+    missing_app = create_app(session_authentication=AuthenticationStub(), academic_tasks=missing)
+    async with AsyncClient(
+        transport=ASGITransport(app=frozen_app), base_url="https://test", cookies=cookies
+    ) as client:
+        csrf_failure = await client.put(f"/api/v1/tasks/{TASK_ID}", json=payload)
+        frozen_response = await client.put(
+            f"/api/v1/tasks/{TASK_ID}",
+            headers={"X-CSRF-Token": "csrf-token"},
+            json=payload,
+        )
+        unconfirmed = await client.delete(
+            f"/api/v1/tasks/{TASK_ID}",
+            headers={"X-CSRF-Token": "csrf-token"},
+            params={"confirmed": "false"},
+        )
+    async with AsyncClient(
+        transport=ASGITransport(app=missing_app), base_url="https://test", cookies=cookies
+    ) as client:
+        missing_update = await client.put(
+            f"/api/v1/tasks/{TASK_ID}",
+            headers={"X-CSRF-Token": "csrf-token"},
+            json=payload,
+        )
+        missing_finish = await client.post(
+            f"/api/v1/tasks/{TASK_ID}/finish-early",
+            headers={"X-CSRF-Token": "csrf-token"},
+            json={"confirmed": True},
+        )
+        missing_delete = await client.delete(
+            f"/api/v1/tasks/{TASK_ID}",
+            headers={"X-CSRF-Token": "csrf-token"},
+            params={"confirmed": "true"},
+        )
+
+    assert csrf_failure.status_code == 403
+    assert frozen_response.status_code == 409
+    assert unconfirmed.status_code == 422
+    assert frozen.deletes == []
+    assert missing_update.status_code == 404
+    assert missing_finish.status_code == 404
+    assert missing_delete.status_code == 404

@@ -45,6 +45,20 @@ class RepositoryStub:
     async def get(self, account_id: UUID, task_id: UUID) -> AcademicTaskRecord | None:
         return None
 
+    async def update(
+        self, account_id: UUID, task_id: UUID, task: NewAcademicTask, now: datetime
+    ) -> AcademicTaskRecord | None:
+        return None
+
+    async def delete(self, account_id: UUID, task_id: UUID) -> bool:
+        return False
+
+    async def finish_early(self, account_id: UUID, task_id: UUID, now: datetime) -> bool:
+        return False
+
+    async def mark_started(self, account_id: UUID, task_id: UUID, now: datetime) -> bool:
+        return False
+
 
 @pytest.mark.anyio
 async def test_task_creation_requires_future_absolute_deadline() -> None:
