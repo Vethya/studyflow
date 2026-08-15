@@ -44,6 +44,11 @@ Application settings use the `STUDYFLOW_` prefix. For example,
 `STUDYFLOW_ENVIRONMENT=test` selects the test environment and `STUDYFLOW_DEBUG=true` enables
 FastAPI debug behavior.
 
+Google Sign-In is enabled only when `STUDYFLOW_GOOGLE_OIDC_CLIENT_ID`,
+`STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET`, and `STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI` are all set. Register
+the redirect URI as `/api/v1/auth/google/callback` on the deployed HTTPS origin. The backend asks
+only for `openid email profile`; it never stores Google access or refresh tokens.
+
 ## Test with Postman
 
 Import `postman/StudyFlow.postman_collection.json` from the repository root. The collection uses

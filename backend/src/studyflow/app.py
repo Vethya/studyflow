@@ -21,18 +21,26 @@ from studyflow.auth.email_delivery import (
     SmtpAuthenticationEmailSender,
 )
 from studyflow.auth.login import Login, LoginService
+from studyflow.auth.oidc import (
+    GoogleOIDCProvider,
+    OIDCLogin,
+    OIDCLoginService,
+    UnconfiguredOIDCLogin,
+)
 from studyflow.auth.passwords import PasswordService
 from studyflow.auth.rate_limits import (
     AccountPasswordChangeRateLimit,
     DatabaseAccountPasswordChangeRateLimiter,
     DatabaseEmailVerificationRateLimiter,
     DatabaseLoginRateLimiter,
+    DatabaseOIDCStartRateLimiter,
     DatabasePasswordResetAttemptRateLimiter,
     DatabasePasswordResetRequestRateLimiter,
     DatabaseRegistrationRateLimiter,
     DatabaseVerificationResendRateLimiter,
     EmailVerificationRateLimit,
     LoginRateLimit,
+    OIDCStartRateLimit,
     PasswordResetAttemptRateLimit,
     PasswordResetRequestRateLimit,
     RegistrationRateLimit,
@@ -44,6 +52,7 @@ from studyflow.auth.repositories import (
     SessionTransactions,
     SqlAlchemyEmailVerificationRepository,
     SqlAlchemyLoginRepository,
+    SqlAlchemyOIDCRepository,
     SqlAlchemyPasswordRecoveryRepository,
     SqlAlchemyRegistrationRepository,
     SqlAlchemySessionAuthenticationRepository,
@@ -112,6 +121,8 @@ def create_app(
     academic_tasks: AcademicTasks | None = None,
     availability_windows: AvailabilityWindows | None = None,
     unavailable_periods: UnavailablePeriods | None = None,
+    oidc_login: OIDCLogin | None = None,
+    oidc_start_rate_limiter: OIDCStartRateLimit | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     resolved_database = database or Database(resolved_settings.database_url.get_secret_value())
@@ -122,11 +133,13 @@ def create_app(
     resolved_verification_resend = verification_resend
     resolved_password_recovery = password_recovery
     resolved_account_passwords = account_passwords
+    resolved_oidc_login = oidc_login
     if (
         resolved_registration is None
         or resolved_login is None
         or resolved_password_recovery is None
         or resolved_account_passwords is None
+        or (resolved_oidc_login is None and resolved_settings.google_oidc_client_id is not None)
     ):
         authentication_http_client = httpx.AsyncClient(
             timeout=resolved_settings.password_breach_timeout_seconds
@@ -179,6 +192,27 @@ def create_app(
         resolved_account_passwords = PasswordChangeService(
             SqlAlchemyPasswordChangeRepository(transactions), password_service
         )
+    if resolved_oidc_login is None:
+        if (
+            resolved_settings.google_oidc_client_id is not None
+            and resolved_settings.google_oidc_client_secret is not None
+            and resolved_settings.google_oidc_redirect_uri is not None
+            and authentication_http_client is not None
+        ):
+            resolved_oidc_login = OIDCLoginService(
+                SqlAlchemyOIDCRepository(transactions),
+                GoogleOIDCProvider(
+                    authentication_http_client,
+                    resolved_settings.google_oidc_client_id,
+                    resolved_settings.google_oidc_client_secret.get_secret_value(),
+                    resolved_settings.google_oidc_redirect_uri,
+                ),
+                SessionService(SqlAlchemySessionRepository(transactions)),
+                resolved_settings.google_oidc_client_id,
+                resolved_settings.google_oidc_redirect_uri,
+            )
+        else:
+            resolved_oidc_login = UnconfiguredOIDCLogin()
     application = FastAPI(
         title="StudyFlow API",
         version=__version__,
@@ -203,6 +237,10 @@ def create_app(
         DatabaseEmailVerificationRateLimiter(transactions)
     )
     application.state.login = resolved_login
+    application.state.oidc_login = resolved_oidc_login
+    application.state.oidc_start_rate_limiter = (
+        oidc_start_rate_limiter or DatabaseOIDCStartRateLimiter(transactions)
+    )
     application.state.login_rate_limiter = login_rate_limiter or DatabaseLoginRateLimiter(
         transactions
     )

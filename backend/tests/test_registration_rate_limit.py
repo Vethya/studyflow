@@ -5,8 +5,10 @@ from sqlalchemy import select
 
 from studyflow.auth.rate_limits import (
     DatabaseEmailVerificationRateLimiter,
+    DatabaseOIDCStartRateLimiter,
     DatabaseRegistrationRateLimiter,
     EmailVerificationRateLimitExceeded,
+    OIDCStartRateLimitExceeded,
     RegistrationRateLimitExceeded,
 )
 from studyflow.database import Base, Database
@@ -84,5 +86,23 @@ async def test_email_verification_rate_limit_is_shared_between_workers() -> None
 
         with pytest.raises(EmailVerificationRateLimitExceeded):
             await second_worker.check("203.0.113.10", "verification-token")
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_oidc_start_rate_limit_bounds_unauthenticated_state_creation() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        limiter = DatabaseOIDCStartRateLimiter(database)
+        for _ in range(5):
+            await limiter.check("203.0.113.10")
+        with pytest.raises(OIDCStartRateLimitExceeded):
+            await limiter.check("203.0.113.10")
     finally:
         await database.stop()

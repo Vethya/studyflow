@@ -10,11 +10,13 @@ from fastapi import (
     Depends,
     Header,
     HTTPException,
+    Query,
     Request,
     Response,
     status,
 )
 from pydantic import BaseModel, EmailStr, Field, field_validator
+from starlette.responses import JSONResponse
 
 from studyflow.auth.login import (
     EmailVerificationRequiredError,
@@ -22,12 +24,20 @@ from studyflow.auth.login import (
     Login,
     LoginCommand,
 )
+from studyflow.auth.oidc import (
+    AccountLinkRequiredError,
+    InvalidOIDCResponseError,
+    OIDCLogin,
+    OIDCNotConfiguredError,
+)
 from studyflow.auth.passwords import PasswordPolicyError
 from studyflow.auth.rate_limits import (
     EmailVerificationRateLimit,
     EmailVerificationRateLimitExceeded,
     LoginRateLimit,
     LoginRateLimitExceeded,
+    OIDCStartRateLimit,
+    OIDCStartRateLimitExceeded,
     PasswordResetAttemptRateLimit,
     PasswordResetAttemptRateLimitExceeded,
     PasswordResetRequestRateLimit,
@@ -114,6 +124,10 @@ class CurrentSessionResponse(BaseModel):
     account: AuthenticatedAccount
 
 
+class OIDCStartResponse(BaseModel):
+    authorization_url: str
+
+
 def get_registration(request: Request) -> Registration:
     return cast(Registration, request.app.state.registration)
 
@@ -136,6 +150,41 @@ def get_login(request: Request) -> Login:
 
 def get_login_rate_limit(request: Request) -> LoginRateLimit:
     return cast(LoginRateLimit, request.app.state.login_rate_limiter)
+
+
+def get_oidc_login(request: Request) -> OIDCLogin:
+    return cast(OIDCLogin, request.app.state.oidc_login)
+
+
+def get_oidc_start_rate_limit(request: Request) -> OIDCStartRateLimit:
+    return cast(OIDCStartRateLimit, request.app.state.oidc_start_rate_limiter)
+
+
+def _set_authentication_cookies(response: Response, session_token: str, csrf_token: str) -> None:
+    response.set_cookie(
+        key="__Host-studyflow_session",
+        value=session_token,
+        max_age=7 * 24 * 60 * 60,
+        path="/",
+        secure=True,
+        httponly=True,
+        samesite="strict",
+    )
+    response.set_cookie(
+        key="__Host-studyflow_csrf",
+        value=csrf_token,
+        max_age=7 * 24 * 60 * 60,
+        path="/",
+        secure=True,
+        httponly=False,
+        samesite="strict",
+    )
+
+
+def _oidc_error_response(status_code: int, detail: str) -> JSONResponse:
+    response = JSONResponse(status_code=status_code, content={"detail": detail})
+    response.delete_cookie("__Host-studyflow_oidc_state", path="/", secure=True, httponly=True)
+    return response
 
 
 def get_session_authentication(request: Request) -> SessionAuthentication:
@@ -163,6 +212,81 @@ def get_password_reset_request_rate_limit(request: Request) -> PasswordResetRequ
 def get_password_reset_attempt_rate_limit(request: Request) -> PasswordResetAttemptRateLimit:
     return cast(
         PasswordResetAttemptRateLimit, request.app.state.password_reset_attempt_rate_limiter
+    )
+
+
+@router.get(
+    "/google/start",
+    response_model=OIDCStartResponse,
+    responses={status.HTTP_503_SERVICE_UNAVAILABLE: {"model": AuthenticationError}},
+)
+async def start_google_oidc(
+    response: Response,
+    http_request: Request,
+    timezone: Annotated[str, Query(min_length=1, max_length=64)],
+    oidc: Annotated[OIDCLogin, Depends(get_oidc_login)],
+    rate_limit: Annotated[OIDCStartRateLimit, Depends(get_oidc_start_rate_limit)],
+) -> OIDCStartResponse:
+    try:
+        if not is_iana_timezone(timezone):
+            raise HTTPException(status_code=422, detail="Timezone must be a valid IANA timezone")
+        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        await rate_limit.check(client_ip)
+        started = await oidc.start(timezone)
+    except OIDCStartRateLimitExceeded as error:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many Google sign-in attempts",
+            headers={"Retry-After": "900"},
+        ) from error
+    except OIDCNotConfiguredError as error:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured") from error
+    response.set_cookie(
+        key="__Host-studyflow_oidc_state",
+        value=started.state,
+        max_age=10 * 60,
+        path="/",
+        secure=True,
+        httponly=True,
+        samesite="lax",
+    )
+    return OIDCStartResponse(authorization_url=started.authorization_url)
+
+
+@router.get(
+    "/google/callback",
+    response_model=LoginResponse,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": AuthenticationError},
+        status.HTTP_409_CONFLICT: {"model": AuthenticationError},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": AuthenticationError},
+    },
+)
+async def complete_google_oidc(
+    response: Response,
+    state: Annotated[str, Query(min_length=20, max_length=512)],
+    oidc: Annotated[OIDCLogin, Depends(get_oidc_login)],
+    code: Annotated[str | None, Query(min_length=1, max_length=2048)] = None,
+    error: Annotated[str | None, Query(max_length=200)] = None,
+    state_cookie: Annotated[str | None, Cookie(alias="__Host-studyflow_oidc_state")] = None,
+) -> LoginResponse | Response:
+    try:
+        if error is not None or code is None or state_cookie is None:
+            raise InvalidOIDCResponseError
+        result = await oidc.complete(code, state, state_cookie)
+    except AccountLinkRequiredError:
+        return _oidc_error_response(409, "Password-confirmed account linking required")
+    except InvalidOIDCResponseError:
+        return _oidc_error_response(400, "Google sign-in could not be completed")
+    except OIDCNotConfiguredError:
+        return _oidc_error_response(503, "Google sign-in is not configured")
+    response.delete_cookie("__Host-studyflow_oidc_state", path="/", secure=True, httponly=True)
+    _set_authentication_cookies(response, result.session_token, result.csrf_token)
+    return LoginResponse(
+        account=AuthenticatedAccount(
+            id=str(result.account_id), email=result.email, name=result.name
+        ),
+        csrf_token=result.csrf_token,
     )
 
 
@@ -363,24 +487,7 @@ async def login_with_email(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Email verification required",
         ) from error
-    response.set_cookie(
-        key="__Host-studyflow_session",
-        value=result.session_token,
-        max_age=7 * 24 * 60 * 60,
-        path="/",
-        secure=True,
-        httponly=True,
-        samesite="strict",
-    )
-    response.set_cookie(
-        key="__Host-studyflow_csrf",
-        value=result.csrf_token,
-        max_age=7 * 24 * 60 * 60,
-        path="/",
-        secure=True,
-        httponly=False,
-        samesite="strict",
-    )
+    _set_authentication_cookies(response, result.session_token, result.csrf_token)
     return LoginResponse(
         account=AuthenticatedAccount(
             id=str(result.account_id),
