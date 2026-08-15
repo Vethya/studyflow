@@ -133,9 +133,19 @@ class SqlAlchemySessionRepository:
         self._database = database
 
     async def create(
-        self, pending: PendingSession, expected_password_hash: str | None = None
+        self,
+        pending: PendingSession,
+        expected_password_hash: str | None = None,
+        *,
+        now: datetime,
     ) -> bool:
         async with self._database.transaction() as session:
+            await session.execute(
+                delete(AuthenticationSession).where(
+                    (AuthenticationSession.idle_expires_at <= now)
+                    | (AuthenticationSession.absolute_expires_at <= now)
+                )
+            )
             if expected_password_hash is not None:
                 account = await session.get(
                     StudentAccount, pending.account_id, with_for_update=True
@@ -511,6 +521,12 @@ class SqlAlchemyOIDCRepository:
                 )
                 if existing is not None:
                     return None
+                await session.execute(
+                    delete(AuthenticationSession).where(
+                        (AuthenticationSession.idle_expires_at <= now)
+                        | (AuthenticationSession.absolute_expires_at <= now)
+                    )
+                )
                 session.add(
                     AuthenticationIdentity(
                         account_id=account.id,

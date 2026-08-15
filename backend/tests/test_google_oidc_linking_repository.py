@@ -20,13 +20,23 @@ async def test_oidc_link_challenge_is_hashed_expiring_single_use_and_attaches_id
             await session.run_sync(
                 lambda sync_session: Base.metadata.create_all(sync_session.connection())
             )
+            student = StudentAccount(
+                email="student@example.com",
+                name="Student",
+                password_hash="$argon2id$hash",
+                email_verified_at=now,
+                timezone="UTC",
+            )
+            session.add(student)
+            await session.flush()
             session.add(
-                StudentAccount(
-                    email="student@example.com",
-                    name="Student",
-                    password_hash="$argon2id$hash",
-                    email_verified_at=now,
-                    timezone="UTC",
+                AuthenticationSession(
+                    account_id=student.id,
+                    token_hash="e" * 64,
+                    csrf_token_hash="x" * 64,
+                    created_at=now - timedelta(days=2),
+                    idle_expires_at=now - timedelta(days=1),
+                    absolute_expires_at=now - timedelta(seconds=1),
                 )
             )
         repository = SqlAlchemyOIDCRepository(database)
@@ -57,6 +67,7 @@ async def test_oidc_link_challenge_is_hashed_expiring_single_use_and_attaches_id
         async with database.transaction() as session:
             persisted_session = await session.scalar(select(AuthenticationSession))
         assert persisted_session is not None and persisted_session.account_id == account.id
+        assert persisted_session.token_hash == hash_oidc_secret("session-token")
     finally:
         await database.stop()
 

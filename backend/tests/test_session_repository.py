@@ -47,8 +47,8 @@ async def test_session_repository_persists_an_owned_revocable_session() -> None:
             absolute_expires_at=now + timedelta(days=7),
         )
         repository = SqlAlchemySessionRepository(database)
-        assert not await repository.create(pending, "$argon2id$stale-hash")
-        assert await repository.create(pending, "$argon2id$stored-hash")
+        assert not await repository.create(pending, "$argon2id$stale-hash", now=now)
+        assert await repository.create(pending, "$argon2id$stored-hash", now=now)
 
         async with database.transaction() as session:
             stored = (await session.scalars(select(AuthenticationSession))).one()
@@ -57,6 +57,73 @@ async def test_session_repository_persists_an_owned_revocable_session() -> None:
         assert stored.token_hash == "a" * 64
         assert stored.csrf_token_hash == "b" * 64
         assert stored.revoked_at is None
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_session_creation_prunes_idle_and_absolute_expirations() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    account_id = uuid4()
+    now = datetime.now(UTC)
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            session.add(
+                StudentAccount(
+                    id=account_id,
+                    email="student@example.com",
+                    name="Student",
+                    password_hash="$argon2id$hash",
+                    email_verified_at=now,
+                    timezone="UTC",
+                )
+            )
+            session.add_all(
+                [
+                    AuthenticationSession(
+                        account_id=account_id,
+                        token_hash="i" * 64,
+                        csrf_token_hash="1" * 64,
+                        created_at=now - timedelta(days=2),
+                        idle_expires_at=now - timedelta(seconds=1),
+                        absolute_expires_at=now + timedelta(days=1),
+                    ),
+                    AuthenticationSession(
+                        account_id=account_id,
+                        token_hash="a" * 64,
+                        csrf_token_hash="2" * 64,
+                        created_at=now - timedelta(days=2),
+                        idle_expires_at=now - timedelta(days=1),
+                        absolute_expires_at=now - timedelta(seconds=1),
+                    ),
+                    AuthenticationSession(
+                        account_id=account_id,
+                        token_hash="v" * 64,
+                        csrf_token_hash="3" * 64,
+                        idle_expires_at=now + timedelta(hours=1),
+                        absolute_expires_at=now + timedelta(days=1),
+                    ),
+                ]
+            )
+
+        await SqlAlchemySessionRepository(database).create(
+            PendingSession(
+                account_id=account_id,
+                token_hash="n" * 64,
+                csrf_token_hash="4" * 64,
+                idle_expires_at=now + timedelta(hours=24),
+                absolute_expires_at=now + timedelta(days=7),
+            ),
+            now=now,
+        )
+
+        async with database.transaction() as session:
+            hashes = set(await session.scalars(select(AuthenticationSession.token_hash)))
+        assert hashes == {"v" * 64, "n" * 64}
     finally:
         await database.stop()
 
@@ -89,7 +156,8 @@ async def test_session_authentication_refreshes_then_revokes_with_csrf() -> None
                 csrf_token_hash=hash_browser_token("csrf-request-token"),
                 idle_expires_at=now + timedelta(hours=1),
                 absolute_expires_at=now + timedelta(hours=2),
-            )
+            ),
+            now=now,
         )
         authentication = SessionAuthenticationService(
             SqlAlchemySessionAuthenticationRepository(database), clock=lambda: now
