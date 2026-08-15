@@ -123,5 +123,5 @@ class RegistrationService:
                 password_hash=password_hash,
                 timezone=timezone,
             ),
-            now,
+            self._clock(),
         )

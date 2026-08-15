@@ -25,6 +25,7 @@ class SafePasswordStub:
 class RegistrationRepositoryStub:
     pending: list[PendingRegistration] = field(default_factory=list)
     completions: list[RegistrationCompletion] = field(default_factory=list)
+    completion_times: list[datetime] = field(default_factory=list)
     created: bool = True
 
     async def begin(self, registration: PendingRegistration) -> bool:
@@ -36,6 +37,7 @@ class RegistrationRepositoryStub:
 
     async def complete(self, completion: RegistrationCompletion, now: datetime) -> bool:
         self.completions.append(completion)
+        self.completion_times.append(now)
         return self.created
 
 
@@ -143,3 +145,26 @@ async def test_invalid_signup_token_is_rejected_before_password_security_work() 
     )
     assert breach_check.checks == 0
     assert repository.completions == []
+
+
+@pytest.mark.anyio
+async def test_completion_rechecks_token_expiry_after_password_work() -> None:
+    before_password_work = datetime(2026, 7, 28, 12, tzinfo=UTC)
+    after_password_work = before_password_work + timedelta(minutes=1)
+    times = iter((before_password_work, after_password_work))
+    repository = RegistrationRepositoryStub()
+    service = RegistrationService(
+        repository=repository,
+        passwords=PasswordService(SafePasswordStub()),
+        email_sender=AuthenticationEmailStub(),
+        clock=lambda: next(times),
+    )
+
+    await service.complete(
+        signup_token="verified-signup-token",
+        name="Student",
+        password="correct horse battery staple",
+        timezone="UTC",
+    )
+
+    assert repository.completion_times == [after_password_work]
