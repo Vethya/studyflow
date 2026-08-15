@@ -14,7 +14,10 @@ from studyflow.auth.registration import (
 
 
 class SafePasswordStub:
+    checks: int = 0
+
     async def is_breached(self, password: str) -> bool:
+        self.checks += 1
         return False
 
 
@@ -26,6 +29,9 @@ class RegistrationRepositoryStub:
 
     async def begin(self, registration: PendingRegistration) -> bool:
         self.pending.append(registration)
+        return self.created
+
+    async def signup_is_valid(self, signup_token_hash: str, now: datetime) -> bool:
         return self.created
 
     async def complete(self, completion: RegistrationCompletion, now: datetime) -> bool:
@@ -117,3 +123,23 @@ async def test_existing_account_does_not_receive_a_verification_email() -> None:
     await service.register(RegistrationCommand(email="student@example.com"), deferred_tasks)
 
     assert deferred_tasks.tasks == []
+
+
+@pytest.mark.anyio
+async def test_invalid_signup_token_is_rejected_before_password_security_work() -> None:
+    repository = RegistrationRepositoryStub(created=False)
+    breach_check = SafePasswordStub()
+    service = RegistrationService(
+        repository=repository,
+        passwords=PasswordService(breach_check),
+        email_sender=AuthenticationEmailStub(),
+    )
+
+    assert not await service.complete(
+        signup_token="invalid-signup-token",
+        name="Student",
+        password="correct horse battery staple",
+        timezone="UTC",
+    )
+    assert breach_check.checks == 0
+    assert repository.completions == []

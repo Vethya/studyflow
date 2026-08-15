@@ -55,6 +55,8 @@ class RegistrationCompletion:
 class RegistrationRepository(Protocol):
     async def begin(self, registration: PendingRegistration) -> bool: ...
 
+    async def signup_is_valid(self, signup_token_hash: str, now: datetime) -> bool: ...
+
     async def complete(self, completion: RegistrationCompletion, now: datetime) -> bool: ...
 
 
@@ -109,13 +111,17 @@ class RegistrationService:
         password: str,
         timezone: str,
     ) -> bool:
+        now = self._clock()
+        signup_token_hash = hash_verification_token(signup_token)
+        if not await self._repository.signup_is_valid(signup_token_hash, now):
+            return False
         password_hash = await self._passwords.hash_password(password)
         return await self._repository.complete(
             RegistrationCompletion(
-                signup_token_hash=hash_verification_token(signup_token),
+                signup_token_hash=signup_token_hash,
                 name=name.strip(),
                 password_hash=password_hash,
                 timezone=timezone,
             ),
-            self._clock(),
+            now,
         )

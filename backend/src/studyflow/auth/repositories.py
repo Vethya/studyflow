@@ -102,6 +102,17 @@ class SqlAlchemyRegistrationRepository:
         registration.verified_at = None
         return True
 
+    async def signup_is_valid(self, signup_token_hash: str, now: datetime) -> bool:
+        async with self._database.transaction() as session:
+            registration_id = await session.scalar(
+                select(AuthenticationRegistration.id).where(
+                    AuthenticationRegistration.signup_token_hash == signup_token_hash,
+                    AuthenticationRegistration.signup_expires_at > now,
+                    AuthenticationRegistration.verified_at.is_not(None),
+                )
+            )
+        return registration_id is not None
+
     async def complete(self, completion: RegistrationCompletion, now: datetime) -> bool:
         async with self._database.transaction() as session:
             registration = await session.scalar(
