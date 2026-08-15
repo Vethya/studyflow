@@ -3,6 +3,7 @@ from uuid import UUID
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 
 from studyflow.app import create_app
 from studyflow.auth.login import (
@@ -12,6 +13,8 @@ from studyflow.auth.login import (
     LoginResult,
 )
 from studyflow.auth.rate_limits import LoginRateLimitExceeded
+from studyflow.auth.session_authentication import SessionPrincipal
+from studyflow.settings import Environment, Settings
 
 
 @dataclass
@@ -56,8 +59,21 @@ class LoginRateLimitStub:
         self.releases.append(email)
 
 
+@dataclass
+class SessionAuthenticationStub:
+    principal: SessionPrincipal
+
+    async def authenticate(
+        self, session_token: str, csrf_token: str | None = None
+    ) -> SessionPrincipal | None:
+        return self.principal if session_token == "opaque-session-token" else None
+
+    async def revoke(self, session_token: str, csrf_token: str) -> bool:
+        return False
+
+
 @pytest.mark.anyio
-async def test_email_login_sets_the_host_session_cookie_and_returns_csrf_token() -> None:
+async def test_email_login_sets_local_http_cookies_and_returns_csrf_token() -> None:
     account_id = UUID("5b15bfef-8c44-45d5-a70e-574beb999fb3")
     login = LoginStub(
         LoginResult(
@@ -69,13 +85,21 @@ async def test_email_login_sets_the_host_session_cookie_and_returns_csrf_token()
         )
     )
     rate_limit = LoginRateLimitStub()
-    transport = ASGITransport(app=create_app(login=login, login_rate_limiter=rate_limit))
-
-    async with AsyncClient(transport=transport, base_url="https://test") as client:
+    transport = ASGITransport(
+        app=create_app(
+            login=login,
+            login_rate_limiter=rate_limit,
+            session_authentication=SessionAuthenticationStub(
+                SessionPrincipal(account_id, "student@example.com", "Student Name")
+            ),
+        )
+    )
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
             "/api/v1/auth/login",
             json={"email": " Student@Example.com ", "password": "correct password"},
         )
+        current_session = await client.get("/api/v1/auth/session")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -89,20 +113,60 @@ async def test_email_login_sets_the_host_session_cookie_and_returns_csrf_token()
     cookies = response.headers.get_list("set-cookie")
     session_cookie = next(value for value in cookies if "studyflow_session" in value)
     csrf_cookie = next(value for value in cookies if "studyflow_csrf" in value)
-    assert "__Host-studyflow_session=opaque-session-token" in session_cookie
+    assert "studyflow_session=opaque-session-token" in session_cookie
     assert "HttpOnly" in session_cookie
-    assert "Secure" in session_cookie
+    assert "Secure" not in session_cookie
     assert "SameSite=strict" in session_cookie
     assert "Path=/" in session_cookie
-    assert "__Host-studyflow_csrf=csrf-request-token" in csrf_cookie
+    assert "studyflow_csrf=csrf-request-token" in csrf_cookie
     assert "HttpOnly" not in csrf_cookie
-    assert "Secure" in csrf_cookie
+    assert "Secure" not in csrf_cookie
     assert "SameSite=strict" in csrf_cookie
     assert login.commands == [
         LoginCommand(email="Student@example.com", password="correct password")
     ]
     assert rate_limit.failures == []
     assert rate_limit.resets == ["Student@example.com"]
+    assert current_session.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_production_login_uses_secure_host_prefixed_cookies() -> None:
+    account_id = UUID("5b15bfef-8c44-45d5-a70e-574beb999fb3")
+    settings = Settings(
+        environment=Environment.PRODUCTION,
+        database_url=SecretStr(
+            "postgresql+psycopg://studyflow:secret@database/studyflow?sslmode=require"
+        ),
+        public_app_url="https://studyflow.example.com",
+        smtp_start_tls=True,
+    )
+    application = create_app(
+        settings=settings,
+        login=LoginStub(
+            LoginResult(
+                account_id,
+                "student@example.com",
+                "Student",
+                "opaque-session-token",
+                "csrf-request-token",
+            )
+        ),
+        login_rate_limiter=LoginRateLimitStub(),
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=application), base_url="https://studyflow.example.com"
+    ) as client:
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "student@example.com", "password": "correct password"},
+        )
+
+    cookies = response.headers.get_list("set-cookie")
+    assert any("__Host-studyflow_session=opaque-session-token" in value for value in cookies)
+    assert any("__Host-studyflow_csrf=csrf-request-token" in value for value in cookies)
+    assert all("Secure" in value for value in cookies)
 
 
 @pytest.mark.anyio

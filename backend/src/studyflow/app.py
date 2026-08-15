@@ -16,6 +16,7 @@ from studyflow.accounts.repositories import (
 )
 from studyflow.api.router import API_V1_PREFIX, api_router
 from studyflow.auth.breached_passwords import PwnedPasswordsClient
+from studyflow.auth.cookies import CookiePolicy
 from studyflow.auth.email_delivery import (
     AiosmtplibEmailTransport,
     SmtpAuthenticationEmailSender,
@@ -240,6 +241,7 @@ def create_app(
         swagger_ui_oauth2_redirect_url=f"{API_V1_PREFIX}/docs/oauth2-redirect",
     )
     application.state.settings = resolved_settings
+    application.state.cookie_policy = CookiePolicy.for_environment(resolved_settings.environment)
     application.state.database = resolved_database
     application.state.authentication_http_client = authentication_http_client
     application.state.registration = resolved_registration

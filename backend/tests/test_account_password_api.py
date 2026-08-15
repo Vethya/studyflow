@@ -69,7 +69,7 @@ async def test_password_change_contract_and_session_clearing(
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="https://test",
-        cookies={"__Host-studyflow_session": "session-token"},
+        cookies={"studyflow_session": "session-token"},
     ) as client:
         response = await client.patch(
             "/api/v1/account/password",
@@ -83,10 +83,8 @@ async def test_password_change_contract_and_session_clearing(
     assert response.status_code == expected
     if expected == 204:
         cookies = response.headers.get_list("set-cookie")
-        assert any(
-            "__Host-studyflow_session=" in value and "Max-Age=0" in value for value in cookies
-        )
-        assert any("__Host-studyflow_csrf=" in value and "Max-Age=0" in value for value in cookies)
+        assert any("studyflow_session=" in value and "Max-Age=0" in value for value in cookies)
+        assert any("studyflow_csrf=" in value and "Max-Age=0" in value for value in cookies)
 
 
 @pytest.mark.anyio
@@ -103,7 +101,7 @@ async def test_password_change_rate_limit_returns_retry_after() -> None:
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="https://test",
-        cookies={"__Host-studyflow_session": "session-token"},
+        cookies={"studyflow_session": "session-token"},
     ) as client:
         response = await client.patch(
             "/api/v1/account/password",

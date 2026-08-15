@@ -58,7 +58,7 @@ async def test_confirm_google_link_and_linked_identity_settings_contract() -> No
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="https://test",
-        cookies={"__Host-studyflow_session": "session-token"},
+        cookies={"studyflow_session": "session-token"},
     ) as client:
         linked = await client.post(
             "/api/v1/auth/google/link",
