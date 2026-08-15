@@ -1,6 +1,7 @@
 """Email authentication endpoints."""
 
 import hmac
+import logging
 from typing import Annotated, cast
 
 import httpx
@@ -62,6 +63,7 @@ from studyflow.auth.verification import EmailVerification
 from studyflow.timezones import is_iana_timezone
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+logger = logging.getLogger(__name__)
 
 
 class RegistrationRequest(BaseModel):
@@ -529,7 +531,10 @@ async def logout(
         or not hmac.compare_digest(csrf_token, csrf_cookie)
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
-    await authentication.revoke(session_token, csrf_token)
+    try:
+        await authentication.revoke(session_token, csrf_token)
+    except Exception:
+        logger.exception("Failed to revoke session during logout")
     cookie_policy.clear_authentication(response)
 
 

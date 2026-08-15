@@ -12,6 +12,7 @@ from studyflow.auth.session_authentication import SessionPrincipal
 class SessionAuthenticationStub:
     principal: SessionPrincipal | None
     revoked: bool = True
+    revoke_error: Exception | None = None
     revoke_calls: list[tuple[str, str]] = field(default_factory=list)
 
     async def authenticate(
@@ -21,6 +22,8 @@ class SessionAuthenticationStub:
 
     async def revoke(self, session_token: str, csrf_token: str) -> bool:
         self.revoke_calls.append((session_token, csrf_token))
+        if self.revoke_error is not None:
+            raise self.revoke_error
         return self.revoked
 
 
@@ -150,3 +153,24 @@ async def test_logout_rejects_session_cookie_without_csrf_cookie() -> None:
         )
     assert response.status_code == 403
     assert authentication.revoke_calls == []
+
+
+@pytest.mark.anyio
+async def test_logout_clears_cookies_when_server_revocation_raises() -> None:
+    authentication = SessionAuthenticationStub(
+        None, revoke_error=RuntimeError("database unavailable")
+    )
+    transport = ASGITransport(app=create_app(session_authentication=authentication))
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        cookies={
+            "studyflow_session": "opaque-session-token",
+            "studyflow_csrf": "csrf-request-token",
+        },
+    ) as client:
+        response = await client.post(
+            "/api/v1/auth/logout", headers={"X-CSRF-Token": "csrf-request-token"}
+        )
+    assert response.status_code == 204
+    assert len(response.headers.get_list("set-cookie")) == 2
