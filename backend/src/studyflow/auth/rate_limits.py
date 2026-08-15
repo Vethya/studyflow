@@ -82,7 +82,7 @@ class OIDCStartRateLimit(Protocol):
 
 
 class OIDCLinkRateLimit(Protocol):
-    async def check(self, client_ip: str, challenge: str) -> None: ...
+    async def check(self, client_ip: str, account_key: str) -> None: ...
 
 
 class _DatabaseRateLimiter:
@@ -232,9 +232,9 @@ class DatabaseOIDCStartRateLimiter(_DatabaseRateLimiter):
 
 
 class DatabaseOIDCLinkRateLimiter(_DatabaseRateLimiter):
-    async def check(self, client_ip: str, challenge: str) -> None:
+    async def check(self, client_ip: str, account_key: str) -> None:
         await self._check(
             "oidc_link",
-            (f"ip:{client_ip}", f"challenge:{challenge}"),
+            (f"ip:{client_ip}", f"account:{account_key}"),
             OIDCLinkRateLimitExceeded,
         )

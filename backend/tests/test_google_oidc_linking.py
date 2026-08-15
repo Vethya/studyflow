@@ -57,6 +57,16 @@ async def test_google_link_challenge_requires_password_then_issues_normal_sessio
 
 
 @pytest.mark.anyio
+async def test_google_link_challenge_resolves_stable_account_for_rate_limiting() -> None:
+    service = OIDCAccountLinkService(RepositoryStub(), PasswordsStub())
+
+    first_account_id = await service.resolve_attempt_account_id("first-challenge")
+    replacement_account_id = await service.resolve_attempt_account_id("replacement-challenge")
+
+    assert first_account_id == replacement_account_id == ACCOUNT_ID
+
+
+@pytest.mark.anyio
 async def test_google_link_challenge_rejects_wrong_password_generically() -> None:
     service = OIDCAccountLinkService(RepositoryStub(), PasswordsStub())
     with pytest.raises(InvalidLinkChallengeError):

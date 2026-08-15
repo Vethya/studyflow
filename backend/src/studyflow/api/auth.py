@@ -342,7 +342,9 @@ async def confirm_google_account_link(
 ) -> LoginResponse:
     client_ip = http_request.client.host if http_request.client is not None else "unknown"
     try:
-        await rate_limit.check(client_ip, payload.challenge)
+        account_id = await linking.resolve_attempt_account_id(payload.challenge)
+        account_key = str(account_id) if account_id is not None else f"invalid:{payload.challenge}"
+        await rate_limit.check(client_ip, account_key)
         result = await linking.link(payload.challenge, payload.password)
     except OIDCLinkRateLimitExceeded as error:
         raise HTTPException(

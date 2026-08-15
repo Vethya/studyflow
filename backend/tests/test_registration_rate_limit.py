@@ -111,7 +111,7 @@ async def test_oidc_start_rate_limit_bounds_unauthenticated_state_creation() -> 
 
 
 @pytest.mark.anyio
-async def test_oidc_link_rate_limit_bounds_password_attempts_by_ip_and_challenge() -> None:
+async def test_oidc_link_rate_limit_bounds_rotating_ips_by_stable_account() -> None:
     database = Database("sqlite+aiosqlite:///:memory:")
     await database.start()
     try:
@@ -120,9 +120,9 @@ async def test_oidc_link_rate_limit_bounds_password_attempts_by_ip_and_challenge
                 lambda sync_session: Base.metadata.create_all(sync_session.connection())
             )
         limiter = DatabaseOIDCLinkRateLimiter(database)
-        for _ in range(5):
-            await limiter.check("203.0.113.10", "challenge")
+        for attempt in range(5):
+            await limiter.check(f"203.0.113.{attempt}", "account-id")
         with pytest.raises(OIDCLinkRateLimitExceeded):
-            await limiter.check("203.0.113.10", "challenge")
+            await limiter.check("203.0.113.99", "account-id")
     finally:
         await database.stop()

@@ -327,6 +327,7 @@ class LinkPasswordVerifier(Protocol):
 
 
 class OIDCAccountLinking(Protocol):
+    async def resolve_attempt_account_id(self, challenge: str) -> UUID | None: ...
     async def link(self, challenge: str, password: str) -> OIDCLoginResult: ...
     async def list_identities(self, account_id: UUID) -> list[LinkedIdentity]: ...
 
@@ -349,6 +350,12 @@ class OIDCAccountLinkService:
         self._passwords = passwords
         self._token_factory = token_factory
         self._clock = clock
+
+    async def resolve_attempt_account_id(self, challenge: str) -> UUID | None:
+        record = await self._repository.get_link_challenge(
+            hash_oidc_secret(challenge), self._clock()
+        )
+        return record.account_id if record is not None else None
 
     async def link(self, challenge: str, password: str) -> OIDCLoginResult:
         record = await self._repository.get_link_challenge(

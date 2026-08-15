@@ -24,6 +24,10 @@ class AuthenticationStub:
 
 
 class LinkingStub:
+    async def resolve_attempt_account_id(self, challenge: str) -> UUID | None:
+        assert challenge == "challenge-token-value-123"
+        return ACCOUNT_ID
+
     async def link(self, challenge: str, password: str) -> OIDCLoginResult:
         assert challenge == "challenge-token-value-123" and password == "correct password"
         return OIDCLoginResult(
@@ -39,8 +43,8 @@ class LinkingStub:
 
 
 class RateLimitStub:
-    async def check(self, client_ip: str, challenge: str) -> None:
-        assert challenge == "challenge-token-value-123"
+    async def check(self, client_ip: str, account_key: str) -> None:
+        assert account_key == str(ACCOUNT_ID)
 
 
 @pytest.mark.anyio
