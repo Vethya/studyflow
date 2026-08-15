@@ -15,7 +15,7 @@ from fastapi import (
     Response,
     status,
 )
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from starlette.responses import JSONResponse
 
 from studyflow.auth.login import (
@@ -62,7 +62,13 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
 class RegistrationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     email: Annotated[EmailStr, Field(max_length=320)]
+
+
+class RegistrationCompletionRequest(BaseModel):
+    signup_token: Annotated[str, Field(min_length=20, max_length=512)]
     name: Annotated[str, Field(min_length=1, max_length=200)]
     password: Annotated[str, Field(min_length=12, max_length=128)]
     timezone: Annotated[str, Field(min_length=1, max_length=64)]
@@ -93,6 +99,10 @@ class AuthenticationError(BaseModel):
 
 class EmailVerificationRequest(BaseModel):
     token: Annotated[str, Field(min_length=20, max_length=512)]
+
+
+class EmailVerificationResponse(BaseModel):
+    signup_token: str
 
 
 class LoginRequest(BaseModel):
@@ -585,10 +595,6 @@ async def login_with_email(
             "model": AuthenticationError,
             "description": "Too many registration attempts",
         },
-        status.HTTP_503_SERVICE_UNAVAILABLE: {
-            "model": AuthenticationError,
-            "description": "Password safety service is unavailable",
-        },
     },
 )
 async def register(
@@ -602,12 +608,7 @@ async def register(
     try:
         await rate_limit.check(client_ip, str(payload.email))
         await registration.register(
-            RegistrationCommand(
-                email=payload.email,
-                name=payload.name,
-                password=payload.password,
-                timezone=payload.timezone,
-            ),
+            RegistrationCommand(email=payload.email),
             background_tasks,
         )
     except RegistrationRateLimitExceeded as error:
@@ -616,6 +617,34 @@ async def register(
             detail="Too many registration attempts",
             headers={"Retry-After": "900"},
         ) from error
+    return AuthenticationMessage(
+        message="Check your email to continue registration if the address is eligible."
+    )
+
+
+@router.post(
+    "/complete-registration",
+    status_code=status.HTTP_201_CREATED,
+    response_model=AuthenticationMessage,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": AuthenticationError},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "model": AuthenticationError,
+            "description": "Password safety service is unavailable",
+        },
+    },
+)
+async def complete_registration(
+    payload: RegistrationCompletionRequest,
+    registration: Annotated[Registration, Depends(get_registration)],
+) -> AuthenticationMessage:
+    try:
+        completed = await registration.complete(
+            payload.signup_token,
+            payload.name,
+            payload.password,
+            payload.timezone,
+        )
     except PasswordPolicyError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -626,14 +655,17 @@ async def register(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Password safety service is unavailable",
         ) from error
-    return AuthenticationMessage(
-        message="Check your email to continue registration if the address is eligible."
-    )
+    if not completed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Signup token is invalid or expired",
+        )
+    return AuthenticationMessage(message="Registration complete.")
 
 
 @router.post(
     "/verify-email",
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=EmailVerificationResponse,
     responses={
         status.HTTP_400_BAD_REQUEST: {
             "model": AuthenticationError,
@@ -650,7 +682,7 @@ async def verify_email(
     http_request: Request,
     verification: Annotated[EmailVerification, Depends(get_email_verification)],
     rate_limit: Annotated[EmailVerificationRateLimit, Depends(get_email_verification_rate_limit)],
-) -> None:
+) -> EmailVerificationResponse:
     client_ip = http_request.client.host if http_request.client is not None else "unknown"
     try:
         await rate_limit.check(client_ip, payload.token)
@@ -660,8 +692,10 @@ async def verify_email(
             detail="Too many verification attempts",
             headers={"Retry-After": "900"},
         ) from error
-    if not await verification.verify(payload.token):
+    signup_token = await verification.verify(payload.token)
+    if signup_token is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Verification token is invalid or expired",
         )
+    return EmailVerificationResponse(signup_token=signup_token)

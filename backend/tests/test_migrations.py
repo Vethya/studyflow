@@ -118,6 +118,7 @@ def test_account_authentication_schema_is_in_the_upgrade_path() -> None:
         "authentication_sessions",
         "authentication_email_tokens",
         "authentication_rate_limits",
+        "authentication_registrations",
     ):
         assert f"CREATE TABLE {table_name}" in result.stdout
 

@@ -222,7 +222,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"student@example.com\",\n  \"name\": \"Student Name\",\n  \"password\": \"correct horse battery staple\",\n  \"timezone\": \"Asia/Phnom_Penh\"\n}",
+              "raw": "{\n  \"email\": \"student@example.com\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -241,7 +241,7 @@
                 "register"
               ]
             },
-            "description": "Creates an unverified email/password account when eligible and sends an eight-hour single-use verification link. The response is intentionally non-enumerating."
+            "description": "Sends an eight-hour single-use verification link when eligible. No account or password is created before verification. The response is intentionally non-enumerating."
           },
           "response": [],
           "event": [
@@ -436,7 +436,7 @@
                 "verify-email"
               ]
             },
-            "description": "Consumes an unexpired single-use token and marks the account's email as verified."
+            "description": "Consumes an unexpired single-use token and returns a 30-minute signup token."
           },
           "response": [],
           "event": [
@@ -445,14 +445,35 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"
+                  "pm.test('returns HTTP 200', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) pm.collectionVariables.set('signup_token', pm.response.json().signup_token);"
                 ]
               }
             }
           ]
         }
-      ]
-    },
+          ]
+        },
+        {
+          "name": "Complete email registration",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signup_token\": \"{{signup_token}}\",\n  \"name\": \"Student Name\",\n  \"password\": \"correct horse battery staple\",\n  \"timezone\": \"Asia/Phnom_Penh\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/complete-registration",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "complete-registration"]
+            },
+            "description": "Creates the account only after the email was verified; the signup token is short-lived and single-use."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 201', () => pm.response.to.have.status(201));"] } }]
+        },
     {
       "name": "Account",
       "description": "Authenticated, student-owned account settings.",
@@ -744,6 +765,12 @@
       "value": "",
       "type": "string",
       "description": "Automatically populated by the email login request."
+    },
+    {
+      "key": "signup_token",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by the verify email request."
     },
     {
       "key": "task_id",

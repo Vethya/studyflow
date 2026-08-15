@@ -14,9 +14,6 @@ from studyflow.auth.passwords import PasswordService
 @dataclass(frozen=True, slots=True)
 class RegistrationCommand:
     email: str
-    name: str
-    password: str
-    timezone: str
 
 
 class Registration(Protocol):
@@ -26,23 +23,38 @@ class Registration(Protocol):
         deferred_tasks: "DeferredTasks",
     ) -> None: ...
 
+    async def complete(
+        self,
+        signup_token: str,
+        name: str,
+        password: str,
+        timezone: str,
+    ) -> bool: ...
+
 
 class DeferredTasks(Protocol):
     def add_task(self, function: Any, *arguments: object) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
-class PendingAccount:
+class PendingRegistration:
     email: str
-    name: str
-    password_hash: str
-    timezone: str
     verification_token_hash: str
     verification_expires_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class RegistrationCompletion:
+    signup_token_hash: str
+    name: str
+    password_hash: str
+    timezone: str
+
+
 class RegistrationRepository(Protocol):
-    async def create_unverified(self, account: PendingAccount) -> bool: ...
+    async def begin(self, registration: PendingRegistration) -> bool: ...
+
+    async def complete(self, completion: RegistrationCompletion, now: datetime) -> bool: ...
 
 
 class AuthenticationEmailSender(Protocol):
@@ -78,15 +90,29 @@ class RegistrationService:
         deferred_tasks: DeferredTasks,
     ) -> None:
         email = canonicalize_email(command.email)
-        password_hash = await self._passwords.hash_password(command.password)
         raw_token = self._token_factory()
-        pending_account = PendingAccount(
+        pending_registration = PendingRegistration(
             email=email,
-            name=command.name.strip(),
-            password_hash=password_hash,
-            timezone=command.timezone,
             verification_token_hash=hash_verification_token(raw_token),
             verification_expires_at=self._clock() + timedelta(hours=8),
         )
-        if await self._repository.create_unverified(pending_account):
+        if await self._repository.begin(pending_registration):
             deferred_tasks.add_task(self._email_sender.send_verification, email, raw_token)
+
+    async def complete(
+        self,
+        signup_token: str,
+        name: str,
+        password: str,
+        timezone: str,
+    ) -> bool:
+        password_hash = await self._passwords.hash_password(password)
+        return await self._repository.complete(
+            RegistrationCompletion(
+                signup_token_hash=hash_verification_token(signup_token),
+                name=name.strip(),
+                password_hash=password_hash,
+                timezone=timezone,
+            ),
+            self._clock(),
+        )
