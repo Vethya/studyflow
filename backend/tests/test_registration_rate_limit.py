@@ -188,3 +188,21 @@ async def test_login_traffic_has_a_separate_higher_per_ip_limit() -> None:
             await limiter.check("203.0.113.10", "last@example.com")
     finally:
         await database.stop()
+
+
+@pytest.mark.anyio
+async def test_parallel_login_attempts_reserve_the_failure_budget() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        limiter = DatabaseLoginRateLimiter(database)
+        for attempt in range(5):
+            await limiter.check(f"203.0.113.{attempt}", "student@example.com")
+        with pytest.raises(LoginRateLimitExceeded):
+            await limiter.check("203.0.113.99", "student@example.com")
+    finally:
+        await database.stop()

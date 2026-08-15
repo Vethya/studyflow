@@ -574,6 +574,9 @@ async def login_with_email(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Email verification required",
         ) from error
+    except Exception:
+        await rate_limit.release(str(payload.email))
+        raise
     await rate_limit.reset_failures(str(payload.email))
     _set_authentication_cookies(response, result.session_token, result.csrf_token)
     return LoginResponse(
