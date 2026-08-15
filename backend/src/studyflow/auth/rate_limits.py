@@ -60,6 +60,10 @@ class EmailVerificationRateLimit(Protocol):
 class LoginRateLimit(Protocol):
     async def check(self, client_ip: str, email: str) -> None: ...
 
+    async def record_failure(self, email: str) -> None: ...
+
+    async def reset_failures(self, email: str) -> None: ...
+
 
 class VerificationResendRateLimit(Protocol):
     async def check(self, client_ip: str, email: str) -> None: ...
@@ -154,6 +158,40 @@ class _DatabaseRateLimiter:
                 if attempt == 2:
                     raise
 
+    async def _enforce(
+        self,
+        action: str,
+        key_value: str,
+        exceeded: type[RuntimeError],
+    ) -> None:
+        now = self._clock()
+        key = self._hash_key(key_value)
+        async with self._database.transaction() as session:
+            row = await session.scalar(
+                select(AuthenticationRateLimit).where(
+                    AuthenticationRateLimit.action == action,
+                    AuthenticationRateLimit.key_hash == key,
+                )
+            )
+            if row is None:
+                return
+            window_started_at = row.window_started_at
+            if window_started_at.tzinfo is None:
+                window_started_at = window_started_at.replace(tzinfo=UTC)
+            if now - window_started_at >= self._window:
+                await session.delete(row)
+            elif row.attempts >= self._maximum_attempts:
+                raise exceeded
+
+    async def _reset(self, action: str, key_value: str) -> None:
+        async with self._database.transaction() as session:
+            await session.execute(
+                delete(AuthenticationRateLimit).where(
+                    AuthenticationRateLimit.action == action,
+                    AuthenticationRateLimit.key_hash == self._hash_key(key_value),
+                )
+            )
+
     @staticmethod
     def _hash_key(value: str) -> str:
         return hashlib.sha256(value.encode()).hexdigest()
@@ -178,12 +216,49 @@ class DatabaseEmailVerificationRateLimiter(_DatabaseRateLimiter):
 
 
 class DatabaseLoginRateLimiter(_DatabaseRateLimiter):
+    def __init__(
+        self,
+        database: SessionTransactions,
+        *,
+        traffic_attempts: int = 30,
+        failure_attempts: int = 5,
+        window_seconds: int = 900,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
+        super().__init__(
+            database,
+            maximum_attempts=failure_attempts,
+            window_seconds=window_seconds,
+            clock=clock,
+        )
+        self._traffic = _DatabaseRateLimiter(
+            database,
+            maximum_attempts=traffic_attempts,
+            window_seconds=window_seconds,
+            clock=clock,
+        )
+
     async def check(self, client_ip: str, email: str) -> None:
-        await self._check(
-            "login",
-            (f"ip:{client_ip}", f"email:{canonicalize_email(email)}"),
+        await self._traffic._check(
+            "login_traffic",
+            (f"ip:{client_ip}",),
             LoginRateLimitExceeded,
         )
+        await self._enforce(
+            "login_failure",
+            f"email:{canonicalize_email(email)}",
+            LoginRateLimitExceeded,
+        )
+
+    async def record_failure(self, email: str) -> None:
+        await self._check(
+            "login_failure",
+            (f"email:{canonicalize_email(email)}",),
+            LoginRateLimitExceeded,
+        )
+
+    async def reset_failures(self, email: str) -> None:
+        await self._reset("login_failure", f"email:{canonicalize_email(email)}")
 
 
 class DatabaseVerificationResendRateLimiter(_DatabaseRateLimiter):

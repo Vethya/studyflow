@@ -30,10 +30,20 @@ class FailingLoginStub:
 @dataclass
 class LoginRateLimitStub:
     error: Exception | None = None
+    checks: list[tuple[str, str]] = field(default_factory=list)
+    failures: list[str] = field(default_factory=list)
+    resets: list[str] = field(default_factory=list)
 
     async def check(self, client_ip: str, email: str) -> None:
+        self.checks.append((client_ip, email))
         if self.error is not None:
             raise self.error
+
+    async def record_failure(self, email: str) -> None:
+        self.failures.append(email)
+
+    async def reset_failures(self, email: str) -> None:
+        self.resets.append(email)
 
 
 @pytest.mark.anyio
@@ -48,7 +58,8 @@ async def test_email_login_sets_the_host_session_cookie_and_returns_csrf_token()
             csrf_token="csrf-request-token",
         )
     )
-    transport = ASGITransport(app=create_app(login=login, login_rate_limiter=LoginRateLimitStub()))
+    rate_limit = LoginRateLimitStub()
+    transport = ASGITransport(app=create_app(login=login, login_rate_limiter=rate_limit))
 
     async with AsyncClient(transport=transport, base_url="https://test") as client:
         response = await client.post(
@@ -80,14 +91,17 @@ async def test_email_login_sets_the_host_session_cookie_and_returns_csrf_token()
     assert login.commands == [
         LoginCommand(email="Student@example.com", password="correct password")
     ]
+    assert rate_limit.failures == []
+    assert rate_limit.resets == ["Student@example.com"]
 
 
 @pytest.mark.anyio
 async def test_email_login_returns_a_non_enumerating_invalid_credentials_error() -> None:
+    rate_limit = LoginRateLimitStub()
     transport = ASGITransport(
         app=create_app(
             login=FailingLoginStub(InvalidCredentialsError()),
-            login_rate_limiter=LoginRateLimitStub(),
+            login_rate_limiter=rate_limit,
         )
     )
 
@@ -100,6 +114,8 @@ async def test_email_login_returns_a_non_enumerating_invalid_credentials_error()
     assert response.status_code == 401
     assert response.json() == {"detail": "Invalid email or password"}
     assert "set-cookie" not in response.headers
+    assert rate_limit.failures == ["unknown@example.com"]
+    assert rate_limit.resets == []
 
 
 @pytest.mark.anyio

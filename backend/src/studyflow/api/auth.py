@@ -556,15 +556,25 @@ async def login_with_email(
             headers={"Retry-After": "900"},
         ) from error
     except InvalidCredentialsError as error:
+        try:
+            await rate_limit.record_failure(str(payload.email))
+        except LoginRateLimitExceeded as rate_limit_error:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many login attempts",
+                headers={"Retry-After": "900"},
+            ) from rate_limit_error
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         ) from error
     except EmailVerificationRequiredError as error:
+        await rate_limit.reset_failures(str(payload.email))
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Email verification required",
         ) from error
+    await rate_limit.reset_failures(str(payload.email))
     _set_authentication_cookies(response, result.session_token, result.csrf_token)
     return LoginResponse(
         account=AuthenticatedAccount(

@@ -5,10 +5,12 @@ from sqlalchemy import select
 
 from studyflow.auth.rate_limits import (
     DatabaseEmailVerificationRateLimiter,
+    DatabaseLoginRateLimiter,
     DatabaseOIDCLinkRateLimiter,
     DatabaseOIDCStartRateLimiter,
     DatabaseRegistrationRateLimiter,
     EmailVerificationRateLimitExceeded,
+    LoginRateLimitExceeded,
     OIDCLinkRateLimitExceeded,
     OIDCStartRateLimitExceeded,
     RegistrationRateLimitExceeded,
@@ -124,5 +126,65 @@ async def test_oidc_link_rate_limit_bounds_rotating_ips_by_stable_account() -> N
             await limiter.check(f"203.0.113.{attempt}", "account-id")
         with pytest.raises(OIDCLinkRateLimitExceeded):
             await limiter.check("203.0.113.99", "account-id")
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_successful_logins_do_not_consume_failure_budget() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        limiter = DatabaseLoginRateLimiter(database)
+        for attempt in range(4):
+            await limiter.check(f"198.51.100.{attempt}", "student@example.com")
+            await limiter.record_failure("student@example.com")
+        await limiter.reset_failures("student@example.com")
+        for attempt in range(10):
+            email = "student@example.com"
+            await limiter.check(f"203.0.113.{attempt}", email)
+            await limiter.reset_failures(email)
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_login_failure_budget_follows_email_across_ips() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        limiter = DatabaseLoginRateLimiter(database)
+        for attempt in range(5):
+            email = "Student@Example.com"
+            await limiter.check(f"203.0.113.{attempt}", email)
+            await limiter.record_failure(email)
+        with pytest.raises(LoginRateLimitExceeded):
+            await limiter.check("203.0.113.99", "student@example.com")
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_login_traffic_has_a_separate_higher_per_ip_limit() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        limiter = DatabaseLoginRateLimiter(database)
+        for attempt in range(30):
+            await limiter.check("203.0.113.10", f"student-{attempt}@example.com")
+        with pytest.raises(LoginRateLimitExceeded):
+            await limiter.check("203.0.113.10", "last@example.com")
     finally:
         await database.stop()
