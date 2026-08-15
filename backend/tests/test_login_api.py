@@ -40,18 +40,19 @@ class LoginRateLimitStub:
     resets: list[str] = field(default_factory=list)
     releases: list[str] = field(default_factory=list)
 
-    async def check(self, client_ip: str, email: str) -> None:
+    async def check(self, client_ip: str, email: str) -> str:
         self.checks.append((client_ip, email))
         if self.error is not None:
             raise self.error
+        return "login_inflight:test"
 
-    async def record_failure(self, email: str) -> None:
+    async def record_failure(self, email: str, reservation_id: str) -> None:
         self.failures.append(email)
 
-    async def reset_failures(self, email: str) -> None:
+    async def reset_failures(self, email: str, reservation_id: str) -> None:
         self.resets.append(email)
 
-    async def release(self, email: str) -> None:
+    async def release(self, email: str, reservation_id: str) -> None:
         self.releases.append(email)
 
 

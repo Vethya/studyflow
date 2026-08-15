@@ -141,13 +141,14 @@ async def test_successful_logins_do_not_consume_failure_budget() -> None:
             )
         limiter = DatabaseLoginRateLimiter(database)
         for attempt in range(4):
-            await limiter.check(f"198.51.100.{attempt}", "student@example.com")
-            await limiter.record_failure("student@example.com")
-        await limiter.reset_failures("student@example.com")
+            reservation_id = await limiter.check(f"198.51.100.{attempt}", "student@example.com")
+            await limiter.record_failure("student@example.com", reservation_id)
+        reservation_id = await limiter.check("198.51.100.99", "student@example.com")
+        await limiter.reset_failures("student@example.com", reservation_id)
         for attempt in range(10):
             email = "student@example.com"
-            await limiter.check(f"203.0.113.{attempt}", email)
-            await limiter.reset_failures(email)
+            reservation_id = await limiter.check(f"203.0.113.{attempt}", email)
+            await limiter.reset_failures(email, reservation_id)
     finally:
         await database.stop()
 
@@ -164,8 +165,8 @@ async def test_login_failure_budget_follows_email_across_ips() -> None:
         limiter = DatabaseLoginRateLimiter(database)
         for attempt in range(5):
             email = "Student@Example.com"
-            await limiter.check(f"203.0.113.{attempt}", email)
-            await limiter.record_failure(email)
+            reservation_id = await limiter.check(f"203.0.113.{attempt}", email)
+            await limiter.record_failure(email, reservation_id)
         with pytest.raises(LoginRateLimitExceeded):
             await limiter.check("203.0.113.99", "student@example.com")
     finally:
@@ -202,6 +203,29 @@ async def test_parallel_login_attempts_reserve_the_failure_budget() -> None:
         limiter = DatabaseLoginRateLimiter(database)
         for attempt in range(5):
             await limiter.check(f"203.0.113.{attempt}", "student@example.com")
+        with pytest.raises(LoginRateLimitExceeded):
+            await limiter.check("203.0.113.99", "student@example.com")
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_newer_login_reservations_keep_their_own_expiry() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    current_time = [datetime(2026, 8, 15, 12, tzinfo=UTC)]
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        limiter = DatabaseLoginRateLimiter(database, clock=lambda: current_time[0])
+        await limiter.check("203.0.113.1", "student@example.com")
+        current_time[0] += timedelta(minutes=14)
+        await limiter.check("203.0.113.2", "student@example.com")
+        current_time[0] += timedelta(minutes=2)
+        for attempt in range(4):
+            await limiter.check(f"203.0.113.{attempt + 3}", "student@example.com")
         with pytest.raises(LoginRateLimitExceeded):
             await limiter.check("203.0.113.99", "student@example.com")
     finally:
