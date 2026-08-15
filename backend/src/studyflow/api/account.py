@@ -1,5 +1,6 @@
 """Authenticated account-profile endpoints."""
 
+from datetime import datetime
 from typing import Annotated, cast
 
 import httpx
@@ -9,6 +10,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from studyflow.accounts.password import AccountPasswords, InvalidCurrentPasswordError
 from studyflow.accounts.preferences import AccountPreferences, StudyPreferences
 from studyflow.accounts.profile import AccountProfile, AccountProfiles
+from studyflow.auth.oidc import OIDCAccountLinking
 from studyflow.auth.passwords import PasswordPolicyError
 from studyflow.auth.rate_limits import (
     AccountPasswordChangeRateLimit,
@@ -67,6 +69,12 @@ class PasswordChangeRequest(BaseModel):
     new_password: Annotated[str, Field(min_length=12, max_length=128)]
 
 
+class LinkedIdentityResponse(BaseModel):
+    provider: str
+    email: EmailStr
+    linked_at: datetime
+
+
 def get_session_authentication(request: Request) -> SessionAuthentication:
     return cast(SessionAuthentication, request.app.state.session_authentication)
 
@@ -81,6 +89,10 @@ def get_account_preferences(request: Request) -> AccountPreferences:
 
 def get_account_passwords(request: Request) -> AccountPasswords:
     return cast(AccountPasswords, request.app.state.account_passwords)
+
+
+def get_oidc_account_linking(request: Request) -> OIDCAccountLinking:
+    return cast(OIDCAccountLinking, request.app.state.oidc_account_linking)
 
 
 def get_account_password_change_rate_limit(request: Request) -> AccountPasswordChangeRateLimit:
@@ -201,6 +213,25 @@ async def update_preferences(
     if updated is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     return _preferences_response(updated)
+
+
+@router.get(
+    "/identities",
+    response_model=list[LinkedIdentityResponse],
+    responses={status.HTTP_401_UNAUTHORIZED: {"model": AccountError}},
+)
+async def list_linked_identities(
+    principal: Annotated[SessionPrincipal, Depends(require_session)],
+    linking: Annotated[OIDCAccountLinking, Depends(get_oidc_account_linking)],
+) -> list[LinkedIdentityResponse]:
+    return [
+        LinkedIdentityResponse(
+            provider=identity.provider,
+            email=identity.email,
+            linked_at=identity.linked_at,
+        )
+        for identity in await linking.list_identities(principal.account_id)
+    ]
 
 
 @router.patch(
