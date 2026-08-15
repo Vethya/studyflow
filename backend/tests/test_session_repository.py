@@ -107,3 +107,50 @@ async def test_session_authentication_refreshes_then_revokes_with_csrf() -> None
         assert await authentication.authenticate("opaque-session-token") is None
     finally:
         await database.stop()
+
+
+@pytest.mark.anyio
+async def test_idle_expiry_refresh_is_monotonic_and_absolute_capped() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    now = datetime.now(UTC)
+    account_id = uuid4()
+    token_hash = hash_browser_token("opaque-session-token")
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            session.add(
+                StudentAccount(
+                    id=account_id,
+                    email="student@example.com",
+                    name="Student",
+                    password_hash="$argon2id$hash",
+                    email_verified_at=now,
+                    timezone="UTC",
+                )
+            )
+            session.add(
+                AuthenticationSession(
+                    account_id=account_id,
+                    token_hash=token_hash,
+                    csrf_token_hash=hash_browser_token("csrf-token"),
+                    idle_expires_at=now + timedelta(hours=1),
+                    absolute_expires_at=now + timedelta(hours=10),
+                )
+            )
+
+        repository = SqlAlchemySessionAuthenticationRepository(database)
+        assert await repository.authenticate(token_hash, now, now + timedelta(hours=8))
+        assert await repository.authenticate(token_hash, now, now + timedelta(hours=4))
+        async with database.transaction() as session:
+            stored = (await session.scalars(select(AuthenticationSession))).one()
+        assert stored.idle_expires_at.replace(tzinfo=UTC) == now + timedelta(hours=8)
+
+        assert await repository.authenticate(token_hash, now, now + timedelta(hours=12))
+        async with database.transaction() as session:
+            stored = (await session.scalars(select(AuthenticationSession))).one()
+        assert stored.idle_expires_at.replace(tzinfo=UTC) == now + timedelta(hours=10)
+    finally:
+        await database.stop()

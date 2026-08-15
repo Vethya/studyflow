@@ -212,7 +212,15 @@ class SqlAlchemySessionAuthenticationRepository:
             absolute_expiry = authentication_session.absolute_expires_at
             if absolute_expiry.tzinfo is None:
                 absolute_expiry = absolute_expiry.replace(tzinfo=UTC)
-            authentication_session.idle_expires_at = min(refreshed_idle_expiry, absolute_expiry)
+            current_idle_expiry = authentication_session.idle_expires_at
+            if current_idle_expiry.tzinfo is None:
+                current_idle_expiry = current_idle_expiry.replace(tzinfo=UTC)
+            if refreshed_idle_expiry.tzinfo is None:
+                refreshed_idle_expiry = refreshed_idle_expiry.replace(tzinfo=UTC)
+            authentication_session.idle_expires_at = min(
+                max(current_idle_expiry, refreshed_idle_expiry),
+                absolute_expiry,
+            )
             return PersistedSessionPrincipal(account.id, account.email, account.name)
 
     async def revoke(self, token_hash: str, csrf_hash: str, now: datetime) -> bool:
