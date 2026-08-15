@@ -545,9 +545,11 @@ async def login_with_email(
     login: Annotated[Login, Depends(get_login)],
     rate_limit: Annotated[LoginRateLimit, Depends(get_login_rate_limit)],
 ) -> LoginResponse:
+    reserved_failure_slot = False
     try:
         client_ip = http_request.client.host if http_request.client is not None else "unknown"
         await rate_limit.check(client_ip, str(payload.email))
+        reserved_failure_slot = True
         result = await login.login(LoginCommand(email=payload.email, password=payload.password))
     except LoginRateLimitExceeded as error:
         raise HTTPException(
@@ -575,7 +577,8 @@ async def login_with_email(
             detail="Email verification required",
         ) from error
     except Exception:
-        await rate_limit.release(str(payload.email))
+        if reserved_failure_slot:
+            await rate_limit.release(str(payload.email))
         raise
     await rate_limit.reset_failures(str(payload.email))
     _set_authentication_cookies(response, result.session_token, result.csrf_token)

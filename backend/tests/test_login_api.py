@@ -183,3 +183,21 @@ async def test_unexpected_login_error_releases_inflight_reservation() -> None:
                 json={"email": "student@example.com", "password": "password"},
             )
     assert rate_limit.releases == ["student@example.com"]
+
+
+@pytest.mark.anyio
+async def test_limiter_error_before_reservation_does_not_release_another_slot() -> None:
+    rate_limit = LoginRateLimitStub(error=RuntimeError("limiter unavailable"))
+    transport = ASGITransport(
+        app=create_app(
+            login=FailingLoginStub(AssertionError("login must not run")),
+            login_rate_limiter=rate_limit,
+        )
+    )
+    with pytest.raises(RuntimeError, match="limiter unavailable"):
+        async with AsyncClient(transport=transport, base_url="https://test") as client:
+            await client.post(
+                "/api/v1/auth/login",
+                json={"email": "student@example.com", "password": "password"},
+            )
+    assert rate_limit.releases == []
