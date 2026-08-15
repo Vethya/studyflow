@@ -41,40 +41,65 @@ class SqlAlchemyRegistrationRepository:
         self._database = database
 
     async def begin(self, pending: PendingRegistration) -> bool:
-        async with self._database.transaction() as session:
-            existing_account = await session.scalar(
-                select(StudentAccount.id).where(StudentAccount.email == pending.email)
-            )
-            if existing_account is not None:
-                return False
-            registration = await session.scalar(
-                select(AuthenticationRegistration)
-                .where(AuthenticationRegistration.email == pending.email)
-                .with_for_update()
-            )
-            if registration is None:
-                session.add(
-                    AuthenticationRegistration(
-                        email=pending.email,
-                        verification_token_hash=pending.verification_token_hash,
-                        verification_expires_at=pending.verification_expires_at,
-                    )
+        try:
+            async with self._database.transaction() as session:
+                existing_account = await session.scalar(
+                    select(StudentAccount.id).where(StudentAccount.email == pending.email)
                 )
-            else:
-                signup_expires_at = registration.signup_expires_at
-                if signup_expires_at is not None and signup_expires_at.tzinfo is None:
-                    signup_expires_at = signup_expires_at.replace(tzinfo=UTC)
-                if (
-                    registration.verified_at is not None
-                    and signup_expires_at is not None
-                    and signup_expires_at > pending.requested_at
-                ):
+                if existing_account is not None:
                     return False
-                registration.verification_token_hash = pending.verification_token_hash
-                registration.verification_expires_at = pending.verification_expires_at
-                registration.signup_token_hash = None
-                registration.signup_expires_at = None
-                registration.verified_at = None
+                registration = await session.scalar(
+                    select(AuthenticationRegistration)
+                    .where(AuthenticationRegistration.email == pending.email)
+                    .with_for_update()
+                )
+                if registration is None:
+                    session.add(
+                        AuthenticationRegistration(
+                            email=pending.email,
+                            verification_token_hash=pending.verification_token_hash,
+                            verification_expires_at=pending.verification_expires_at,
+                        )
+                    )
+                elif not self._rotate_pending(registration, pending):
+                    return False
+        except IntegrityError:
+            async with self._database.transaction() as session:
+                existing_account = await session.scalar(
+                    select(StudentAccount.id).where(StudentAccount.email == pending.email)
+                )
+                if existing_account is not None:
+                    return False
+                registration = await session.scalar(
+                    select(AuthenticationRegistration)
+                    .where(AuthenticationRegistration.email == pending.email)
+                    .with_for_update()
+                )
+                if registration is None:
+                    raise
+                if not self._rotate_pending(registration, pending):
+                    return False
+        return True
+
+    @staticmethod
+    def _rotate_pending(
+        registration: AuthenticationRegistration,
+        pending: PendingRegistration,
+    ) -> bool:
+        signup_expires_at = registration.signup_expires_at
+        if signup_expires_at is not None and signup_expires_at.tzinfo is None:
+            signup_expires_at = signup_expires_at.replace(tzinfo=UTC)
+        if (
+            registration.verified_at is not None
+            and signup_expires_at is not None
+            and signup_expires_at > pending.requested_at
+        ):
+            return False
+        registration.verification_token_hash = pending.verification_token_hash
+        registration.verification_expires_at = pending.verification_expires_at
+        registration.signup_token_hash = None
+        registration.signup_expires_at = None
+        registration.verified_at = None
         return True
 
     async def complete(self, completion: RegistrationCompletion, now: datetime) -> bool:

@@ -1,4 +1,6 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select
@@ -166,6 +168,37 @@ async def test_existing_account_is_not_replaced_or_given_a_challenge() -> None:
             [account] = list(await session.scalars(select(StudentAccount)))
             assert list(await session.scalars(select(AuthenticationRegistration))) == []
         assert account.password_hash == "$argon2id$existing"
+    finally:
+        await db.stop()
+
+
+@pytest.mark.anyio
+async def test_concurrent_registration_for_same_email_does_not_fail(
+    tmp_path: Path,
+) -> None:
+    db = Database(f"sqlite+aiosqlite:///{tmp_path / 'registration.db'}")
+    await db.start()
+    async with db.transaction() as session:
+        await session.run_sync(lambda sync: Base.metadata.create_all(sync.connection()))
+    now = datetime.now(UTC)
+    repository = SqlAlchemyRegistrationRepository(db)
+    try:
+        results = await asyncio.gather(
+            *(
+                repository.begin(
+                    PendingRegistration(
+                        email="student@example.com",
+                        verification_token_hash=hash_verification_token(f"token-{index}"),
+                        verification_expires_at=now + timedelta(hours=8),
+                        requested_at=now,
+                    )
+                )
+                for index in range(2)
+            )
+        )
+        assert results == [True, True]
+        async with db.transaction() as session:
+            assert len(list(await session.scalars(select(AuthenticationRegistration)))) == 1
     finally:
         await db.stop()
 
