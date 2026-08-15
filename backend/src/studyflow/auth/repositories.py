@@ -61,6 +61,15 @@ class SqlAlchemyRegistrationRepository:
                     )
                 )
             else:
+                signup_expires_at = registration.signup_expires_at
+                if signup_expires_at is not None and signup_expires_at.tzinfo is None:
+                    signup_expires_at = signup_expires_at.replace(tzinfo=UTC)
+                if (
+                    registration.verified_at is not None
+                    and signup_expires_at is not None
+                    and signup_expires_at > pending.requested_at
+                ):
+                    return False
                 registration.verification_token_hash = pending.verification_token_hash
                 registration.verification_expires_at = pending.verification_expires_at
                 registration.signup_token_hash = None

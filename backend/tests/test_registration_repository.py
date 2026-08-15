@@ -36,6 +36,7 @@ async def test_registration_creates_no_account_until_verified_completion() -> No
                 email="student@example.com",
                 verification_token_hash=hash_verification_token("email-token"),
                 verification_expires_at=now + timedelta(hours=8),
+                requested_at=now,
             )
         )
         async with db.transaction() as session:
@@ -84,12 +85,55 @@ async def test_repeated_email_rotates_only_pending_challenge_not_credentials() -
                     email="student@example.com",
                     verification_token_hash=hash_verification_token(token),
                     verification_expires_at=now + timedelta(hours=8),
+                    requested_at=now,
                 )
             )
         async with db.transaction() as session:
             assert list(await session.scalars(select(StudentAccount))) == []
             [pending] = list(await session.scalars(select(AuthenticationRegistration)))
         assert pending.verification_token_hash == hash_verification_token("second-token")
+    finally:
+        await db.stop()
+
+
+@pytest.mark.anyio
+async def test_repeated_email_cannot_invalidate_a_verified_signup_session() -> None:
+    db = await database()
+    now = datetime.now(UTC)
+    repository = SqlAlchemyRegistrationRepository(db)
+    try:
+        await repository.begin(
+            PendingRegistration(
+                email="student@example.com",
+                verification_token_hash=hash_verification_token("email-token"),
+                verification_expires_at=now + timedelta(hours=8),
+                requested_at=now,
+            )
+        )
+        verification = EmailVerificationService(
+            SqlAlchemyEmailVerificationRepository(db),
+            token_factory=lambda: "signup-token",
+            clock=lambda: now,
+        )
+        await verification.verify("email-token")
+
+        assert not await repository.begin(
+            PendingRegistration(
+                email="student@example.com",
+                verification_token_hash=hash_verification_token("attacker-token"),
+                verification_expires_at=now + timedelta(hours=8, minutes=1),
+                requested_at=now + timedelta(minutes=1),
+            )
+        )
+        assert await repository.complete(
+            RegistrationCompletion(
+                signup_token_hash=hash_verification_token("signup-token"),
+                name="Student",
+                password_hash="$argon2id$hash",
+                timezone="UTC",
+            ),
+            now + timedelta(minutes=1),
+        )
     finally:
         await db.stop()
 
@@ -115,6 +159,7 @@ async def test_existing_account_is_not_replaced_or_given_a_challenge() -> None:
                 email="student@example.com",
                 verification_token_hash="a" * 64,
                 verification_expires_at=now + timedelta(hours=8),
+                requested_at=now,
             )
         )
         async with db.transaction() as session:
@@ -136,6 +181,7 @@ async def test_expired_signup_token_cannot_create_account() -> None:
                 email="student@example.com",
                 verification_token_hash=hash_verification_token("email-token"),
                 verification_expires_at=now + timedelta(hours=8),
+                requested_at=now,
             )
         )
         verification = EmailVerificationService(

@@ -41,6 +41,7 @@ class PendingRegistration:
     email: str
     verification_token_hash: str
     verification_expires_at: datetime
+    requested_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,10 +92,12 @@ class RegistrationService:
     ) -> None:
         email = canonicalize_email(command.email)
         raw_token = self._token_factory()
+        now = self._clock()
         pending_registration = PendingRegistration(
             email=email,
             verification_token_hash=hash_verification_token(raw_token),
-            verification_expires_at=self._clock() + timedelta(hours=8),
+            verification_expires_at=now + timedelta(hours=8),
+            requested_at=now,
         )
         if await self._repository.begin(pending_registration):
             deferred_tasks.add_task(self._email_sender.send_verification, email, raw_token)
