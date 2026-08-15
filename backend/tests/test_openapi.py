@@ -79,6 +79,19 @@ async def test_openapi_documents_verification_rate_limiting() -> None:
     assert verification_responses["429"]["description"] == "Too many verification attempts"
 
 
+def test_openapi_documents_google_account_link_challenge() -> None:
+    schema = create_app().openapi()
+
+    conflict = schema["paths"]["/api/v1/auth/google/callback"]["get"]["responses"]["409"]
+    assert conflict["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/OIDCLinkRequiredResponse"
+    }
+    assert schema["components"]["schemas"]["OIDCLinkRequiredResponse"]["required"] == [
+        "detail",
+        "link_challenge",
+    ]
+
+
 def test_openapi_documents_session_authentication_failures() -> None:
     schema = create_app().openapi()
 

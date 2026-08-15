@@ -132,6 +132,10 @@ class OIDCStartResponse(BaseModel):
     authorization_url: str
 
 
+class OIDCLinkRequiredResponse(AuthenticationError):
+    link_challenge: str
+
+
 class OIDCLinkRequest(BaseModel):
     challenge: Annotated[str, Field(min_length=20, max_length=512)]
     password: Annotated[str, Field(min_length=1, max_length=128)]
@@ -209,12 +213,13 @@ def _oidc_error_response(status_code: int, detail: str) -> JSONResponse:
 
 
 def _oidc_link_required_response(challenge: str) -> JSONResponse:
+    payload = OIDCLinkRequiredResponse(
+        detail="Password-confirmed account linking required",
+        link_challenge=challenge,
+    )
     response = JSONResponse(
         status_code=409,
-        content={
-            "detail": "Password-confirmed account linking required",
-            "link_challenge": challenge,
-        },
+        content=payload.model_dump(),
         headers={"Cache-Control": "no-store"},
     )
     response.delete_cookie("__Host-studyflow_oidc_state", path="/", secure=True, httponly=True)
@@ -292,7 +297,7 @@ async def start_google_oidc(
     response_model=LoginResponse,
     responses={
         status.HTTP_400_BAD_REQUEST: {"model": AuthenticationError},
-        status.HTTP_409_CONFLICT: {"model": AuthenticationError},
+        status.HTTP_409_CONFLICT: {"model": OIDCLinkRequiredResponse},
         status.HTTP_503_SERVICE_UNAVAILABLE: {"model": AuthenticationError},
     },
 )
