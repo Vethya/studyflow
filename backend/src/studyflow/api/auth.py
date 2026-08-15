@@ -528,7 +528,7 @@ async def logout(
     if (
         csrf_token is None
         or csrf_cookie is None
-        or not hmac.compare_digest(csrf_token, csrf_cookie)
+        or not hmac.compare_digest(csrf_token.encode(), csrf_cookie.encode())
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
     try:

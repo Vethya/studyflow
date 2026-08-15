@@ -174,3 +174,20 @@ async def test_logout_clears_cookies_when_server_revocation_raises() -> None:
         )
     assert response.status_code == 204
     assert len(response.headers.get_list("set-cookie")) == 2
+
+
+@pytest.mark.anyio
+async def test_logout_rejects_non_ascii_csrf_without_server_error() -> None:
+    authentication = SessionAuthenticationStub(None)
+    transport = ASGITransport(app=create_app(session_authentication=authentication))
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        cookies={
+            "studyflow_session": "opaque-session-token",
+            "studyflow_csrf": "csrf-request-token",
+        },
+    ) as client:
+        response = await client.post("/api/v1/auth/logout", headers=[(b"X-CSRF-Token", b"\xff")])
+    assert response.status_code == 403
+    assert authentication.revoke_calls == []
