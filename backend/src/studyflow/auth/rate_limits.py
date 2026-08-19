@@ -17,6 +17,10 @@ class RegistrationRateLimitExceeded(RuntimeError):
     """Raised when an IP address or email exceeds the registration window."""
 
 
+class RegistrationCompletionRateLimitExceeded(RuntimeError):
+    """Raised when registration completion exceeds its window."""
+
+
 class EmailVerificationRateLimitExceeded(RuntimeError):
     """Raised when an IP address or token exceeds the verification window."""
 
@@ -51,6 +55,10 @@ class OIDCLinkRateLimitExceeded(RuntimeError):
 
 class RegistrationRateLimit(Protocol):
     async def check(self, client_ip: str, email: str) -> None: ...
+
+
+class RegistrationCompletionRateLimit(Protocol):
+    async def check(self, client_ip: str, signup_token: str) -> None: ...
 
 
 class EmailVerificationRateLimit(Protocol):
@@ -165,6 +173,15 @@ class DatabaseRegistrationRateLimiter(_DatabaseRateLimiter):
             "registration",
             (f"ip:{client_ip}", f"email:{canonicalize_email(email)}"),
             RegistrationRateLimitExceeded,
+        )
+
+
+class DatabaseRegistrationCompletionRateLimiter(_DatabaseRateLimiter):
+    async def check(self, client_ip: str, signup_token: str) -> None:
+        await self._check(
+            "registration_completion",
+            (f"ip:{client_ip}", f"signup:{signup_token}"),
+            RegistrationCompletionRateLimitExceeded,
         )
 
 

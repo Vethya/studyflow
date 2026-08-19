@@ -46,6 +46,8 @@ from studyflow.auth.rate_limits import (
     PasswordResetAttemptRateLimitExceeded,
     PasswordResetRequestRateLimit,
     PasswordResetRequestRateLimitExceeded,
+    RegistrationCompletionRateLimit,
+    RegistrationCompletionRateLimitExceeded,
     RegistrationRateLimit,
     RegistrationRateLimitExceeded,
     VerificationResendRateLimit,
@@ -157,6 +159,13 @@ def get_registration(request: Request) -> Registration:
 
 def get_registration_rate_limit(request: Request) -> RegistrationRateLimit:
     return cast(RegistrationRateLimit, request.app.state.registration_rate_limiter)
+
+
+def get_registration_completion_rate_limit(request: Request) -> RegistrationCompletionRateLimit:
+    return cast(
+        RegistrationCompletionRateLimit,
+        request.app.state.registration_completion_rate_limiter,
+    )
 
 
 def get_email_verification(request: Request) -> EmailVerification:
@@ -628,6 +637,10 @@ async def register(
     response_model=AuthenticationMessage,
     responses={
         status.HTTP_400_BAD_REQUEST: {"model": AuthenticationError},
+        status.HTTP_429_TOO_MANY_REQUESTS: {
+            "model": AuthenticationError,
+            "description": "Too many registration completion attempts",
+        },
         status.HTTP_503_SERVICE_UNAVAILABLE: {
             "model": AuthenticationError,
             "description": "Password safety service is unavailable",
@@ -636,15 +649,28 @@ async def register(
 )
 async def complete_registration(
     payload: RegistrationCompletionRequest,
+    http_request: Request,
     registration: Annotated[Registration, Depends(get_registration)],
+    rate_limit: Annotated[
+        RegistrationCompletionRateLimit,
+        Depends(get_registration_completion_rate_limit),
+    ],
 ) -> AuthenticationMessage:
     try:
+        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        await rate_limit.check(client_ip, payload.signup_token)
         completed = await registration.complete(
             payload.signup_token,
             payload.name,
             payload.password,
             payload.timezone,
         )
+    except RegistrationCompletionRateLimitExceeded as error:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many registration completion attempts",
+            headers={"Retry-After": "900"},
+        ) from error
     except PasswordPolicyError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

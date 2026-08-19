@@ -6,7 +6,10 @@ from httpx import ASGITransport, AsyncClient, ConnectError, Request
 
 from studyflow.app import create_app
 from studyflow.auth.passwords import BreachedPasswordError
-from studyflow.auth.rate_limits import RegistrationRateLimitExceeded
+from studyflow.auth.rate_limits import (
+    RegistrationCompletionRateLimitExceeded,
+    RegistrationRateLimitExceeded,
+)
 from studyflow.auth.registration import DeferredTasks, RegistrationCommand
 
 
@@ -34,10 +37,25 @@ class RegistrationRateLimitStub:
             raise self.error
 
 
-def app(registration: RegistrationStub, rate_limit: RegistrationRateLimitStub | None = None) -> Any:
+@dataclass
+class RegistrationCompletionRateLimitStub:
+    error: Exception | None = None
+
+    async def check(self, client_ip: str, signup_token: str) -> None:
+        if self.error is not None:
+            raise self.error
+
+
+def app(
+    registration: RegistrationStub,
+    rate_limit: RegistrationRateLimitStub | None = None,
+    completion_rate_limit: RegistrationCompletionRateLimitStub | None = None,
+) -> Any:
     return create_app(
         registration=registration,
         registration_rate_limiter=rate_limit or RegistrationRateLimitStub(),
+        registration_completion_rate_limiter=completion_rate_limit
+        or RegistrationCompletionRateLimitStub(),
     )
 
 
@@ -119,6 +137,28 @@ async def test_completion_rejects_invalid_signup_token() -> None:
             },
         )
     assert response.status_code == 400
+
+
+@pytest.mark.anyio
+async def test_completion_rate_limit_runs_before_service() -> None:
+    registration = RegistrationStub()
+    completion_rate_limit = RegistrationCompletionRateLimitStub(
+        error=RegistrationCompletionRateLimitExceeded()
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app(registration, completion_rate_limit=completion_rate_limit)),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/api/v1/auth/complete-registration",
+            json={
+                "signup_token": "short-lived-verified-signup-token",
+                "name": "Student",
+                "password": "correct horse battery staple",
+                "timezone": "UTC",
+            },
+        )
+    assert response.status_code == 429
 
 
 @pytest.mark.anyio

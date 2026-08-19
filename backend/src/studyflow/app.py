@@ -39,6 +39,7 @@ from studyflow.auth.rate_limits import (
     DatabaseOIDCStartRateLimiter,
     DatabasePasswordResetAttemptRateLimiter,
     DatabasePasswordResetRequestRateLimiter,
+    DatabaseRegistrationCompletionRateLimiter,
     DatabaseRegistrationRateLimiter,
     DatabaseVerificationResendRateLimiter,
     EmailVerificationRateLimit,
@@ -47,6 +48,7 @@ from studyflow.auth.rate_limits import (
     OIDCStartRateLimit,
     PasswordResetAttemptRateLimit,
     PasswordResetRequestRateLimit,
+    RegistrationCompletionRateLimit,
     RegistrationRateLimit,
     VerificationResendRateLimit,
 )
@@ -108,6 +110,7 @@ def create_app(
     database: DatabaseRuntime | None = None,
     registration: Registration | None = None,
     registration_rate_limiter: RegistrationRateLimit | None = None,
+    registration_completion_rate_limiter: RegistrationCompletionRateLimit | None = None,
     email_verification: EmailVerification | None = None,
     email_verification_rate_limiter: EmailVerificationRateLimit | None = None,
     login: Login | None = None,
@@ -242,6 +245,10 @@ def create_app(
     application.state.registration = resolved_registration
     application.state.registration_rate_limiter = registration_rate_limiter or (
         DatabaseRegistrationRateLimiter(transactions)
+    )
+    application.state.registration_completion_rate_limiter = (
+        registration_completion_rate_limiter
+        or DatabaseRegistrationCompletionRateLimiter(transactions)
     )
     application.state.email_verification = email_verification or EmailVerificationService(
         SqlAlchemyEmailVerificationRepository(transactions)
