@@ -45,7 +45,9 @@ async def test_registration_rate_limit_bounds_ip_and_email_attempts_per_window()
 
 
 @pytest.mark.anyio
-async def test_registration_completion_rate_limit_bounds_ip_and_signup_token() -> None:
+async def test_registration_completion_rate_limit_bounds_ip_and_signup_token_across_workers() -> (
+    None
+):
     database = Database("sqlite+aiosqlite:///:memory:")
     await database.start()
     try:
@@ -53,11 +55,18 @@ async def test_registration_completion_rate_limit_bounds_ip_and_signup_token() -
             await session.run_sync(
                 lambda sync_session: Base.metadata.create_all(sync_session.connection())
             )
-        limiter = DatabaseRegistrationCompletionRateLimiter(database)
+        first_worker = DatabaseRegistrationCompletionRateLimiter(database)
+        second_worker = DatabaseRegistrationCompletionRateLimiter(database)
+
         for attempt in range(5):
-            await limiter.check(f"203.0.113.{attempt}", "signup-token")
+            await first_worker.check("203.0.113.10", f"signup-token-{attempt}")
         with pytest.raises(RegistrationCompletionRateLimitExceeded):
-            await limiter.check("203.0.113.99", "signup-token")
+            await second_worker.check("203.0.113.10", "signup-token-5")
+
+        for attempt in range(5):
+            await first_worker.check(f"198.51.100.{attempt}", "shared-signup-token")
+        with pytest.raises(RegistrationCompletionRateLimitExceeded):
+            await second_worker.check("198.51.100.99", "shared-signup-token")
     finally:
         await database.stop()
 
