@@ -221,6 +221,50 @@ async def test_migrated_pending_account_is_completed_in_place() -> None:
 
 
 @pytest.mark.anyio
+async def test_completion_rejects_an_account_that_claimed_the_registration_email() -> None:
+    db = await database()
+    now = datetime.now(UTC)
+    repository = SqlAlchemyRegistrationRepository(db)
+    try:
+        async with db.transaction() as session:
+            session.add(
+                AuthenticationRegistration(
+                    email="student@example.com",
+                    verification_token_hash=hash_verification_token("email-token"),
+                    verification_expires_at=now + timedelta(hours=1),
+                    verified_at=now,
+                    signup_token_hash=hash_verification_token("signup-token"),
+                    signup_expires_at=now + timedelta(minutes=30),
+                )
+            )
+            session.add(
+                StudentAccount(
+                    email="student@example.com",
+                    name="Google Student",
+                    password_hash=None,
+                    timezone="UTC",
+                    email_verified_at=now,
+                )
+            )
+        assert not await repository.complete(
+            RegistrationCompletion(
+                signup_token_hash=hash_verification_token("signup-token"),
+                name="Password Student",
+                password_hash="$argon2id$new",
+                timezone="UTC",
+            ),
+            now,
+        )
+        async with db.transaction() as session:
+            account = (await session.scalars(select(StudentAccount))).one()
+            assert account.name == "Google Student"
+            assert account.password_hash is None
+            assert list(await session.scalars(select(AuthenticationRegistration))) == []
+    finally:
+        await db.stop()
+
+
+@pytest.mark.anyio
 async def test_concurrent_registration_for_same_email_does_not_fail(
     tmp_path: Path,
 ) -> None:

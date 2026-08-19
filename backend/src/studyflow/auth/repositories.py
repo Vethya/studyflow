@@ -161,20 +161,39 @@ class SqlAlchemyRegistrationRepository:
             )
             if registration is None:
                 return False
+            account = await session.scalar(
+                select(StudentAccount)
+                .where(StudentAccount.email == registration.email)
+                .with_for_update()
+            )
             if account is not None and account.email_verified_at is not None:
                 await session.delete(registration)
                 return False
             if account is None:
-                session.add(
-                    StudentAccount(
-                        email=registration.email,
-                        name=completion.name,
-                        password_hash=completion.password_hash,
-                        timezone=completion.timezone,
-                        email_verified_at=now,
+                try:
+                    async with session.begin_nested():
+                        session.add(
+                            StudentAccount(
+                                email=registration.email,
+                                name=completion.name,
+                                password_hash=completion.password_hash,
+                                timezone=completion.timezone,
+                                email_verified_at=now,
+                            )
+                        )
+                        await session.flush()
+                except IntegrityError:
+                    account = await session.scalar(
+                        select(StudentAccount)
+                        .where(StudentAccount.email == registration.email)
+                        .with_for_update()
                     )
-                )
-            else:
+                    if account is None:
+                        raise
+                    if account.email_verified_at is not None:
+                        await session.delete(registration)
+                        return False
+            if account is not None:
                 account.name = completion.name
                 account.password_hash = completion.password_hash
                 account.timezone = completion.timezone
