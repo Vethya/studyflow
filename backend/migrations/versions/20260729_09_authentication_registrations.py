@@ -61,6 +61,43 @@ def upgrade() -> None:
         "authentication_registrations",
         ["signup_expires_at"],
     )
+    op.execute(
+        """
+        INSERT INTO authentication_registrations (
+            id, email, verification_token_hash, verification_expires_at
+        )
+        SELECT id, email, token_hash, expires_at
+        FROM (
+            SELECT
+                account.id,
+                account.email,
+                token.token_hash,
+                token.expires_at,
+                row_number() OVER (
+                    PARTITION BY account.id ORDER BY token.created_at DESC
+                ) AS token_rank
+            FROM student_accounts AS account
+            JOIN authentication_email_tokens AS token
+                ON token.account_id = account.id
+            WHERE account.email_verified_at IS NULL
+              AND token.purpose = 'email_verification'
+              AND token.consumed_at IS NULL
+              AND token.expires_at > CURRENT_TIMESTAMP
+        ) AS pending
+        WHERE token_rank = 1
+        """
+    )
+    op.execute(
+        """
+        UPDATE authentication_email_tokens
+        SET consumed_at = CURRENT_TIMESTAMP
+        WHERE purpose = 'email_verification'
+          AND consumed_at IS NULL
+          AND account_id IN (
+              SELECT id FROM student_accounts WHERE email_verified_at IS NULL
+          )
+        """
+    )
 
 
 def downgrade() -> None:

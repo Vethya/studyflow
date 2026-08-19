@@ -161,6 +161,15 @@ def test_account_authentication_schema_is_in_the_upgrade_path() -> None:
         assert f"CONSTRAINT {constraint_name} CHECK" in result.stdout
 
 
+def test_registration_migration_preserves_legacy_pending_accounts() -> None:
+    result = run_alembic("upgrade", "head", "--sql")
+
+    assert result.returncode == 0, result.stderr
+    assert "INSERT INTO authentication_registrations" in result.stdout
+    assert "UPDATE authentication_email_tokens" in result.stdout
+    assert "row_number() OVER" in result.stdout
+
+
 def test_online_environment_runs_migrations_and_disposes_engine(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

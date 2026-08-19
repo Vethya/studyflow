@@ -173,6 +173,54 @@ async def test_existing_account_is_not_replaced_or_given_a_challenge() -> None:
 
 
 @pytest.mark.anyio
+async def test_migrated_pending_account_is_completed_in_place() -> None:
+    db = await database()
+    now = datetime.now(UTC)
+    account_id = None
+    repository = SqlAlchemyRegistrationRepository(db)
+    try:
+        async with db.transaction() as session:
+            account = StudentAccount(
+                email="student@example.com",
+                name="Legacy",
+                password_hash="$argon2id$legacy",
+                timezone="UTC",
+            )
+            session.add(account)
+            await session.flush()
+            account_id = account.id
+            session.add(
+                AuthenticationRegistration(
+                    email=account.email,
+                    verification_token_hash=hash_verification_token("email-token"),
+                    verification_expires_at=now + timedelta(hours=1),
+                    verified_at=now,
+                    signup_token_hash=hash_verification_token("signup-token"),
+                    signup_expires_at=now + timedelta(minutes=30),
+                )
+            )
+        assert await repository.complete(
+            RegistrationCompletion(
+                signup_token_hash=hash_verification_token("signup-token"),
+                name="Updated Student",
+                password_hash="$argon2id$new",
+                timezone="Asia/Phnom_Penh",
+            ),
+            now,
+        )
+        async with db.transaction() as session:
+            account = await session.get(StudentAccount, account_id)
+            assert account is not None
+            assert account.name == "Updated Student"
+            assert account.password_hash == "$argon2id$new"
+            assert account.timezone == "Asia/Phnom_Penh"
+            assert account.email_verified_at is not None
+            assert list(await session.scalars(select(AuthenticationRegistration))) == []
+    finally:
+        await db.stop()
+
+
+@pytest.mark.anyio
 async def test_concurrent_registration_for_same_email_does_not_fail(
     tmp_path: Path,
 ) -> None:

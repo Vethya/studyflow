@@ -44,9 +44,11 @@ class SqlAlchemyRegistrationRepository:
         try:
             async with self._database.transaction() as session:
                 existing_account = await session.scalar(
-                    select(StudentAccount.id).where(StudentAccount.email == pending.email)
+                    select(StudentAccount)
+                    .where(StudentAccount.email == pending.email)
+                    .with_for_update()
                 )
-                if existing_account is not None:
+                if existing_account is not None and existing_account.email_verified_at is not None:
                     return False
                 registration = await session.scalar(
                     select(AuthenticationRegistration)
@@ -66,9 +68,11 @@ class SqlAlchemyRegistrationRepository:
         except IntegrityError:
             async with self._database.transaction() as session:
                 existing_account = await session.scalar(
-                    select(StudentAccount.id).where(StudentAccount.email == pending.email)
+                    select(StudentAccount)
+                    .where(StudentAccount.email == pending.email)
+                    .with_for_update()
                 )
-                if existing_account is not None:
+                if existing_account is not None and existing_account.email_verified_at is not None:
                     return False
                 registration = await session.scalar(
                     select(AuthenticationRegistration)
@@ -126,21 +130,29 @@ class SqlAlchemyRegistrationRepository:
             )
             if registration is None:
                 return False
-            account_exists = await session.scalar(
-                select(StudentAccount.id).where(StudentAccount.email == registration.email)
+            account = await session.scalar(
+                select(StudentAccount)
+                .where(StudentAccount.email == registration.email)
+                .with_for_update()
             )
-            if account_exists is not None:
+            if account is not None and account.email_verified_at is not None:
                 await session.delete(registration)
                 return False
-            session.add(
-                StudentAccount(
-                    email=registration.email,
-                    name=completion.name,
-                    password_hash=completion.password_hash,
-                    timezone=completion.timezone,
-                    email_verified_at=now,
+            if account is None:
+                session.add(
+                    StudentAccount(
+                        email=registration.email,
+                        name=completion.name,
+                        password_hash=completion.password_hash,
+                        timezone=completion.timezone,
+                        email_verified_at=now,
+                    )
                 )
-            )
+            else:
+                account.name = completion.name
+                account.password_hash = completion.password_hash
+                account.timezone = completion.timezone
+                account.email_verified_at = now
             await session.delete(registration)
         return True
 
