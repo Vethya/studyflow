@@ -64,15 +64,16 @@ def upgrade() -> None:
     op.execute(
         """
         INSERT INTO authentication_registrations (
-            id, email, verification_token_hash, verification_expires_at
+            id, email, verification_token_hash, verification_expires_at, created_at
         )
-        SELECT id, email, token_hash, expires_at
+        SELECT id, email, token_hash, expires_at, token_created_at
         FROM (
             SELECT
                 account.id,
                 account.email,
                 token.token_hash,
                 token.expires_at,
+                token.created_at AS token_created_at,
                 row_number() OVER (
                     PARTITION BY account.id ORDER BY token.created_at DESC
                 ) AS token_rank
@@ -82,7 +83,6 @@ def upgrade() -> None:
             WHERE account.email_verified_at IS NULL
               AND token.purpose = 'email_verification'
               AND token.consumed_at IS NULL
-              AND token.expires_at > CURRENT_TIMESTAMP
         ) AS pending
         WHERE token_rank = 1
         """
