@@ -5,7 +5,12 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from studyflow.app import create_app
-from studyflow.auth.login import InvalidCredentialsError, LoginCommand, LoginResult
+from studyflow.auth.login import (
+    EmailVerificationRequiredError,
+    InvalidCredentialsError,
+    LoginCommand,
+    LoginResult,
+)
 from studyflow.auth.rate_limits import LoginRateLimitExceeded
 
 
@@ -30,10 +35,25 @@ class FailingLoginStub:
 @dataclass
 class LoginRateLimitStub:
     error: Exception | None = None
+    checks: list[tuple[str, str]] = field(default_factory=list)
+    failures: list[str] = field(default_factory=list)
+    resets: list[str] = field(default_factory=list)
+    releases: list[str] = field(default_factory=list)
 
-    async def check(self, client_ip: str, email: str) -> None:
+    async def check(self, client_ip: str, email: str) -> str:
+        self.checks.append((client_ip, email))
         if self.error is not None:
             raise self.error
+        return "login_inflight:test"
+
+    async def record_failure(self, email: str, reservation_id: str) -> None:
+        self.failures.append(email)
+
+    async def reset_failures(self, email: str, reservation_id: str) -> None:
+        self.resets.append(email)
+
+    async def release(self, email: str, reservation_id: str) -> None:
+        self.releases.append(email)
 
 
 @pytest.mark.anyio
@@ -48,7 +68,8 @@ async def test_email_login_sets_the_host_session_cookie_and_returns_csrf_token()
             csrf_token="csrf-request-token",
         )
     )
-    transport = ASGITransport(app=create_app(login=login, login_rate_limiter=LoginRateLimitStub()))
+    rate_limit = LoginRateLimitStub()
+    transport = ASGITransport(app=create_app(login=login, login_rate_limiter=rate_limit))
 
     async with AsyncClient(transport=transport, base_url="https://test") as client:
         response = await client.post(
@@ -80,14 +101,17 @@ async def test_email_login_sets_the_host_session_cookie_and_returns_csrf_token()
     assert login.commands == [
         LoginCommand(email="Student@example.com", password="correct password")
     ]
+    assert rate_limit.failures == []
+    assert rate_limit.resets == ["Student@example.com"]
 
 
 @pytest.mark.anyio
 async def test_email_login_returns_a_non_enumerating_invalid_credentials_error() -> None:
+    rate_limit = LoginRateLimitStub()
     transport = ASGITransport(
         app=create_app(
             login=FailingLoginStub(InvalidCredentialsError()),
-            login_rate_limiter=LoginRateLimitStub(),
+            login_rate_limiter=rate_limit,
         )
     )
 
@@ -100,6 +124,8 @@ async def test_email_login_returns_a_non_enumerating_invalid_credentials_error()
     assert response.status_code == 401
     assert response.json() == {"detail": "Invalid email or password"}
     assert "set-cookie" not in response.headers
+    assert rate_limit.failures == ["unknown@example.com"]
+    assert rate_limit.resets == []
 
 
 @pytest.mark.anyio
@@ -122,3 +148,57 @@ async def test_email_login_rate_limit_runs_before_password_verification() -> Non
     assert response.status_code == 429
     assert response.headers["Retry-After"] == "900"
     assert login.commands == []
+
+
+@pytest.mark.anyio
+async def test_valid_unverified_credentials_reset_failures() -> None:
+    rate_limit = LoginRateLimitStub()
+    transport = ASGITransport(
+        app=create_app(
+            login=FailingLoginStub(EmailVerificationRequiredError()),
+            login_rate_limiter=rate_limit,
+        )
+    )
+    async with AsyncClient(transport=transport, base_url="https://test") as client:
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "student@example.com", "password": "correct password"},
+        )
+    assert response.status_code == 403
+    assert rate_limit.resets == ["student@example.com"]
+
+
+@pytest.mark.anyio
+async def test_unexpected_login_error_releases_inflight_reservation() -> None:
+    rate_limit = LoginRateLimitStub()
+    transport = ASGITransport(
+        app=create_app(
+            login=FailingLoginStub(RuntimeError("unexpected")),
+            login_rate_limiter=rate_limit,
+        )
+    )
+    with pytest.raises(RuntimeError, match="unexpected"):
+        async with AsyncClient(transport=transport, base_url="https://test") as client:
+            await client.post(
+                "/api/v1/auth/login",
+                json={"email": "student@example.com", "password": "password"},
+            )
+    assert rate_limit.releases == ["student@example.com"]
+
+
+@pytest.mark.anyio
+async def test_limiter_error_before_reservation_does_not_release_another_slot() -> None:
+    rate_limit = LoginRateLimitStub(error=RuntimeError("limiter unavailable"))
+    transport = ASGITransport(
+        app=create_app(
+            login=FailingLoginStub(AssertionError("login must not run")),
+            login_rate_limiter=rate_limit,
+        )
+    )
+    with pytest.raises(RuntimeError, match="limiter unavailable"):
+        async with AsyncClient(transport=transport, base_url="https://test") as client:
+            await client.post(
+                "/api/v1/auth/login",
+                json={"email": "student@example.com", "password": "password"},
+            )
+    assert rate_limit.releases == []

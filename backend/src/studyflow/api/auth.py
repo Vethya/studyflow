@@ -564,9 +564,10 @@ async def login_with_email(
     login: Annotated[Login, Depends(get_login)],
     rate_limit: Annotated[LoginRateLimit, Depends(get_login_rate_limit)],
 ) -> LoginResponse:
+    reservation_id: str | None = None
     try:
         client_ip = http_request.client.host if http_request.client is not None else "unknown"
-        await rate_limit.check(client_ip, str(payload.email))
+        reservation_id = await rate_limit.check(client_ip, str(payload.email))
         result = await login.login(LoginCommand(email=payload.email, password=payload.password))
     except LoginRateLimitExceeded as error:
         raise HTTPException(
@@ -575,15 +576,35 @@ async def login_with_email(
             headers={"Retry-After": "900"},
         ) from error
     except InvalidCredentialsError as error:
+        try:
+            if reservation_id is None:
+                raise RuntimeError("Login reservation was not created")
+            await rate_limit.record_failure(str(payload.email), reservation_id)
+        except LoginRateLimitExceeded as rate_limit_error:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many login attempts",
+                headers={"Retry-After": "900"},
+            ) from rate_limit_error
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         ) from error
     except EmailVerificationRequiredError as error:
+        if reservation_id is None:
+            raise RuntimeError("Login reservation was not created") from error
+        await rate_limit.reset_failures(str(payload.email), reservation_id)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Email verification required",
         ) from error
+    except Exception:
+        if reservation_id is not None:
+            await rate_limit.release(str(payload.email), reservation_id)
+        raise
+    if reservation_id is None:
+        raise RuntimeError("Login reservation was not created")
+    await rate_limit.reset_failures(str(payload.email), reservation_id)
     _set_authentication_cookies(response, result.session_token, result.csrf_token)
     return LoginResponse(
         account=AuthenticatedAccount(
