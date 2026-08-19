@@ -55,6 +55,13 @@ class SqlAlchemyRegistrationRepository:
                     .where(AuthenticationRegistration.email == pending.email)
                     .with_for_update()
                 )
+                existing_account = await session.scalar(
+                    select(StudentAccount)
+                    .where(StudentAccount.email == pending.email)
+                    .with_for_update()
+                )
+                if existing_account is not None and existing_account.email_verified_at is not None:
+                    return False
                 if registration is None:
                     session.add(
                         AuthenticationRegistration(
@@ -79,6 +86,13 @@ class SqlAlchemyRegistrationRepository:
                     .where(AuthenticationRegistration.email == pending.email)
                     .with_for_update()
                 )
+                existing_account = await session.scalar(
+                    select(StudentAccount)
+                    .where(StudentAccount.email == pending.email)
+                    .with_for_update()
+                )
+                if existing_account is not None and existing_account.email_verified_at is not None:
+                    return False
                 if registration is None:
                     raise
                 if not self._rotate_pending(registration, pending):
@@ -119,9 +133,26 @@ class SqlAlchemyRegistrationRepository:
 
     async def complete(self, completion: RegistrationCompletion, now: datetime) -> bool:
         async with self._database.transaction() as session:
+            candidate = (
+                await session.execute(
+                    select(AuthenticationRegistration.id, AuthenticationRegistration.email).where(
+                        AuthenticationRegistration.signup_token_hash
+                        == completion.signup_token_hash,
+                        AuthenticationRegistration.signup_expires_at > now,
+                        AuthenticationRegistration.verified_at.is_not(None),
+                    )
+                )
+            ).one_or_none()
+            if candidate is None:
+                return False
+            registration_id, email = candidate
+            account = await session.scalar(
+                select(StudentAccount).where(StudentAccount.email == email).with_for_update()
+            )
             registration = await session.scalar(
                 select(AuthenticationRegistration)
                 .where(
+                    AuthenticationRegistration.id == registration_id,
                     AuthenticationRegistration.signup_token_hash == completion.signup_token_hash,
                     AuthenticationRegistration.signup_expires_at > now,
                     AuthenticationRegistration.verified_at.is_not(None),
@@ -130,11 +161,6 @@ class SqlAlchemyRegistrationRepository:
             )
             if registration is None:
                 return False
-            account = await session.scalar(
-                select(StudentAccount)
-                .where(StudentAccount.email == registration.email)
-                .with_for_update()
-            )
             if account is not None and account.email_verified_at is not None:
                 await session.delete(registration)
                 return False
