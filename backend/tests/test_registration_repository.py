@@ -209,12 +209,12 @@ async def test_migrated_pending_account_is_completed_in_place() -> None:
             now,
         )
         async with db.transaction() as session:
-            account = await session.get(StudentAccount, account_id)
-            assert account is not None
-            assert account.name == "Updated Student"
-            assert account.password_hash == "$argon2id$new"
-            assert account.timezone == "Asia/Phnom_Penh"
-            assert account.email_verified_at is not None
+            stored_account = await session.get(StudentAccount, account_id)
+            assert stored_account is not None
+            assert stored_account.name == "Updated Student"
+            assert stored_account.password_hash == "$argon2id$new"
+            assert stored_account.timezone == "Asia/Phnom_Penh"
+            assert stored_account.email_verified_at is not None
             assert list(await session.scalars(select(AuthenticationRegistration))) == []
     finally:
         await db.stop()
