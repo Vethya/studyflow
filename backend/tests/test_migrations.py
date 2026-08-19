@@ -166,7 +166,7 @@ def test_registration_migration_preserves_legacy_pending_accounts() -> None:
 
     assert result.returncode == 0, result.stderr
     assert "INSERT INTO authentication_registrations" in result.stdout
-    assert "UPDATE authentication_email_tokens" in result.stdout
+    assert "UPDATE authentication_email_tokens" not in result.stdout
     assert "row_number() OVER" in result.stdout
     assert "verification_expires_at, created_at" in result.stdout
     assert "token.expires_at > CURRENT_TIMESTAMP" not in result.stdout

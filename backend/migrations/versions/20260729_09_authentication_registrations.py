@@ -87,17 +87,6 @@ def upgrade() -> None:
         WHERE token_rank = 1
         """
     )
-    op.execute(
-        """
-        UPDATE authentication_email_tokens
-        SET consumed_at = CURRENT_TIMESTAMP
-        WHERE purpose = 'email_verification'
-          AND consumed_at IS NULL
-          AND account_id IN (
-              SELECT id FROM student_accounts WHERE email_verified_at IS NULL
-          )
-        """
-    )
 
 
 def downgrade() -> None:
