@@ -10,6 +10,7 @@ def test_authentication_tables_are_registered_with_application_metadata() -> Non
         "authentication_sessions",
         "authentication_email_tokens",
         "authentication_rate_limits",
+        "authentication_registrations",
         "authentication_oidc_states",
     }.issubset(Base.metadata.tables)
 

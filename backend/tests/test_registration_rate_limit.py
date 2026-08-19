@@ -7,10 +7,12 @@ from studyflow.auth.rate_limits import (
     DatabaseEmailVerificationRateLimiter,
     DatabaseOIDCLinkRateLimiter,
     DatabaseOIDCStartRateLimiter,
+    DatabaseRegistrationCompletionRateLimiter,
     DatabaseRegistrationRateLimiter,
     EmailVerificationRateLimitExceeded,
     OIDCLinkRateLimitExceeded,
     OIDCStartRateLimitExceeded,
+    RegistrationCompletionRateLimitExceeded,
     RegistrationRateLimitExceeded,
 )
 from studyflow.database import Base, Database
@@ -38,6 +40,33 @@ async def test_registration_rate_limit_bounds_ip_and_email_attempts_per_window()
 
         current_time += timedelta(seconds=900)
         await second_worker.check("203.0.113.10", "student@example.com")
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_registration_completion_rate_limit_bounds_ip_and_signup_token_across_workers() -> (
+    None
+):
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        first_worker = DatabaseRegistrationCompletionRateLimiter(database)
+        second_worker = DatabaseRegistrationCompletionRateLimiter(database)
+
+        for attempt in range(5):
+            await first_worker.check("203.0.113.10", f"signup-token-{attempt}")
+        with pytest.raises(RegistrationCompletionRateLimitExceeded):
+            await second_worker.check("203.0.113.10", "signup-token-5")
+
+        for attempt in range(5):
+            await first_worker.check(f"198.51.100.{attempt}", "shared-signup-token")
+        with pytest.raises(RegistrationCompletionRateLimitExceeded):
+            await second_worker.check("198.51.100.99", "shared-signup-token")
     finally:
         await database.stop()
 
