@@ -12,7 +12,11 @@ class SessionRepositoryStub:
     sessions: list[PendingSession] = field(default_factory=list)
 
     async def create(
-        self, session: PendingSession, expected_password_hash: str | None = None
+        self,
+        session: PendingSession,
+        expected_password_hash: str | None = None,
+        *,
+        now: datetime,
     ) -> bool:
         self.sessions.append(session)
         return True
