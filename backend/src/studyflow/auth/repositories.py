@@ -140,22 +140,20 @@ class SqlAlchemySessionRepository:
         now: datetime,
     ) -> bool:
         async with self._database.transaction() as session:
+            account = await session.get(StudentAccount, pending.account_id, with_for_update=True)
+            if account is None:
+                return False
+            if expected_password_hash is not None and (
+                account.password_hash is None
+                or not hmac.compare_digest(account.password_hash, expected_password_hash)
+            ):
+                return False
             await session.execute(
                 delete(AuthenticationSession).where(
                     (AuthenticationSession.idle_expires_at <= now)
                     | (AuthenticationSession.absolute_expires_at <= now)
                 )
             )
-            if expected_password_hash is not None:
-                account = await session.get(
-                    StudentAccount, pending.account_id, with_for_update=True
-                )
-                if (
-                    account is None
-                    or account.password_hash is None
-                    or not hmac.compare_digest(account.password_hash, expected_password_hash)
-                ):
-                    return False
             session.add(
                 AuthenticationSession(
                     account_id=pending.account_id,

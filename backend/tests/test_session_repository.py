@@ -129,6 +129,57 @@ async def test_session_creation_prunes_idle_and_absolute_expirations() -> None:
 
 
 @pytest.mark.anyio
+async def test_session_creation_checks_account_before_pruning_expired_sessions() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    existing_account_id = uuid4()
+    now = datetime.now(UTC)
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            session.add(
+                StudentAccount(
+                    id=existing_account_id,
+                    email="student@example.com",
+                    name="Student",
+                    password_hash="$argon2id$hash",
+                    email_verified_at=now,
+                    timezone="UTC",
+                )
+            )
+            session.add(
+                AuthenticationSession(
+                    account_id=existing_account_id,
+                    token_hash="e" * 64,
+                    csrf_token_hash="1" * 64,
+                    created_at=now - timedelta(days=1),
+                    idle_expires_at=now - timedelta(seconds=1),
+                    absolute_expires_at=now + timedelta(days=1),
+                )
+            )
+
+        created = await SqlAlchemySessionRepository(database).create(
+            PendingSession(
+                account_id=uuid4(),
+                token_hash="n" * 64,
+                csrf_token_hash="2" * 64,
+                idle_expires_at=now + timedelta(hours=24),
+                absolute_expires_at=now + timedelta(days=7),
+            ),
+            now=now,
+        )
+
+        async with database.transaction() as session:
+            hashes = set(await session.scalars(select(AuthenticationSession.token_hash)))
+        assert created is False
+        assert hashes == {"e" * 64}
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
 async def test_session_authentication_refreshes_then_revokes_with_csrf() -> None:
     database = Database("sqlite+aiosqlite:///:memory:")
     await database.start()
