@@ -61,7 +61,7 @@ async def test_study_preferences_read_and_timezone_update_contract() -> None:
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="https://test",
-        cookies={"__Host-studyflow_session": "session-token"},
+        cookies={"studyflow_session": "session-token"},
     ) as client:
         current = await client.get("/api/v1/account/preferences")
         updated = await client.patch(
@@ -124,7 +124,7 @@ async def test_study_preferences_reject_invalid_time_rules(payload: dict[str, ob
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="https://test",
-        cookies={"__Host-studyflow_session": "session-token"},
+        cookies={"studyflow_session": "session-token"},
     ) as client:
         response = await client.patch(
             "/api/v1/account/preferences",
@@ -146,7 +146,7 @@ async def test_study_preferences_require_authentication_and_csrf() -> None:
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="https://test",
-        cookies={"__Host-studyflow_session": "session-token"},
+        cookies={"studyflow_session": "session-token"},
     ) as client:
         unauthenticated = await client.get("/api/v1/account/preferences")
         missing_csrf = await client.patch(

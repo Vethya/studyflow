@@ -6,7 +6,6 @@ import httpx
 from fastapi import (
     APIRouter,
     BackgroundTasks,
-    Cookie,
     Depends,
     Header,
     HTTPException,
@@ -18,6 +17,7 @@ from fastapi import (
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from starlette.responses import JSONResponse
 
+from studyflow.auth.cookies import CookiePolicy
 from studyflow.auth.login import (
     EmailVerificationRequiredError,
     InvalidCredentialsError,
@@ -200,38 +200,23 @@ def get_oidc_link_rate_limit(request: Request) -> OIDCLinkRateLimit:
     return cast(OIDCLinkRateLimit, request.app.state.oidc_link_rate_limiter)
 
 
-def _set_authentication_cookies(response: Response, session_token: str, csrf_token: str) -> None:
-    response.set_cookie(
-        key="__Host-studyflow_session",
-        value=session_token,
-        max_age=7 * 24 * 60 * 60,
-        path="/",
-        secure=True,
-        httponly=True,
-        samesite="strict",
-    )
-    response.set_cookie(
-        key="__Host-studyflow_csrf",
-        value=csrf_token,
-        max_age=7 * 24 * 60 * 60,
-        path="/",
-        secure=True,
-        httponly=False,
-        samesite="strict",
-    )
+def get_cookie_policy(request: Request) -> CookiePolicy:
+    return cast(CookiePolicy, request.app.state.cookie_policy)
 
 
-def _oidc_error_response(status_code: int, detail: str) -> JSONResponse:
+def _oidc_error_response(
+    status_code: int, detail: str, cookie_policy: CookiePolicy
+) -> JSONResponse:
     response = JSONResponse(
         status_code=status_code,
         content={"detail": detail},
         headers={"Cache-Control": "no-store"},
     )
-    response.delete_cookie("__Host-studyflow_oidc_state", path="/", secure=True, httponly=True)
+    cookie_policy.clear_oidc_state(response)
     return response
 
 
-def _oidc_link_required_response(challenge: str) -> JSONResponse:
+def _oidc_link_required_response(challenge: str, cookie_policy: CookiePolicy) -> JSONResponse:
     payload = OIDCLinkRequiredResponse(
         detail="Password-confirmed account linking required",
         link_challenge=challenge,
@@ -241,7 +226,7 @@ def _oidc_link_required_response(challenge: str) -> JSONResponse:
         content=payload.model_dump(),
         headers={"Cache-Control": "no-store"},
     )
-    response.delete_cookie("__Host-studyflow_oidc_state", path="/", secure=True, httponly=True)
+    cookie_policy.clear_oidc_state(response)
     return response
 
 
@@ -299,15 +284,7 @@ async def start_google_oidc(
         ) from error
     except OIDCNotConfiguredError as error:
         raise HTTPException(status_code=503, detail="Google sign-in is not configured") from error
-    response.set_cookie(
-        key="__Host-studyflow_oidc_state",
-        value=started.state,
-        max_age=10 * 60,
-        path="/",
-        secure=True,
-        httponly=True,
-        samesite="lax",
-    )
+    get_cookie_policy(http_request).set_oidc_state(response, started.state)
     return OIDCStartResponse(authorization_url=started.authorization_url)
 
 
@@ -322,25 +299,27 @@ async def start_google_oidc(
 )
 async def complete_google_oidc(
     response: Response,
+    http_request: Request,
     state: Annotated[str, Query(min_length=20, max_length=512)],
     oidc: Annotated[OIDCLogin, Depends(get_oidc_login)],
     code: Annotated[str | None, Query(min_length=1, max_length=2048)] = None,
     error: Annotated[str | None, Query(max_length=200)] = None,
-    state_cookie: Annotated[str | None, Cookie(alias="__Host-studyflow_oidc_state")] = None,
 ) -> LoginResponse | Response:
     response.headers["Cache-Control"] = "no-store"
+    cookie_policy = get_cookie_policy(http_request)
+    state_cookie = http_request.cookies.get(cookie_policy.oidc_state_name)
     try:
         if error is not None or code is None or state_cookie is None:
             raise InvalidOIDCResponseError
         result = await oidc.complete(code, state, state_cookie)
     except AccountLinkRequiredError as error:
-        return _oidc_link_required_response(error.challenge)
+        return _oidc_link_required_response(error.challenge, cookie_policy)
     except InvalidOIDCResponseError:
-        return _oidc_error_response(400, "Google sign-in could not be completed")
+        return _oidc_error_response(400, "Google sign-in could not be completed", cookie_policy)
     except OIDCNotConfiguredError:
-        return _oidc_error_response(503, "Google sign-in is not configured")
-    response.delete_cookie("__Host-studyflow_oidc_state", path="/", secure=True, httponly=True)
-    _set_authentication_cookies(response, result.session_token, result.csrf_token)
+        return _oidc_error_response(503, "Google sign-in is not configured", cookie_policy)
+    cookie_policy.clear_oidc_state(response)
+    cookie_policy.set_authentication(response, result.session_token, result.csrf_token)
     return LoginResponse(
         account=AuthenticatedAccount(
             id=str(result.account_id), email=result.email, name=result.name
@@ -378,7 +357,9 @@ async def confirm_google_account_link(
         ) from error
     except InvalidLinkChallengeError as error:
         raise HTTPException(status_code=401, detail="Invalid link challenge or password") from error
-    _set_authentication_cookies(response, result.session_token, result.csrf_token)
+    get_cookie_policy(http_request).set_authentication(
+        response, result.session_token, result.csrf_token
+    )
     return LoginResponse(
         account=AuthenticatedAccount(
             id=str(result.account_id), email=result.email, name=result.name
@@ -508,9 +489,10 @@ async def resend_verification(
     responses={status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError}},
 )
 async def get_current_session(
+    http_request: Request,
     authentication: Annotated[SessionAuthentication, Depends(get_session_authentication)],
-    session_token: Annotated[str | None, Cookie(alias="__Host-studyflow_session")] = None,
 ) -> CurrentSessionResponse:
+    session_token = http_request.cookies.get(get_cookie_policy(http_request).session_name)
     principal = (
         await authentication.authenticate(session_token) if session_token is not None else None
     )
@@ -530,22 +512,19 @@ async def get_current_session(
 )
 async def logout(
     response: Response,
+    http_request: Request,
     authentication: Annotated[SessionAuthentication, Depends(get_session_authentication)],
-    session_token: Annotated[str | None, Cookie(alias="__Host-studyflow_session")] = None,
     csrf_token: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
 ) -> None:
+    cookie_policy = get_cookie_policy(http_request)
+    session_token = http_request.cookies.get(cookie_policy.session_name)
     if (
         session_token is None
         or csrf_token is None
         or not await authentication.revoke(session_token, csrf_token)
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
-    response.delete_cookie(
-        "__Host-studyflow_session", path="/", secure=True, httponly=True, samesite="strict"
-    )
-    response.delete_cookie(
-        "__Host-studyflow_csrf", path="/", secure=True, httponly=False, samesite="strict"
-    )
+    cookie_policy.clear_authentication(response)
 
 
 @router.post(
@@ -605,7 +584,9 @@ async def login_with_email(
     if reservation_id is None:
         raise RuntimeError("Login reservation was not created")
     await rate_limit.reset_failures(str(payload.email), reservation_id)
-    _set_authentication_cookies(response, result.session_token, result.csrf_token)
+    get_cookie_policy(http_request).set_authentication(
+        response, result.session_token, result.csrf_token
+    )
     return LoginResponse(
         account=AuthenticatedAccount(
             id=str(result.account_id),

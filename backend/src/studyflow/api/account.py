@@ -4,12 +4,13 @@ from datetime import datetime
 from typing import Annotated, cast
 
 import httpx
-from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from studyflow.accounts.password import AccountPasswords, InvalidCurrentPasswordError
 from studyflow.accounts.preferences import AccountPreferences, StudyPreferences
 from studyflow.accounts.profile import AccountProfile, AccountProfiles
+from studyflow.auth.cookies import CookiePolicy
 from studyflow.auth.oidc import OIDCAccountLinking
 from studyflow.auth.passwords import PasswordPolicyError
 from studyflow.auth.rate_limits import (
@@ -79,6 +80,10 @@ def get_session_authentication(request: Request) -> SessionAuthentication:
     return cast(SessionAuthentication, request.app.state.session_authentication)
 
 
+def get_cookie_policy(request: Request) -> CookiePolicy:
+    return cast(CookiePolicy, request.app.state.cookie_policy)
+
+
 def get_account_profiles(request: Request) -> AccountProfiles:
     return cast(AccountProfiles, request.app.state.account_profiles)
 
@@ -103,9 +108,10 @@ def get_account_password_change_rate_limit(request: Request) -> AccountPasswordC
 
 
 async def require_session(
+    request: Request,
     authentication: Annotated[SessionAuthentication, Depends(get_session_authentication)],
-    session_token: Annotated[str | None, Cookie(alias="__Host-studyflow_session")] = None,
 ) -> SessionPrincipal:
+    session_token = request.cookies.get(get_cookie_policy(request).session_name)
     principal = (
         await authentication.authenticate(session_token) if session_token is not None else None
     )
@@ -115,10 +121,11 @@ async def require_session(
 
 
 async def require_csrf_session(
+    request: Request,
     authentication: Annotated[SessionAuthentication, Depends(get_session_authentication)],
-    session_token: Annotated[str | None, Cookie(alias="__Host-studyflow_session")] = None,
     csrf_token: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
 ) -> SessionPrincipal:
+    session_token = request.cookies.get(get_cookie_policy(request).session_name)
     if session_token is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     if csrf_token is None:
@@ -292,9 +299,4 @@ async def change_password(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Password safety service is unavailable",
         ) from error
-    response.delete_cookie(
-        "__Host-studyflow_session", path="/", secure=True, httponly=True, samesite="strict"
-    )
-    response.delete_cookie(
-        "__Host-studyflow_csrf", path="/", secure=True, httponly=False, samesite="strict"
-    )
+    get_cookie_policy(http_request).clear_authentication(response)
