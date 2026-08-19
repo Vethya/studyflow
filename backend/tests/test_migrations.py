@@ -160,6 +160,13 @@ def test_account_authentication_schema_is_in_the_upgrade_path() -> None:
         assert f"CONSTRAINT {constraint_name} CHECK" in result.stdout
 
 
+def test_task_title_migration_preserves_postgresql_whitespace_regex() -> None:
+    result = run_alembic("upgrade", "head", "--sql")
+
+    assert result.returncode == 0, result.stderr
+    assert "regexp_replace(title, E'[[:space:]]', '', 'g')" in result.stdout
+
+
 def test_online_environment_runs_migrations_and_disposes_engine(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

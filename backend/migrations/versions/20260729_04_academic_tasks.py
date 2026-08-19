@@ -61,8 +61,7 @@ def upgrade() -> None:
             name="planned_duration_source",
         ),
         sa.CheckConstraint(
-            "length(replace(replace(replace(replace(replace(replace("
-            "title, ' ', ''), '\t', ''), '\n', ''), '\r', ''), '\f', ''), '\v', '')) > 0",
+            "length(regexp_replace(title, E'[[:space:]]', '', 'g')) > 0",
             name="title_required",
         ),
         sa.CheckConstraint("course IS NULL OR length(course) <= 100", name="course_length"),
