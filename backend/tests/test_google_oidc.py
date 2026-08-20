@@ -10,6 +10,7 @@ from studyflow.auth.oidc import (
     InvalidOIDCResponseError,
     OIDCAccount,
     OIDCLoginService,
+    OIDCProviderUnavailableError,
     OIDCStateRecord,
 )
 from studyflow.auth.sessions import SessionCredentials
@@ -22,19 +23,28 @@ class RepositoryStub:
         self.state_hash = ""
         self.nonce_hash = ""
         self.link_required = link_required
+        self.consumed = False
+        self.restored = 0
 
     async def store_state(
         self, state_hash: str, nonce_hash: str, timezone: str, expires_at: datetime
     ) -> None:
         self.state_hash, self.nonce_hash = state_hash, nonce_hash
         self.timezone = timezone
+        self.consumed = False
 
     async def consume_state(self, state_hash: str, now: datetime) -> OIDCStateRecord | None:
-        return (
-            OIDCStateRecord(self.nonce_hash, self.timezone)
-            if state_hash == self.state_hash
-            else None
-        )
+        if state_hash != self.state_hash or self.consumed:
+            return None
+        self.consumed = True
+        return OIDCStateRecord(self.nonce_hash, self.timezone)
+
+    async def restore_state(self, state_hash: str, consumed_at: datetime, now: datetime) -> bool:
+        if state_hash != self.state_hash or not self.consumed:
+            return False
+        self.consumed = False
+        self.restored += 1
+        return True
 
     async def resolve_identity(self, claims: GoogleClaims, timezone: str) -> OIDCAccount | None:
         if self.link_required:
@@ -53,6 +63,17 @@ class ProviderStub:
         assert code == "authorization-code"
         assert expected_nonce_hash
         return GoogleClaims("google-subject", "student@example.com", "Student")
+
+
+class FlakyProviderStub(ProviderStub):
+    def __init__(self) -> None:
+        self.attempts = 0
+
+    async def exchange(self, code: str, expected_nonce_hash: str) -> GoogleClaims:
+        self.attempts += 1
+        if self.attempts == 1:
+            raise OIDCProviderUnavailableError
+        return await super().exchange(code, expected_nonce_hash)
 
 
 class SessionsStub:
@@ -106,3 +127,26 @@ async def test_google_oidc_rejects_browser_state_mismatch_and_requires_confirmed
         await service.complete("authorization-code", started.state, started.state)
     assert raised.value.challenge == "link-challenge"
     assert repository.link_token_hash != "link-challenge"
+
+
+@pytest.mark.anyio
+async def test_google_oidc_restores_state_for_a_provider_outage_retry() -> None:
+    repository = RepositoryStub()
+    provider = FlakyProviderStub()
+    service = OIDCLoginService(
+        repository,
+        provider,
+        SessionsStub(),
+        client_id="client-id",
+        redirect_uri="https://studyflow.example/api/v1/auth/google/callback",
+        token_factory=iter(["state-secret", "nonce-secret"]).__next__,
+    )
+    started = await service.start("Asia/Phnom_Penh")
+
+    with pytest.raises(OIDCProviderUnavailableError):
+        await service.complete("authorization-code", started.state, started.state)
+    result = await service.complete("authorization-code", started.state, started.state)
+
+    assert repository.restored == 1
+    assert provider.attempts == 2
+    assert result.account_id == ACCOUNT_ID

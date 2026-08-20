@@ -482,6 +482,22 @@ class SqlAlchemyOIDCRepository:
             row.consumed_at = now
             return OIDCStateRecord(row.nonce_hash, row.timezone)
 
+    async def restore_state(self, state_hash: str, consumed_at: datetime, now: datetime) -> bool:
+        async with self._database.transaction() as session:
+            row = await session.scalar(
+                select(AuthenticationOIDCState)
+                .where(
+                    AuthenticationOIDCState.state_hash == state_hash,
+                    AuthenticationOIDCState.consumed_at == consumed_at,
+                    AuthenticationOIDCState.expires_at > now,
+                )
+                .with_for_update()
+            )
+            if row is None:
+                return False
+            row.consumed_at = None
+            return True
+
     async def resolve_identity(self, claims: GoogleClaims, timezone: str) -> OIDCAccount | None:
         try:
             async with self._database.transaction() as session:

@@ -95,6 +95,16 @@ def test_openapi_documents_google_account_link_challenge() -> None:
     ]
 
 
+def test_openapi_documents_retry_after_for_google_provider_outages() -> None:
+    schema = create_app().openapi()
+
+    unavailable = schema["paths"]["/api/v1/auth/google/callback"]["get"]["responses"]["503"]
+    assert unavailable["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AuthenticationError"
+    }
+    assert unavailable["headers"]["Retry-After"]["schema"] == {"type": "integer"}
+
+
 def test_openapi_documents_session_authentication_failures() -> None:
     schema = create_app().openapi()
 
