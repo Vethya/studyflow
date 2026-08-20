@@ -188,7 +188,9 @@ class OIDCLoginService:
             claims = await self._provider.exchange(code, state_record.nonce_hash)
         except OIDCProviderUnavailableError as error:
             if error.retry_same_callback:
-                await self._repository.restore_state(state_hash, consumed_at, self._clock())
+                error.retry_same_callback = await self._repository.restore_state(
+                    state_hash, consumed_at, self._clock()
+                )
             raise
         account = await self._repository.resolve_identity(claims, state_record.timezone)
         if account is None:

@@ -19,10 +19,11 @@ ACCOUNT_ID = UUID("5b15bfef-8c44-45d5-a70e-574beb999fb3")
 
 
 class RepositoryStub:
-    def __init__(self, *, link_required: bool = False) -> None:
+    def __init__(self, *, link_required: bool = False, can_restore: bool = True) -> None:
         self.state_hash = ""
         self.nonce_hash = ""
         self.link_required = link_required
+        self.can_restore = can_restore
         self.consumed = False
         self.restored = 0
 
@@ -40,7 +41,7 @@ class RepositoryStub:
         return OIDCStateRecord(self.nonce_hash, self.timezone)
 
     async def restore_state(self, state_hash: str, consumed_at: datetime, now: datetime) -> bool:
-        if state_hash != self.state_hash or not self.consumed:
+        if state_hash != self.state_hash or not self.consumed or not self.can_restore:
             return False
         self.consumed = False
         self.restored += 1
@@ -150,3 +151,23 @@ async def test_google_oidc_restores_state_for_a_provider_outage_retry() -> None:
     assert repository.restored == 1
     assert provider.attempts == 2
     assert result.account_id == ACCOUNT_ID
+
+
+@pytest.mark.anyio
+async def test_google_oidc_marks_outage_nonretryable_when_state_cannot_be_restored() -> None:
+    repository = RepositoryStub(can_restore=False)
+    service = OIDCLoginService(
+        repository,
+        FlakyProviderStub(),
+        SessionsStub(),
+        client_id="client-id",
+        redirect_uri="https://studyflow.example/api/v1/auth/google/callback",
+        token_factory=iter(["state-secret", "nonce-secret"]).__next__,
+    )
+    started = await service.start("Asia/Phnom_Penh")
+
+    with pytest.raises(OIDCProviderUnavailableError) as raised:
+        await service.complete("authorization-code", started.state, started.state)
+
+    assert raised.value.retry_same_callback is False
+    assert repository.restored == 0
