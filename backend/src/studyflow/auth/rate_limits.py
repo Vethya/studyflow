@@ -1,6 +1,7 @@
 """Durable abuse control for authentication endpoints."""
 
 import hashlib
+import secrets
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
@@ -15,6 +16,10 @@ from studyflow.database.models import AuthenticationRateLimit
 
 class RegistrationRateLimitExceeded(RuntimeError):
     """Raised when an IP address or email exceeds the registration window."""
+
+
+class RegistrationCompletionRateLimitExceeded(RuntimeError):
+    """Raised when registration completion exceeds its window."""
 
 
 class EmailVerificationRateLimitExceeded(RuntimeError):
@@ -53,12 +58,22 @@ class RegistrationRateLimit(Protocol):
     async def check(self, client_ip: str, email: str) -> None: ...
 
 
+class RegistrationCompletionRateLimit(Protocol):
+    async def check(self, client_ip: str, signup_token: str) -> None: ...
+
+
 class EmailVerificationRateLimit(Protocol):
     async def check(self, client_ip: str, token: str) -> None: ...
 
 
 class LoginRateLimit(Protocol):
-    async def check(self, client_ip: str, email: str) -> None: ...
+    async def check(self, client_ip: str, email: str) -> str: ...
+
+    async def record_failure(self, email: str, reservation_id: str) -> None: ...
+
+    async def reset_failures(self, email: str, reservation_id: str) -> None: ...
+
+    async def release(self, email: str, reservation_id: str) -> None: ...
 
 
 class VerificationResendRateLimit(Protocol):
@@ -168,6 +183,15 @@ class DatabaseRegistrationRateLimiter(_DatabaseRateLimiter):
         )
 
 
+class DatabaseRegistrationCompletionRateLimiter(_DatabaseRateLimiter):
+    async def check(self, client_ip: str, signup_token: str) -> None:
+        await self._check(
+            "registration_completion",
+            (f"ip:{client_ip}", f"signup:{signup_token}"),
+            RegistrationCompletionRateLimitExceeded,
+        )
+
+
 class DatabaseEmailVerificationRateLimiter(_DatabaseRateLimiter):
     async def check(self, client_ip: str, token: str) -> None:
         await self._check(
@@ -178,12 +202,190 @@ class DatabaseEmailVerificationRateLimiter(_DatabaseRateLimiter):
 
 
 class DatabaseLoginRateLimiter(_DatabaseRateLimiter):
-    async def check(self, client_ip: str, email: str) -> None:
-        await self._check(
-            "login",
-            (f"ip:{client_ip}", f"email:{canonicalize_email(email)}"),
+    def __init__(
+        self,
+        database: SessionTransactions,
+        *,
+        traffic_attempts: int = 30,
+        failure_attempts: int = 5,
+        window_seconds: int = 900,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
+        super().__init__(
+            database,
+            maximum_attempts=failure_attempts,
+            window_seconds=window_seconds,
+            clock=clock,
+        )
+        self._traffic = _DatabaseRateLimiter(
+            database,
+            maximum_attempts=traffic_attempts,
+            window_seconds=window_seconds,
+            clock=clock,
+        )
+
+    async def check(self, client_ip: str, email: str) -> str:
+        await self._traffic._check(
+            "login_traffic",
+            (f"ip:{client_ip}",),
             LoginRateLimitExceeded,
         )
+        return await self._reserve_failure_slot(email)
+
+    async def record_failure(self, email: str, reservation_id: str) -> None:
+        await self._finish_failure_slot(email, reservation_id, failed=True, reset_failures=False)
+
+    async def reset_failures(self, email: str, reservation_id: str) -> None:
+        await self._finish_failure_slot(email, reservation_id, failed=False, reset_failures=True)
+
+    async def release(self, email: str, reservation_id: str) -> None:
+        await self._finish_failure_slot(email, reservation_id, failed=False, reset_failures=False)
+
+    async def _reserve_failure_slot(self, email: str) -> str:
+        now = self._clock()
+        key_hash = self._hash_key(f"email:{canonicalize_email(email)}")
+        for attempt in range(3):
+            try:
+                async with self._database.transaction() as session:
+                    guard = await session.scalar(
+                        select(AuthenticationRateLimit)
+                        .where(
+                            AuthenticationRateLimit.action == "login_guard",
+                            AuthenticationRateLimit.key_hash == key_hash,
+                        )
+                        .with_for_update()
+                    )
+                    if guard is None:
+                        guard = AuthenticationRateLimit(
+                            action="login_guard",
+                            key_hash=key_hash,
+                            window_started_at=now,
+                            attempts=1,
+                        )
+                        session.add(guard)
+                        await session.flush()
+                    else:
+                        guard.window_started_at = now
+                    await session.execute(
+                        delete(AuthenticationRateLimit).where(
+                            AuthenticationRateLimit.action.like("login_inflight:%"),
+                            AuthenticationRateLimit.key_hash == key_hash,
+                            AuthenticationRateLimit.window_started_at <= now - self._window,
+                        )
+                    )
+                    failures = await session.scalar(
+                        select(AuthenticationRateLimit)
+                        .where(
+                            AuthenticationRateLimit.action == "login_failure",
+                            AuthenticationRateLimit.key_hash == key_hash,
+                        )
+                        .with_for_update()
+                    )
+                    if failures is not None and self._is_expired(failures, now):
+                        await session.delete(failures)
+                        failures = None
+                    reservations = list(
+                        await session.scalars(
+                            select(AuthenticationRateLimit).where(
+                                AuthenticationRateLimit.action.like("login_inflight:%"),
+                                AuthenticationRateLimit.key_hash == key_hash,
+                            )
+                        )
+                    )
+                    if (failures.attempts if failures is not None else 0) + len(
+                        reservations
+                    ) >= self._maximum_attempts:
+                        raise LoginRateLimitExceeded
+                    reservation_id = f"login_inflight:{secrets.token_hex(8)}"
+                    session.add(
+                        AuthenticationRateLimit(
+                            action=reservation_id,
+                            key_hash=key_hash,
+                            window_started_at=now,
+                            attempts=1,
+                        )
+                    )
+                    await session.flush()
+                return reservation_id
+            except IntegrityError:
+                if attempt == 2:
+                    raise
+        raise RuntimeError("Login reservation retry exhausted")
+
+    async def _finish_failure_slot(
+        self,
+        email: str,
+        reservation_id: str,
+        *,
+        failed: bool,
+        reset_failures: bool,
+    ) -> None:
+        now = self._clock()
+        key_hash = self._hash_key(f"email:{canonicalize_email(email)}")
+        for attempt in range(3):
+            try:
+                async with self._database.transaction() as session:
+                    guard = await session.scalar(
+                        select(AuthenticationRateLimit)
+                        .where(
+                            AuthenticationRateLimit.action == "login_guard",
+                            AuthenticationRateLimit.key_hash == key_hash,
+                        )
+                        .with_for_update()
+                    )
+                    if guard is None:
+                        session.add(
+                            AuthenticationRateLimit(
+                                action="login_guard",
+                                key_hash=key_hash,
+                                window_started_at=now,
+                                attempts=1,
+                            )
+                        )
+                        await session.flush()
+                    else:
+                        guard.window_started_at = now
+                    await session.execute(
+                        delete(AuthenticationRateLimit).where(
+                            AuthenticationRateLimit.action == reservation_id,
+                            AuthenticationRateLimit.key_hash == key_hash,
+                        )
+                    )
+                    failures = await session.scalar(
+                        select(AuthenticationRateLimit)
+                        .where(
+                            AuthenticationRateLimit.action == "login_failure",
+                            AuthenticationRateLimit.key_hash == key_hash,
+                        )
+                        .with_for_update()
+                    )
+                    if reset_failures and failures is not None:
+                        await session.delete(failures)
+                    elif failed:
+                        if failures is None or self._is_expired(failures, now):
+                            if failures is not None:
+                                await session.delete(failures)
+                                await session.flush()
+                            session.add(
+                                AuthenticationRateLimit(
+                                    action="login_failure",
+                                    key_hash=key_hash,
+                                    window_started_at=now,
+                                    attempts=1,
+                                )
+                            )
+                        else:
+                            failures.attempts += 1
+                return
+            except IntegrityError:
+                if attempt == 2:
+                    raise
+
+    def _is_expired(self, row: AuthenticationRateLimit, now: datetime) -> bool:
+        window_started_at = row.window_started_at
+        if window_started_at.tzinfo is None:
+            window_started_at = window_started_at.replace(tzinfo=UTC)
+        return now - window_started_at >= self._window
 
 
 class DatabaseVerificationResendRateLimiter(_DatabaseRateLimiter):

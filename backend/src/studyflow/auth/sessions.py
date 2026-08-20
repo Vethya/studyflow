@@ -26,7 +26,11 @@ class SessionCredentials:
 
 class SessionRepository(Protocol):
     async def create(
-        self, session: PendingSession, expected_password_hash: str | None = None
+        self,
+        session: PendingSession,
+        expected_password_hash: str | None = None,
+        *,
+        now: datetime,
     ) -> bool: ...
 
 
@@ -64,6 +68,7 @@ class SessionService:
                 absolute_expires_at=now + timedelta(days=7),
             ),
             expected_password_hash,
+            now=now,
         )
         if not created:
             return None

@@ -6,24 +6,38 @@ import pytest
 
 from studyflow.auth.passwords import PasswordService
 from studyflow.auth.registration import (
-    PendingAccount,
+    PendingRegistration,
     RegistrationCommand,
+    RegistrationCompletion,
     RegistrationService,
 )
 
 
 class SafePasswordStub:
+    checks: int = 0
+
     async def is_breached(self, password: str) -> bool:
+        self.checks += 1
         return False
 
 
 @dataclass
 class RegistrationRepositoryStub:
-    pending_accounts: list[PendingAccount] = field(default_factory=list)
+    pending: list[PendingRegistration] = field(default_factory=list)
+    completions: list[RegistrationCompletion] = field(default_factory=list)
+    completion_times: list[datetime] = field(default_factory=list)
     created: bool = True
 
-    async def create_unverified(self, account: PendingAccount) -> bool:
-        self.pending_accounts.append(account)
+    async def begin(self, registration: PendingRegistration) -> bool:
+        self.pending.append(registration)
+        return self.created
+
+    async def signup_is_valid(self, signup_token_hash: str, now: datetime) -> bool:
+        return self.created
+
+    async def complete(self, completion: RegistrationCompletion, now: datetime) -> bool:
+        self.completions.append(completion)
+        self.completion_times.append(now)
         return self.created
 
 
@@ -48,9 +62,8 @@ class DeferredTasksStub:
 
 
 @pytest.mark.anyio
-async def test_registration_creates_an_unverified_account_and_eight_hour_token() -> None:
+async def test_registration_stores_only_email_and_verification_challenge() -> None:
     now = datetime(2026, 7, 28, 12, tzinfo=UTC)
-    raw_token = "verification-secret"
     repository = RegistrationRepositoryStub()
     email_sender = AuthenticationEmailStub()
     deferred_tasks = DeferredTasksStub()
@@ -58,53 +71,100 @@ async def test_registration_creates_an_unverified_account_and_eight_hour_token()
         repository=repository,
         passwords=PasswordService(SafePasswordStub()),
         email_sender=email_sender,
-        token_factory=lambda: raw_token,
+        token_factory=lambda: "verification-secret",
         clock=lambda: now,
     )
 
-    await service.register(
-        RegistrationCommand(
-            email=" Student@Example.COM ",
-            name="Student Name",
-            password="correct horse battery staple",
-            timezone="Asia/Phnom_Penh",
-        ),
-        deferred_tasks,
-    )
+    await service.register(RegistrationCommand(email=" Student@Example.COM "), deferred_tasks)
 
-    [pending_account] = repository.pending_accounts
-    assert pending_account.email == "student@example.com"
-    assert pending_account.name == "Student Name"
-    assert pending_account.password_hash.startswith("$argon2id$")
-    assert pending_account.timezone == "Asia/Phnom_Penh"
-    assert pending_account.verification_token_hash != raw_token
-    assert pending_account.verification_expires_at == now + timedelta(hours=8)
-    assert email_sender.deliveries == []
+    [pending] = repository.pending
+    assert pending.email == "student@example.com"
+    assert pending.verification_token_hash != "verification-secret"
+    assert pending.verification_expires_at == now + timedelta(hours=8)
+    assert not hasattr(pending, "password_hash")
+    assert not hasattr(pending, "name")
     await deferred_tasks.run()
-    assert email_sender.deliveries == [("student@example.com", raw_token)]
+    assert email_sender.deliveries == [("student@example.com", "verification-secret")]
 
 
 @pytest.mark.anyio
-async def test_existing_email_does_not_send_or_disclose_a_verification() -> None:
+async def test_completion_hashes_password_and_uses_verified_signup_token() -> None:
+    now = datetime(2026, 7, 28, 12, tzinfo=UTC)
+    repository = RegistrationRepositoryStub()
+    service = RegistrationService(
+        repository=repository,
+        passwords=PasswordService(SafePasswordStub()),
+        email_sender=AuthenticationEmailStub(),
+        clock=lambda: now,
+    )
+
+    assert await service.complete(
+        signup_token="verified-signup-token",
+        name="  Student Name  ",
+        password="correct horse battery staple",
+        timezone="Asia/Phnom_Penh",
+    )
+
+    [completion] = repository.completions
+    assert completion.signup_token_hash != "verified-signup-token"
+    assert completion.name == "Student Name"
+    assert completion.password_hash.startswith("$argon2id$")
+    assert completion.timezone == "Asia/Phnom_Penh"
+
+
+@pytest.mark.anyio
+async def test_existing_account_does_not_receive_a_verification_email() -> None:
     repository = RegistrationRepositoryStub(created=False)
-    email_sender = AuthenticationEmailStub()
     deferred_tasks = DeferredTasksStub()
     service = RegistrationService(
         repository=repository,
         passwords=PasswordService(SafePasswordStub()),
-        email_sender=email_sender,
-        token_factory=lambda: "unused-token",
+        email_sender=AuthenticationEmailStub(),
     )
 
-    await service.register(
-        RegistrationCommand(
-            email="student@example.com",
-            name="Student Name",
-            password="correct horse battery staple",
-            timezone="UTC",
-        ),
-        deferred_tasks,
-    )
+    await service.register(RegistrationCommand(email="student@example.com"), deferred_tasks)
 
-    assert email_sender.deliveries == []
     assert deferred_tasks.tasks == []
+
+
+@pytest.mark.anyio
+async def test_invalid_signup_token_is_rejected_before_password_security_work() -> None:
+    repository = RegistrationRepositoryStub(created=False)
+    breach_check = SafePasswordStub()
+    service = RegistrationService(
+        repository=repository,
+        passwords=PasswordService(breach_check),
+        email_sender=AuthenticationEmailStub(),
+    )
+
+    assert not await service.complete(
+        signup_token="invalid-signup-token",
+        name="Student",
+        password="correct horse battery staple",
+        timezone="UTC",
+    )
+    assert breach_check.checks == 0
+    assert repository.completions == []
+
+
+@pytest.mark.anyio
+async def test_completion_rechecks_token_expiry_after_password_work() -> None:
+    before_password_work = datetime(2026, 7, 28, 12, tzinfo=UTC)
+    after_password_work = before_password_work + timedelta(minutes=1)
+    times = iter((before_password_work, after_password_work))
+    repository = RegistrationRepositoryStub()
+    service = RegistrationService(
+        repository=repository,
+        passwords=PasswordService(SafePasswordStub()),
+        email_sender=AuthenticationEmailStub(),
+        clock=lambda: next(times),
+    )
+
+    await service.complete(
+        signup_token="verified-signup-token",
+        name="Student",
+        password="correct horse battery staple",
+        timezone="UTC",
+    )
+
+    assert repository.completion_times == [after_password_work]

@@ -18,7 +18,7 @@ from studyflow.auth.oidc import (
     OIDCLinkChallenge,
     OIDCStateRecord,
 )
-from studyflow.auth.registration import PendingAccount
+from studyflow.auth.registration import PendingRegistration, RegistrationCompletion
 from studyflow.auth.session_authentication import PersistedSessionPrincipal
 from studyflow.auth.sessions import PendingSession
 from studyflow.database.models import (
@@ -26,6 +26,7 @@ from studyflow.database.models import (
     AuthenticationIdentity,
     AuthenticationOIDCLinkChallenge,
     AuthenticationOIDCState,
+    AuthenticationRegistration,
     AuthenticationSession,
     StudentAccount,
 )
@@ -39,26 +40,38 @@ class SqlAlchemyRegistrationRepository:
     def __init__(self, database: SessionTransactions) -> None:
         self._database = database
 
-    async def create_unverified(self, pending: PendingAccount) -> bool:
+    async def begin(self, pending: PendingRegistration) -> bool:
         try:
             async with self._database.transaction() as session:
-                account = StudentAccount(
-                    email=pending.email,
-                    name=pending.name,
-                    password_hash=pending.password_hash,
-                    timezone=pending.timezone,
+                existing_account = await session.scalar(
+                    select(StudentAccount)
+                    .where(StudentAccount.email == pending.email)
+                    .with_for_update()
                 )
-                session.add(account)
-                await session.flush()
-                session.add(
-                    AuthenticationEmailToken(
-                        account_id=account.id,
-                        purpose="email_verification",
-                        token_hash=pending.verification_token_hash,
-                        expires_at=pending.verification_expires_at,
+                if existing_account is not None and existing_account.email_verified_at is not None:
+                    return False
+                registration = await session.scalar(
+                    select(AuthenticationRegistration)
+                    .where(AuthenticationRegistration.email == pending.email)
+                    .with_for_update()
+                )
+                existing_account = await session.scalar(
+                    select(StudentAccount)
+                    .where(StudentAccount.email == pending.email)
+                    .with_for_update()
+                )
+                if existing_account is not None and existing_account.email_verified_at is not None:
+                    return False
+                if registration is None:
+                    session.add(
+                        AuthenticationRegistration(
+                            email=pending.email,
+                            verification_token_hash=pending.verification_token_hash,
+                            verification_expires_at=pending.verification_expires_at,
+                        )
                     )
-                )
-            return True
+                elif not self._rotate_pending(registration, pending):
+                    return False
         except IntegrityError:
             async with self._database.transaction() as session:
                 existing_account = await session.scalar(
@@ -66,65 +79,155 @@ class SqlAlchemyRegistrationRepository:
                     .where(StudentAccount.email == pending.email)
                     .with_for_update()
                 )
-                if existing_account is None:
-                    raise
-                if existing_account.email_verified_at is not None:
+                if existing_account is not None and existing_account.email_verified_at is not None:
                     return False
-                existing_account.name = pending.name
-                existing_account.password_hash = pending.password_hash
-                existing_account.timezone = pending.timezone
+                registration = await session.scalar(
+                    select(AuthenticationRegistration)
+                    .where(AuthenticationRegistration.email == pending.email)
+                    .with_for_update()
+                )
+                existing_account = await session.scalar(
+                    select(StudentAccount)
+                    .where(StudentAccount.email == pending.email)
+                    .with_for_update()
+                )
+                if existing_account is not None and existing_account.email_verified_at is not None:
+                    return False
+                if registration is None:
+                    raise
+                if not self._rotate_pending(registration, pending):
+                    return False
+        return True
+
+    @staticmethod
+    def _rotate_pending(
+        registration: AuthenticationRegistration,
+        pending: PendingRegistration,
+    ) -> bool:
+        signup_expires_at = registration.signup_expires_at
+        if signup_expires_at is not None and signup_expires_at.tzinfo is None:
+            signup_expires_at = signup_expires_at.replace(tzinfo=UTC)
+        if (
+            registration.verified_at is not None
+            and signup_expires_at is not None
+            and signup_expires_at > pending.requested_at
+        ):
+            return False
+        registration.verification_token_hash = pending.verification_token_hash
+        registration.verification_expires_at = pending.verification_expires_at
+        registration.signup_token_hash = None
+        registration.signup_expires_at = None
+        registration.verified_at = None
+        return True
+
+    async def signup_is_valid(self, signup_token_hash: str, now: datetime) -> bool:
+        async with self._database.transaction() as session:
+            registration_id = await session.scalar(
+                select(AuthenticationRegistration.id).where(
+                    AuthenticationRegistration.signup_token_hash == signup_token_hash,
+                    AuthenticationRegistration.signup_expires_at > now,
+                    AuthenticationRegistration.verified_at.is_not(None),
+                )
+            )
+        return registration_id is not None
+
+    async def complete(self, completion: RegistrationCompletion, now: datetime) -> bool:
+        async with self._database.transaction() as session:
+            candidate = (
                 await session.execute(
-                    delete(AuthenticationEmailToken).where(
-                        AuthenticationEmailToken.account_id == existing_account.id,
-                        AuthenticationEmailToken.purpose == "email_verification",
-                        AuthenticationEmailToken.consumed_at.is_(None),
+                    select(AuthenticationRegistration.id, AuthenticationRegistration.email).where(
+                        AuthenticationRegistration.signup_token_hash
+                        == completion.signup_token_hash,
+                        AuthenticationRegistration.signup_expires_at > now,
+                        AuthenticationRegistration.verified_at.is_not(None),
                     )
                 )
-                session.add(
-                    AuthenticationEmailToken(
-                        account_id=existing_account.id,
-                        purpose="email_verification",
-                        token_hash=pending.verification_token_hash,
-                        expires_at=pending.verification_expires_at,
-                    )
+            ).one_or_none()
+            if candidate is None:
+                return False
+            registration_id, email = candidate
+            account = await session.scalar(
+                select(StudentAccount).where(StudentAccount.email == email).with_for_update()
+            )
+            registration = await session.scalar(
+                select(AuthenticationRegistration)
+                .where(
+                    AuthenticationRegistration.id == registration_id,
+                    AuthenticationRegistration.signup_token_hash == completion.signup_token_hash,
+                    AuthenticationRegistration.signup_expires_at > now,
+                    AuthenticationRegistration.verified_at.is_not(None),
                 )
-            return True
+                .with_for_update()
+            )
+            if registration is None:
+                return False
+            account = await session.scalar(
+                select(StudentAccount)
+                .where(StudentAccount.email == registration.email)
+                .with_for_update()
+            )
+            if account is not None and account.email_verified_at is not None:
+                await session.delete(registration)
+                return False
+            if account is None:
+                try:
+                    async with session.begin_nested():
+                        session.add(
+                            StudentAccount(
+                                email=registration.email,
+                                name=completion.name,
+                                password_hash=completion.password_hash,
+                                timezone=completion.timezone,
+                                email_verified_at=now,
+                            )
+                        )
+                        await session.flush()
+                except IntegrityError:
+                    account = await session.scalar(
+                        select(StudentAccount)
+                        .where(StudentAccount.email == registration.email)
+                        .with_for_update()
+                    )
+                    if account is None:
+                        raise
+                    if account.email_verified_at is not None:
+                        await session.delete(registration)
+                        return False
+            if account is not None:
+                account.name = completion.name
+                account.password_hash = completion.password_hash
+                account.timezone = completion.timezone
+                account.email_verified_at = now
+            await session.delete(registration)
+        return True
 
 
 class SqlAlchemyEmailVerificationRepository:
     def __init__(self, database: SessionTransactions) -> None:
         self._database = database
 
-    async def consume(self, token_hash: str, now: datetime) -> bool:
+    async def grant_signup(
+        self,
+        token_hash: str,
+        signup_token_hash: str,
+        now: datetime,
+        signup_expires_at: datetime,
+    ) -> bool:
         async with self._database.transaction() as session:
-            account_id = await session.scalar(
-                select(AuthenticationEmailToken.account_id).where(
-                    AuthenticationEmailToken.purpose == "email_verification",
-                    AuthenticationEmailToken.token_hash == token_hash,
-                    AuthenticationEmailToken.consumed_at.is_(None),
-                    AuthenticationEmailToken.expires_at > now,
-                )
-            )
-            if account_id is None:
-                return False
-            account = await session.get(StudentAccount, account_id, with_for_update=True)
-            if account is None or account.email_verified_at is not None:
-                return False
-            token = await session.scalar(
-                select(AuthenticationEmailToken)
+            registration = await session.scalar(
+                select(AuthenticationRegistration)
                 .where(
-                    AuthenticationEmailToken.account_id == account_id,
-                    AuthenticationEmailToken.purpose == "email_verification",
-                    AuthenticationEmailToken.token_hash == token_hash,
-                    AuthenticationEmailToken.consumed_at.is_(None),
-                    AuthenticationEmailToken.expires_at > now,
+                    AuthenticationRegistration.verification_token_hash == token_hash,
+                    AuthenticationRegistration.verification_expires_at > now,
+                    AuthenticationRegistration.verified_at.is_(None),
                 )
                 .with_for_update()
             )
-            if token is None:
+            if registration is None:
                 return False
-            token.consumed_at = now
-            account.email_verified_at = now
+            registration.verified_at = now
+            registration.signup_token_hash = signup_token_hash
+            registration.signup_expires_at = signup_expires_at
         return True
 
 
@@ -133,19 +236,27 @@ class SqlAlchemySessionRepository:
         self._database = database
 
     async def create(
-        self, pending: PendingSession, expected_password_hash: str | None = None
+        self,
+        pending: PendingSession,
+        expected_password_hash: str | None = None,
+        *,
+        now: datetime,
     ) -> bool:
         async with self._database.transaction() as session:
-            if expected_password_hash is not None:
-                account = await session.get(
-                    StudentAccount, pending.account_id, with_for_update=True
+            account = await session.get(StudentAccount, pending.account_id, with_for_update=True)
+            if account is None:
+                return False
+            if expected_password_hash is not None and (
+                account.password_hash is None
+                or not hmac.compare_digest(account.password_hash, expected_password_hash)
+            ):
+                return False
+            await session.execute(
+                delete(AuthenticationSession).where(
+                    (AuthenticationSession.idle_expires_at <= now)
+                    | (AuthenticationSession.absolute_expires_at <= now)
                 )
-                if (
-                    account is None
-                    or account.password_hash is None
-                    or not hmac.compare_digest(account.password_hash, expected_password_hash)
-                ):
-                    return False
+            )
             session.add(
                 AuthenticationSession(
                     account_id=pending.account_id,
@@ -240,26 +351,15 @@ class SqlAlchemyVerificationResendRepository:
 
     async def rotate(self, email: str, token_hash: str, expires_at: datetime) -> bool:
         async with self._database.transaction() as session:
-            account = await session.scalar(
-                select(StudentAccount).where(StudentAccount.email == email).with_for_update()
+            registration = await session.scalar(
+                select(AuthenticationRegistration)
+                .where(AuthenticationRegistration.email == email)
+                .with_for_update()
             )
-            if account is None or account.email_verified_at is not None:
+            if registration is None or registration.verified_at is not None:
                 return False
-            await session.execute(
-                delete(AuthenticationEmailToken).where(
-                    AuthenticationEmailToken.account_id == account.id,
-                    AuthenticationEmailToken.purpose == "email_verification",
-                    AuthenticationEmailToken.consumed_at.is_(None),
-                )
-            )
-            session.add(
-                AuthenticationEmailToken(
-                    account_id=account.id,
-                    purpose="email_verification",
-                    token_hash=token_hash,
-                    expires_at=expires_at,
-                )
-            )
+            registration.verification_token_hash = token_hash
+            registration.verification_expires_at = expires_at
         return True
 
 
@@ -511,6 +611,12 @@ class SqlAlchemyOIDCRepository:
                 )
                 if existing is not None:
                     return None
+                await session.execute(
+                    delete(AuthenticationSession).where(
+                        (AuthenticationSession.idle_expires_at <= now)
+                        | (AuthenticationSession.absolute_expires_at <= now)
+                    )
+                )
                 session.add(
                     AuthenticationIdentity(
                         account_id=account.id,

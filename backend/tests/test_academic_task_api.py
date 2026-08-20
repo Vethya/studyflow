@@ -112,7 +112,7 @@ async def test_task_create_list_and_detail_contract() -> None:
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="https://test",
-        cookies={"__Host-studyflow_session": "session-token"},
+        cookies={"studyflow_session": "session-token"},
     ) as client:
         created = await client.post(
             "/api/v1/tasks",
@@ -155,7 +155,7 @@ async def test_task_detail_returns_404_for_unowned_or_missing_id() -> None:
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="https://test",
-        cookies={"__Host-studyflow_session": "session-token"},
+        cookies={"studyflow_session": "session-token"},
     ) as client:
         response = await client.get(f"/api/v1/tasks/{TASK_ID}")
 
@@ -173,7 +173,7 @@ async def test_task_endpoints_require_authentication_csrf_and_valid_absolute_fie
     authenticated = create_app(
         session_authentication=AuthenticationStub(), academic_tasks=invalid_deadline_tasks
     )
-    cookies = {"__Host-studyflow_session": "session-token"}
+    cookies = {"studyflow_session": "session-token"}
     valid_payload = {
         "title": "Read chapter 4",
         "category": "reading",
@@ -218,7 +218,7 @@ async def test_task_create_rejects_whitespace_only_titles(title: str) -> None:
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="https://test",
-        cookies={"__Host-studyflow_session": "session-token"},
+        cookies={"studyflow_session": "session-token"},
     ) as client:
         response = await client.post(
             "/api/v1/tasks",
@@ -248,7 +248,7 @@ async def test_task_update_finish_early_and_delete_contract() -> None:
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="https://test",
-        cookies={"__Host-studyflow_session": "session-token"},
+        cookies={"studyflow_session": "session-token"},
     ) as client:
         updated = await client.put(
             f"/api/v1/tasks/{TASK_ID}",
@@ -286,7 +286,7 @@ async def test_task_lifecycle_maps_confirmation_csrf_missing_and_frozen_failures
         "deadline_at": "2026-08-01T12:00:00Z",
         "original_estimate_minutes": 120,
     }
-    cookies = {"__Host-studyflow_session": "session-token"}
+    cookies = {"studyflow_session": "session-token"}
     frozen_app = create_app(session_authentication=AuthenticationStub(), academic_tasks=frozen)
     missing_app = create_app(session_authentication=AuthenticationStub(), academic_tasks=missing)
     async with AsyncClient(

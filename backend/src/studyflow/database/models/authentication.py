@@ -140,6 +140,31 @@ class AuthenticationEmailToken(Base):
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class AuthenticationRegistration(Base):
+    __tablename__ = "authentication_registrations"
+    __table_args__ = (
+        CheckConstraint("email = lower(email) AND email <> ''", name="email_canonical"),
+        CheckConstraint("length(verification_token_hash) = 64", name="verification_hash_length"),
+        CheckConstraint(
+            "signup_token_hash IS NULL OR length(signup_token_hash) = 64",
+            name="signup_hash_length",
+        ),
+        CheckConstraint("created_at < verification_expires_at", name="verification_expiry_order"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    email: Mapped[str] = mapped_column(String(320), unique=True)
+    verification_token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    verification_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    signup_token_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
+    signup_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class AuthenticationRateLimit(Base):
     __tablename__ = "authentication_rate_limits"
     __table_args__ = (

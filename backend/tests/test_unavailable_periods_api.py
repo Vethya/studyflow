@@ -70,7 +70,7 @@ async def test_unavailable_period_crud_contract() -> None:
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="https://test",
-        cookies={"__Host-studyflow_session": "session-token"},
+        cookies={"studyflow_session": "session-token"},
     ) as client:
         listed = await client.get("/api/v1/availability/unavailable-periods")
         created = await client.post(

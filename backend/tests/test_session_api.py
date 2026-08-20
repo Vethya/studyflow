@@ -35,7 +35,7 @@ async def test_current_session_returns_the_authenticated_account() -> None:
     async with AsyncClient(
         transport=transport,
         base_url="https://test",
-        cookies={"__Host-studyflow_session": "opaque-session-token"},
+        cookies={"studyflow_session": "opaque-session-token"},
     ) as client:
         response = await client.get("/api/v1/auth/session")
 
@@ -57,7 +57,7 @@ async def test_logout_requires_matching_csrf_and_clears_browser_cookies() -> Non
     async with AsyncClient(
         transport=transport,
         base_url="https://test",
-        cookies={"__Host-studyflow_session": "opaque-session-token"},
+        cookies={"studyflow_session": "opaque-session-token"},
     ) as client:
         response = await client.post(
             "/api/v1/auth/logout",
@@ -67,8 +67,8 @@ async def test_logout_requires_matching_csrf_and_clears_browser_cookies() -> Non
     assert response.status_code == 204
     assert authentication.revoke_calls == [("opaque-session-token", "csrf-request-token")]
     cookies = response.headers.get_list("set-cookie")
-    assert any('__Host-studyflow_session=""' in value and "Max-Age=0" in value for value in cookies)
-    assert any('__Host-studyflow_csrf=""' in value and "Max-Age=0" in value for value in cookies)
+    assert any('studyflow_session=""' in value and "Max-Age=0" in value for value in cookies)
+    assert any('studyflow_csrf=""' in value and "Max-Age=0" in value for value in cookies)
 
 
 @pytest.mark.anyio
@@ -88,7 +88,7 @@ async def test_logout_rejects_invalid_csrf_without_clearing_cookies() -> None:
     async with AsyncClient(
         transport=transport,
         base_url="https://test",
-        cookies={"__Host-studyflow_session": "opaque-session-token"},
+        cookies={"studyflow_session": "opaque-session-token"},
     ) as client:
         response = await client.post("/api/v1/auth/logout", headers={"X-CSRF-Token": "wrong-token"})
     assert response.status_code == 403

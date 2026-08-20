@@ -45,7 +45,7 @@ async def test_account_profile_read_and_csrf_protected_update() -> None:
     )
     profiles = AccountProfileStub(AccountProfile(account_id, "student@example.com", "Student Name"))
     app = create_app(session_authentication=authentication, account_profiles=profiles)
-    cookies = {"__Host-studyflow_session": "opaque-session-token"}
+    cookies = {"studyflow_session": "opaque-session-token"}
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="https://test", cookies=cookies
     ) as client:
@@ -81,7 +81,7 @@ async def test_account_profile_update_requires_session_and_csrf() -> None:
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="https://test",
-        cookies={"__Host-studyflow_session": "opaque-session-token"},
+        cookies={"studyflow_session": "opaque-session-token"},
     ) as client:
         unauthenticated = await client.get("/api/v1/account/profile")
         missing_csrf = await client.patch(

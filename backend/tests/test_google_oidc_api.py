@@ -53,11 +53,11 @@ async def test_google_oidc_start_and_callback_cookie_contract() -> None:
 
     assert started.status_code == 200
     assert started.json()["authorization_url"].startswith("https://accounts.google.com/")
-    assert "__Host-studyflow_oidc_state=state-state-state-state" in started.headers["set-cookie"]
+    assert "studyflow_oidc_state=state-state-state-state" in started.headers["set-cookie"]
     assert completed.status_code == 200
     cookies = completed.headers.get_list("set-cookie")
-    assert any("__Host-studyflow_session=session-token" in cookie for cookie in cookies)
-    assert any("__Host-studyflow_csrf=csrf-token" in cookie for cookie in cookies)
+    assert any("studyflow_session=session-token" in cookie for cookie in cookies)
+    assert any("studyflow_csrf=csrf-token" in cookie for cookie in cookies)
 
 
 @pytest.mark.anyio
@@ -71,7 +71,7 @@ async def test_google_oidc_denial_is_generic_and_clears_state_cookie() -> None:
 
     assert denied.status_code == 400
     assert denied.json() == {"detail": "Google sign-in could not be completed"}
-    assert "__Host-studyflow_oidc_state=" in denied.headers["set-cookie"]
+    assert "studyflow_oidc_state=" in denied.headers["set-cookie"]
 
 
 @pytest.mark.anyio

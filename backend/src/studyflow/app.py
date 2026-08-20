@@ -16,6 +16,7 @@ from studyflow.accounts.repositories import (
 )
 from studyflow.api.router import API_V1_PREFIX, api_router
 from studyflow.auth.breached_passwords import PwnedPasswordsClient
+from studyflow.auth.cookies import CookiePolicy
 from studyflow.auth.email_delivery import (
     AiosmtplibEmailTransport,
     SmtpAuthenticationEmailSender,
@@ -39,6 +40,7 @@ from studyflow.auth.rate_limits import (
     DatabaseOIDCStartRateLimiter,
     DatabasePasswordResetAttemptRateLimiter,
     DatabasePasswordResetRequestRateLimiter,
+    DatabaseRegistrationCompletionRateLimiter,
     DatabaseRegistrationRateLimiter,
     DatabaseVerificationResendRateLimiter,
     EmailVerificationRateLimit,
@@ -47,6 +49,7 @@ from studyflow.auth.rate_limits import (
     OIDCStartRateLimit,
     PasswordResetAttemptRateLimit,
     PasswordResetRequestRateLimit,
+    RegistrationCompletionRateLimit,
     RegistrationRateLimit,
     VerificationResendRateLimit,
 )
@@ -108,6 +111,7 @@ def create_app(
     database: DatabaseRuntime | None = None,
     registration: Registration | None = None,
     registration_rate_limiter: RegistrationRateLimit | None = None,
+    registration_completion_rate_limiter: RegistrationCompletionRateLimit | None = None,
     email_verification: EmailVerification | None = None,
     email_verification_rate_limiter: EmailVerificationRateLimit | None = None,
     login: Login | None = None,
@@ -237,11 +241,16 @@ def create_app(
         swagger_ui_oauth2_redirect_url=f"{API_V1_PREFIX}/docs/oauth2-redirect",
     )
     application.state.settings = resolved_settings
+    application.state.cookie_policy = CookiePolicy.for_environment(resolved_settings.environment)
     application.state.database = resolved_database
     application.state.authentication_http_client = authentication_http_client
     application.state.registration = resolved_registration
     application.state.registration_rate_limiter = registration_rate_limiter or (
         DatabaseRegistrationRateLimiter(transactions)
+    )
+    application.state.registration_completion_rate_limiter = (
+        registration_completion_rate_limiter
+        or DatabaseRegistrationCompletionRateLimiter(transactions)
     )
     application.state.email_verification = email_verification or EmailVerificationService(
         SqlAlchemyEmailVerificationRepository(transactions)

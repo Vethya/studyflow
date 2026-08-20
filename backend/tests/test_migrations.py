@@ -118,6 +118,7 @@ def test_account_authentication_schema_is_in_the_upgrade_path() -> None:
         "authentication_sessions",
         "authentication_email_tokens",
         "authentication_rate_limits",
+        "authentication_registrations",
     ):
         assert f"CREATE TABLE {table_name}" in result.stdout
 
@@ -165,6 +166,17 @@ def test_task_title_migration_preserves_postgresql_whitespace_regex() -> None:
 
     assert result.returncode == 0, result.stderr
     assert "regexp_replace(title, E'[[:space:]]', '', 'g')" in result.stdout
+
+
+def test_registration_migration_preserves_legacy_pending_accounts() -> None:
+    result = run_alembic("upgrade", "head", "--sql")
+
+    assert result.returncode == 0, result.stderr
+    assert "INSERT INTO authentication_registrations" in result.stdout
+    assert "UPDATE authentication_email_tokens" not in result.stdout
+    assert "row_number() OVER" in result.stdout
+    assert "verification_expires_at, created_at" in result.stdout
+    assert "token.expires_at > CURRENT_TIMESTAMP" not in result.stdout
 
 
 def test_online_environment_runs_migrations_and_disposes_engine(

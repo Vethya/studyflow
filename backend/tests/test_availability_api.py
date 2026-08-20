@@ -51,7 +51,7 @@ async def test_availability_read_replace_and_timezone_confirmation_contract() ->
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="https://test",
-        cookies={"__Host-studyflow_session": "session-token"},
+        cookies={"studyflow_session": "session-token"},
     ) as client:
         listed = await client.get("/api/v1/availability/windows")
         replaced = await client.put(
@@ -79,7 +79,7 @@ async def test_availability_rejects_non_local_times_and_false_confirmation() -> 
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="https://test",
-        cookies={"__Host-studyflow_session": "session-token"},
+        cookies={"studyflow_session": "session-token"},
     ) as client:
         invalid_time = await client.put(
             "/api/v1/availability/windows",
