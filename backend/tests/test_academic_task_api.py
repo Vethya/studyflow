@@ -49,6 +49,7 @@ class TasksStub:
     update_failure: str | None = None
     updates: list[tuple[UUID, UUID, NewAcademicTask]] = field(default_factory=list)
     deletes: list[tuple[UUID, UUID]] = field(default_factory=list)
+    starts: list[tuple[UUID, UUID]] = field(default_factory=list)
     finishes: list[tuple[UUID, UUID]] = field(default_factory=list)
     finish_requires_start: bool = False
 
@@ -88,6 +89,7 @@ class TasksStub:
         return any(record.id == task_id for record in self.records)
 
     async def mark_started(self, account_id: UUID, task_id: UUID) -> bool:
+        self.starts.append((account_id, task_id))
         return any(record.id == task_id for record in self.records)
 
 
@@ -236,6 +238,14 @@ async def test_task_update_finish_early_and_delete_contract() -> None:
             headers={"X-CSRF-Token": "csrf-token"},
             json=payload,
         )
+        started = await client.post(
+            f"/api/v1/tasks/{TASK_ID}/start",
+            headers={"X-CSRF-Token": "csrf-token"},
+        )
+        started_again = await client.post(
+            f"/api/v1/tasks/{TASK_ID}/start",
+            headers={"X-CSRF-Token": "csrf-token"},
+        )
         finished = await client.post(
             f"/api/v1/tasks/{TASK_ID}/finish-early",
             headers={"X-CSRF-Token": "csrf-token"},
@@ -248,10 +258,13 @@ async def test_task_update_finish_early_and_delete_contract() -> None:
         )
 
     assert updated.status_code == 200
+    assert started.status_code == 204
+    assert started_again.status_code == 204
     assert finished.status_code == 204
     assert deleted.status_code == 204
     assert tasks.updates[0][:2] == (ACCOUNT_ID, TASK_ID)
     assert tasks.updates[0][2].original_estimate_minutes == 120
+    assert tasks.starts == [(ACCOUNT_ID, TASK_ID), (ACCOUNT_ID, TASK_ID)]
     assert tasks.finishes == [(ACCOUNT_ID, TASK_ID)]
     assert tasks.deletes == [(ACCOUNT_ID, TASK_ID)]
 
@@ -311,6 +324,10 @@ async def test_task_lifecycle_maps_confirmation_csrf_missing_and_frozen_failures
             headers={"X-CSRF-Token": "csrf-token"},
             json=payload,
         )
+        missing_start = await client.post(
+            f"/api/v1/tasks/{TASK_ID}/start",
+            headers={"X-CSRF-Token": "csrf-token"},
+        )
         missing_finish = await client.post(
             f"/api/v1/tasks/{TASK_ID}/finish-early",
             headers={"X-CSRF-Token": "csrf-token"},
@@ -327,5 +344,6 @@ async def test_task_lifecycle_maps_confirmation_csrf_missing_and_frozen_failures
     assert unconfirmed.status_code == 422
     assert frozen.deletes == []
     assert missing_update.status_code == 404
+    assert missing_start.status_code == 404
     assert missing_finish.status_code == 404
     assert missing_delete.status_code == 404
