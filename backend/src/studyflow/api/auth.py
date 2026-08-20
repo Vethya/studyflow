@@ -511,18 +511,20 @@ async def get_current_session(
 @router.post(
     "/logout",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses={status.HTTP_403_FORBIDDEN: {"model": AuthenticationError}},
+    responses={
+        status.HTTP_403_FORBIDDEN: {"model": AuthenticationError},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": AuthenticationError},
+    },
 )
 async def logout(
-    response: Response,
     http_request: Request,
     authentication: Annotated[SessionAuthentication, Depends(get_session_authentication)],
     csrf_token: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
-) -> None:
+) -> Response:
     cookie_policy = get_cookie_policy(http_request)
     session_token = http_request.cookies.get(cookie_policy.session_name)
     if session_token is None:
-        return
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
     csrf_cookie = http_request.cookies.get(cookie_policy.csrf_name)
     if (
         csrf_token is None
@@ -534,7 +536,16 @@ async def logout(
         await authentication.revoke(session_token, csrf_token)
     except Exception:
         logger.exception("Failed to revoke session during logout")
+        error_response = JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": "Logout could not be completed"},
+            headers={"Cache-Control": "no-store"},
+        )
+        cookie_policy.clear_authentication(error_response)
+        return error_response
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
     cookie_policy.clear_authentication(response)
+    return response
 
 
 @router.post(

@@ -172,7 +172,10 @@ async def test_logout_clears_cookies_when_server_revocation_raises() -> None:
         response = await client.post(
             "/api/v1/auth/logout", headers={"X-CSRF-Token": "csrf-request-token"}
         )
-    assert response.status_code == 204
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Logout could not be completed"}
+    assert response.headers["cache-control"] == "no-store"
+    assert authentication.revoke_calls == [("opaque-session-token", "csrf-request-token")]
     assert len(response.headers.get_list("set-cookie")) == 2
 
 
