@@ -112,6 +112,23 @@ def test_openapi_documents_google_browser_callback_redirect() -> None:
     assert redirect["description"] == "Browser flow redirected to a clean frontend route"
 
 
+def test_openapi_preserves_google_callback_query_constraints() -> None:
+    schema = create_app().openapi()
+    parameters = {
+        parameter["name"]: parameter
+        for parameter in schema["paths"]["/api/v1/auth/google/callback"]["get"]["parameters"]
+    }
+
+    assert parameters["state"]["required"] is True
+    assert parameters["state"]["schema"]["minLength"] == 20
+    assert parameters["state"]["schema"]["maxLength"] == 512
+    code_schema = parameters["code"]["schema"]["anyOf"][0]
+    error_schema = parameters["error"]["schema"]["anyOf"][0]
+    assert code_schema["minLength"] == 1
+    assert code_schema["maxLength"] == 2048
+    assert error_schema["maxLength"] == 200
+
+
 def test_openapi_documents_session_authentication_failures() -> None:
     schema = create_app().openapi()
 

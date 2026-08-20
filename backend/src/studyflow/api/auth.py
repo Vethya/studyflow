@@ -16,6 +16,8 @@ from fastapi import (
     Response,
     status,
 )
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from starlette.responses import JSONResponse, RedirectResponse
 
@@ -264,6 +266,18 @@ def _browser_redirect(request: Request, path: str, *, retry_after: str | None = 
     return RedirectResponse(f"{public_app_url}{path}", status_code=303, headers=headers)
 
 
+async def handle_google_callback_validation_error(
+    request: Request, error: Exception
+) -> Response:
+    if not isinstance(error, RequestValidationError):
+        raise error
+    if request.url.path == "/api/v1/auth/google/callback" and _wants_html(request):
+        response = _browser_redirect(request, "/login/google-error/invalid")
+        get_cookie_policy(request).clear_oidc_state(response)
+        return response
+    return await request_validation_exception_handler(request, error)
+
+
 def _oidc_error_response(
     status_code: int, detail: str, cookie_policy: CookiePolicy
 ) -> JSONResponse:
@@ -384,10 +398,10 @@ async def start_google_oidc(
 async def complete_google_oidc(
     response: Response,
     http_request: Request,
+    state: Annotated[str, Query(min_length=20, max_length=512)],
     oidc: Annotated[OIDCLogin, Depends(get_oidc_login)],
-    state: Annotated[str | None, Query()] = None,
-    code: Annotated[str | None, Query()] = None,
-    error: Annotated[str | None, Query()] = None,
+    code: Annotated[str | None, Query(min_length=1, max_length=2048)] = None,
+    error: Annotated[str | None, Query(max_length=200)] = None,
 ) -> LoginResponse | Response:
     response.headers["Cache-Control"] = "no-store"
     response.headers["Vary"] = "Accept"
@@ -395,16 +409,9 @@ async def complete_google_oidc(
     browser_flow = _wants_html(http_request)
     state_cookie = http_request.cookies.get(cookie_policy.oidc_state_name)
     try:
-        invalid_parameters = (
-            state is None
-            or not 20 <= len(state) <= 512
-            or code is None
-            or not 1 <= len(code) <= 2048
-            or (error is not None and len(error) > 200)
-        )
-        if error is not None or state_cookie is None or invalid_parameters:
+        if error is not None or code is None or state_cookie is None:
             raise InvalidOIDCResponseError
-        result = await oidc.complete(cast(str, code), cast(str, state), state_cookie)
+        result = await oidc.complete(code, state, state_cookie)
     except AccountLinkRequiredError as link_error:
         if browser_flow:
             redirect = _browser_redirect(http_request, "/login/google-link")

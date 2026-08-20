@@ -261,6 +261,15 @@ async def test_malformed_google_browser_callbacks_redirect_instead_of_returning_
 
 
 @pytest.mark.anyio
+async def test_malformed_google_json_callback_retains_validation_contract() -> None:
+    app = create_app(oidc_login=OIDCStub(), oidc_start_rate_limiter=RateLimitStub())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
+        response = await client.get("/api/v1/auth/google/callback?code=code&state=short")
+
+    assert response.status_code == 422
+
+
+@pytest.mark.anyio
 async def test_google_oidc_browser_provider_outage_redirects_and_clears_callback_state() -> None:
     app = create_app(
         oidc_login=RetryableUnavailableOIDCStub(), oidc_start_rate_limiter=RateLimitStub()
