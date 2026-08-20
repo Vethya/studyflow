@@ -70,3 +70,26 @@ async def test_confirm_google_link_and_linked_identity_settings_contract() -> No
     assert linked.json()["csrf_token"] == "csrf-token"
     assert identities.status_code == 200
     assert identities.json()[0]["provider"] == "google"
+
+
+@pytest.mark.anyio
+async def test_confirm_google_link_accepts_and_clears_browser_link_cookie() -> None:
+    app = create_app(
+        oidc_account_linking=LinkingStub(),
+        oidc_link_rate_limiter=RateLimitStub(),
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://test",
+    ) as client:
+        client.cookies.set(
+            "studyflow_oidc_link", "challenge-token-value-123", domain="test.local", path="/"
+        )
+        linked = await client.post(
+            "/api/v1/auth/google/link",
+            json={"password": "correct password"},
+        )
+
+    assert linked.status_code == 200
+    assert "studyflow_oidc_link=" in linked.headers["set-cookie"]
+    assert client.cookies.get("studyflow_oidc_link") is None

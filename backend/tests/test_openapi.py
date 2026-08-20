@@ -105,6 +105,13 @@ def test_openapi_documents_retry_after_for_google_provider_outages() -> None:
     assert unavailable["headers"]["Retry-After"]["schema"] == {"type": "integer"}
 
 
+def test_openapi_documents_google_browser_callback_redirect() -> None:
+    schema = create_app().openapi()
+
+    redirect = schema["paths"]["/api/v1/auth/google/callback"]["get"]["responses"]["303"]
+    assert redirect["description"] == "Browser flow redirected to a clean frontend route"
+
+
 def test_openapi_documents_session_authentication_failures() -> None:
     schema = create_app().openapi()
 

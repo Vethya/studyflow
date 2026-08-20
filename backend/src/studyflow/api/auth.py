@@ -17,7 +17,7 @@ from fastapi import (
     status,
 )
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse
 
 from studyflow.auth.cookies import CookiePolicy
 from studyflow.auth.login import (
@@ -153,7 +153,7 @@ class OIDCLinkRequiredResponse(AuthenticationError):
 
 
 class OIDCLinkRequest(BaseModel):
-    challenge: Annotated[str, Field(min_length=20, max_length=512)]
+    challenge: Annotated[str | None, Field(min_length=20, max_length=512)] = None
     password: Annotated[str, Field(min_length=1, max_length=128)]
 
 
@@ -208,13 +208,29 @@ def get_cookie_policy(request: Request) -> CookiePolicy:
     return cast(CookiePolicy, request.app.state.cookie_policy)
 
 
+def _wants_html(request: Request) -> bool:
+    return "text/html" in request.headers.get("accept", "").lower()
+
+
+def _browser_redirect(request: Request, path: str, *, retry_after: str | None = None) -> Response:
+    public_app_url = cast(str, request.app.state.settings.public_app_url)
+    headers = {
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "no-referrer",
+        "Vary": "Accept",
+    }
+    if retry_after is not None:
+        headers["Retry-After"] = retry_after
+    return RedirectResponse(f"{public_app_url}{path}", status_code=303, headers=headers)
+
+
 def _oidc_error_response(
     status_code: int, detail: str, cookie_policy: CookiePolicy
 ) -> JSONResponse:
     response = JSONResponse(
         status_code=status_code,
         content={"detail": detail},
-        headers={"Cache-Control": "no-store"},
+        headers={"Cache-Control": "no-store", "Vary": "Accept"},
     )
     cookie_policy.clear_oidc_state(response)
     return response
@@ -228,7 +244,7 @@ def _oidc_link_required_response(challenge: str, cookie_policy: CookiePolicy) ->
     response = JSONResponse(
         status_code=409,
         content=payload.model_dump(),
-        headers={"Cache-Control": "no-store"},
+        headers={"Cache-Control": "no-store", "Vary": "Accept"},
     )
     cookie_policy.clear_oidc_state(response)
     return response
@@ -240,7 +256,7 @@ def _oidc_provider_unavailable_response(
     response = JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={"detail": "Google sign-in is temporarily unavailable"},
-        headers={"Cache-Control": "no-store", "Retry-After": "60"},
+        headers={"Cache-Control": "no-store", "Retry-After": "60", "Vary": "Accept"},
     )
     if not error.retry_same_callback:
         cookie_policy.clear_oidc_state(response)
@@ -309,6 +325,9 @@ async def start_google_oidc(
     "/google/callback",
     response_model=LoginResponse,
     responses={
+        status.HTTP_303_SEE_OTHER: {
+            "description": "Browser flow redirected to a clean frontend route"
+        },
         status.HTTP_400_BAD_REQUEST: {"model": AuthenticationError},
         status.HTTP_409_CONFLICT: {"model": OIDCLinkRequiredResponse},
         status.HTTP_503_SERVICE_UNAVAILABLE: {
@@ -331,20 +350,47 @@ async def complete_google_oidc(
     error: Annotated[str | None, Query(max_length=200)] = None,
 ) -> LoginResponse | Response:
     response.headers["Cache-Control"] = "no-store"
+    response.headers["Vary"] = "Accept"
     cookie_policy = get_cookie_policy(http_request)
+    browser_flow = _wants_html(http_request)
     state_cookie = http_request.cookies.get(cookie_policy.oidc_state_name)
     try:
         if error is not None or code is None or state_cookie is None:
             raise InvalidOIDCResponseError
         result = await oidc.complete(code, state, state_cookie)
-    except AccountLinkRequiredError as error:
-        return _oidc_link_required_response(error.challenge, cookie_policy)
-    except OIDCProviderUnavailableError as error:
-        return _oidc_provider_unavailable_response(error, cookie_policy)
+    except AccountLinkRequiredError as link_error:
+        if browser_flow:
+            redirect = _browser_redirect(http_request, "/login/google-link")
+            cookie_policy.clear_oidc_state(redirect)
+            cookie_policy.set_oidc_link(redirect, link_error.challenge)
+            return redirect
+        return _oidc_link_required_response(link_error.challenge, cookie_policy)
+    except OIDCProviderUnavailableError as provider_error:
+        if browser_flow:
+            redirect = _browser_redirect(
+                http_request, "/login/google-error/provider-unavailable", retry_after="60"
+            )
+            cookie_policy.clear_oidc_state(redirect)
+            return redirect
+        return _oidc_provider_unavailable_response(provider_error, cookie_policy)
     except InvalidOIDCResponseError:
+        if browser_flow:
+            outcome = "denied" if error == "access_denied" else "invalid"
+            redirect = _browser_redirect(http_request, f"/login/google-error/{outcome}")
+            cookie_policy.clear_oidc_state(redirect)
+            return redirect
         return _oidc_error_response(400, "Google sign-in could not be completed", cookie_policy)
     except OIDCNotConfiguredError:
+        if browser_flow:
+            redirect = _browser_redirect(http_request, "/login/google-error/not-configured")
+            cookie_policy.clear_oidc_state(redirect)
+            return redirect
         return _oidc_error_response(503, "Google sign-in is not configured", cookie_policy)
+    if browser_flow:
+        redirect = _browser_redirect(http_request, "/app")
+        cookie_policy.clear_oidc_state(redirect)
+        cookie_policy.set_authentication(redirect, result.session_token, result.csrf_token)
+        return redirect
     cookie_policy.clear_oidc_state(response)
     cookie_policy.set_authentication(response, result.session_token, result.csrf_token)
     return LoginResponse(
@@ -371,11 +417,15 @@ async def confirm_google_account_link(
     rate_limit: Annotated[OIDCLinkRateLimit, Depends(get_oidc_link_rate_limit)],
 ) -> LoginResponse:
     client_ip = http_request.client.host if http_request.client is not None else "unknown"
+    cookie_policy = get_cookie_policy(http_request)
+    challenge = payload.challenge or http_request.cookies.get(cookie_policy.oidc_link_name)
     try:
-        account_id = await linking.resolve_attempt_account_id(payload.challenge)
-        account_key = str(account_id) if account_id is not None else f"invalid:{payload.challenge}"
+        if challenge is None:
+            raise InvalidLinkChallengeError
+        account_id = await linking.resolve_attempt_account_id(challenge)
+        account_key = str(account_id) if account_id is not None else f"invalid:{challenge}"
         await rate_limit.check(client_ip, account_key)
-        result = await linking.link(payload.challenge, payload.password)
+        result = await linking.link(challenge, payload.password)
     except OIDCLinkRateLimitExceeded as error:
         raise HTTPException(
             status_code=429,
@@ -384,9 +434,8 @@ async def confirm_google_account_link(
         ) from error
     except InvalidLinkChallengeError as error:
         raise HTTPException(status_code=401, detail="Invalid link challenge or password") from error
-    get_cookie_policy(http_request).set_authentication(
-        response, result.session_token, result.csrf_token
-    )
+    cookie_policy.clear_oidc_link(response)
+    cookie_policy.set_authentication(response, result.session_token, result.csrf_token)
     return LoginResponse(
         account=AuthenticatedAccount(
             id=str(result.account_id), email=result.email, name=result.name
