@@ -348,10 +348,10 @@ async def start_google_oidc(
 async def complete_google_oidc(
     response: Response,
     http_request: Request,
-    state: Annotated[str, Query(min_length=20, max_length=512)],
     oidc: Annotated[OIDCLogin, Depends(get_oidc_login)],
-    code: Annotated[str | None, Query(min_length=1, max_length=2048)] = None,
-    error: Annotated[str | None, Query(max_length=200)] = None,
+    state: Annotated[str | None, Query()] = None,
+    code: Annotated[str | None, Query()] = None,
+    error: Annotated[str | None, Query()] = None,
 ) -> LoginResponse | Response:
     response.headers["Cache-Control"] = "no-store"
     response.headers["Vary"] = "Accept"
@@ -359,8 +359,16 @@ async def complete_google_oidc(
     browser_flow = _wants_html(http_request)
     state_cookie = http_request.cookies.get(cookie_policy.oidc_state_name)
     try:
-        if error is not None or code is None or state_cookie is None:
+        invalid_parameters = (
+            state is None
+            or not 20 <= len(state) <= 512
+            or code is None
+            or not 1 <= len(code) <= 2048
+            or (error is not None and len(error) > 200)
+        )
+        if error is not None or state_cookie is None or invalid_parameters:
             raise InvalidOIDCResponseError
+        assert state is not None and code is not None
         result = await oidc.complete(code, state, state_cookie)
     except AccountLinkRequiredError as link_error:
         if browser_flow:

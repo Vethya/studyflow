@@ -214,6 +214,29 @@ async def test_google_oidc_browser_errors_redirect_without_sensitive_parameters(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    "query",
+    [
+        "code=code",
+        "code=code&state=short",
+        f"code={'x' * 2049}&state=state-state-state-state",
+    ],
+)
+async def test_malformed_google_browser_callbacks_redirect_instead_of_returning_validation_json(
+    query: str,
+) -> None:
+    app = create_app(oidc_login=OIDCStub(), oidc_start_rate_limiter=RateLimitStub())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
+        await client.get("/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh")
+        response = await client.get(
+            f"/api/v1/auth/google/callback?{query}", headers={"Accept": "text/html"}
+        )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "http://localhost:5173/login/google-error/invalid"
+
+
+@pytest.mark.anyio
 async def test_google_oidc_browser_provider_outage_redirects_and_clears_callback_state() -> None:
     app = create_app(
         oidc_login=RetryableUnavailableOIDCStub(), oidc_start_rate_limiter=RateLimitStub()
