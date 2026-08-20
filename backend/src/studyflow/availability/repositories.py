@@ -1,12 +1,18 @@
 """SQLAlchemy availability repositories."""
 
 from datetime import UTC, datetime
+from typing import Protocol
 from uuid import UUID
 
 from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.repositories import SessionTransactions
-from studyflow.availability.unavailable import UnavailablePeriod, UnavailablePeriodDraft
+from studyflow.availability.unavailable import (
+    UnavailablePeriod,
+    UnavailablePeriodChange,
+    UnavailablePeriodDraft,
+)
 from studyflow.availability.windows import (
     AvailabilityWindow,
     AvailabilityWindowDraft,
@@ -14,6 +20,29 @@ from studyflow.availability.windows import (
 from studyflow.database.models import AvailabilityWindow as AvailabilityWindowRow
 from studyflow.database.models import StudentAccount
 from studyflow.database.models import UnavailablePeriod as UnavailablePeriodRow
+
+
+class FutureSessionInvalidator(Protocol):
+    async def remove_conflicting_future_sessions(
+        self,
+        session: AsyncSession,
+        account_id: UUID,
+        starts_at: datetime,
+        ends_at: datetime,
+    ) -> list[UUID]: ...
+
+
+class NoFutureSessions:
+    """Transactional scheduler seam while Study Sessions are deferred."""
+
+    async def remove_conflicting_future_sessions(
+        self,
+        session: AsyncSession,
+        account_id: UUID,
+        starts_at: datetime,
+        ends_at: datetime,
+    ) -> list[UUID]:
+        return []
 
 
 class SqlAlchemyAvailabilityWindowRepository:
@@ -77,8 +106,13 @@ class SqlAlchemyAvailabilityWindowRepository:
 
 
 class SqlAlchemyUnavailablePeriodRepository:
-    def __init__(self, database: SessionTransactions) -> None:
+    def __init__(
+        self,
+        database: SessionTransactions,
+        invalidator: FutureSessionInvalidator,
+    ) -> None:
         self._database = database
+        self._invalidator = invalidator
 
     async def list_periods(self, account_id: UUID) -> list[UnavailablePeriod]:
         async with self._database.transaction() as session:
@@ -89,7 +123,9 @@ class SqlAlchemyUnavailablePeriodRepository:
             )
             return [self._to_period(row) for row in rows]
 
-    async def create(self, account_id: UUID, draft: UnavailablePeriodDraft) -> UnavailablePeriod:
+    async def create(
+        self, account_id: UUID, draft: UnavailablePeriodDraft
+    ) -> UnavailablePeriodChange:
         async with self._database.transaction() as session:
             row = UnavailablePeriodRow(
                 account_id=account_id,
@@ -100,11 +136,14 @@ class SqlAlchemyUnavailablePeriodRepository:
             session.add(row)
             await session.flush()
             await session.refresh(row)
-            return self._to_period(row)
+            invalidated = await self._invalidator.remove_conflicting_future_sessions(
+                session, account_id, draft.starts_at, draft.ends_at
+            )
+            return UnavailablePeriodChange(self._to_period(row), invalidated)
 
     async def update(
         self, account_id: UUID, period_id: UUID, draft: UnavailablePeriodDraft
-    ) -> UnavailablePeriod | None:
+    ) -> UnavailablePeriodChange | None:
         async with self._database.transaction() as session:
             row = await session.scalar(
                 select(UnavailablePeriodRow)
@@ -121,7 +160,10 @@ class SqlAlchemyUnavailablePeriodRepository:
             row.reason = draft.reason
             await session.flush()
             await session.refresh(row)
-            return self._to_period(row)
+            invalidated = await self._invalidator.remove_conflicting_future_sessions(
+                session, account_id, draft.starts_at, draft.ends_at
+            )
+            return UnavailablePeriodChange(self._to_period(row), invalidated)
 
     async def delete(self, account_id: UUID, period_id: UUID) -> bool:
         async with self._database.transaction() as session:
