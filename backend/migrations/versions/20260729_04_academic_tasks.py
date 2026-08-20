@@ -63,6 +63,10 @@ def upgrade() -> None:
         sa.CheckConstraint("length(trim(title)) > 0", name="title_required"),
         sa.CheckConstraint("course IS NULL OR length(course) <= 100", name="course_length"),
         sa.CheckConstraint("notes IS NULL OR length(notes) <= 2000", name="notes_length"),
+        sa.CheckConstraint(
+            "finished_early_at IS NULL OR estimate_frozen_at IS NOT NULL",
+            name="completion_requires_start",
+        ),
         sa.ForeignKeyConstraint(["account_id"], ["student_accounts.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )

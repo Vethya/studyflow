@@ -31,6 +31,10 @@ class EstimateFrozenError(ValueError):
     """Raised when an update changes an estimate after work starts."""
 
 
+class TaskMustBeStartedError(ValueError):
+    """Raised when an unstarted task is finished early."""
+
+
 class TaskStatus(StrEnum):
     NOT_STARTED = "not_started"
     IN_PROGRESS = "in_progress"

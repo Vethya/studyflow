@@ -14,6 +14,7 @@ from studyflow.tasks.service import (
     NewAcademicTask,
     TaskCategory,
     TaskFilters,
+    TaskMustBeStartedError,
     TaskPriority,
     TaskStatus,
 )
@@ -49,6 +50,7 @@ class TasksStub:
     updates: list[tuple[UUID, UUID, NewAcademicTask]] = field(default_factory=list)
     deletes: list[tuple[UUID, UUID]] = field(default_factory=list)
     finishes: list[tuple[UUID, UUID]] = field(default_factory=list)
+    finish_requires_start: bool = False
 
     async def create(self, account_id: UUID, task: NewAcademicTask) -> AcademicTaskRecord:
         if self.create_failure:
@@ -81,6 +83,8 @@ class TasksStub:
 
     async def finish_early(self, account_id: UUID, task_id: UUID) -> bool:
         self.finishes.append((account_id, task_id))
+        if self.finish_requires_start:
+            raise TaskMustBeStartedError
         return any(record.id == task_id for record in self.records)
 
     async def mark_started(self, account_id: UUID, task_id: UUID) -> bool:
@@ -250,6 +254,25 @@ async def test_task_update_finish_early_and_delete_contract() -> None:
     assert tasks.updates[0][2].original_estimate_minutes == 120
     assert tasks.finishes == [(ACCOUNT_ID, TASK_ID)]
     assert tasks.deletes == [(ACCOUNT_ID, TASK_ID)]
+
+
+@pytest.mark.anyio
+async def test_task_finish_early_requires_the_task_to_be_started() -> None:
+    tasks = TasksStub([task_record()], finish_requires_start=True)
+    app = create_app(session_authentication=AuthenticationStub(), academic_tasks=tasks)
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://test",
+        cookies={"studyflow_session": "session-token"},
+    ) as client:
+        response = await client.post(
+            f"/api/v1/tasks/{TASK_ID}/finish-early",
+            headers={"X-CSRF-Token": "csrf-token"},
+            json={"confirmed": True},
+        )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Task must be started before it can be finished"}
 
 
 @pytest.mark.anyio

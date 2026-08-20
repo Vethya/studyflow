@@ -17,6 +17,7 @@ from studyflow.tasks.service import (
     NewAcademicTask,
     TaskCategory,
     TaskFilters,
+    TaskMustBeStartedError,
     TaskPriority,
     TaskStatus,
 )
@@ -259,6 +260,7 @@ async def update_task(
         status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
         status.HTTP_403_FORBIDDEN: {"model": AccountError},
         status.HTTP_404_NOT_FOUND: {"model": TaskError},
+        status.HTTP_409_CONFLICT: {"model": TaskError},
     },
 )
 async def finish_task_early(
@@ -267,7 +269,14 @@ async def finish_task_early(
     principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
     tasks: Annotated[AcademicTasks, Depends(get_academic_tasks)],
 ) -> None:
-    if not await tasks.finish_early(principal.account_id, task_id):
+    try:
+        finished = await tasks.finish_early(principal.account_id, task_id)
+    except TaskMustBeStartedError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Task must be started before it can be finished",
+        ) from error
+    if not finished:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
 
 

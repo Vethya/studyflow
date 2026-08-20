@@ -6,13 +6,14 @@ import pytest
 from sqlalchemy import select
 
 from studyflow.database import Base, Database
-from studyflow.database.models import StudentAccount, TaskDeadlineHistory
+from studyflow.database.models import AcademicTask, StudentAccount, TaskDeadlineHistory
 from studyflow.tasks.repositories import SqlAlchemyAcademicTaskRepository
 from studyflow.tasks.service import (
     EstimateFrozenError,
     NewAcademicTask,
     TaskCategory,
     TaskFilters,
+    TaskMustBeStartedError,
     TaskPriority,
     TaskStatus,
 )
@@ -64,6 +65,8 @@ async def test_task_lifecycle_preserves_history_freezes_estimate_and_derives_sta
         assert history.previous_deadline_at.replace(tzinfo=UTC) == now + timedelta(days=2)
         assert history.new_deadline_at.replace(tzinfo=UTC) == now + timedelta(days=3)
 
+        with pytest.raises(TaskMustBeStartedError):
+            await repository.finish_early(account_id, task.id, now)
         assert await repository.mark_started(account_id, task.id, now)
         assert (await repository.get(account_id, task.id)).status is TaskStatus.IN_PROGRESS  # type: ignore[union-attr]
         with pytest.raises(EstimateFrozenError):
@@ -74,6 +77,12 @@ async def test_task_lifecycle_preserves_history_freezes_estimate_and_derives_sta
             assert len(list(await session.scalars(select(TaskDeadlineHistory)))) == 1
 
         assert await repository.finish_early(account_id, task.id, now)
+        assert await repository.finish_early(account_id, task.id, now + timedelta(hours=1))
+        async with database.transaction() as session:
+            finished_at = await session.scalar(
+                select(AcademicTask.finished_early_at).where(AcademicTask.id == task.id)
+            )
+        assert finished_at is not None and finished_at.replace(tzinfo=UTC) == now
         overdue_draft = replace(draft, title="Overdue", deadline_at=now - timedelta(hours=1))
         overdue = await repository.create(account_id, overdue_draft)
         overdue_updated = await repository.update(
