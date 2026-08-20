@@ -129,6 +129,24 @@ def test_openapi_preserves_google_callback_query_constraints() -> None:
     assert error_schema["maxLength"] == 200
 
 
+def test_openapi_documents_browser_link_cookie_prerequisites() -> None:
+    schema = create_app().openapi()
+    operation = schema["paths"]["/api/v1/auth/google/link/browser"]["post"]
+    cookie_parameters = {
+        parameter["name"]: parameter
+        for parameter in operation["parameters"]
+        if parameter["in"] == "cookie"
+    }
+
+    assert "short-lived HttpOnly challenge cookie" in operation["description"]
+    assert set(cookie_parameters) == {
+        "studyflow_oidc_link",
+        "__Host-studyflow_oidc_link",
+    }
+    assert "development" in cookie_parameters["studyflow_oidc_link"]["description"]
+    assert "production" in cookie_parameters["__Host-studyflow_oidc_link"]["description"]
+
+
 def test_openapi_documents_session_authentication_failures() -> None:
     schema = create_app().openapi()
 

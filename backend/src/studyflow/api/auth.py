@@ -266,9 +266,7 @@ def _browser_redirect(request: Request, path: str, *, retry_after: str | None = 
     return RedirectResponse(f"{public_app_url}{path}", status_code=303, headers=headers)
 
 
-async def handle_google_callback_validation_error(
-    request: Request, error: Exception
-) -> Response:
+async def handle_google_callback_validation_error(request: Request, error: Exception) -> Response:
     if not isinstance(error, RequestValidationError):
         raise error
     if request.url.path == "/api/v1/auth/google/callback" and _wants_html(request):
@@ -478,6 +476,29 @@ async def confirm_google_account_link(
 @router.post(
     "/google/link/browser",
     response_model=LoginResponse,
+    description=(
+        "Completes browser account linking using the short-lived HttpOnly challenge cookie. "
+        "Development requires `studyflow_oidc_link`; production requires "
+        "`__Host-studyflow_oidc_link`."
+    ),
+    openapi_extra={
+        "parameters": [
+            {
+                "name": "studyflow_oidc_link",
+                "in": "cookie",
+                "required": False,
+                "description": "Required short-lived link challenge in development",
+                "schema": {"type": "string"},
+            },
+            {
+                "name": "__Host-studyflow_oidc_link",
+                "in": "cookie",
+                "required": False,
+                "description": "Required short-lived link challenge in production",
+                "schema": {"type": "string"},
+            },
+        ]
+    },
     responses={
         status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError},
         status.HTTP_429_TOO_MANY_REQUESTS: {"model": AuthenticationError},
