@@ -168,6 +168,30 @@ async def test_google_oidc_browser_success_redirects_to_clean_app_url() -> None:
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    "accept",
+    [
+        "application/json, text/html;q=0",
+        "application/json, text/html",
+        "*/*",
+    ],
+)
+async def test_google_oidc_callback_keeps_json_when_html_is_rejected_or_not_preferred(
+    accept: str,
+) -> None:
+    app = create_app(oidc_login=OIDCStub(), oidc_start_rate_limiter=RateLimitStub())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
+        await client.get("/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh")
+        response = await client.get(
+            "/api/v1/auth/google/callback?code=code&state=state-state-state-state",
+            headers={"Accept": accept},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["csrf_token"] == "csrf-token"
+
+
+@pytest.mark.anyio
 async def test_google_oidc_browser_linking_uses_http_only_server_state() -> None:
     app = create_app(oidc_login=LinkRequiredOIDCStub(), oidc_start_rate_limiter=RateLimitStub())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:

@@ -213,7 +213,43 @@ def get_cookie_policy(request: Request) -> CookiePolicy:
 
 
 def _wants_html(request: Request) -> bool:
-    return "text/html" in request.headers.get("accept", "").lower()
+    accept = request.headers.get("accept")
+    if accept is None:
+        return False
+    html_quality = _accepted_quality(accept, "text/html")
+    json_quality = _accepted_quality(accept, "application/json")
+    return html_quality > 0 and html_quality > json_quality
+
+
+def _accepted_quality(accept: str, offered: str) -> float:
+    offered_type, offered_subtype = offered.split("/", maxsplit=1)
+    best_specificity = -1
+    best_quality = 0.0
+    for media_range in accept.lower().split(","):
+        media_type, *parameters = (part.strip() for part in media_range.split(";"))
+        if "/" not in media_type:
+            continue
+        accepted_type, accepted_subtype = media_type.split("/", maxsplit=1)
+        if accepted_type not in {"*", offered_type} or accepted_subtype not in {
+            "*",
+            offered_subtype,
+        }:
+            continue
+        specificity = int(accepted_type != "*") + int(accepted_subtype != "*")
+        quality = 1.0
+        for parameter in parameters:
+            name, separator, value = parameter.partition("=")
+            if name == "q" and separator:
+                try:
+                    quality = float(value)
+                except ValueError:
+                    quality = 0.0
+        quality = min(max(quality, 0.0), 1.0)
+        if specificity > best_specificity:
+            best_specificity, best_quality = specificity, quality
+        elif specificity == best_specificity:
+            best_quality = max(best_quality, quality)
+    return best_quality
 
 
 def _browser_redirect(request: Request, path: str, *, retry_after: str | None = None) -> Response:
@@ -368,8 +404,7 @@ async def complete_google_oidc(
         )
         if error is not None or state_cookie is None or invalid_parameters:
             raise InvalidOIDCResponseError
-        assert state is not None and code is not None
-        result = await oidc.complete(code, state, state_cookie)
+        result = await oidc.complete(cast(str, code), cast(str, state), state_cookie)
     except AccountLinkRequiredError as link_error:
         if browser_flow:
             redirect = _browser_redirect(http_request, "/login/google-link")
