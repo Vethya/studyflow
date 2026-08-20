@@ -522,7 +522,6 @@ async def logout(
     cookie_policy = get_cookie_policy(http_request)
     session_token = http_request.cookies.get(cookie_policy.session_name)
     if session_token is None:
-        cookie_policy.clear_authentication(response)
         return
     csrf_cookie = http_request.cookies.get(cookie_policy.csrf_name)
     if (

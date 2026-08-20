@@ -136,7 +136,7 @@ async def test_repeated_logout_without_cookies_is_successful() -> None:
         response = await client.post("/api/v1/auth/logout")
     assert response.status_code == 204
     assert authentication.revoke_calls == []
-    assert len(response.headers.get_list("set-cookie")) == 2
+    assert "set-cookie" not in response.headers
 
 
 @pytest.mark.anyio
