@@ -248,7 +248,7 @@ class GoogleOIDCProvider:
             claims = await self._decode_id_token(id_token)
             return self._validated_claims(claims, expected_nonce_hash)
         except httpx.HTTPStatusError as error:
-            if error.response.status_code >= 500:
+            if error.response.status_code == 429 or error.response.status_code >= 500:
                 raise OIDCProviderUnavailableError from error
             raise InvalidOIDCResponseError from error
         except httpx.RequestError as error:

@@ -130,7 +130,7 @@ async def test_google_provider_requires_matching_authorized_party_for_multiple_a
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("endpoint", ["token", "jwks"])
-@pytest.mark.parametrize("failure", ["timeout", "connection", "server_error"])
+@pytest.mark.parametrize("failure", ["timeout", "connection", "rate_limit", "server_error"])
 async def test_google_provider_reports_temporary_transport_failures(
     endpoint: str, failure: str
 ) -> None:
@@ -143,7 +143,7 @@ async def test_google_provider_reports_temporary_transport_failures(
                 raise httpx.ReadTimeout("Google timed out", request=request)
             if failure == "connection":
                 raise httpx.ConnectError("Google connection failed", request=request)
-            return httpx.Response(503)
+            return httpx.Response(429 if failure == "rate_limit" else 503)
         if request_endpoint == "token":
             return httpx.Response(200, json={"id_token": token})
         return httpx.Response(200, json={"keys": [public_jwk]})
