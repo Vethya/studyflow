@@ -150,8 +150,10 @@ async def test_google_provider_reports_temporary_transport_failures(
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         provider = GoogleOIDCProvider(client, "client-id", "client-secret", "https://app/callback")
-        with pytest.raises(OIDCProviderUnavailableError):
+        with pytest.raises(OIDCProviderUnavailableError) as raised:
             await provider.exchange("code", hashlib.sha256(nonce.encode()).hexdigest())
+
+    assert raised.value.retry_same_callback is (endpoint == "token" and failure == "connection")
 
 
 @pytest.mark.anyio

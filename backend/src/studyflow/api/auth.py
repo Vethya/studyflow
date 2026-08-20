@@ -234,12 +234,17 @@ def _oidc_link_required_response(challenge: str, cookie_policy: CookiePolicy) ->
     return response
 
 
-def _oidc_provider_unavailable_response() -> JSONResponse:
-    return JSONResponse(
+def _oidc_provider_unavailable_response(
+    error: OIDCProviderUnavailableError, cookie_policy: CookiePolicy
+) -> JSONResponse:
+    response = JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={"detail": "Google sign-in is temporarily unavailable"},
         headers={"Cache-Control": "no-store", "Retry-After": "60"},
     )
+    if not error.retry_same_callback:
+        cookie_policy.clear_oidc_state(response)
+    return response
 
 
 def get_session_authentication(request: Request) -> SessionAuthentication:
@@ -334,8 +339,8 @@ async def complete_google_oidc(
         result = await oidc.complete(code, state, state_cookie)
     except AccountLinkRequiredError as error:
         return _oidc_link_required_response(error.challenge, cookie_policy)
-    except OIDCProviderUnavailableError:
-        return _oidc_provider_unavailable_response()
+    except OIDCProviderUnavailableError as error:
+        return _oidc_provider_unavailable_response(error, cookie_policy)
     except InvalidOIDCResponseError:
         return _oidc_error_response(400, "Google sign-in could not be completed", cookie_policy)
     except OIDCNotConfiguredError:

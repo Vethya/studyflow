@@ -33,6 +33,9 @@ class InvalidOIDCResponseError(ValueError):
 class OIDCProviderUnavailableError(RuntimeError):
     """Google could not complete a request because of a temporary provider failure."""
 
+    def __init__(self, *, retry_same_callback: bool = False) -> None:
+        self.retry_same_callback = retry_same_callback
+
 
 class AccountLinkRequiredError(ValueError):
     """A matching account requires password-confirmed linking."""
@@ -183,8 +186,9 @@ class OIDCLoginService:
             raise InvalidOIDCResponseError
         try:
             claims = await self._provider.exchange(code, state_record.nonce_hash)
-        except OIDCProviderUnavailableError:
-            await self._repository.restore_state(state_hash, consumed_at, self._clock())
+        except OIDCProviderUnavailableError as error:
+            if error.retry_same_callback:
+                await self._repository.restore_state(state_hash, consumed_at, self._clock())
             raise
         account = await self._repository.resolve_identity(claims, state_record.timezone)
         if account is None:
@@ -222,6 +226,7 @@ class GoogleOIDCProvider:
         self._redirect_uri = redirect_uri
 
     async def exchange(self, code: str, expected_nonce_hash: str) -> GoogleClaims:
+        token_exchanged = False
         try:
             token_response = await self._http_client.post(
                 GOOGLE_TOKEN_ENDPOINT,
@@ -234,6 +239,7 @@ class GoogleOIDCProvider:
                 },
             )
             token_response.raise_for_status()
+            token_exchanged = True
             id_token = token_response.json()["id_token"]
             if not isinstance(id_token, str):
                 raise InvalidOIDCResponseError
@@ -244,7 +250,10 @@ class GoogleOIDCProvider:
                 raise OIDCProviderUnavailableError from error
             raise InvalidOIDCResponseError from error
         except httpx.RequestError as error:
-            raise OIDCProviderUnavailableError from error
+            retry_same_callback = not token_exchanged and isinstance(
+                error, (httpx.ConnectError, httpx.ConnectTimeout)
+            )
+            raise OIDCProviderUnavailableError(retry_same_callback=retry_same_callback) from error
         except (KeyError, TypeError, ValueError, jwt.PyJWTError) as error:
             if isinstance(error, InvalidOIDCResponseError):
                 raise

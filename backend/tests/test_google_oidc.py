@@ -72,7 +72,7 @@ class FlakyProviderStub(ProviderStub):
     async def exchange(self, code: str, expected_nonce_hash: str) -> GoogleClaims:
         self.attempts += 1
         if self.attempts == 1:
-            raise OIDCProviderUnavailableError
+            raise OIDCProviderUnavailableError(retry_same_callback=True)
         return await super().exchange(code, expected_nonce_hash)
 
 
