@@ -154,7 +154,22 @@ async def create_task(
 @router.get(
     "",
     response_model=list[AcademicTaskResponse],
-    responses={status.HTTP_401_UNAUTHORIZED: {"model": AccountError}},
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "description": "Invalid task filters",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "oneOf": [
+                            {"$ref": "#/components/schemas/TaskError"},
+                            {"$ref": "#/components/schemas/HTTPValidationError"},
+                        ]
+                    }
+                }
+            },
+        },
+    },
 )
 async def list_tasks(
     principal: Annotated[SessionPrincipal, Depends(require_session)],
