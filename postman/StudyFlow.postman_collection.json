@@ -188,6 +188,18 @@
           },
           "response": [],
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) pm.collectionVariables.set('csrf_token', pm.response.json().csrf_token);"] } }]
+        },
+        {
+          "name": "Confirm Browser Google Account Link",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"password\": \"correct horse battery staple\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/auth/google/link/browser", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "google", "link", "browser"] },
+            "description": "Confirms account linking with the short-lived HttpOnly challenge cookie created by the browser callback."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200 or expired challenge 401', () => pm.expect([200, 401]).to.include(pm.response.code));", "if (pm.response.code === 200) pm.collectionVariables.set('csrf_token', pm.response.json().csrf_token);"] } }]
         }
       ]
     },
