@@ -585,6 +585,18 @@
     {
       "name": "Academic Tasks",
       "description": "Authenticated, student-owned academic work.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const taskDeadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);",
+              "pm.collectionVariables.set('task_deadline_at', taskDeadline.toISOString());"
+            ]
+          }
+        }
+      ],
       "item": [
         {
           "name": "Create Academic Task",
@@ -597,14 +609,14 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Read chapter 4\",\n  \"category\": \"reading\",\n  \"priority\": \"medium\",\n  \"course\": \"Algorithms\",\n  \"notes\": \"Focus on dynamic programming.\",\n  \"deadline_at\": \"2026-08-10T12:00:00Z\",\n  \"original_estimate_minutes\": 90\n}",
+              "raw": "{\n  \"title\": \"Read chapter 4\",\n  \"category\": \"reading\",\n  \"priority\": \"medium\",\n  \"course\": \"Algorithms\",\n  \"notes\": \"Focus on dynamic programming.\",\n  \"deadline_at\": \"{{task_deadline_at}}\",\n  \"original_estimate_minutes\": 90\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": { "raw": "{{base_url}}/api/v1/tasks", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks"] },
             "description": "Creates a task owned by the authenticated student. Planned duration initially equals the original estimate."
           },
           "response": [],
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 201', () => pm.response.to.have.status(201));", "if (pm.response.code === 201) pm.collectionVariables.set('task_id', pm.response.json().id);"] } }]
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 201', () => pm.response.to.have.status(201));", "pm.test('generated task deadline is a valid future instant', () => {", "  const deadline = Date.parse(pm.collectionVariables.get('task_deadline_at'));", "  pm.expect(Number.isNaN(deadline)).to.be.false;", "  pm.expect(deadline).to.be.above(Date.now());", "});", "if (pm.response.code === 201) pm.collectionVariables.set('task_id', pm.response.json().id);"] } }]
         },
         {
           "name": "List Academic Tasks",
@@ -633,7 +645,7 @@
           "request": {
             "method": "PUT",
             "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
-            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Updated task\",\n  \"category\": \"assignment\",\n  \"priority\": \"high\",\n  \"deadline_at\": \"2026-08-12T12:00:00Z\",\n  \"original_estimate_minutes\": 120\n}", "options": { "raw": { "language": "json" } } },
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Updated task\",\n  \"category\": \"assignment\",\n  \"priority\": \"high\",\n  \"deadline_at\": \"{{task_deadline_at}}\",\n  \"original_estimate_minutes\": 120\n}", "options": { "raw": { "language": "json" } } },
             "url": { "raw": "{{base_url}}/api/v1/tasks/{{task_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks", "{{task_id}}"] },
             "description": "Replaces editable fields, preserves deadline history, and rejects estimate changes after work starts."
           },
@@ -777,6 +789,12 @@
       "value": "",
       "type": "string",
       "description": "Automatically populated by the create Academic Task request."
+    },
+    {
+      "key": "task_deadline_at",
+      "value": "",
+      "type": "string",
+      "description": "Generated seven days ahead before Academic Task requests."
     },
     {
       "key": "period_id",
