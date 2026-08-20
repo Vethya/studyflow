@@ -153,7 +153,11 @@ class OIDCLinkRequiredResponse(AuthenticationError):
 
 
 class OIDCLinkRequest(BaseModel):
-    challenge: Annotated[str | None, Field(min_length=20, max_length=512)] = None
+    challenge: Annotated[str, Field(min_length=20, max_length=512)]
+    password: Annotated[str, Field(min_length=1, max_length=128)]
+
+
+class OIDCLinkBrowserRequest(BaseModel):
     password: Annotated[str, Field(min_length=1, max_length=128)]
 
 
@@ -416,16 +420,50 @@ async def confirm_google_account_link(
     linking: Annotated[OIDCAccountLinking, Depends(get_oidc_account_linking)],
     rate_limit: Annotated[OIDCLinkRateLimit, Depends(get_oidc_link_rate_limit)],
 ) -> LoginResponse:
+    return await _complete_google_account_link(
+        payload.challenge, payload.password, response, http_request, linking, rate_limit
+    )
+
+
+@router.post(
+    "/google/link/browser",
+    response_model=LoginResponse,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError},
+        status.HTTP_429_TOO_MANY_REQUESTS: {"model": AuthenticationError},
+    },
+)
+async def confirm_google_browser_account_link(
+    payload: OIDCLinkBrowserRequest,
+    response: Response,
+    http_request: Request,
+    linking: Annotated[OIDCAccountLinking, Depends(get_oidc_account_linking)],
+    rate_limit: Annotated[OIDCLinkRateLimit, Depends(get_oidc_link_rate_limit)],
+) -> LoginResponse:
+    cookie_policy = get_cookie_policy(http_request)
+    challenge = http_request.cookies.get(cookie_policy.oidc_link_name)
+    if challenge is None:
+        raise HTTPException(status_code=401, detail="Invalid link challenge or password")
+    return await _complete_google_account_link(
+        challenge, payload.password, response, http_request, linking, rate_limit
+    )
+
+
+async def _complete_google_account_link(
+    challenge: str,
+    password: str,
+    response: Response,
+    http_request: Request,
+    linking: OIDCAccountLinking,
+    rate_limit: OIDCLinkRateLimit,
+) -> LoginResponse:
     client_ip = http_request.client.host if http_request.client is not None else "unknown"
     cookie_policy = get_cookie_policy(http_request)
-    challenge = payload.challenge or http_request.cookies.get(cookie_policy.oidc_link_name)
     try:
-        if challenge is None:
-            raise InvalidLinkChallengeError
         account_id = await linking.resolve_attempt_account_id(challenge)
         account_key = str(account_id) if account_id is not None else f"invalid:{challenge}"
         await rate_limit.check(client_ip, account_key)
-        result = await linking.link(challenge, payload.password)
+        result = await linking.link(challenge, password)
     except OIDCLinkRateLimitExceeded as error:
         raise HTTPException(
             status_code=429,

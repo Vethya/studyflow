@@ -86,10 +86,29 @@ async def test_confirm_google_link_accepts_and_clears_browser_link_cookie() -> N
             "studyflow_oidc_link", "challenge-token-value-123", domain="test.local", path="/"
         )
         linked = await client.post(
-            "/api/v1/auth/google/link",
+            "/api/v1/auth/google/link/browser",
             json={"password": "correct password"},
         )
 
     assert linked.status_code == 200
     assert "studyflow_oidc_link=" in linked.headers["set-cookie"]
     assert client.cookies.get("studyflow_oidc_link") is None
+
+
+@pytest.mark.anyio
+async def test_json_google_link_still_requires_explicit_challenge() -> None:
+    app = create_app(
+        oidc_account_linking=LinkingStub(),
+        oidc_link_rate_limiter=RateLimitStub(),
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://test",
+        cookies={"studyflow_oidc_link": "challenge-token-value-123"},
+    ) as client:
+        response = await client.post(
+            "/api/v1/auth/google/link",
+            json={"password": "correct password"},
+        )
+
+    assert response.status_code == 422
