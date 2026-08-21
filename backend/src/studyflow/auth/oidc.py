@@ -30,6 +30,13 @@ class InvalidOIDCResponseError(ValueError):
     """The authorization response or ID token did not validate."""
 
 
+class OIDCProviderUnavailableError(RuntimeError):
+    """Google could not complete a request because of a temporary provider failure."""
+
+    def __init__(self, *, retry_same_callback: bool = False) -> None:
+        self.retry_same_callback = retry_same_callback
+
+
 class AccountLinkRequiredError(ValueError):
     """A matching account requires password-confirmed linking."""
 
@@ -101,6 +108,9 @@ class OIDCRepository(Protocol):
         self, state_hash: str, nonce_hash: str, timezone: str, expires_at: datetime
     ) -> None: ...
     async def consume_state(self, state_hash: str, now: datetime) -> OIDCStateRecord | None: ...
+    async def restore_state(
+        self, state_hash: str, consumed_at: datetime, now: datetime
+    ) -> bool: ...
     async def resolve_identity(self, claims: GoogleClaims, timezone: str) -> OIDCAccount | None: ...
     async def create_link_challenge(
         self, claims: GoogleClaims, token_hash: str, expires_at: datetime
@@ -169,10 +179,19 @@ class OIDCLoginService:
     async def complete(self, code: str, state: str, state_cookie: str) -> OIDCLoginResult:
         if not hmac.compare_digest(state, state_cookie):
             raise InvalidOIDCResponseError
-        state_record = await self._repository.consume_state(hash_oidc_secret(state), self._clock())
+        state_hash = hash_oidc_secret(state)
+        consumed_at = self._clock()
+        state_record = await self._repository.consume_state(state_hash, consumed_at)
         if state_record is None:
             raise InvalidOIDCResponseError
-        claims = await self._provider.exchange(code, state_record.nonce_hash)
+        try:
+            claims = await self._provider.exchange(code, state_record.nonce_hash)
+        except OIDCProviderUnavailableError as error:
+            if error.retry_same_callback:
+                error.retry_same_callback = await self._repository.restore_state(
+                    state_hash, consumed_at, self._clock()
+                )
+            raise
         account = await self._repository.resolve_identity(claims, state_record.timezone)
         if account is None:
             challenge = self._token_factory()
@@ -209,6 +228,7 @@ class GoogleOIDCProvider:
         self._redirect_uri = redirect_uri
 
     async def exchange(self, code: str, expected_nonce_hash: str) -> GoogleClaims:
+        token_exchanged = False
         try:
             token_response = await self._http_client.post(
                 GOOGLE_TOKEN_ENDPOINT,
@@ -221,12 +241,22 @@ class GoogleOIDCProvider:
                 },
             )
             token_response.raise_for_status()
+            token_exchanged = True
             id_token = token_response.json()["id_token"]
             if not isinstance(id_token, str):
                 raise InvalidOIDCResponseError
             claims = await self._decode_id_token(id_token)
             return self._validated_claims(claims, expected_nonce_hash)
-        except (httpx.HTTPError, KeyError, TypeError, ValueError, jwt.PyJWTError) as error:
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code == 429 or error.response.status_code >= 500:
+                raise OIDCProviderUnavailableError from error
+            raise InvalidOIDCResponseError from error
+        except httpx.RequestError as error:
+            retry_same_callback = not token_exchanged and isinstance(
+                error, (httpx.ConnectError, httpx.ConnectTimeout)
+            )
+            raise OIDCProviderUnavailableError(retry_same_callback=retry_same_callback) from error
+        except (KeyError, TypeError, ValueError, jwt.PyJWTError) as error:
             if isinstance(error, InvalidOIDCResponseError):
                 raise
             raise InvalidOIDCResponseError from error

@@ -10,7 +10,7 @@ from studyflow.database.models import AuthenticationOIDCState, StudentAccount
 
 
 @pytest.mark.anyio
-async def test_oidc_repository_consumes_state_once_and_resolves_identity() -> None:
+async def test_oidc_repository_consumes_and_safely_restores_state() -> None:
     database = Database("sqlite+aiosqlite:///:memory:")
     await database.start()
     now = datetime.now(UTC)
@@ -40,6 +40,11 @@ async def test_oidc_repository_consumes_state_once_and_resolves_identity() -> No
         assert consumed is not None and consumed.nonce_hash == "n" * 64
         assert consumed.timezone == "Asia/Phnom_Penh"
         assert await repository.consume_state("s" * 64, now) is None
+        assert not await repository.restore_state(
+            "s" * 64, now + timedelta(seconds=1), now + timedelta(seconds=1)
+        )
+        assert await repository.restore_state("s" * 64, now, now + timedelta(seconds=1))
+        assert await repository.consume_state("s" * 64, now + timedelta(seconds=2)) is not None
         claims = GoogleClaims("subject", "student@example.com", "Student")
         created = await repository.resolve_identity(claims, "Asia/Phnom_Penh")
         existing = await repository.resolve_identity(claims, "UTC")

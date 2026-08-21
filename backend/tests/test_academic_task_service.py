@@ -11,6 +11,7 @@ from studyflow.tasks.service import (
     NewAcademicTask,
     TaskCategory,
     TaskFilters,
+    TaskMustBeStartedError,
     TaskPriority,
 )
 
@@ -18,6 +19,7 @@ from studyflow.tasks.service import (
 @dataclass
 class RepositoryStub:
     created: list[tuple[UUID, NewAcademicTask]] = field(default_factory=list)
+    finish_requires_start: bool = False
 
     async def create(self, account_id: UUID, task: NewAcademicTask) -> AcademicTaskRecord:
         self.created.append((account_id, task))
@@ -54,6 +56,8 @@ class RepositoryStub:
         return False
 
     async def finish_early(self, account_id: UUID, task_id: UUID, now: datetime) -> bool:
+        if self.finish_requires_start:
+            raise TaskMustBeStartedError
         return False
 
     async def mark_started(self, account_id: UUID, task_id: UUID, now: datetime) -> bool:
@@ -83,3 +87,12 @@ async def test_task_creation_requires_future_absolute_deadline() -> None:
         await service.create(account_id, replace(draft, deadline_at=now))
     with pytest.raises(InvalidTaskDeadlineError):
         await service.create(account_id, replace(draft, deadline_at=now.replace(tzinfo=None)))
+
+
+@pytest.mark.anyio
+async def test_task_service_preserves_the_must_start_lifecycle_error() -> None:
+    now = datetime(2026, 7, 29, 12, tzinfo=UTC)
+    service = AcademicTaskService(RepositoryStub(finish_requires_start=True), clock=lambda: now)
+
+    with pytest.raises(TaskMustBeStartedError):
+        await service.finish_early(uuid4(), uuid4())

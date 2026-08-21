@@ -95,6 +95,16 @@ def test_openapi_documents_google_account_link_challenge() -> None:
     ]
 
 
+def test_openapi_documents_retry_after_for_google_provider_outages() -> None:
+    schema = create_app().openapi()
+
+    unavailable = schema["paths"]["/api/v1/auth/google/callback"]["get"]["responses"]["503"]
+    assert unavailable["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AuthenticationError"
+    }
+    assert unavailable["headers"]["Retry-After"]["schema"] == {"type": "integer"}
+
+
 def test_openapi_documents_session_authentication_failures() -> None:
     schema = create_app().openapi()
 
@@ -114,6 +124,25 @@ def test_openapi_documents_both_task_update_validation_error_shapes() -> None:
             {"$ref": "#/components/schemas/TaskError"},
             {"$ref": "#/components/schemas/HTTPValidationError"},
         ]
+    }
+
+
+def test_openapi_documents_finish_early_lifecycle_conflict() -> None:
+    schema = create_app().openapi()
+
+    conflict = schema["paths"]["/api/v1/tasks/{task_id}/finish-early"]["post"]["responses"]["409"]
+    assert conflict["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/TaskError"
+    }
+
+
+def test_openapi_documents_task_start_transition() -> None:
+    schema = create_app().openapi()
+
+    responses = schema["paths"]["/api/v1/tasks/{task_id}/start"]["post"]["responses"]
+    assert set(responses) >= {"204", "401", "403", "404"}
+    assert responses["404"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/TaskError"
     }
 
 
