@@ -1,5 +1,7 @@
 """Email authentication endpoints."""
 
+import hmac
+import logging
 from typing import Annotated, cast
 
 import httpx
@@ -61,6 +63,7 @@ from studyflow.auth.verification import EmailVerification
 from studyflow.timezones import is_iana_timezone
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+logger = logging.getLogger(__name__)
 
 
 class RegistrationRequest(BaseModel):
@@ -508,23 +511,41 @@ async def get_current_session(
 @router.post(
     "/logout",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses={status.HTTP_403_FORBIDDEN: {"model": AuthenticationError}},
+    responses={
+        status.HTTP_403_FORBIDDEN: {"model": AuthenticationError},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": AuthenticationError},
+    },
 )
 async def logout(
-    response: Response,
     http_request: Request,
     authentication: Annotated[SessionAuthentication, Depends(get_session_authentication)],
     csrf_token: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
-) -> None:
+) -> Response:
     cookie_policy = get_cookie_policy(http_request)
     session_token = http_request.cookies.get(cookie_policy.session_name)
+    if session_token is None:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    csrf_cookie = http_request.cookies.get(cookie_policy.csrf_name)
     if (
-        session_token is None
-        or csrf_token is None
-        or not await authentication.revoke(session_token, csrf_token)
+        csrf_token is None
+        or csrf_cookie is None
+        or not hmac.compare_digest(csrf_token.encode(), csrf_cookie.encode())
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
+    try:
+        await authentication.revoke(session_token, csrf_token)
+    except Exception:
+        logger.exception("Failed to revoke session during logout")
+        error_response = JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": "Logout could not be completed"},
+            headers={"Cache-Control": "no-store"},
+        )
+        cookie_policy.clear_authentication(error_response)
+        return error_response
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
     cookie_policy.clear_authentication(response)
+    return response
 
 
 @router.post(

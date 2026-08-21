@@ -31,7 +31,11 @@ class AcademicTask(Base):
             "planned_duration_minutes = adaptive_estimate_minutes)",
             name="planned_duration_source",
         ),
-        CheckConstraint("length(trim(title)) > 0", name="title_required"),
+        CheckConstraint(
+            "length(replace(replace(replace(replace(replace(replace("
+            "title, ' ', ''), '\t', ''), '\n', ''), '\r', ''), '\f', ''), '\v', '')) > 0",
+            name="title_required",
+        ),
         CheckConstraint("course IS NULL OR length(course) <= 100", name="course_length"),
         CheckConstraint("notes IS NULL OR length(notes) <= 2000", name="notes_length"),
     )

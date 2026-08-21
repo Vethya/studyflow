@@ -100,6 +100,7 @@ def test_openapi_documents_session_authentication_failures() -> None:
 
     assert "401" in schema["paths"]["/api/v1/auth/session"]["get"]["responses"]
     assert "403" in schema["paths"]["/api/v1/auth/logout"]["post"]["responses"]
+    assert "503" in schema["paths"]["/api/v1/auth/logout"]["post"]["responses"]
 
 
 def test_openapi_documents_both_task_update_validation_error_shapes() -> None:
@@ -108,6 +109,20 @@ def test_openapi_documents_both_task_update_validation_error_shapes() -> None:
     validation_schema = schema["paths"]["/api/v1/tasks/{task_id}"]["put"]["responses"]["422"][
         "content"
     ]["application/json"]["schema"]
+    assert validation_schema == {
+        "oneOf": [
+            {"$ref": "#/components/schemas/TaskError"},
+            {"$ref": "#/components/schemas/HTTPValidationError"},
+        ]
+    }
+
+
+def test_openapi_documents_both_task_list_validation_error_shapes() -> None:
+    schema = create_app().openapi()
+
+    validation_schema = schema["paths"]["/api/v1/tasks"]["get"]["responses"]["422"]["content"][
+        "application/json"
+    ]["schema"]
     assert validation_schema == {
         "oneOf": [
             {"$ref": "#/components/schemas/TaskError"},

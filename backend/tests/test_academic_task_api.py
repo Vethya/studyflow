@@ -150,6 +150,26 @@ async def test_task_create_list_and_detail_contract() -> None:
 
 
 @pytest.mark.anyio
+async def test_task_list_normalizes_course_filter_whitespace() -> None:
+    tasks = TasksStub([task_record()])
+    app = create_app(session_authentication=AuthenticationStub(), academic_tasks=tasks)
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://test",
+        cookies={"studyflow_session": "session-token"},
+    ) as client:
+        padded = await client.get("/api/v1/tasks", params={"course": "  Algorithms\t"})
+        whitespace_only = await client.get("/api/v1/tasks", params={"course": " \t\n "})
+
+    assert padded.status_code == 200
+    assert whitespace_only.status_code == 200
+    assert tasks.filters == [
+        TaskFilters(course="Algorithms"),
+        TaskFilters(course=None),
+    ]
+
+
+@pytest.mark.anyio
 async def test_task_detail_returns_404_for_unowned_or_missing_id() -> None:
     app = create_app(session_authentication=AuthenticationStub(), academic_tasks=TasksStub([]))
     async with AsyncClient(
@@ -209,6 +229,29 @@ async def test_task_endpoints_require_authentication_csrf_and_valid_absolute_fie
     assert naive.status_code == 422
     assert overflow.status_code == 422
     assert past.status_code == 422
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("title", ["   ", "\t\t", "\n\r"])
+async def test_task_create_rejects_whitespace_only_titles(title: str) -> None:
+    app = create_app(session_authentication=AuthenticationStub(), academic_tasks=TasksStub([]))
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://test",
+        cookies={"studyflow_session": "session-token"},
+    ) as client:
+        response = await client.post(
+            "/api/v1/tasks",
+            headers={"X-CSRF-Token": "csrf-token"},
+            json={
+                "title": title,
+                "category": "reading",
+                "deadline_at": "2026-07-30T12:00:00Z",
+                "original_estimate_minutes": 90,
+            },
+        )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.anyio
