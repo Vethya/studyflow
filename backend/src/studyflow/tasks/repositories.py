@@ -15,6 +15,7 @@ from studyflow.tasks.service import (
     NewAcademicTask,
     TaskCategory,
     TaskFilters,
+    TaskMustBeStartedError,
     TaskPriority,
     TaskStatus,
 )
@@ -184,6 +185,8 @@ class SqlAlchemyAcademicTaskRepository:
             )
             if row is None:
                 return False
+            if row.estimate_frozen_at is None:
+                raise TaskMustBeStartedError
             row.finished_early_at = row.finished_early_at or now
         return True
 

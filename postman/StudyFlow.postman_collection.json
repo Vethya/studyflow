@@ -653,6 +653,17 @@
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
         },
         {
+          "name": "Start Academic Task",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/tasks/{{task_id}}/start", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks", "{{task_id}}", "start"] },
+            "description": "Idempotently starts an owned task and freezes its original estimate."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
+        },
+        {
           "name": "Finish Academic Task Early",
           "request": {
             "method": "POST",

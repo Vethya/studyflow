@@ -47,6 +47,7 @@ def test_academic_task_schema_preserves_owned_planning_inputs() -> None:
         "ck_academic_tasks_title_required",
         "ck_academic_tasks_course_length",
         "ck_academic_tasks_notes_length",
+        "ck_academic_tasks_completion_requires_start",
     }.issubset(constraints)
     assert cast(DateTime, table.c.deadline_at.type).timezone is True
     assert cast(DateTime, table.c.estimate_frozen_at.type).timezone is True
@@ -73,6 +74,46 @@ def test_task_deadline_history_is_owned_through_cascading_task() -> None:
     assert cast(DateTime, table.c.previous_deadline_at.type).timezone is True
     assert cast(DateTime, table.c.new_deadline_at.type).timezone is True
     assert cast(DateTime, table.c.changed_at.type).timezone is True
+
+
+@pytest.mark.anyio
+async def test_persistence_rejects_completed_tasks_that_never_started() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    account_id = uuid4()
+    now = datetime.now(UTC)
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            session.add(
+                StudentAccount(
+                    id=account_id,
+                    email="student@example.com",
+                    name="Student",
+                    password_hash="$argon2id$hash",
+                    email_verified_at=now,
+                    timezone="UTC",
+                )
+            )
+
+        with pytest.raises(IntegrityError):
+            async with database.transaction() as session:
+                session.add(
+                    AcademicTask(
+                        account_id=account_id,
+                        title="Unstarted task",
+                        category="reading",
+                        deadline_at=now + timedelta(days=1),
+                        original_estimate_minutes=30,
+                        planned_duration_minutes=30,
+                        finished_early_at=now,
+                    )
+                )
+                await session.flush()
+    finally:
+        await database.stop()
 
 
 @pytest.mark.anyio

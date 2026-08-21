@@ -157,6 +157,7 @@ def test_account_authentication_schema_is_in_the_upgrade_path() -> None:
         "ck_academic_tasks_title_required",
         "ck_academic_tasks_course_length",
         "ck_academic_tasks_notes_length",
+        "ck_academic_tasks_completion_requires_start",
     ):
         assert f"CONSTRAINT {constraint_name} CHECK" in result.stdout
 

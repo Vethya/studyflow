@@ -38,6 +38,10 @@ class AcademicTask(Base):
         ),
         CheckConstraint("course IS NULL OR length(course) <= 100", name="course_length"),
         CheckConstraint("notes IS NULL OR length(notes) <= 2000", name="notes_length"),
+        CheckConstraint(
+            "finished_early_at IS NULL OR estimate_frozen_at IS NOT NULL",
+            name="completion_requires_start",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
