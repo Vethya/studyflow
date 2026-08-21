@@ -1,8 +1,13 @@
+from datetime import UTC, datetime, timedelta
 from typing import cast
+from uuid import uuid4
 
+import pytest
 from sqlalchemy import CheckConstraint, DateTime, DefaultClause
+from sqlalchemy.exc import IntegrityError
 
-from studyflow.database import Base
+from studyflow.database import Base, Database
+from studyflow.database.models import AcademicTask, StudentAccount
 
 
 def test_academic_task_schema_preserves_owned_planning_inputs() -> None:
@@ -68,3 +73,42 @@ def test_task_deadline_history_is_owned_through_cascading_task() -> None:
     assert cast(DateTime, table.c.previous_deadline_at.type).timezone is True
     assert cast(DateTime, table.c.new_deadline_at.type).timezone is True
     assert cast(DateTime, table.c.changed_at.type).timezone is True
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("title", ["   ", "\t\t", "\n\r", "\f\v"])
+async def test_task_persistence_rejects_whitespace_only_titles(title: str) -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    account_id = uuid4()
+    now = datetime.now(UTC)
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            session.add(
+                StudentAccount(
+                    id=account_id,
+                    email="student@example.com",
+                    name="Student",
+                    password_hash="$argon2id$hash",
+                    email_verified_at=now,
+                    timezone="UTC",
+                )
+            )
+        async with database.transaction() as session:
+            session.add(
+                AcademicTask(
+                    account_id=account_id,
+                    title=title,
+                    category="reading",
+                    deadline_at=now + timedelta(days=1),
+                    original_estimate_minutes=30,
+                    planned_duration_minutes=30,
+                )
+            )
+            with pytest.raises(IntegrityError):
+                await session.flush()
+    finally:
+        await database.stop()

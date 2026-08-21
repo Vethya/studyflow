@@ -232,6 +232,29 @@ async def test_task_endpoints_require_authentication_csrf_and_valid_absolute_fie
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("title", ["   ", "\t\t", "\n\r"])
+async def test_task_create_rejects_whitespace_only_titles(title: str) -> None:
+    app = create_app(session_authentication=AuthenticationStub(), academic_tasks=TasksStub([]))
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://test",
+        cookies={"studyflow_session": "session-token"},
+    ) as client:
+        response = await client.post(
+            "/api/v1/tasks",
+            headers={"X-CSRF-Token": "csrf-token"},
+            json={
+                "title": title,
+                "category": "reading",
+                "deadline_at": "2026-07-30T12:00:00Z",
+                "original_estimate_minutes": 90,
+            },
+        )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.anyio
 async def test_task_update_finish_early_and_delete_contract() -> None:
     tasks = TasksStub([task_record()])
     app = create_app(session_authentication=AuthenticationStub(), academic_tasks=tasks)
