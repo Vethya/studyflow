@@ -113,6 +113,20 @@ def test_openapi_documents_session_authentication_failures() -> None:
     assert "503" in schema["paths"]["/api/v1/auth/logout"]["post"]["responses"]
 
 
+def test_openapi_documents_both_task_update_validation_error_shapes() -> None:
+    schema = create_app().openapi()
+
+    validation_schema = schema["paths"]["/api/v1/tasks/{task_id}"]["put"]["responses"]["422"][
+        "content"
+    ]["application/json"]["schema"]
+    assert validation_schema == {
+        "oneOf": [
+            {"$ref": "#/components/schemas/TaskError"},
+            {"$ref": "#/components/schemas/HTTPValidationError"},
+        ]
+    }
+
+
 def test_openapi_documents_finish_early_lifecycle_conflict() -> None:
     schema = create_app().openapi()
 

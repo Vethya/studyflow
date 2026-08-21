@@ -235,6 +235,19 @@ async def get_task(
         status.HTTP_403_FORBIDDEN: {"model": AccountError},
         status.HTTP_404_NOT_FOUND: {"model": TaskError},
         status.HTTP_409_CONFLICT: {"model": TaskError},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "description": "Invalid task fields or deadline",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "oneOf": [
+                            {"$ref": "#/components/schemas/TaskError"},
+                            {"$ref": "#/components/schemas/HTTPValidationError"},
+                        ]
+                    }
+                }
+            },
+        },
     },
 )
 async def update_task(
