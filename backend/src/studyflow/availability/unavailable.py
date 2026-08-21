@@ -31,26 +31,11 @@ class UnavailablePeriodRepository(Protocol):
     async def list_periods(self, account_id: UUID) -> list[UnavailablePeriod]: ...
     async def create(
         self, account_id: UUID, draft: UnavailablePeriodDraft
-    ) -> UnavailablePeriod: ...
+    ) -> UnavailablePeriodChange: ...
     async def update(
         self, account_id: UUID, period_id: UUID, draft: UnavailablePeriodDraft
-    ) -> UnavailablePeriod | None: ...
+    ) -> UnavailablePeriodChange | None: ...
     async def delete(self, account_id: UUID, period_id: UUID) -> bool: ...
-
-
-class FutureSessionInvalidator(Protocol):
-    async def remove_conflicting_future_sessions(
-        self, account_id: UUID, starts_at: datetime, ends_at: datetime
-    ) -> list[UUID]: ...
-
-
-class NoFutureSessions:
-    """Scheduler integration seam while Study Sessions are deferred."""
-
-    async def remove_conflicting_future_sessions(
-        self, account_id: UUID, starts_at: datetime, ends_at: datetime
-    ) -> list[UUID]:
-        return []
 
 
 def normalize_draft(draft: UnavailablePeriodDraft) -> UnavailablePeriodDraft:
@@ -68,13 +53,8 @@ def normalize_draft(draft: UnavailablePeriodDraft) -> UnavailablePeriodDraft:
 
 
 class UnavailablePeriodService:
-    def __init__(
-        self,
-        repository: UnavailablePeriodRepository,
-        invalidator: FutureSessionInvalidator,
-    ) -> None:
+    def __init__(self, repository: UnavailablePeriodRepository) -> None:
         self._repository = repository
-        self._invalidator = invalidator
 
     async def list_periods(self, account_id: UUID) -> list[UnavailablePeriod]:
         return await self._repository.list_periods(account_id)
@@ -82,24 +62,12 @@ class UnavailablePeriodService:
     async def create(
         self, account_id: UUID, draft: UnavailablePeriodDraft
     ) -> UnavailablePeriodChange:
-        normalized = normalize_draft(draft)
-        period = await self._repository.create(account_id, normalized)
-        invalidated = await self._invalidator.remove_conflicting_future_sessions(
-            account_id, normalized.starts_at, normalized.ends_at
-        )
-        return UnavailablePeriodChange(period, invalidated)
+        return await self._repository.create(account_id, normalize_draft(draft))
 
     async def update(
         self, account_id: UUID, period_id: UUID, draft: UnavailablePeriodDraft
     ) -> UnavailablePeriodChange | None:
-        normalized = normalize_draft(draft)
-        period = await self._repository.update(account_id, period_id, normalized)
-        if period is None:
-            return None
-        invalidated = await self._invalidator.remove_conflicting_future_sessions(
-            account_id, normalized.starts_at, normalized.ends_at
-        )
-        return UnavailablePeriodChange(period, invalidated)
+        return await self._repository.update(account_id, period_id, normalize_draft(draft))
 
     async def delete(self, account_id: UUID, period_id: UUID) -> bool:
         return await self._repository.delete(account_id, period_id)
