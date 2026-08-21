@@ -30,6 +30,15 @@ def normalize_postman_path(raw_url: str) -> str:
     return re.sub(r"\{\{([^}]+)\}\}", r"{\1}", path)
 
 
+def find_item(items: list[dict[str, Any]], name: str) -> dict[str, Any]:
+    for item in items:
+        if item.get("name") == name:
+            return item
+        if found := find_item(cast(list[dict[str, Any]], item.get("item", [])), name):
+            return found
+    return {}
+
+
 def test_postman_collection_matches_the_openapi_endpoint_set() -> None:
     collection = load_json(COLLECTION_PATH)
     postman_operations = {
@@ -65,3 +74,20 @@ def test_postman_environments_are_complete_and_safe_by_default() -> None:
             assert base_url == "http://127.0.0.1:8000"
         else:
             assert base_url.startswith("https://")
+
+
+def test_academic_task_requests_generate_a_future_deadline() -> None:
+    collection = load_json(COLLECTION_PATH)
+    academic_tasks = find_item(collection["item"], "Academic Tasks")
+    create_task = find_item(academic_tasks["item"], "Create Academic Task")
+    update_task = find_item(academic_tasks["item"], "Update Academic Task")
+
+    prerequest_script = "\n".join(academic_tasks["event"][0]["script"]["exec"])
+    create_test_script = "\n".join(create_task["event"][0]["script"]["exec"])
+
+    assert "Date.now() + 7 * 24 * 60 * 60 * 1000" in prerequest_script
+    assert "pm.collectionVariables.set('task_deadline_at'" in prerequest_script
+    assert "{{task_deadline_at}}" in create_task["request"]["body"]["raw"]
+    assert "{{task_deadline_at}}" in update_task["request"]["body"]["raw"]
+    assert "Date.parse(pm.collectionVariables.get('task_deadline_at'))" in create_test_script
+    assert "pm.expect(deadline).to.be.above(Date.now())" in create_test_script
