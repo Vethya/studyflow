@@ -24,6 +24,12 @@ from studyflow.tasks.service import (
 router = APIRouter(prefix="/tasks", tags=["Academic Tasks"])
 
 
+def normalize_course(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return value.strip() or None
+
+
 class AcademicTaskRequest(BaseModel):
     title: Annotated[str, Field(min_length=1, max_length=200)]
     category: TaskCategory
@@ -46,10 +52,8 @@ class AcademicTaskRequest(BaseModel):
 
     @field_validator("course")
     @classmethod
-    def normalize_course(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return value.strip() or None
+    def normalize_course_field(cls, value: str | None) -> str | None:
+        return normalize_course(value)
 
     @field_validator("deadline_at")
     @classmethod
@@ -193,7 +197,7 @@ async def list_tasks(
             detail="deadline_from must not be after deadline_to",
         )
     filters = TaskFilters(
-        course=course,
+        course=normalize_course(course),
         category=category,
         priority=priority,
         deadline_from=deadline_from.astimezone(UTC) if deadline_from is not None else None,

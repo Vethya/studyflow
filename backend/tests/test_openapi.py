@@ -100,6 +100,7 @@ def test_openapi_documents_session_authentication_failures() -> None:
 
     assert "401" in schema["paths"]["/api/v1/auth/session"]["get"]["responses"]
     assert "403" in schema["paths"]["/api/v1/auth/logout"]["post"]["responses"]
+    assert "503" in schema["paths"]["/api/v1/auth/logout"]["post"]["responses"]
 
 
 def test_openapi_documents_both_task_list_validation_error_shapes() -> None:
