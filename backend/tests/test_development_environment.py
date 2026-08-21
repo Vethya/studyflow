@@ -87,6 +87,30 @@ def test_database_url_can_be_supplied_as_an_encoded_atomic_value() -> None:
     assert database_url.endswith("}")
 
 
+def test_google_oidc_settings_are_forwarded_without_example_secrets() -> None:
+    compose = load_compose()
+    oidc_variables = {
+        "STUDYFLOW_GOOGLE_OIDC_CLIENT_ID",
+        "STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET",
+        "STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI",
+    }
+
+    shared_environment = compose["x-backend-environment"]
+    for variable in oidc_variables:
+        assert shared_environment[variable] == f"${{{variable}:-}}"
+        assert compose["services"]["backend"]["environment"][variable] == f"${{{variable}:-}}"
+        assert compose["services"]["migrate"]["environment"][variable] == f"${{{variable}:-}}"
+
+    example_environment = dict(
+        line.split("=", maxsplit=1)
+        for line in (REPOSITORY_ROOT / ".env.example").read_text().splitlines()
+        if line and not line.startswith("#")
+    )
+    assert {
+        variable: example_environment[variable] for variable in oidc_variables
+    } == dict.fromkeys(oidc_variables, "")
+
+
 def test_docker_context_excludes_local_and_secret_files() -> None:
     dockerignore = (BACKEND_ROOT / ".dockerignore").read_text().splitlines()
 
