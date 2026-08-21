@@ -33,6 +33,7 @@ from studyflow.auth.oidc import (
     OIDCAccountLinking,
     OIDCLogin,
     OIDCNotConfiguredError,
+    OIDCProviderUnavailableError,
 )
 from studyflow.auth.passwords import PasswordPolicyError
 from studyflow.auth.rate_limits import (
@@ -233,6 +234,19 @@ def _oidc_link_required_response(challenge: str, cookie_policy: CookiePolicy) ->
     return response
 
 
+def _oidc_provider_unavailable_response(
+    error: OIDCProviderUnavailableError, cookie_policy: CookiePolicy
+) -> JSONResponse:
+    response = JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": "Google sign-in is temporarily unavailable"},
+        headers={"Cache-Control": "no-store", "Retry-After": "60"},
+    )
+    if not error.retry_same_callback:
+        cookie_policy.clear_oidc_state(response)
+    return response
+
+
 def get_session_authentication(request: Request) -> SessionAuthentication:
     return cast(SessionAuthentication, request.app.state.session_authentication)
 
@@ -297,7 +311,15 @@ async def start_google_oidc(
     responses={
         status.HTTP_400_BAD_REQUEST: {"model": AuthenticationError},
         status.HTTP_409_CONFLICT: {"model": OIDCLinkRequiredResponse},
-        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": AuthenticationError},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "model": AuthenticationError,
+            "headers": {
+                "Retry-After": {
+                    "description": "Seconds before retrying a temporary Google provider failure",
+                    "schema": {"type": "integer"},
+                }
+            },
+        },
     },
 )
 async def complete_google_oidc(
@@ -317,6 +339,8 @@ async def complete_google_oidc(
         result = await oidc.complete(code, state, state_cookie)
     except AccountLinkRequiredError as error:
         return _oidc_link_required_response(error.challenge, cookie_policy)
+    except OIDCProviderUnavailableError as error:
+        return _oidc_provider_unavailable_response(error, cookie_policy)
     except InvalidOIDCResponseError:
         return _oidc_error_response(400, "Google sign-in could not be completed", cookie_policy)
     except OIDCNotConfiguredError:

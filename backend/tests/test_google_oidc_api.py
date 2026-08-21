@@ -5,7 +5,12 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from studyflow.app import create_app
-from studyflow.auth.oidc import AccountLinkRequiredError, OIDCLoginResult, OIDCStart
+from studyflow.auth.oidc import (
+    AccountLinkRequiredError,
+    OIDCLoginResult,
+    OIDCProviderUnavailableError,
+    OIDCStart,
+)
 
 
 @dataclass
@@ -40,6 +45,16 @@ class RateLimitStub:
 class LinkRequiredOIDCStub(OIDCStub):
     async def complete(self, code: str, state: str, state_cookie: str) -> OIDCLoginResult:
         raise AccountLinkRequiredError("server-link-challenge-value")
+
+
+class RetryableUnavailableOIDCStub(OIDCStub):
+    async def complete(self, code: str, state: str, state_cookie: str) -> OIDCLoginResult:
+        raise OIDCProviderUnavailableError(retry_same_callback=True)
+
+
+class RestartRequiredOIDCStub(OIDCStub):
+    async def complete(self, code: str, state: str, state_cookie: str) -> OIDCLoginResult:
+        raise OIDCProviderUnavailableError
 
 
 @pytest.mark.anyio
@@ -89,3 +104,37 @@ async def test_google_oidc_returns_only_the_server_issued_link_challenge() -> No
         "detail": "Password-confirmed account linking required",
         "link_challenge": "server-link-challenge-value",
     }
+
+
+@pytest.mark.anyio
+async def test_google_oidc_provider_outage_is_retryable_and_retains_state_cookie() -> None:
+    app = create_app(
+        oidc_login=RetryableUnavailableOIDCStub(), oidc_start_rate_limiter=RateLimitStub()
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
+        await client.get("/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh")
+        response = await client.get(
+            "/api/v1/auth/google/callback?code=code&state=state-state-state-state"
+        )
+
+        assert client.cookies.get("studyflow_oidc_state") == "state-state-state-state"
+
+    assert response.status_code == 503
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["retry-after"] == "60"
+    assert "set-cookie" not in response.headers
+    assert response.json() == {"detail": "Google sign-in is temporarily unavailable"}
+
+
+@pytest.mark.anyio
+async def test_google_oidc_provider_outage_requires_restart_after_code_may_be_consumed() -> None:
+    app = create_app(oidc_login=RestartRequiredOIDCStub(), oidc_start_rate_limiter=RateLimitStub())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
+        await client.get("/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh")
+        response = await client.get(
+            "/api/v1/auth/google/callback?code=code&state=state-state-state-state"
+        )
+
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "60"
+    assert "studyflow_oidc_state=" in response.headers["set-cookie"]
