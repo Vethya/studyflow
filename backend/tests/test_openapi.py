@@ -120,3 +120,17 @@ def test_openapi_documents_task_start_transition() -> None:
     assert responses["404"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/TaskError"
     }
+
+
+def test_openapi_documents_both_task_list_validation_error_shapes() -> None:
+    schema = create_app().openapi()
+
+    validation_schema = schema["paths"]["/api/v1/tasks"]["get"]["responses"]["422"]["content"][
+        "application/json"
+    ]["schema"]
+    assert validation_schema == {
+        "oneOf": [
+            {"$ref": "#/components/schemas/TaskError"},
+            {"$ref": "#/components/schemas/HTTPValidationError"},
+        ]
+    }
