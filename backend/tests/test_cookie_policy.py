@@ -11,11 +11,13 @@ def test_development_cookie_policy_supports_local_http() -> None:
 
     policy.set_authentication(response, "session-token", "csrf-token")
     policy.set_oidc_state(response, "oidc-state")
+    policy.set_oidc_link(response, "oidc-link")
 
     cookies = response.headers.getlist("set-cookie")
     assert any("studyflow_session=session-token" in cookie for cookie in cookies)
     assert any("studyflow_csrf=csrf-token" in cookie for cookie in cookies)
     assert any("studyflow_oidc_state=oidc-state" in cookie for cookie in cookies)
+    assert any("studyflow_oidc_link=oidc-link" in cookie for cookie in cookies)
     assert all("Secure" not in cookie for cookie in cookies)
     assert all("__Host-" not in cookie for cookie in cookies)
 
@@ -26,11 +28,13 @@ def test_production_cookie_policy_is_host_prefixed_and_secure() -> None:
 
     policy.set_authentication(response, "session-token", "csrf-token")
     policy.set_oidc_state(response, "oidc-state")
+    policy.set_oidc_link(response, "oidc-link")
 
     cookies = response.headers.getlist("set-cookie")
     assert any("__Host-studyflow_session=session-token" in cookie for cookie in cookies)
     assert any("__Host-studyflow_csrf=csrf-token" in cookie for cookie in cookies)
     assert any("__Host-studyflow_oidc_state=oidc-state" in cookie for cookie in cookies)
+    assert any("__Host-studyflow_oidc_link=oidc-link" in cookie for cookie in cookies)
     assert all("Secure" in cookie for cookie in cookies)
 
 

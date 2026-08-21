@@ -4,6 +4,7 @@ from typing import cast
 
 import httpx
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 
 from studyflow import __version__
 from studyflow.accounts.password import AccountPasswords, PasswordChangeService
@@ -14,6 +15,7 @@ from studyflow.accounts.repositories import (
     SqlAlchemyPasswordChangeRepository,
     SqlAlchemyStudyPreferencesRepository,
 )
+from studyflow.api.auth import handle_google_callback_validation_error
 from studyflow.api.router import API_V1_PREFIX, api_router
 from studyflow.auth.breached_passwords import PwnedPasswordsClient
 from studyflow.auth.cookies import CookiePolicy
@@ -239,6 +241,9 @@ def create_app(
         openapi_url=f"{API_V1_PREFIX}/openapi.json",
         redoc_url=None,
         swagger_ui_oauth2_redirect_url=f"{API_V1_PREFIX}/docs/oauth2-redirect",
+    )
+    application.add_exception_handler(
+        RequestValidationError, handle_google_callback_validation_error
     )
     application.state.settings = resolved_settings
     application.state.cookie_policy = CookiePolicy.for_environment(resolved_settings.environment)

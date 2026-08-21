@@ -35,6 +35,10 @@ class CookiePolicy:
     def oidc_state_name(self) -> str:
         return self._name("studyflow_oidc_state")
 
+    @property
+    def oidc_link_name(self) -> str:
+        return self._name("studyflow_oidc_link")
+
     def set_authentication(
         self,
         response: Response,
@@ -94,6 +98,26 @@ class CookiePolicy:
             secure=self.secure,
             httponly=True,
             samesite="lax",
+        )
+
+    def set_oidc_link(self, response: Response, challenge: str) -> None:
+        response.set_cookie(
+            key=self.oidc_link_name,
+            value=challenge,
+            max_age=10 * 60,
+            path="/",
+            secure=self.secure,
+            httponly=True,
+            samesite="strict",
+        )
+
+    def clear_oidc_link(self, response: Response) -> None:
+        response.delete_cookie(
+            self.oidc_link_name,
+            path="/",
+            secure=self.secure,
+            httponly=True,
+            samesite="strict",
         )
 
     def _name(self, base_name: str) -> str:
