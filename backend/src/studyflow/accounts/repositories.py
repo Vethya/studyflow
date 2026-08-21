@@ -9,7 +9,11 @@ from sqlalchemy import select, update
 from studyflow.accounts.preferences import StudyPreferences
 from studyflow.accounts.profile import AccountProfile
 from studyflow.auth.repositories import SessionTransactions
-from studyflow.database.models import AuthenticationSession, StudentAccount
+from studyflow.database.models import (
+    AuthenticationEmailToken,
+    AuthenticationSession,
+    StudentAccount,
+)
 
 
 class SqlAlchemyAccountProfileRepository:
@@ -103,6 +107,15 @@ class SqlAlchemyPasswordChangeRepository:
             ):
                 return False
             account.password_hash = new_password_hash
+            await session.execute(
+                update(AuthenticationEmailToken)
+                .where(
+                    AuthenticationEmailToken.account_id == account_id,
+                    AuthenticationEmailToken.purpose == "password_reset",
+                    AuthenticationEmailToken.consumed_at.is_(None),
+                )
+                .values(consumed_at=now)
+            )
             await session.execute(
                 update(AuthenticationSession)
                 .where(

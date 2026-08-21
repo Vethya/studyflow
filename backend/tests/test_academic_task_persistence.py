@@ -114,3 +114,42 @@ async def test_persistence_rejects_completed_tasks_that_never_started() -> None:
                 await session.flush()
     finally:
         await database.stop()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("title", ["   ", "\t\t", "\n\r", "\f\v"])
+async def test_task_persistence_rejects_whitespace_only_titles(title: str) -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    account_id = uuid4()
+    now = datetime.now(UTC)
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            session.add(
+                StudentAccount(
+                    id=account_id,
+                    email="student@example.com",
+                    name="Student",
+                    password_hash="$argon2id$hash",
+                    email_verified_at=now,
+                    timezone="UTC",
+                )
+            )
+        async with database.transaction() as session:
+            session.add(
+                AcademicTask(
+                    account_id=account_id,
+                    title=title,
+                    category="reading",
+                    deadline_at=now + timedelta(days=1),
+                    original_estimate_minutes=30,
+                    planned_duration_minutes=30,
+                )
+            )
+            with pytest.raises(IntegrityError):
+                await session.flush()
+    finally:
+        await database.stop()

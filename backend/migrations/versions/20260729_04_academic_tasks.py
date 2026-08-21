@@ -60,7 +60,10 @@ def upgrade() -> None:
             "planned_duration_minutes = adaptive_estimate_minutes)",
             name="planned_duration_source",
         ),
-        sa.CheckConstraint("length(trim(title)) > 0", name="title_required"),
+        sa.CheckConstraint(
+            "length(regexp_replace(title, E'[[:space:]]', '', 'g')) > 0",
+            name="title_required",
+        ),
         sa.CheckConstraint("course IS NULL OR length(course) <= 100", name="course_length"),
         sa.CheckConstraint("notes IS NULL OR length(notes) <= 2000", name="notes_length"),
         sa.CheckConstraint(
