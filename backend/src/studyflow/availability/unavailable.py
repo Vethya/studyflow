@@ -1,9 +1,14 @@
 """Dated unavailable periods and future-session invalidation boundary."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
+
+
+class PastUnavailablePeriodError(ValueError):
+    """Raised when an unavailable period ends in the past."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,8 +58,13 @@ def normalize_draft(draft: UnavailablePeriodDraft) -> UnavailablePeriodDraft:
 
 
 class UnavailablePeriodService:
-    def __init__(self, repository: UnavailablePeriodRepository) -> None:
+    def __init__(
+        self,
+        repository: UnavailablePeriodRepository,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
         self._repository = repository
+        self._clock = clock
 
     async def list_periods(self, account_id: UUID) -> list[UnavailablePeriod]:
         return await self._repository.list_periods(account_id)
@@ -62,12 +72,20 @@ class UnavailablePeriodService:
     async def create(
         self, account_id: UUID, draft: UnavailablePeriodDraft
     ) -> UnavailablePeriodChange:
-        return await self._repository.create(account_id, normalize_draft(draft))
+        return await self._repository.create(account_id, self._validated_draft(draft))
 
     async def update(
         self, account_id: UUID, period_id: UUID, draft: UnavailablePeriodDraft
     ) -> UnavailablePeriodChange | None:
-        return await self._repository.update(account_id, period_id, normalize_draft(draft))
+        return await self._repository.update(account_id, period_id, self._validated_draft(draft))
+
+    def _validated_draft(self, draft: UnavailablePeriodDraft) -> UnavailablePeriodDraft:
+        normalized = normalize_draft(draft)
+        if normalized.ends_at <= self._clock():
+            raise PastUnavailablePeriodError(
+                "Unavailable period ends_at must be in the future"
+            )
+        return normalized
 
     async def delete(self, account_id: UUID, period_id: UUID) -> bool:
         return await self._repository.delete(account_id, period_id)
