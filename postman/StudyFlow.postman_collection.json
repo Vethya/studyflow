@@ -463,8 +463,6 @@
               }
             }
           ]
-        }
-          ]
         },
         {
           "name": "Complete email registration",
@@ -485,7 +483,9 @@
           },
           "response": [],
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 201', () => pm.response.to.have.status(201));"] } }]
-        },
+        }
+      ]
+    },
     {
       "name": "Account",
       "description": "Authenticated, student-owned account settings.",
