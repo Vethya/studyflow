@@ -111,11 +111,18 @@ def test_settings_split_a_comma_separated_origin_list(
         "javascript:alert(1)",
         "not-a-url",
         "https://studyflow.example.com/?tenant=1",
+        "https://studyflow.example.com/app",
     ],
 )
 def test_settings_reject_invalid_cors_origins(origin: str) -> None:
     with raises(ValidationError):
         Settings(cors_origins=[origin])
+
+
+def test_settings_accept_a_bare_trailing_slash_in_cors_origins() -> None:
+    settings = Settings(cors_origins=["https://studyflow.example.com/"])
+
+    assert settings.cors_origins == ["https://studyflow.example.com"]
 
 
 def test_settings_reject_duplicate_cors_origins() -> None:

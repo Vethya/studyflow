@@ -79,6 +79,8 @@ class Settings(BaseSettings):
                 raise ValueError("CORS origins must use HTTP or HTTPS and include a host")
             if parsed_url.query or parsed_url.fragment:
                 raise ValueError("CORS origins must not include a query or fragment")
+            if parsed_url.path not in {"", "/"}:
+                raise ValueError("CORS origins must not include a path")
             normalized.append(origin.rstrip("/"))
         if len(set(normalized)) != len(normalized):
             raise ValueError("CORS origins must not contain duplicates")
