@@ -83,22 +83,27 @@ URL, and TLS for email delivery.
 
 ### 4. Vercel (frontend)
 
-The frontend repository needs a same-origin proxy so cookies work unchanged:
+The frontend repository needs a production rewrite checked into its project root so cookies
+work unchanged. Create `vercel.json` in the frontend repository:
 
-```js
-// next.config.js (or vite-plugin proxy equivalent for preview builds)
-async rewrites() {
-  return [
+```json
+{
+  "rewrites": [
     {
-      source: "/api/:path*",
-      destination: "https://studyflow-api.onrender.com/api/:path*",
-    },
-  ];
+      "source": "/api/:path*",
+      "destination": "https://studyflow-api.onrender.com/api/:path*"
+    }
+  ]
 }
 ```
 
+This Vercel rewrite is required for production Vite deployments; a Vite development-server
+proxy only handles local development or preview processes and does not configure Vercel's
+production routing.
+
 1. Import the frontend repository into Vercel with the project name `studyflow`.
-2. Configure the rewrite above against the Render service URL.
+2. Commit `vercel.json` to the frontend repository and replace the example Render service URL
+   with the deployed API URL.
 3. Application code calls `/api/...` relative to its own origin everywhere — never an
    absolute backend URL.
 
