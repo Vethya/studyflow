@@ -1,0 +1,94 @@
+name: Backend CI
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/backend-ci.yml"
+      - ".env.example"
+      - "backend/**"
+      - "compose.yaml"
+      - "render.yaml"
+      - "postman/**"
+  push:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/backend-ci.yml"
+      - ".env.example"
+      - "backend/**"
+      - "compose.yaml"
+      - "render.yaml"
+      - "postman/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend quality gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17.10-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+        env:
+          POSTGRES_DB: studyflow
+          POSTGRES_PASSWORD: studyflow
+          POSTGRES_USER: studyflow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U studyflow -d studyflow"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.32"
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+          working-directory: backend
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Type check
+        run: uv run mypy
+
+      - name: Test with branch coverage
+        run: uv run pytest --cov=studyflow --cov-branch
+
+      - name: Apply and validate migrations
+        env:
+          STUDYFLOW_DATABASE_URL: postgresql+psycopg://studyflow:studyflow@127.0.0.1:5432/studyflow
+          STUDYFLOW_ENVIRONMENT: test
+        run: |
+          uv run alembic upgrade head
+          uv run alembic check
+
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+
+      - name: Build backend image
+        run: docker build --tag studyflow-backend:ci .

@@ -1,0 +1,847 @@
+{
+  "info": {
+    "_postman_id": "b27795bb-7742-4d68-9b6a-987cbf36b49f",
+    "name": "StudyFlow API",
+    "description": "Runnable requests and automated checks for the StudyFlow API. Select a Postman environment to override the collection's localhost default.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const baseUrl = pm.variables.get('base_url');",
+          "if (!baseUrl || !/^https?:\\/\\//.test(baseUrl)) {",
+          "  throw new Error('base_url must be an absolute http(s) URL. Select an environment or update the collection variable.');",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Service",
+      "description": "Service health and API contract endpoints.",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "health"
+              ]
+            },
+            "description": "Checks that the API process is alive. This endpoint has no database dependency."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('returns JSON', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/json'));",
+                  "pm.test('matches the health contract', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.have.all.keys('service', 'status', 'version');",
+                  "  pm.expect(body.service).to.eql('studyflow-api');",
+                  "  pm.expect(body.status).to.eql('ok');",
+                  "  pm.expect(body.version).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Database readiness",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/ready",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ready"
+              ]
+            },
+            "description": "Checks that the API can reach PostgreSQL. A 503 response means the process is alive but the database is unavailable."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('returns JSON', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/json'));",
+                  "pm.test('matches the readiness contract', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.have.all.keys('service', 'status', 'database');",
+                  "  pm.expect(body.service).to.eql('studyflow-api');",
+                  "  pm.expect(body.status).to.eql('ready');",
+                  "  pm.expect(body.database).to.eql('reachable');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "OpenAPI schema",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/openapi.json",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "openapi.json"
+              ]
+            },
+            "description": "Fetches the generated API contract used by Swagger UI and client tooling."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('returns the StudyFlow OpenAPI contract', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.openapi).to.match(/^3\\./);",
+                  "  pm.expect(body.info.title).to.eql('StudyFlow API');",
+                  "  pm.expect(body.paths).to.have.property('/api/v1/health');",
+                  "  pm.expect(body.paths).to.have.property('/api/v1/ready');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Start Google OIDC",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "google", "start"], "query": [{ "key": "timezone", "value": "Asia/Phnom_Penh" }] },
+            "description": "Creates one-time state and nonce values and returns Google's authorization URL with only openid, email, and profile scopes."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) { const url = new URL(pm.response.json().authorization_url); pm.collectionVariables.set('google_oidc_state', url.searchParams.get('state')); }"] } }]
+        },
+        {
+          "name": "Complete Google OIDC",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/auth/google/callback?code={{google_oidc_code}}&state={{google_oidc_state}}", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "google", "callback"], "query": [{ "key": "code", "value": "{{google_oidc_code}}" }, { "key": "state", "value": "{{google_oidc_state}}" }] },
+            "description": "Exchanges a Google authorization code, validates signature/issuer/audience/state/nonce/verified-email claims, and creates a normal StudyFlow session."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200 or link-required 409', () => pm.expect([200, 409]).to.include(pm.response.code));", "if (pm.response.code === 200) pm.collectionVariables.set('csrf_token', pm.response.json().csrf_token);", "if (pm.response.code === 409) pm.collectionVariables.set('google_link_challenge', pm.response.json().link_challenge);"] } }]
+        },
+        {
+          "name": "Confirm Google Account Link",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"challenge\": \"{{google_link_challenge}}\",\n  \"password\": \"correct horse battery staple\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/auth/google/link", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "google", "link"] },
+            "description": "Confirms a server-issued, one-time Google identity challenge with the matching account password, attaches the identity, and creates a normal session."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) pm.collectionVariables.set('csrf_token', pm.response.json().csrf_token);"] } }]
+        },
+        {
+          "name": "Confirm Browser Google Account Link",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"password\": \"correct horse battery staple\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/auth/google/link/browser", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "google", "link", "browser"] },
+            "description": "Confirms account linking with the short-lived HttpOnly challenge cookie created by the browser callback."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200 or expired challenge 401', () => pm.expect([200, 401]).to.include(pm.response.code));", "if (pm.response.code === 200) pm.collectionVariables.set('csrf_token', pm.response.json().csrf_token);"] } }]
+        }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "description": "Email authentication and account-security endpoints.",
+      "item": [
+        {
+          "name": "List Linked Identities",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/account/identities", "host": ["{{base_url}}"], "path": ["api", "v1", "account", "identities"] },
+            "description": "Lists the authenticated account's linked Google identity without exposing provider tokens."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Register with email",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"student@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Sends an eight-hour single-use verification link when eligible. No account or password is created before verification. The response is intentionally non-enumerating."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 202', () => pm.response.to.have.status(202));",
+                  "pm.test('returns a non-enumerating response', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.have.all.keys('message');",
+                  "  pm.expect(body.message).to.eql('Check your email to continue registration if the address is eligible.');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login with email",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"student@example.com\",\n  \"password\": \"correct horse battery staple\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "description": "Authenticates a verified password account, sets the secure opaque session cookie, and returns the CSRF token."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('returns account and CSRF token', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.have.all.keys('account', 'csrf_token');",
+                  "  pm.collectionVariables.set('csrf_token', body.csrf_token);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Current session",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/session",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "session"]
+            },
+            "description": "Validates the opaque session cookie and refreshes its idle expiry."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "logout"]
+            },
+            "description": "Validates CSRF, revokes the server session, and clears both browser cookies."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
+        },
+        {
+          "name": "Resend verification",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"student@example.com\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/resend-verification",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "resend-verification"]
+            },
+            "description": "Returns a non-enumerating response and rotates the verification token for an eligible unverified account."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 202', () => pm.response.to.have.status(202));"] } }]
+        },
+        {
+          "name": "Forgot password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"student@example.com\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/forgot-password",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "forgot-password"]
+            },
+            "description": "Returns a non-enumerating response and sends a one-hour reset link when the verified password account is eligible."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 202', () => pm.response.to.have.status(202));"] } }]
+        },
+        {
+          "name": "Reset password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"paste-password-reset-token-here\",\n  \"password\": \"a new secure password phrase\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/reset-password",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "reset-password"]
+            },
+            "description": "Consumes the one-hour single-use token, updates the password, and revokes all existing sessions."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
+        },
+        {
+          "name": "Verify email",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"paste-verification-token-here\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/verify-email",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "verify-email"
+              ]
+            },
+            "description": "Consumes an unexpired single-use token and returns a 30-minute signup token."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) pm.collectionVariables.set('signup_token', pm.response.json().signup_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Complete email registration",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signup_token\": \"{{signup_token}}\",\n  \"name\": \"Student Name\",\n  \"password\": \"correct horse battery staple\",\n  \"timezone\": \"Asia/Phnom_Penh\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/complete-registration",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "complete-registration"]
+            },
+            "description": "Creates the account only after the email was verified; the signup token is short-lived and single-use."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 201', () => pm.response.to.have.status(201));"] } }]
+        }
+      ]
+    },
+    {
+      "name": "Account",
+      "description": "Authenticated, student-owned account settings.",
+      "item": [
+        {
+          "name": "Get account profile",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/account/profile",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "account", "profile"]
+            },
+            "description": "Returns the authenticated student's immutable ID and email plus editable display name."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Update account profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Student Name\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/account/profile",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "account", "profile"]
+            },
+            "description": "Updates only the authenticated student's profile name and requires the session-bound CSRF token."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Get study preferences",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/account/preferences",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "account", "preferences"]
+            },
+            "description": "Returns the account timezone, session length, break preference, and whether recurring availability needs reconfirmation."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Update study preferences",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"timezone\": \"Asia/Phnom_Penh\",\n  \"preferred_session_length_minutes\": 60,\n  \"minimum_break_minutes\": 10\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/account/preferences",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "account", "preferences"]
+            },
+            "description": "Updates validated planning preferences. A timezone change marks recurring availability for confirmation without changing stored deadline instants."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Change password",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"current_password\": \"correct horse battery staple\",\n  \"new_password\": \"a different secure password phrase\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/account/password",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "account", "password"]
+            },
+            "description": "Verifies the current password, applies breach and Argon2id policy to the replacement, then revokes all sessions."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
+        }
+      ]
+    },
+    {
+      "name": "Academic Tasks",
+      "description": "Authenticated, student-owned academic work.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const taskDeadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);",
+              "pm.collectionVariables.set('task_deadline_at', taskDeadline.toISOString());"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "Create Academic Task",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Read chapter 4\",\n  \"category\": \"reading\",\n  \"priority\": \"medium\",\n  \"course\": \"Algorithms\",\n  \"notes\": \"Focus on dynamic programming.\",\n  \"deadline_at\": \"{{task_deadline_at}}\",\n  \"original_estimate_minutes\": 90\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/v1/tasks", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks"] },
+            "description": "Creates a task owned by the authenticated student. Planned duration initially equals the original estimate."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 201', () => pm.response.to.have.status(201));", "pm.test('generated task deadline is a valid future instant', () => {", "  const deadline = Date.parse(pm.collectionVariables.get('task_deadline_at'));", "  pm.expect(Number.isNaN(deadline)).to.be.false;", "  pm.expect(deadline).to.be.above(Date.now());", "});", "if (pm.response.code === 201) pm.collectionVariables.set('task_id', pm.response.json().id);"] } }]
+        },
+        {
+          "name": "List Academic Tasks",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/tasks?course=Algorithms&category=reading&priority=medium&status=not_started", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks"], "query": [{ "key": "course", "value": "Algorithms" }, { "key": "category", "value": "reading" }, { "key": "priority", "value": "medium" }, { "key": "status", "value": "not_started" }] },
+            "description": "Lists only owned tasks, ordered by deadline. Supports Course, Category, Priority, and deadline-range filters; Task Status is added with lifecycle derivation."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Get Academic Task",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/tasks/{{task_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks", "{{task_id}}"] },
+            "description": "Returns one owned task. Missing and cross-user identifiers both return 404."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Update Academic Task",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Updated task\",\n  \"category\": \"assignment\",\n  \"priority\": \"high\",\n  \"deadline_at\": \"{{task_deadline_at}}\",\n  \"original_estimate_minutes\": 120\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/tasks/{{task_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks", "{{task_id}}"] },
+            "description": "Replaces editable fields, preserves deadline history, and rejects estimate changes after work starts."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Start Academic Task",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/tasks/{{task_id}}/start", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks", "{{task_id}}", "start"] },
+            "description": "Idempotently starts an owned task and freezes its original estimate."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
+        },
+        {
+          "name": "Finish Academic Task Early",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"confirmed\": true\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/tasks/{{task_id}}/finish-early", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks", "{{task_id}}", "finish-early"] },
+            "description": "Explicitly confirms early completion while preserving work history."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
+        },
+        {
+          "name": "Delete Academic Task",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/tasks/{{task_id}}?confirmed=true", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks", "{{task_id}}"], "query": [{ "key": "confirmed", "value": "true" }] },
+            "description": "Deletes the owned task and cascading task history only after explicit confirmation."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
+        }
+      ]
+    },
+    {
+      "name": "Availability",
+      "description": "Authenticated recurring weekly availability in the account timezone.",
+      "item": [
+        {
+          "name": "List Availability Windows",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/availability/windows", "host": ["{{base_url}}"], "path": ["api", "v1", "availability", "windows"] },
+            "description": "Lists the authenticated student's canonical recurring weekly availability."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Replace Availability Windows",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"windows\": [\n    {\"weekday\": 0, \"start_time\": \"18:00\", \"end_time\": \"22:00\"},\n    {\"weekday\": 2, \"start_time\": \"18:00\", \"end_time\": \"22:00\"}\n  ]\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/availability/windows", "host": ["{{base_url}}"], "path": ["api", "v1", "availability", "windows"] },
+            "description": "Atomically creates, updates, or deletes the complete owned weekly availability set and merges touching windows."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Confirm Availability Timezone",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"confirmed\": true\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/availability/confirm-timezone", "host": ["{{base_url}}"], "path": ["api", "v1", "availability", "confirm-timezone"] },
+            "description": "Confirms that local-time availability remains correct after a timezone change."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
+        },
+        {
+          "name": "List Unavailable Periods",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/availability/unavailable-periods", "host": ["{{base_url}}"], "path": ["api", "v1", "availability", "unavailable-periods"] },
+            "description": "Lists owned dated exceptions in absolute UTC instants."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Create Unavailable Period",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"starts_at\": \"2026-08-01T12:00:00Z\",\n  \"ends_at\": \"2026-08-01T14:00:00Z\",\n  \"reason\": \"Exam\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/availability/unavailable-periods", "host": ["{{base_url}}"], "path": ["api", "v1", "availability", "unavailable-periods"] },
+            "description": "Creates an owned dated exception and reports future sessions invalidated by it."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 201', () => pm.response.to.have.status(201));", "if (pm.response.code === 201) pm.collectionVariables.set('period_id', pm.response.json().period.id);"] } }]
+        },
+        {
+          "name": "Update Unavailable Period",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"starts_at\": \"2026-08-01T12:00:00Z\",\n  \"ends_at\": \"2026-08-01T15:00:00Z\",\n  \"reason\": \"Extended exam\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/availability/unavailable-periods/{{period_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "availability", "unavailable-periods", "{{period_id}}"] },
+            "description": "Updates one owned exception; missing and cross-user IDs both return 404."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Delete Unavailable Period",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/availability/unavailable-periods/{{period_id}}?confirmed=true", "host": ["{{base_url}}"], "path": ["api", "v1", "availability", "unavailable-periods", "{{period_id}}"], "query": [{ "key": "confirmed", "value": "true" }] },
+            "description": "Deletes one owned exception after explicit confirmation."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000",
+      "type": "string",
+      "description": "API origin without a trailing slash. Postman environments override this default."
+    },
+    {
+      "key": "csrf_token",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by the email login request."
+    },
+    {
+      "key": "signup_token",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by the verify email request."
+    },
+    {
+      "key": "task_id",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by the create Academic Task request."
+    },
+    {
+      "key": "task_deadline_at",
+      "value": "",
+      "type": "string",
+      "description": "Generated seven days ahead before Academic Task requests."
+    },
+    {
+      "key": "period_id",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by the create unavailable period request."
+    },
+    {
+      "key": "google_oidc_code",
+      "value": "",
+      "type": "string",
+      "description": "Paste the one-time authorization code returned by Google."
+    },
+    {
+      "key": "google_oidc_state",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by the Google OIDC start request."
+    },
+    {
+      "key": "google_link_challenge",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated when Google matches an existing password account."
+    }
+  ]
+}
