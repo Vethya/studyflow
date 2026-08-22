@@ -3,7 +3,7 @@ from typing import Annotated, Literal, Self
 from urllib.parse import parse_qs, urlsplit
 
 from pydantic import EmailStr, Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Environment(StrEnum):
@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     smtp_start_tls: bool = False
     email_from_address: EmailStr = "no-reply@example.com"
     public_app_url: str = "http://localhost:5173"
+    cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
     google_oidc_client_id: str | None = None
     google_oidc_client_secret: SecretStr | None = None
     google_oidc_redirect_uri: str | None = None
@@ -60,6 +61,30 @@ class Settings(BaseSettings):
         if parsed_url.query or parsed_url.fragment:
             raise ValueError("Public app URL must not include a query or fragment")
         return value.rstrip("/")
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def split_cors_origins(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
+
+    @field_validator("cors_origins")
+    @classmethod
+    def validate_cors_origins(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for origin in value:
+            parsed_url = urlsplit(origin)
+            if parsed_url.scheme not in {"http", "https"} or parsed_url.hostname is None:
+                raise ValueError("CORS origins must use HTTP or HTTPS and include a host")
+            if parsed_url.query or parsed_url.fragment:
+                raise ValueError("CORS origins must not include a query or fragment")
+            if parsed_url.path not in {"", "/"}:
+                raise ValueError("CORS origins must not include a path")
+            normalized.append(origin.rstrip("/"))
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("CORS origins must not contain duplicates")
+        return normalized
 
     @field_validator("smtp_username", mode="before")
     @classmethod
