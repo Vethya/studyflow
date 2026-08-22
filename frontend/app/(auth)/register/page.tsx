@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle, ArrowLeft, CheckCircle2, Loader2 } from "lucide-react";
 import { ApiError, auth } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
+import { detectTimezone } from "@/lib/timezones";
 
 const GoogleIcon = () => (
   <svg className="h-4 w-4" viewBox="0 0 48 48" aria-hidden="true">
@@ -53,7 +54,7 @@ export default function RegisterPage() {
     setError(null);
     setIsRedirecting(true);
     try {
-      const { authorization_url } = await auth.startGoogleSignIn();
+      const { authorization_url } = await auth.startGoogleSignIn(detectTimezone());
       window.location.href = authorization_url;
     } catch (cause) {
       setError(describeError(cause));

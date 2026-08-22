@@ -1,6 +1,6 @@
 /** Authentication endpoints — `backend/src/studyflow/api/auth.py`. */
 
-import { apiJson, apiVoid } from "./client";
+import { apiJson, apiVoid, buildQuery } from "./client";
 import type {
   WireAuthenticationMessage,
   WireCurrentSessionResponse,
@@ -106,9 +106,13 @@ export function resetPassword(
  * Returns the Google authorization URL to send the browser to. The callback
  * lands back on the backend, which redirects to `/app` on success or to
  * `/login/google-link` / `/login/google-error/:reason` otherwise.
+ *
+ * `timezone` is required and must be a valid IANA zone: a first-time Google
+ * signup has no account yet, so this is where the new account's timezone comes
+ * from. Omitting it fails the request with 422.
  */
-export function startGoogleSignIn(): Promise<WireOIDCStartResponse> {
-  return apiJson<WireOIDCStartResponse>("/auth/google/start");
+export function startGoogleSignIn(timezone: string): Promise<WireOIDCStartResponse> {
+  return apiJson<WireOIDCStartResponse>(`/auth/google/start${buildQuery({ timezone })}`);
 }
 
 /**

@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { ApiError, auth } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
+import { detectTimezone } from "@/lib/timezones";
 import { useSession } from "@/hooks/use-session";
 
 const GoogleIcon = () => (
@@ -79,7 +80,7 @@ function LoginForm() {
     setError(null);
     setIsRedirecting(true);
     try {
-      const { authorization_url } = await auth.startGoogleSignIn();
+      const { authorization_url } = await auth.startGoogleSignIn(detectTimezone());
       window.location.href = authorization_url;
     } catch (cause) {
       setError(describeError(cause));

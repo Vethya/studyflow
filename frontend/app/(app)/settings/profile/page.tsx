@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { account as accountApi, auth } from "@/lib/api";
 import { describeError, useApi } from "@/hooks/use-api";
 import { useSession } from "@/hooks/use-session";
+import { detectTimezone } from "@/lib/timezones";
 
 const GoogleIcon = () => (
   <svg className="h-4 w-4" viewBox="0 0 48 48" aria-hidden="true">
@@ -75,7 +76,7 @@ export default function ProfileSettingsPage() {
 
   async function handleConnectGoogle() {
     try {
-      const { authorization_url } = await auth.startGoogleSignIn();
+      const { authorization_url } = await auth.startGoogleSignIn(detectTimezone());
       window.location.href = authorization_url;
     } catch (cause) {
       toast.error(describeError(cause));
