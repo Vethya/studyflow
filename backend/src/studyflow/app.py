@@ -5,6 +5,7 @@ from typing import cast
 import httpx
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 
 from studyflow import __version__
 from studyflow.accounts.password import AccountPasswords, PasswordChangeService
@@ -245,6 +246,14 @@ def create_app(
     application.add_exception_handler(
         RequestValidationError, handle_google_callback_validation_error
     )
+    if resolved_settings.cors_origins:
+        application.add_middleware(
+            CORSMiddleware,
+            allow_origins=resolved_settings.cors_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
     application.state.settings = resolved_settings
     application.state.cookie_policy = CookiePolicy.for_environment(resolved_settings.environment)
     application.state.database = resolved_database
