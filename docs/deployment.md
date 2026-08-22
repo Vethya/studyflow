@@ -34,7 +34,7 @@ URL, and TLS for email delivery.
 | `STUDYFLOW_CORS_ORIGINS` | no | `render.yaml` | Comma-separated origins for local frontend development only |
 | `STUDYFLOW_GOOGLE_OIDC_CLIENT_ID` | no | You (secret) | All three OIDC values configure together |
 | `STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET` | no | You (secret) | |
-| `STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI` | no | `render.yaml` | `https://<api-host>/api/v1/auth/google/callback`; must be HTTPS |
+| `STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI` | no | `render.yaml` | `https://<frontend-origin>/api/v1/auth/google/callback`; must be HTTPS and must go through the frontend proxy |
 
 ## One-time setup
 
@@ -70,8 +70,11 @@ URL, and TLS for email delivery.
    - `STUDYFLOW_SMTP_PASSWORD` (Resend API key)
    - `STUDYFLOW_EMAIL_FROM_ADDRESS` (from step 2)
 4. Note the service URL (for example `https://studyflow-api.onrender.com`). If Google
-   Sign-In will be used, register `<service-url>/api/v1/auth/google/callback` in the Google
-   Cloud console and fill the three OIDC variables.
+   Sign-In will be used, register
+   `https://studyflow.vercel.app/api/v1/auth/google/callback` in the Google Cloud console.
+   The callback must go through the frontend origin: the OIDC state cookie is set on the
+   origin where sign-in started (the Vercel proxy), so a callback sent directly to the Render
+   domain would arrive without it and every login would be rejected.
 
 ### 4. Vercel (frontend)
 
