@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from studyflow.availability.unavailable import (
+    PastUnavailablePeriodError,
     UnavailablePeriod,
     UnavailablePeriodChange,
     UnavailablePeriodDraft,
@@ -36,8 +37,8 @@ class RepositoryStub:
 @pytest.mark.anyio
 async def test_unavailable_period_normalizes_before_atomic_repository_change() -> None:
     repository = RepositoryStub()
-    service = UnavailablePeriodService(repository)
-    starts_at = datetime(2026, 8, 1, 19, tzinfo=timezone(timedelta(hours=7)))
+    starts_at = datetime(2027, 8, 1, 19, tzinfo=timezone(timedelta(hours=7)))
+    service = UnavailablePeriodService(repository, clock=lambda: starts_at - timedelta(days=1))
     result = await service.create(
         ACCOUNT_ID,
         UnavailablePeriodDraft(starts_at, starts_at + timedelta(hours=2), " Exam "),
@@ -48,8 +49,8 @@ async def test_unavailable_period_normalizes_before_atomic_repository_change() -
         (
             ACCOUNT_ID,
             UnavailablePeriodDraft(
-                datetime(2026, 8, 1, 12, tzinfo=UTC),
-                datetime(2026, 8, 1, 14, tzinfo=UTC),
+                datetime(2027, 8, 1, 12, tzinfo=UTC),
+                datetime(2027, 8, 1, 14, tzinfo=UTC),
                 "Exam",
             ),
         )
@@ -65,3 +66,31 @@ async def test_unavailable_period_rejects_naive_or_reversed_instants() -> None:
     aware = naive.replace(tzinfo=UTC)
     with pytest.raises(ValueError, match="after"):
         await service.create(ACCOUNT_ID, UnavailablePeriodDraft(aware, aware))
+
+
+@pytest.mark.anyio
+async def test_unavailable_period_rejects_period_ending_in_the_past() -> None:
+    repository = RepositoryStub()
+    now = datetime(2026, 8, 1, 12, tzinfo=UTC)
+    service = UnavailablePeriodService(repository, clock=lambda: now)
+    with pytest.raises(PastUnavailablePeriodError, match="future"):
+        await service.create(
+            ACCOUNT_ID,
+            UnavailablePeriodDraft(now - timedelta(hours=3), now - timedelta(hours=1)),
+        )
+    with pytest.raises(PastUnavailablePeriodError, match="future"):
+        await service.create(ACCOUNT_ID, UnavailablePeriodDraft(now - timedelta(hours=1), now))
+    assert repository.created == []
+
+
+@pytest.mark.anyio
+async def test_unavailable_period_allows_period_started_in_the_past() -> None:
+    repository = RepositoryStub()
+    now = datetime(2026, 8, 1, 12, tzinfo=UTC)
+    service = UnavailablePeriodService(repository, clock=lambda: now)
+    result = await service.create(
+        ACCOUNT_ID,
+        UnavailablePeriodDraft(now - timedelta(hours=1), now + timedelta(hours=1)),
+    )
+
+    assert result.period.starts_at == now - timedelta(hours=1)
