@@ -217,7 +217,7 @@ export default function TasksPage() {
             <EmptyState hasFilters={filterCount > 0 || search !== ""} onClear={clearFilters} />
           ) : (
             <>
-              <div className="hidden grid-cols-[1fr_9rem_7rem_6rem_2.5rem] gap-4 border-b bg-muted/40 px-6 py-2 md:grid">
+              <div className="hidden grid-cols-[minmax(0,1fr)_7rem_6rem_7rem_2.5rem] gap-4 border-b bg-muted/40 px-6 py-2 lg:grid">
                 <span className="eyebrow">Task</span>
                 <span className="eyebrow">Deadline</span>
                 <span className="eyebrow text-right">Remaining</span>
@@ -287,8 +287,10 @@ function FilterSelect<T extends string>({
       value={value ?? ANY}
       onValueChange={(next) => next && onChange(next === ANY ? null : (next as T))}
     >
-      <SelectTrigger className="h-9 w-auto min-w-[9rem]">
-        <SelectValue placeholder={placeholder} />
+      <SelectTrigger className="h-9 w-auto min-w-[9.5rem]">
+        {/* Base UI renders the raw value by default, which would show the
+            sentinel "any" rather than the option's label. */}
+        <SelectValue>{(selected) => (selected === ANY ? placeholder : String(selected))}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         <SelectItem value={ANY}>{placeholder}</SelectItem>
@@ -350,85 +352,93 @@ function TaskRow({
   const due = relativeDeadline(task.deadline);
 
   return (
-    <li className="group relative grid grid-cols-1 items-center gap-2 px-6 py-3 transition-colors hover:bg-muted/40 md:grid-cols-[1fr_9rem_7rem_6rem_2.5rem] md:gap-4">
+    <li className="group relative py-3 pl-6 pr-14 transition-colors hover:bg-muted/40 lg:pr-6">
       {/* Overdue tasks carry a rule in the margin rather than a tinted row. */}
       {task.status === "Overdue" && (
         <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-deficit" aria-hidden />
       )}
 
-      <div className="min-w-0">
-        <Link
-          href={`/tasks/${task.id}`}
-          className="block truncate text-sm font-medium underline-offset-4 hover:underline"
-        >
-          {task.title}
-        </Link>
-        <div className="mt-1 flex flex-wrap items-center gap-1.5">
-          <Badge className={cn("rounded-md border-0 text-[11px]", category.bg, category.color)}>
-            {category.label}
-          </Badge>
-          {task.priority !== "Medium" && (
-            <Badge className={cn("rounded-md border-0 text-[11px]", priority.bg, priority.color)}>
-              {priority.label}
+      <div className="flex flex-col gap-2 lg:grid lg:grid-cols-[minmax(0,1fr)_7rem_6rem_7rem_2.5rem] lg:items-center lg:gap-4">
+        <div className="min-w-0">
+          <Link
+            href={`/tasks/${task.id}`}
+            className="block truncate text-sm font-medium underline-offset-4 hover:underline"
+          >
+            {task.title}
+          </Link>
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
+            <Badge className={cn("rounded-md border-0 text-[11px]", category.bg, category.color)}>
+              {category.label}
             </Badge>
-          )}
-          {task.course && (
-            <span className="truncate text-xs text-muted-foreground">{task.course}</span>
-          )}
+            {task.priority !== "Medium" && (
+              <Badge className={cn("rounded-md border-0 text-[11px]", priority.bg, priority.color)}>
+                {priority.label}
+              </Badge>
+            )}
+            {task.course && (
+              <span className="truncate text-xs text-muted-foreground">{task.course}</span>
+            )}
+          </div>
         </div>
+
+        {/* `lg:contents` dissolves this wrapper once the grid takes over, so
+            the three figures become real columns instead of a nested row. */}
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 lg:contents">
+          <span
+            className={cn(
+              "min-w-0 font-mono text-xs",
+              due.urgent ? "text-deficit" : "text-muted-foreground",
+            )}
+          >
+            {due.label}
+          </span>
+
+          <span className="min-w-0 font-mono text-xs text-muted-foreground lg:text-right">
+            {formatDuration(task.remainingDuration)}
+          </span>
+
+          <span className="flex min-w-0 items-center gap-1.5 text-xs">
+            <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", statusConfig.dotColor)} />
+            <span className="truncate text-muted-foreground">{statusConfig.label}</span>
+          </span>
+        </div>
+
+        {/* Pinned to the row corner while stacked; a real grid cell once the
+            columns take over. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                className="absolute right-4 top-2.5 h-8 w-8 lg:static lg:opacity-0 lg:transition-opacity lg:group-hover:opacity-100"
+                disabled={busy}
+                aria-label={`Actions for ${task.title}`}
+              >
+                {busy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <MoreHorizontal className="h-4 w-4" />
+                )}
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuItem render={<Link href={`/tasks/${task.id}`}>Open</Link>} />
+            <DropdownMenuItem onClick={onEdit}>Edit</DropdownMenuItem>
+            {task.status === "Not Started" && (
+              <DropdownMenuItem onClick={onStart}>Start</DropdownMenuItem>
+            )}
+            {task.status === "In Progress" && (
+              <DropdownMenuItem onClick={onFinish}>Finish early</DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="text-destructive" onClick={onDelete}>
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
-
-      <span
-        className={cn(
-          "font-mono text-xs",
-          due.urgent ? "text-deficit" : "text-muted-foreground",
-        )}
-      >
-        {due.label}
-      </span>
-
-      <span className="font-mono text-xs text-muted-foreground md:text-right">
-        {formatDuration(task.remainingDuration)}
-      </span>
-
-      <span className="flex items-center gap-1.5 text-xs">
-        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", statusConfig.dotColor)} />
-        <span className="text-muted-foreground">{statusConfig.label}</span>
-      </span>
-
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 md:opacity-0 md:transition-opacity md:group-hover:opacity-100"
-              disabled={busy}
-              aria-label={`Actions for ${task.title}`}
-            >
-              {busy ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <MoreHorizontal className="h-4 w-4" />
-              )}
-            </Button>
-          }
-        />
-        <DropdownMenuContent align="end" className="w-44">
-          <DropdownMenuItem render={<Link href={`/tasks/${task.id}`}>Open</Link>} />
-          <DropdownMenuItem onClick={onEdit}>Edit</DropdownMenuItem>
-          {task.status === "Not Started" && (
-            <DropdownMenuItem onClick={onStart}>Start</DropdownMenuItem>
-          )}
-          {task.status === "In Progress" && (
-            <DropdownMenuItem onClick={onFinish}>Finish early</DropdownMenuItem>
-          )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem className="text-destructive" onClick={onDelete}>
-            Delete
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
     </li>
   );
 }

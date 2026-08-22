@@ -58,7 +58,7 @@ export default function GoogleErrorPage({
         </div>
       </div>
 
-      <Button className="w-full" render={<Link href="/login" />}>
+      <Button className="w-full" nativeButton={false} render={<Link href="/login" />}>
         {canRetry ? "Back to sign in" : "Sign in with email"}
       </Button>
 

@@ -34,8 +34,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { status } = useSession();
   const isSettings = pathname.startsWith("/settings/");
-  const pageName = pageNames[pathname] || "Dashboard";
-  const parentName = isSettings ? "Settings" : undefined;
+  const isTaskDetail = /^\/tasks\/[^/]+$/.test(pathname);
+  // Dynamic routes are not in the lookup, so a task detail page would
+  // otherwise fall through to "Dashboard".
+  const pageName = isTaskDetail ? "Task" : (pageNames[pathname] ?? "Dashboard");
+  const parentName = isSettings ? "Settings" : isTaskDetail ? "Tasks" : undefined;
+  const parentHref = isSettings ? "/settings/profile" : "/tasks";
 
   // Every page in this group needs a session; bounce anonymous visitors and
   // preserve where they were headed so login can return them there.
@@ -66,7 +70,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               {parentName && (
                 <>
                   <BreadcrumbItem className="hidden md:block">
-                    <BreadcrumbLink href="/settings/profile">
+                    <BreadcrumbLink href={parentHref}>
                       {parentName}
                     </BreadcrumbLink>
                   </BreadcrumbItem>

@@ -183,7 +183,7 @@ export default function DashboardPage() {
                   Open work due in the next {horizon} days, soonest first
                 </CardDescription>
               </div>
-              <Button size="sm" variant="outline" render={<Link href="/tasks" />}>
+              <Button size="sm" variant="outline" nativeButton={false} render={<Link href="/tasks" />}>
                 <Plus className="mr-1.5 h-3.5 w-3.5" />
                 Add task
               </Button>
@@ -338,7 +338,7 @@ function EmptyCapacity() {
           Add your weekly availability and this becomes a real answer.
         </p>
       </div>
-      <Button size="sm" render={<Link href="/availability" />}>
+      <Button size="sm" nativeButton={false} render={<Link href="/availability" />}>
         Set availability
         <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
       </Button>
