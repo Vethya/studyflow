@@ -60,7 +60,9 @@ def test_blueprint_keeps_secrets_out_of_the_repository() -> None:
     secrets = [
         "STUDYFLOW_DATABASE_URL",
         "STUDYFLOW_SMTP_PASSWORD",
+        "STUDYFLOW_GOOGLE_OIDC_CLIENT_ID",
         "STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET",
+        "STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI",
     ]
 
     by_key = {entry["key"]: entry for entry in raw_variables}
