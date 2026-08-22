@@ -99,7 +99,7 @@ async def test_past_unavailable_period_is_rejected_with_422() -> None:
         async def create(
             self, account_id: UUID, draft: UnavailablePeriodDraft
         ) -> UnavailablePeriodChange:
-                raise PastUnavailablePeriodError("Unavailable period ends_at must be in the future")
+            raise PastUnavailablePeriodError("Unavailable period ends_at must be in the future")
 
     app = create_app(
         session_authentication=AuthenticationStub(),

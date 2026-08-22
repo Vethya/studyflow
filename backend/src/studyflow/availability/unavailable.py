@@ -82,9 +82,7 @@ class UnavailablePeriodService:
     def _validated_draft(self, draft: UnavailablePeriodDraft) -> UnavailablePeriodDraft:
         normalized = normalize_draft(draft)
         if normalized.ends_at <= self._clock():
-            raise PastUnavailablePeriodError(
-                "Unavailable period ends_at must be in the future"
-            )
+            raise PastUnavailablePeriodError("Unavailable period ends_at must be in the future")
         return normalized
 
     async def delete(self, account_id: UUID, period_id: UUID) -> bool:
