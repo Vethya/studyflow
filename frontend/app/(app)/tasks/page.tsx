@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Table,
   TableBody,
@@ -30,10 +32,15 @@ import {
   CheckCircle2,
   AlertCircle,
   CircleDashed,
+  Loader2,
 } from "lucide-react";
-import { mockTasks } from "@/lib/mock-data";
+import { toast } from "sonner";
 import { formatDuration, CATEGORY_CONFIG, PRIORITY_CONFIG, STATUS_CONFIG } from "@/lib/constants";
 import { cn } from "@/lib/utils";
+import { ApiError, tasks as tasksApi } from "@/lib/api";
+import { describeError, useApi } from "@/hooks/use-api";
+import { TaskFormDialog } from "@/components/task-form-dialog";
+import type { AcademicTask } from "@/types/task";
 
 type TabValue = "all" | "in-progress" | "not-started" | "completed" | "overdue";
 
@@ -44,6 +51,13 @@ const tabs: { value: TabValue; label: string; icon: React.ElementType }[] = [
   { value: "completed",    label: "Completed",    icon: CheckCircle2 },
   { value: "overdue",      label: "Overdue",      icon: AlertCircle },
 ];
+
+const TAB_STATUS: Record<Exclude<TabValue, "all">, AcademicTask["status"]> = {
+  "in-progress": "In Progress",
+  "not-started": "Not Started",
+  completed: "Completed",
+  overdue: "Overdue",
+};
 
 function getRelativeDeadline(deadline: string) {
   const now = new Date();
@@ -64,29 +78,61 @@ function getRelativeDeadline(deadline: string) {
 export default function TasksPage() {
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<TabValue>("all");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<AcademicTask | null>(null);
+  const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
 
-  const filteredTasks = mockTasks.filter((task) => {
-    const q = search.toLowerCase();
-    const matchesSearch =
-      task.title.toLowerCase().includes(q) ||
-      (task.course && task.course.toLowerCase().includes(q));
+  // Status filtering happens server-side; the counts need the unfiltered list,
+  // so the whole set is fetched once and narrowed in the browser.
+  const load = useCallback((signal: AbortSignal) => tasksApi.listTasks({}, signal), []);
+  const { data, error, isLoading, reload, setData } = useApi(load);
 
-    if (activeTab === "all") return matchesSearch;
-    if (activeTab === "in-progress") return matchesSearch && task.status === "In Progress";
-    if (activeTab === "not-started") return matchesSearch && task.status === "Not Started";
-    if (activeTab === "completed") return matchesSearch && task.status === "Completed";
-    if (activeTab === "overdue") return matchesSearch && task.status === "Overdue";
-    return matchesSearch;
-  });
+  const allTasks = useMemo(() => data ?? [], [data]);
 
-  const getCount = (tab: TabValue) => {
-    if (tab === "all") return mockTasks.length;
-    if (tab === "in-progress") return mockTasks.filter((t) => t.status === "In Progress").length;
-    if (tab === "not-started") return mockTasks.filter((t) => t.status === "Not Started").length;
-    if (tab === "completed") return mockTasks.filter((t) => t.status === "Completed").length;
-    if (tab === "overdue") return mockTasks.filter((t) => t.status === "Overdue").length;
-    return 0;
-  };
+  const filteredTasks = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return allTasks.filter((task) => {
+      const matchesSearch =
+        q === "" ||
+        task.title.toLowerCase().includes(q) ||
+        (task.course?.toLowerCase().includes(q) ?? false);
+      if (activeTab === "all") return matchesSearch;
+      return matchesSearch && task.status === TAB_STATUS[activeTab];
+    });
+  }, [allTasks, search, activeTab]);
+
+  const getCount = (tab: TabValue) =>
+    tab === "all"
+      ? allTasks.length
+      : allTasks.filter((task) => task.status === TAB_STATUS[tab]).length;
+
+  function handleSaved(saved: AcademicTask) {
+    setData(
+      allTasks.some((task) => task.id === saved.id)
+        ? allTasks.map((task) => (task.id === saved.id ? saved : task))
+        : [saved, ...allTasks],
+    );
+    toast.success(editing ? "Task updated" : "Task added");
+    setEditing(null);
+  }
+
+  /** Runs a mutation, then reloads so server-derived status stays authoritative. */
+  async function runAction(taskId: string, action: () => Promise<void>, successMessage: string) {
+    setBusyTaskId(taskId);
+    try {
+      await action();
+      toast.success(successMessage);
+      reload();
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 409) {
+        toast.error("Start the task before finishing it early.");
+      } else {
+        toast.error(describeError(cause));
+      }
+    } finally {
+      setBusyTaskId(null);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -95,14 +141,32 @@ export default function TasksPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Tasks</h1>
           <p className="text-sm text-muted-foreground">
-            Manage your academic workload — {mockTasks.length} tasks total
+            {isLoading
+              ? "Loading your academic workload…"
+              : `Manage your academic workload — ${allTasks.length} tasks total`}
           </p>
         </div>
-        <Button className="w-fit">
+        <Button
+          className="w-fit"
+          onClick={() => {
+            setEditing(null);
+            setDialogOpen(true);
+          }}
+        >
           <Plus className="mr-2 h-4 w-4" />
           Add task
         </Button>
       </div>
+
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription className="flex items-center justify-between gap-4">
+            <span>{describeError(error)}</span>
+            <Button size="sm" variant="outline" onClick={reload}>Retry</Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* ── Tab bar ────────────────────────────── */}
       <div className="flex gap-1 border-b overflow-x-auto pb-0 -mb-px">
@@ -167,12 +231,24 @@ export default function TasksPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredTasks.length === 0 ? (
+              {isLoading ? (
+                Array.from({ length: 4 }).map((_, index) => (
+                  <TableRow key={index}>
+                    <TableCell colSpan={7} className="py-3 pl-4">
+                      <Skeleton className="h-6 w-full" />
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : filteredTasks.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} className="py-16 text-center">
                     <div className="flex flex-col items-center gap-2 text-muted-foreground">
                       <ListTodo className="h-8 w-8 opacity-30" />
-                      <span className="text-sm">No tasks match your search.</span>
+                      <span className="text-sm">
+                        {allTasks.length === 0
+                          ? "No tasks yet. Add your first one to get started."
+                          : "No tasks match your search."}
+                      </span>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -187,6 +263,7 @@ export default function TasksPage() {
                       : 0;
                   const dl = getRelativeDeadline(task.deadline);
                   const isOverdue = task.status === "Overdue";
+                  const isBusy = busyTaskId === task.id;
 
                   return (
                     <TableRow
@@ -282,16 +359,64 @@ export default function TasksPage() {
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                                disabled={isBusy}
                               >
-                                <MoreHorizontal className="h-4 w-4" />
+                                {isBusy ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <MoreHorizontal className="h-4 w-4" />
+                                )}
                               </Button>
                             }
                           />
-                          <DropdownMenuContent align="end" className="w-40">
-                            <DropdownMenuItem>Edit task</DropdownMenuItem>
-                            <DropdownMenuItem>Log session</DropdownMenuItem>
+                          <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setEditing(task);
+                                setDialogOpen(true);
+                              }}
+                            >
+                              Edit task
+                            </DropdownMenuItem>
+                            {task.status === "Not Started" && (
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  void runAction(
+                                    task.id,
+                                    () => tasksApi.startTask(task.id),
+                                    "Task started",
+                                  )
+                                }
+                              >
+                                Start task
+                              </DropdownMenuItem>
+                            )}
+                            {task.status === "In Progress" && (
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  void runAction(
+                                    task.id,
+                                    () => tasksApi.finishTaskEarly(task.id),
+                                    "Task finished",
+                                  )
+                                }
+                              >
+                                Finish early
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem className="text-destructive">Delete</DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-destructive"
+                              onClick={() =>
+                                void runAction(
+                                  task.id,
+                                  () => tasksApi.deleteTask(task.id),
+                                  "Task deleted",
+                                )
+                              }
+                            >
+                              Delete
+                            </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -305,11 +430,18 @@ export default function TasksPage() {
           {/* Footer */}
           <div className="flex items-center justify-between px-4 py-2.5 border-t bg-muted/30">
             <p className="text-xs text-muted-foreground">
-              {filteredTasks.length} of {mockTasks.length} tasks
+              {filteredTasks.length} of {allTasks.length} tasks
             </p>
           </div>
         </CardContent>
       </Card>
+
+      <TaskFormDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        task={editing}
+        onSaved={handleSaved}
+      />
     </div>
   );
 }

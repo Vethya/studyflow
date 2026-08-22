@@ -8,7 +8,8 @@ export interface StudentAccount {
   preferredSessionLength: number; // 10-240 minutes, default 60
   minimumBreak: number; // 0-120 minutes, default 10
   avatarUrl?: string;
-  createdAt: string;
+  /** Not exposed by /account/profile; present only in fixtures. */
+  createdAt?: string;
 }
 
 export interface AccountSettings {

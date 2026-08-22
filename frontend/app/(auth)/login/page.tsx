@@ -1,11 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AlertCircle, Loader2 } from "lucide-react";
+import { ApiError, auth } from "@/lib/api";
+import { describeError } from "@/hooks/use-api";
+import { useSession } from "@/hooks/use-session";
 
 const GoogleIcon = () => (
   <svg className="h-4 w-4" viewBox="0 0 48 48" aria-hidden="true">
@@ -16,7 +21,74 @@ const GoogleIcon = () => (
   </svg>
 );
 
+// `useSearchParams` suspends during prerendering, so the form lives in a child
+// component behind a boundary.
 export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex justify-center py-16">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </div>
+      }
+    >
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { refresh } = useSession();
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
+
+  // Set by the app shell when it bounced an unauthenticated visitor.
+  const nextPath = searchParams.get("next") ?? "/dashboard";
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    setError(null);
+    setIsSubmitting(true);
+    try {
+      // Sets the session and CSRF cookies as a side effect.
+      await auth.login(email, password);
+      await refresh();
+      router.replace(nextPath);
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.isRateLimited) {
+        const wait = cause.retryAfterSeconds;
+        setError(
+          wait
+            ? `Too many attempts. Try again in ${Math.ceil(wait / 60)} minutes.`
+            : "Too many attempts. Try again later.",
+        );
+      } else {
+        setError(describeError(cause));
+      }
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleGoogle() {
+    setError(null);
+    setIsRedirecting(true);
+    try {
+      const { authorization_url } = await auth.startGoogleSignIn();
+      window.location.href = authorization_url;
+    } catch (cause) {
+      setError(describeError(cause));
+      setIsRedirecting(false);
+    }
+  }
+
+  const isBusy = isSubmitting || isRedirecting;
+
   return (
     <div className="space-y-6">
       {/* Heading */}
@@ -27,9 +99,22 @@ export default function LoginPage() {
         </p>
       </div>
 
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
       {/* Google SSO */}
-      <Button variant="outline" className="w-full" type="button">
-        <GoogleIcon />
+      <Button
+        variant="outline"
+        className="w-full"
+        type="button"
+        onClick={handleGoogle}
+        disabled={isBusy}
+      >
+        {isRedirecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <GoogleIcon />}
         <span className="ml-2">Continue with Google</span>
       </Button>
 
@@ -44,7 +129,7 @@ export default function LoginPage() {
       </div>
 
       {/* Email + password form */}
-      <form action="/dashboard" method="GET" className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-1.5">
           <Label htmlFor="email" className="text-xs font-medium">Email</Label>
           <Input
@@ -52,6 +137,9 @@ export default function LoginPage() {
             type="email"
             placeholder="student@university.edu"
             autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={isBusy}
             required
           />
         </div>
@@ -70,19 +158,18 @@ export default function LoginPage() {
             id="password"
             type="password"
             autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={isBusy}
             required
           />
         </div>
 
-        {/* Remember me */}
-        <div className="flex items-center gap-2">
-          <Checkbox id="remember" />
-          <Label htmlFor="remember" className="text-xs font-normal text-muted-foreground cursor-pointer">
-            Remember me for 30 days
-          </Label>
-        </div>
+        {/* The backend issues a fixed seven-day session, so there is no
+            "remember me" choice to offer here. */}
 
-        <Button type="submit" className="w-full font-medium">
+        <Button type="submit" className="w-full font-medium" disabled={isBusy}>
+          {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Sign In
         </Button>
       </form>

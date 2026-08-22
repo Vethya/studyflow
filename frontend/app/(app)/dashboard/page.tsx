@@ -31,8 +31,17 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
-import { mockTasks, mockSessions } from "@/lib/mock-data";
+import { useCallback, useMemo } from "react";
+import Link from "next/link";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
+// Study sessions have no backend yet, so every session-derived widget below
+// still reads from the fixtures. Tasks and deadlines come from the API.
+import { mockSessions } from "@/lib/mock-data";
 import { formatDuration, STATUS_CONFIG, PRIORITY_CONFIG, CATEGORY_CONFIG } from "@/lib/constants";
+import { tasks as tasksApi } from "@/lib/api";
+import { describeError, useApi } from "@/hooks/use-api";
+import type { AcademicTask } from "@/types/task";
 
 // ─── Chart data ─────────────────────────────────────────────────
 const studyTimeData = [
@@ -77,23 +86,30 @@ const monthlyConfig = {
   hours: { label: "Hours", color: "hsl(var(--chart-5))" },
 } satisfies ChartConfig;
 
-// ─── Derived data ───────────────────────────────────────────────
+// ─── Session fixtures (no scheduling API yet) ───────────────────
 const todaySessions = mockSessions.filter(
   (s) => !s.outcome && !s.isAwaitingOutcome && new Date(s.startTime).toDateString() === new Date().toDateString()
 );
 const todayWorkload = todaySessions.reduce((sum, s) => sum + s.plannedDuration, 0);
-const totalStudied = mockTasks.reduce((sum, t) => sum + t.actualDuration, 0);
-const totalPlanned = mockTasks.reduce((sum, t) => sum + t.plannedDuration, 0);
-const weeklyEffort = totalPlanned > 0 ? Math.round((totalStudied / totalPlanned) * 100) : 0;
 const nextSession = todaySessions[0];
-const upcomingDeadlines = [...mockTasks]
-  .filter((t) => t.status !== "Completed")
-  .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime())
-  .slice(0, 5);
 const awaitingOutcome = mockSessions.filter((s) => s.isAwaitingOutcome);
-const overdueTasks = mockTasks.filter((t) => t.status === "Overdue");
 
 export default function DashboardPage() {
+  const load = useCallback((signal: AbortSignal) => tasksApi.listTasks({}, signal), []);
+  const { data, error, isLoading } = useApi(load);
+  const tasks = useMemo<AcademicTask[]>(() => data ?? [], [data]);
+
+  // Task-derived figures are live; effort totals read zero until the backend
+  // reports logged work, so they are labelled rather than filled with guesses.
+  const totalStudied = tasks.reduce((sum, t) => sum + t.actualDuration, 0);
+  const totalPlanned = tasks.reduce((sum, t) => sum + t.plannedDuration, 0);
+  const weeklyEffort = totalPlanned > 0 ? Math.round((totalStudied / totalPlanned) * 100) : 0;
+  const upcomingDeadlines = [...tasks]
+    .filter((t) => t.status !== "Completed")
+    .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime())
+    .slice(0, 5);
+  const overdueTasks = tasks.filter((t) => t.status === "Overdue");
+
   return (
     <div className="flex flex-col gap-6 p-6">
       {/* Header */}
@@ -105,16 +121,36 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" disabled title="Scheduling is not available yet">
             <RefreshCw className="mr-2 h-4 w-4" />
             Regenerate schedule
           </Button>
-          <Button size="sm">
+          <Button size="sm" render={<Link href="/tasks" />}>
             <Plus className="mr-2 h-4 w-4" />
             Add task
           </Button>
         </div>
       </div>
+
+      {error && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>{describeError(error)}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* The scheduling engine has no endpoints yet, so anything derived from
+          study sessions is still sample data. Say so rather than implying the
+          numbers are the student's own. */}
+      <Alert>
+        <AlertTriangle className="h-4 w-4" />
+        <AlertDescription>
+          Tasks and deadlines below are live. Study sessions, charts and effort
+          totals are sample data until the scheduling API ships.
+        </AlertDescription>
+      </Alert>
+
+      {isLoading && <Skeleton className="h-4 w-48" />}
 
       {/* Tabs */}
       <Tabs defaultValue="overview" className="space-y-6">

@@ -5,7 +5,10 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AlertCircle, ArrowLeft, CheckCircle2, Loader2 } from "lucide-react";
+import { ApiError, auth } from "@/lib/api";
+import { describeError } from "@/hooks/use-api";
 
 const GoogleIcon = () => (
   <svg className="h-4 w-4" viewBox="0 0 48 48" aria-hidden="true">
@@ -16,38 +19,106 @@ const GoogleIcon = () => (
   </svg>
 );
 
-function getPasswordStrength(pw: string): { level: number; label: string; color: string } {
-  if (pw.length === 0) return { level: 0, label: "", color: "" };
-  let score = 0;
-  if (pw.length >= 8) score++;
-  if (pw.length >= 12) score++;
-  if (/[A-Z]/.test(pw)) score++;
-  if (/[0-9]/.test(pw)) score++;
-  if (/[^A-Za-z0-9]/.test(pw)) score++;
-
-  if (score <= 1) return { level: 1, label: "Weak",   color: "bg-red-500" };
-  if (score <= 2) return { level: 2, label: "Fair",   color: "bg-amber-500" };
-  if (score <= 3) return { level: 3, label: "Good",   color: "bg-yellow-500" };
-  if (score === 4) return { level: 4, label: "Strong", color: "bg-emerald-500" };
-  return                { level: 5, label: "Great",  color: "bg-emerald-600" };
-}
-
+/**
+ * Registration is email-first: this step only asks for an address. The name,
+ * password and timezone are collected on /verify-email once the emailed link
+ * has been exchanged for a signup token.
+ */
 export default function RegisterPage() {
-  const [password, setPassword] = useState("");
-  const strength = getPasswordStrength(password);
+  const [email, setEmail] = useState("");
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    setError(null);
+    setIsSubmitting(true);
+    try {
+      await auth.register(email);
+      setSent(true);
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.isRateLimited) {
+        setError("Too many registration attempts. Please try again later.");
+      } else {
+        setError(describeError(cause));
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleGoogle() {
+    setError(null);
+    setIsRedirecting(true);
+    try {
+      const { authorization_url } = await auth.startGoogleSignIn();
+      window.location.href = authorization_url;
+    } catch (cause) {
+      setError(describeError(cause));
+      setIsRedirecting(false);
+    }
+  }
+
+  if (sent) {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col items-center text-center space-y-4 py-6">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100">
+            <CheckCircle2 className="h-7 w-7 text-emerald-600" />
+          </div>
+          <div className="space-y-1">
+            <h1 className="text-xl font-bold tracking-tight">Check your inbox</h1>
+            <p className="text-sm text-muted-foreground">
+              If <strong className="text-foreground">{email}</strong> is eligible, we sent a
+              link to finish setting up your account. It expires in eight hours.
+            </p>
+          </div>
+        </div>
+
+        <Button variant="outline" className="w-full" onClick={() => setSent(false)}>
+          Use a different email
+        </Button>
+
+        <Link
+          href="/login"
+          className="flex items-center justify-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          Back to sign in
+        </Link>
+      </div>
+    );
+  }
+
+  const isBusy = isSubmitting || isRedirecting;
 
   return (
     <div className="space-y-6">
       <div className="space-y-1">
         <h1 className="text-2xl font-bold tracking-tight">Create your account</h1>
         <p className="text-sm text-muted-foreground">
-          Start planning smarter — it's free
+          Start planning smarter — it&apos;s free
         </p>
       </div>
 
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
       {/* Google SSO */}
-      <Button variant="outline" className="w-full" type="button">
-        <GoogleIcon />
+      <Button
+        variant="outline"
+        className="w-full"
+        type="button"
+        onClick={handleGoogle}
+        disabled={isBusy}
+      >
+        {isRedirecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <GoogleIcon />}
         <span className="ml-2">Continue with Google</span>
       </Button>
 
@@ -60,51 +131,22 @@ export default function RegisterPage() {
         </div>
       </div>
 
-      <form action="/verify-email" method="GET" className="space-y-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="name" className="text-xs font-medium">Full Name</Label>
-          <Input id="name" placeholder="Your full name" autoComplete="name" required />
-        </div>
-
+      <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-1.5">
           <Label htmlFor="email" className="text-xs font-medium">Email</Label>
-          <Input id="email" type="email" placeholder="student@university.edu" autoComplete="email" required />
-        </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="password" className="text-xs font-medium">Password</Label>
           <Input
-            id="password"
-            type="password"
-            autoComplete="new-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            id="email"
+            type="email"
+            placeholder="student@university.edu"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={isBusy}
             required
           />
-          {/* Strength bar */}
-          {password.length > 0 && (
-            <div className="space-y-1">
-              <div className="flex gap-1 h-1">
-                {[1, 2, 3, 4, 5].map((i) => (
-                  <div
-                    key={i}
-                    className={cn(
-                      "flex-1 rounded-full transition-all duration-300",
-                      i <= strength.level ? strength.color : "bg-muted"
-                    )}
-                  />
-                ))}
-              </div>
-              <p className={cn("text-[11px] font-medium", strength.level <= 2 ? "text-red-500" : "text-emerald-600")}>
-                {strength.label} password
-              </p>
-            </div>
-          )}
-        </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="confirm" className="text-xs font-medium">Confirm Password</Label>
-          <Input id="confirm" type="password" autoComplete="new-password" required />
+          <p className="text-[11px] text-muted-foreground">
+            We&apos;ll email you a link to choose a name and password.
+          </p>
         </div>
 
         <p className="text-[11px] text-muted-foreground">
@@ -114,8 +156,9 @@ export default function RegisterPage() {
           <Link href="#" className="underline hover:text-foreground">Privacy Policy</Link>.
         </p>
 
-        <Button type="submit" className="w-full font-medium">
-          Create Account
+        <Button type="submit" className="w-full font-medium" disabled={isBusy}>
+          {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Continue
         </Button>
       </form>
 

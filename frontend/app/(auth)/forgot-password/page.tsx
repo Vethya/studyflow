@@ -5,11 +5,36 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Send, CheckCircle2 } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AlertCircle, ArrowLeft, Send, CheckCircle2, Loader2 } from "lucide-react";
+import { ApiError, auth } from "@/lib/api";
+import { describeError } from "@/hooks/use-api";
 
 export default function ForgotPasswordPage() {
   const [submitted, setSubmitted] = useState(false);
   const [email, setEmail] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    setError(null);
+    setIsSubmitting(true);
+    try {
+      // Always reports success so the response cannot be used to discover
+      // which addresses have accounts.
+      await auth.forgotPassword(email);
+      setSubmitted(true);
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.isRateLimited) {
+        setError("Too many reset requests. Please wait before trying again.");
+      } else {
+        setError(describeError(cause));
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
   if (submitted) {
     return (
@@ -21,8 +46,8 @@ export default function ForgotPasswordPage() {
           <div className="space-y-1">
             <h1 className="text-xl font-bold tracking-tight">Check your inbox</h1>
             <p className="text-sm text-muted-foreground">
-              We sent a reset link to <strong className="text-foreground">{email}</strong>.
-              It expires in 10 minutes.
+              If <strong className="text-foreground">{email}</strong> has an account, a reset
+              link is on its way. It expires in one hour.
             </p>
           </div>
         </div>
@@ -48,17 +73,18 @@ export default function ForgotPasswordPage() {
       <div className="space-y-1">
         <h1 className="text-2xl font-bold tracking-tight">Reset password</h1>
         <p className="text-sm text-muted-foreground">
-          We'll send a secure link to your email to reset your password.
+          We&apos;ll send a secure link to your email to reset your password.
         </p>
       </div>
 
-      <form
-        className="space-y-4"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (email) setSubmitted(true);
-        }}
-      >
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      <form className="space-y-4" onSubmit={handleSubmit}>
         <div className="space-y-1.5">
           <Label htmlFor="email" className="text-xs font-medium">Email</Label>
           <Input
@@ -68,12 +94,17 @@ export default function ForgotPasswordPage() {
             autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            disabled={isSubmitting}
             required
           />
         </div>
 
-        <Button type="submit" className="w-full font-medium">
-          <Send className="mr-2 h-4 w-4" />
+        <Button type="submit" className="w-full font-medium" disabled={isSubmitting}>
+          {isSubmitting ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <Send className="mr-2 h-4 w-4" />
+          )}
           Send reset link
         </Button>
       </form>

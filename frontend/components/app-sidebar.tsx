@@ -45,7 +45,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { mockUser } from "@/lib/mock-data";
+import { useSession } from "@/hooks/use-session";
 
 const iconMap = {
   LayoutDashboard,
@@ -81,8 +81,17 @@ const settingsSubItems = [
   { title: "Timezone", url: "/settings/timezone", icon: Globe },
 ];
 
+/** Two-letter fallback avatar, e.g. "Meng Heang" → "MH". */
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const letters = parts.length === 1 ? parts[0].slice(0, 2) : parts[0][0] + parts[parts.length - 1][0];
+  return letters.toUpperCase();
+}
+
 export function AppSidebar() {
   const pathname = usePathname();
+  const { account, signOut } = useSession();
 
   return (
     <Sidebar variant="sidebar" collapsible="icon">
@@ -186,15 +195,15 @@ export function AppSidebar() {
                 >
                   <Avatar className="h-8 w-8 rounded-lg">
                     <AvatarFallback className="rounded-lg bg-primary text-primary-foreground text-xs font-semibold">
-                      MH
+                      {account ? initials(account.name) : "—"}
                     </AvatarFallback>
                   </Avatar>
                   <div className="grid flex-1 text-left text-sm leading-tight">
                     <span className="truncate font-semibold">
-                      {mockUser.name}
+                      {account?.name ?? "Loading…"}
                     </span>
                     <span className="truncate text-xs text-muted-foreground">
-                      {mockUser.email}
+                      {account?.email ?? ""}
                     </span>
                   </div>
                   <ChevronDown className="ml-auto size-4" />
@@ -213,11 +222,12 @@ export function AppSidebar() {
                   <Link href="/settings/preferences">Preferences</Link>
                 } />
                 <DropdownMenuSeparator />
-                <DropdownMenuItem render={
-                  <Link href="/login" className="text-destructive">
-                    Sign out
-                  </Link>
-                } />
+                <DropdownMenuItem
+                  className="text-destructive"
+                  onClick={() => void signOut()}
+                >
+                  Sign out
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>

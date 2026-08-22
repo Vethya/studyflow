@@ -43,7 +43,15 @@ import {
   ArrowDown,
   Minus,
 } from "lucide-react";
+import { useCallback, useMemo } from "react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AlertTriangle } from "lucide-react";
+// Effort and session totals have no backend yet, so the aggregate cards and
+// charts still read from fixtures. The per-task table below is live.
 import { mockTasks } from "@/lib/mock-data";
+import { tasks as tasksApi } from "@/lib/api";
+import { describeError, useApi } from "@/hooks/use-api";
+import type { AcademicTask } from "@/types/task";
 import { formatDuration, STATUS_CONFIG } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
@@ -115,6 +123,10 @@ const statCards = [
 type TabKey = "task" | "week";
 
 export default function ProgressPage() {
+  const load = useCallback((signal: AbortSignal) => tasksApi.listTasks({}, signal), []);
+  const { data, error } = useApi(load);
+  const liveTasks = useMemo<AcademicTask[]>(() => data ?? [], [data]);
+
   const [activeTab, setActiveTab] = useState<TabKey>("task");
 
   return (
@@ -126,6 +138,21 @@ export default function ProgressPage() {
           Track your effort and study consistency over time
         </p>
       </div>
+
+      {error && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>{describeError(error)}</AlertDescription>
+        </Alert>
+      )}
+
+      <Alert>
+        <AlertTriangle className="h-4 w-4" />
+        <AlertDescription>
+          The per-task table is live. Totals and charts are sample data until the
+          backend records study sessions and logged effort.
+        </AlertDescription>
+      </Alert>
 
       {/* Tab bar */}
       <div className="flex gap-1 border-b -mb-px">
@@ -286,7 +313,7 @@ export default function ProgressPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {mockTasks.map((task) => {
+                  {liveTasks.map((task) => {
                     const statCfg = STATUS_CONFIG[task.status];
                     const pct =
                       task.plannedDuration > 0

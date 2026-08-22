@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,8 +8,13 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
-import { Upload, Camera, CheckCircle2 } from "lucide-react";
-import { mockUser } from "@/lib/mock-data";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import { account as accountApi, auth } from "@/lib/api";
+import { describeError, useApi } from "@/hooks/use-api";
+import { useSession } from "@/hooks/use-session";
 
 const GoogleIcon = () => (
   <svg className="h-4 w-4" viewBox="0 0 48 48" aria-hidden="true">
@@ -19,8 +25,62 @@ const GoogleIcon = () => (
   </svg>
 );
 
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return (parts.length === 1 ? parts[0].slice(0, 2) : parts[0][0] + parts[parts.length - 1][0])
+    .toUpperCase();
+}
+
 export default function ProfileSettingsPage() {
-  const initials = mockUser.name.split(" ").map((n) => n[0]).join("");
+  const { setAccount } = useSession();
+
+  const loadProfile = useCallback((signal: AbortSignal) => accountApi.getProfile(signal), []);
+  const loadIdentities = useCallback(
+    (signal: AbortSignal) => accountApi.getLinkedIdentities(signal),
+    [],
+  );
+
+  const profile = useApi(loadProfile);
+  const identities = useApi(loadIdentities);
+
+  const [name, setName] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Seed the editable field from the server value, and re-seed whenever a new
+  // one arrives, without an effect round trip.
+  const [syncedProfile, setSyncedProfile] = useState(profile.data);
+  if (profile.data !== syncedProfile) {
+    setSyncedProfile(profile.data);
+    if (profile.data) setName(profile.data.name);
+  }
+
+  const google = identities.data?.find((identity) => identity.provider === "google") ?? null;
+  const isDirty = profile.data ? name.trim() !== profile.data.name : false;
+
+  async function handleSave() {
+    setIsSaving(true);
+    try {
+      const updated = await accountApi.updateProfile(name.trim());
+      profile.setData(updated);
+      // Keep the sidebar in step without a second round trip.
+      setAccount(updated);
+      toast.success("Profile updated");
+    } catch (cause) {
+      toast.error(describeError(cause));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleConnectGoogle() {
+    try {
+      const { authorization_url } = await auth.startGoogleSignIn();
+      window.location.href = authorization_url;
+    } catch (cause) {
+      toast.error(describeError(cause));
+    }
+  }
 
   return (
     <div className="flex flex-col gap-2">
@@ -31,29 +91,42 @@ export default function ProfileSettingsPage() {
         </p>
       </div>
 
+      {profile.error && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription className="flex items-center justify-between gap-4">
+            <span>{describeError(profile.error)}</span>
+            <Button size="sm" variant="outline" onClick={profile.reload}>Retry</Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
       <Card>
         <CardContent className="p-6 space-y-6">
 
-          {/* Avatar section */}
+          {/* Identity summary */}
           <div className="flex items-center gap-5">
-            <div className="relative">
-              <Avatar className="h-16 w-16">
-                <AvatarFallback className="text-lg font-semibold bg-primary text-primary-foreground">
-                  {initials}
-                </AvatarFallback>
-              </Avatar>
-              <button className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full border-2 border-background bg-muted shadow-sm hover:bg-accent transition-colors">
-                <Camera className="h-3 w-3" />
-              </button>
-            </div>
-            <div className="space-y-1">
-              <p className="text-sm font-medium">{mockUser.name}</p>
-              <p className="text-xs text-muted-foreground">{mockUser.email}</p>
-              <Button variant="outline" size="sm" className="mt-1 h-7 text-xs">
-                <Upload className="mr-1.5 h-3 w-3" />
-                Upload photo
-              </Button>
-            </div>
+            {profile.isLoading || !profile.data ? (
+              <>
+                <Skeleton className="h-16 w-16 rounded-full" />
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-44" />
+                </div>
+              </>
+            ) : (
+              <>
+                <Avatar className="h-16 w-16">
+                  <AvatarFallback className="text-lg font-semibold bg-primary text-primary-foreground">
+                    {initials(profile.data.name)}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">{profile.data.name}</p>
+                  <p className="text-xs text-muted-foreground">{profile.data.email}</p>
+                </div>
+              </>
+            )}
           </div>
 
           <Separator />
@@ -65,12 +138,23 @@ export default function ProfileSettingsPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="full-name" className="text-xs font-medium">Full Name</Label>
-                <Input id="full-name" defaultValue={mockUser.name} />
+                <Input
+                  id="full-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  maxLength={200}
+                  disabled={profile.isLoading || isSaving}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="email" className="text-xs font-medium">Email Address</Label>
                 <div className="relative">
-                  <Input id="email" defaultValue={mockUser.email} disabled className="pr-24 bg-muted/50" />
+                  <Input
+                    id="email"
+                    value={profile.data?.email ?? ""}
+                    disabled
+                    className="pr-24 bg-muted/50"
+                  />
                   <div className="absolute right-2 top-1/2 -translate-y-1/2">
                     <Badge className="bg-emerald-50 text-emerald-700 border-0 text-[11px] flex items-center gap-1 h-5">
                       <CheckCircle2 className="h-3 w-3" />
@@ -84,7 +168,10 @@ export default function ProfileSettingsPage() {
           </div>
 
           <div className="flex justify-end pt-1">
-            <Button size="sm">Save changes</Button>
+            <Button size="sm" onClick={handleSave} disabled={!isDirty || isSaving || !name.trim()}>
+              {isSaving && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+              Save changes
+            </Button>
           </div>
 
           <Separator />
@@ -99,17 +186,32 @@ export default function ProfileSettingsPage() {
                 </div>
                 <div>
                   <p className="text-sm font-medium">Google</p>
-                  <p className="text-xs text-muted-foreground">{mockUser.email}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {identities.isLoading
+                      ? "Checking…"
+                      : google
+                        ? `${google.email} · linked ${new Date(google.linked_at).toLocaleDateString()}`
+                        : "Not connected"}
+                  </p>
                 </div>
               </div>
-              {mockUser.hasGoogleLinked ? (
-                <Button variant="outline" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/20">
-                  Disconnect
-                </Button>
+              {google ? (
+                <Badge className="bg-emerald-50 text-emerald-700 border-0 text-[11px]">
+                  Connected
+                </Badge>
               ) : (
-                <Button variant="outline" size="sm">Connect</Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleConnectGoogle}
+                  disabled={identities.isLoading}
+                >
+                  Connect
+                </Button>
               )}
             </div>
+            {/* The API exposes no unlink endpoint, so disconnecting is not
+                offered rather than shown as a control that cannot work. */}
           </div>
 
         </CardContent>

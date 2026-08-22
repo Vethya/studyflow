@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,8 +14,12 @@ import {
   AlertTriangle,
   CalendarClock,
 } from "lucide-react";
-import { mockSessions, mockTasks, mockAvailability } from "@/lib/mock-data";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+// Study sessions have no backend yet; availability windows and tasks do.
+import { mockSessions } from "@/lib/mock-data";
 import { formatDuration, CATEGORY_CONFIG } from "@/lib/constants";
+import { availability as availabilityApi, tasks as tasksApi } from "@/lib/api";
+import { describeError, useApi } from "@/hooks/use-api";
 
 const HOURS = Array.from({ length: 15 }, (_, i) => i + 7); // 7AM to 9PM
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -47,15 +52,34 @@ export default function CalendarPage() {
   const weekDates = getWeekDates(weekOffset);
   const today = new Date();
 
-  // Availability hours for shading
-  const availHours = new Set<string>();
-  mockAvailability.forEach((a) => {
-    const startH = parseInt(a.startTime.split(":")[0]);
-    const endH = parseInt(a.endTime.split(":")[0]);
-    for (let h = startH; h < endH; h++) {
-      availHours.add(`${a.dayOfWeek}-${h}`);
+  const loadWindows = useCallback(
+    (signal: AbortSignal) => availabilityApi.listWindows(signal),
+    [],
+  );
+  const loadTasks = useCallback((signal: AbortSignal) => tasksApi.listTasks({}, signal), []);
+
+  const windows = useApi(loadWindows);
+  const tasks = useApi(loadTasks);
+
+  const overdueTasks = useMemo(
+    () => (tasks.data ?? []).filter((task) => task.status === "Overdue"),
+    [tasks.data],
+  );
+
+  // Availability hours for shading, keyed `dayOfWeek-hour`.
+  const availHours = useMemo(() => {
+    const hours = new Set<string>();
+    for (const window of windows.data ?? []) {
+      const startH = parseInt(window.startTime.split(":")[0]);
+      const endH = parseInt(window.endTime.split(":")[0]);
+      for (let h = startH; h < endH; h++) {
+        hours.add(`${window.dayOfWeek}-${h}`);
+      }
     }
-  });
+    return hours;
+  }, [windows.data]);
+
+  const loadError = windows.error ?? tasks.error;
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -83,13 +107,28 @@ export default function CalendarPage() {
             {weekDates[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – {weekDates[6].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
           </span>
           <div className="ml-auto">
-            <Button size="sm">
+            <Button size="sm" render={<Link href="/tasks" />}>
               <Plus className="mr-2 h-4 w-4" />
               Add task
             </Button>
           </div>
         </div>
       </div>
+
+      {loadError && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>{describeError(loadError)}</AlertDescription>
+        </Alert>
+      )}
+
+      <Alert>
+        <AlertTriangle className="h-4 w-4" />
+        <AlertDescription>
+          Availability shading and the overdue list are live. The session blocks
+          themselves are sample data until the scheduling API ships.
+        </AlertDescription>
+      </Alert>
 
       <Tabs defaultValue="week">
         <TabsList>
@@ -225,7 +264,7 @@ export default function CalendarPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {mockTasks.filter((t) => t.status === "Overdue").map((task) => (
+              {overdueTasks.map((task) => (
                 <div key={task.id} className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50/50 p-3 mb-2">
                   <div>
                     <p className="text-sm font-medium">{task.title}</p>
