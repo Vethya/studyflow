@@ -1,526 +1,390 @@
 "use client";
 
+import { useCallback, useMemo, useState } from "react";
+import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from "@/components/ui/chart";
-import {
-  Clock,
-  ListTodo,
-  TrendingUp,
-  Plus,
-  RefreshCw,
-  AlertTriangle,
-  CalendarClock,
-  History,
-  ArrowUpRight,
-} from "lucide-react";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
-import { useCallback, useMemo } from "react";
-import Link from "next/link";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
-// Study sessions have no backend yet, so every session-derived widget below
-// still reads from the fixtures. Tasks and deadlines come from the API.
-import { mockSessions } from "@/lib/mock-data";
-import { formatDuration, STATUS_CONFIG, PRIORITY_CONFIG, CATEGORY_CONFIG } from "@/lib/constants";
-import { tasks as tasksApi } from "@/lib/api";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AlertTriangle, ArrowRight, CalendarOff, Clock3, Plus } from "lucide-react";
+import { CapacityBar } from "@/components/capacity-bar";
+import { formatDuration, CATEGORY_CONFIG, PRIORITY_CONFIG } from "@/lib/constants";
+import { cn } from "@/lib/utils";
+import { assessCapacity, weeklyPatternMinutes } from "@/lib/capacity";
+import { account as accountApi, availability as availabilityApi, tasks as tasksApi } from "@/lib/api";
 import { describeError, useApi } from "@/hooks/use-api";
+import { useSession } from "@/hooks/use-session";
 import type { AcademicTask } from "@/types/task";
 
-// ─── Chart data ─────────────────────────────────────────────────
-const studyTimeData = [
-  { day: "Mon", minutes: 120 },
-  { day: "Tue", minutes: 90 },
-  { day: "Wed", minutes: 60 },
-  { day: "Thu", minutes: 150 },
-  { day: "Fri", minutes: 45 },
-  { day: "Sat", minutes: 180 },
-  { day: "Sun", minutes: 100 },
+const HORIZONS = [
+  { days: 7, label: "7 days" },
+  { days: 14, label: "14 days" },
+  { days: 30, label: "30 days" },
 ];
 
-const categoryData = [
-  { category: "Assignment", sessions: 8, fill: "var(--color-assignment)" },
-  { category: "Reading", sessions: 4, fill: "var(--color-reading)" },
-  { category: "Exam Prep", sessions: 12, fill: "var(--color-exam)" },
-  { category: "Project", sessions: 6, fill: "var(--color-project)" },
-  { category: "Research", sessions: 3, fill: "var(--color-research)" },
-];
-
-const monthlyData = [
-  { week: "Week 1", hours: 8 },
-  { week: "Week 2", hours: 12 },
-  { week: "Week 3", hours: 10 },
-  { week: "Week 4", hours: 15 },
-];
-
-const studyTimeConfig = {
-  minutes: { label: "Minutes", color: "hsl(var(--chart-5))" },
-} satisfies ChartConfig;
-
-const categoryConfig = {
-  sessions: { label: "Sessions" },
-  assignment: { label: "Assignment", color: "hsl(243 75% 59%)" },
-  reading: { label: "Reading", color: "hsl(168 76% 42%)" },
-  exam: { label: "Exam Prep", color: "hsl(350 89% 60%)" },
-  project: { label: "Project", color: "hsl(38 92% 50%)" },
-  research: { label: "Research", color: "hsl(199 89% 48%)" },
-} satisfies ChartConfig;
-
-const monthlyConfig = {
-  hours: { label: "Hours", color: "hsl(var(--chart-5))" },
-} satisfies ChartConfig;
-
-// ─── Session fixtures (no scheduling API yet) ───────────────────
-const todaySessions = mockSessions.filter(
-  (s) => !s.outcome && !s.isAwaitingOutcome && new Date(s.startTime).toDateString() === new Date().toDateString()
-);
-const todayWorkload = todaySessions.reduce((sum, s) => sum + s.plannedDuration, 0);
-const nextSession = todaySessions[0];
-const awaitingOutcome = mockSessions.filter((s) => s.isAwaitingOutcome);
+function deadlineLabel(deadline: string): { text: string; urgent: boolean } {
+  const diff = new Date(deadline).getTime() - Date.now();
+  const hours = Math.round(diff / 3_600_000);
+  if (hours < 0) return { text: `${Math.abs(Math.round(hours / 24))}d overdue`, urgent: true };
+  if (hours < 24) return { text: `in ${hours}h`, urgent: true };
+  const days = Math.round(hours / 24);
+  return { text: `in ${days}d`, urgent: days <= 2 };
+}
 
 export default function DashboardPage() {
-  const load = useCallback((signal: AbortSignal) => tasksApi.listTasks({}, signal), []);
-  const { data, error, isLoading } = useApi(load);
-  const tasks = useMemo<AcademicTask[]>(() => data ?? [], [data]);
+  const { account } = useSession();
+  const [horizon, setHorizon] = useState(7);
 
-  // Task-derived figures are live; effort totals read zero until the backend
-  // reports logged work, so they are labelled rather than filled with guesses.
-  const totalStudied = tasks.reduce((sum, t) => sum + t.actualDuration, 0);
-  const totalPlanned = tasks.reduce((sum, t) => sum + t.plannedDuration, 0);
-  const weeklyEffort = totalPlanned > 0 ? Math.round((totalStudied / totalPlanned) * 100) : 0;
-  const upcomingDeadlines = [...tasks]
-    .filter((t) => t.status !== "Completed")
-    .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime())
-    .slice(0, 5);
-  const overdueTasks = tasks.filter((t) => t.status === "Overdue");
+  const loadTasks = useCallback((signal: AbortSignal) => tasksApi.listTasks({}, signal), []);
+  const loadWindows = useCallback(
+    (signal: AbortSignal) => availabilityApi.listWindows(signal),
+    [],
+  );
+  const loadPeriods = useCallback(
+    (signal: AbortSignal) => availabilityApi.listUnavailablePeriods(signal),
+    [],
+  );
+  const loadPreferences = useCallback(
+    (signal: AbortSignal) => accountApi.getPreferences(signal),
+    [],
+  );
+
+  const tasks = useApi(loadTasks);
+  const windows = useApi(loadWindows);
+  const periods = useApi(loadPeriods);
+  const preferences = useApi(loadPreferences);
+
+  const isLoading =
+    tasks.isLoading || windows.isLoading || periods.isLoading || preferences.isLoading;
+  const loadError = tasks.error ?? windows.error ?? periods.error ?? preferences.error;
+
+  const verdict = useMemo(
+    () => assessCapacity(tasks.data ?? [], windows.data ?? [], periods.data ?? [], horizon),
+    [tasks.data, windows.data, periods.data, horizon],
+  );
+
+  const hasWindows = (windows.data ?? []).length > 0;
+  const overdue = useMemo(
+    () => (tasks.data ?? []).filter((task) => task.status === "Overdue"),
+    [tasks.data],
+  );
+
+  // Committed minutes grouped by course, largest first. Tasks with no course
+  // are pooled rather than dropped, so the totals still reconcile.
+  const byCourse = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const task of verdict.tasks) {
+      const key = task.course?.trim() || "No course";
+      totals.set(key, (totals.get(key) ?? 0) + task.remainingDuration);
+    }
+    return [...totals.entries()].sort((a, b) => b[1] - a[1]);
+  }, [verdict.tasks]);
+
+  const firstName = account?.name.trim().split(/\s+/)[0] ?? "";
 
   return (
-    <div className="flex flex-col gap-6 p-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">
-            What needs attention now
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" disabled title="Scheduling is not available yet">
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Regenerate schedule
-          </Button>
-          <Button size="sm" render={<Link href="/tasks" />}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add task
-          </Button>
-        </div>
-      </div>
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 p-6">
+      {/* ── Verdict ─────────────────────────────── */}
+      <section className="flex flex-col gap-5">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="eyebrow">
+              {firstName ? `${firstName}'s workload` : "Your workload"}
+            </p>
+            <h1 className="mt-1 font-display text-3xl font-bold tracking-tight">
+              Does it fit?
+            </h1>
+          </div>
 
-      {error && (
-        <Alert variant="destructive">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertDescription>{describeError(error)}</AlertDescription>
-        </Alert>
-      )}
-
-      {/* The scheduling engine has no endpoints yet, so anything derived from
-          study sessions is still sample data. Say so rather than implying the
-          numbers are the student's own. */}
-      <Alert>
-        <AlertTriangle className="h-4 w-4" />
-        <AlertDescription>
-          Tasks and deadlines below are live. Study sessions, charts and effort
-          totals are sample data until the scheduling API ships.
-        </AlertDescription>
-      </Alert>
-
-      {isLoading && <Skeleton className="h-4 w-48" />}
-
-      {/* Tabs */}
-      <Tabs defaultValue="overview" className="space-y-6">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="agenda">Next 14 Days</TabsTrigger>
-          <TabsTrigger value="unscheduled">Unscheduled</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="overview" className="space-y-6">
-          {/* Row 1 — Stat cards + study time chart */}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            {/* Next Session */}
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Next Session</CardTitle>
-                <Clock className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                {nextSession ? (
-                  <>
-                    <div className="text-2xl font-bold">in 2h 15m</div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {nextSession.taskTitle}
-                    </p>
-                    <div className="flex items-center gap-2 mt-3">
-                      <Badge variant="secondary" className="text-xs">
-                        {nextSession.plannedDuration} min
-                      </Badge>
-                      <span className="text-xs text-muted-foreground">
-                        {new Date(nextSession.startTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      </span>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="text-2xl font-bold">—</div>
-                    <p className="text-xs text-muted-foreground mt-1">No sessions today</p>
-                  </>
+          {/* Horizon switch. Capacity is meaningless without a window of time. */}
+          <div className="flex items-center rounded-md border bg-card p-0.5">
+            {HORIZONS.map((option) => (
+              <button
+                key={option.days}
+                onClick={() => setHorizon(option.days)}
+                className={cn(
+                  "rounded-[0.3rem] px-3 py-1.5 font-mono text-xs transition-colors",
+                  horizon === option.days
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground",
                 )}
-              </CardContent>
-            </Card>
-
-            {/* Today's Workload */}
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Today&apos;s Workload</CardTitle>
-                <ListTodo className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{formatDuration(todayWorkload)}</div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  across {todaySessions.length} sessions
-                </p>
-                <div className="flex items-center gap-3 mt-3 text-xs text-muted-foreground">
-                  <span>{todaySessions.length} upcoming</span>
-                  <span>·</span>
-                  <span>0 done</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Weekly Effort */}
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Weekly Effort</CardTitle>
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{weeklyEffort}%</div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {formatDuration(totalStudied)} / {formatDuration(totalPlanned)}
-                </p>
-                <Progress value={weeklyEffort} className="mt-3 h-2" />
-              </CardContent>
-            </Card>
-
-            {/* Study Time chart */}
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Study Time</CardTitle>
-                <div className="flex items-center text-xs text-green-600">
-                  <ArrowUpRight className="h-3 w-3 mr-1" />
-                  12%
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {formatDuration(studyTimeData.reduce((s, d) => s + d.minutes, 0))}
-                </div>
-                <p className="text-xs text-muted-foreground mb-3">Last 7 days</p>
-                <ChartContainer config={studyTimeConfig} className="h-[60px] w-full">
-                  <AreaChart data={studyTimeData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
-                    <Area
-                      type="monotone"
-                      dataKey="minutes"
-                      stroke="var(--color-minutes)"
-                      fill="var(--color-minutes)"
-                      fillOpacity={0.1}
-                      strokeWidth={2}
-                    />
-                  </AreaChart>
-                </ChartContainer>
-              </CardContent>
-            </Card>
+              >
+                {option.label}
+              </button>
+            ))}
           </div>
+        </div>
 
-          {/* Row 2 — Charts */}
-          <div className="grid gap-4 md:grid-cols-7">
-            <Card className="md:col-span-4">
-              <CardHeader>
-                <CardTitle className="text-base">Study Activity</CardTitle>
-                <CardDescription>Weekly study hours this month</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ChartContainer config={monthlyConfig} className="h-[250px] w-full">
-                  <AreaChart data={monthlyData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="week" tickLine={false} axisLine={false} fontSize={12} />
-                    <YAxis tickLine={false} axisLine={false} fontSize={12} tickFormatter={(v) => `${v}h`} />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                    <Area
-                      type="monotone"
-                      dataKey="hours"
-                      stroke="var(--color-hours)"
-                      fill="var(--color-hours)"
-                      fillOpacity={0.1}
-                      strokeWidth={2}
-                    />
-                  </AreaChart>
-                </ChartContainer>
-              </CardContent>
-            </Card>
+        {loadError && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription className="flex items-center justify-between gap-4">
+              <span>{describeError(loadError)}</span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  tasks.reload();
+                  windows.reload();
+                  periods.reload();
+                }}
+              >
+                Retry
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
 
-            <Card className="md:col-span-3">
-              <CardHeader>
-                <CardTitle className="text-base">Sessions by Category</CardTitle>
-                <CardDescription>Distribution of study sessions</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ChartContainer config={categoryConfig} className="h-[250px] w-full">
-                  <BarChart data={categoryData} layout="vertical" margin={{ top: 0, right: 10, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                    <XAxis type="number" tickLine={false} axisLine={false} fontSize={12} />
-                    <YAxis type="category" dataKey="category" tickLine={false} axisLine={false} fontSize={12} width={80} />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                    <Bar dataKey="sessions" radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ChartContainer>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Row 3 — Deadlines table + Needs attention */}
-          <div className="grid gap-4 md:grid-cols-7">
-            <Card className="md:col-span-4">
-              <CardHeader>
-                <CardTitle className="text-base">Upcoming Deadlines</CardTitle>
-                <CardDescription>Tasks due soonest</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Task</TableHead>
-                      <TableHead>Category</TableHead>
-                      <TableHead>Due</TableHead>
-                      <TableHead>Priority</TableHead>
-                      <TableHead className="text-right">Remaining</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {upcomingDeadlines.map((task) => {
-                      const catCfg = CATEGORY_CONFIG[task.category];
-                      const priCfg = PRIORITY_CONFIG[task.priority];
-                      return (
-                        <TableRow key={task.id}>
-                          <TableCell>
-                            <div className="font-medium">{task.title}</div>
-                            {task.course && (
-                              <div className="text-xs text-muted-foreground">{task.course}</div>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className={`${catCfg.color} ${catCfg.bg} border-0`}>
-                              {catCfg.label}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-sm">
-                            {new Date(task.deadline).toLocaleDateString("en-US", {
-                              month: "short",
-                              day: "numeric",
-                            })}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className={`${priCfg.color} ${priCfg.bg} border-0`}>
-                              {priCfg.label}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right font-medium tabular-nums">
-                            {formatDuration(task.remainingDuration)}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-
-            <Card className="md:col-span-3">
-              <CardHeader>
-                <CardTitle className="text-base">Needs Attention</CardTitle>
-                <CardDescription>Items requiring your action</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Overdue tasks */}
-                {overdueTasks.map((task) => (
-                  <div key={task.id} className="flex items-start gap-3 rounded-lg border p-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-50">
-                      <AlertTriangle className="h-4 w-4 text-red-600" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium">Overdue: {task.title}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {formatDuration(task.remainingDuration)} remaining — set a new deadline
-                      </p>
-                    </div>
-                    <Button variant="ghost" size="sm" className="text-xs shrink-0">
-                      Fix
-                    </Button>
-                  </div>
-                ))}
-
-                {/* Awaiting outcomes */}
-                {awaitingOutcome.map((session) => (
-                  <div key={session.id} className="flex items-start gap-3 rounded-lg border p-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50">
-                      <History className="h-4 w-4 text-blue-600" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium">Awaiting Outcome</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {session.taskTitle} — {session.plannedDuration} min session
-                      </p>
-                    </div>
-                    <Button variant="ghost" size="sm" className="text-xs shrink-0">
-                      Record
-                    </Button>
-                  </div>
-                ))}
-
-                {/* Unscheduled work notice */}
-                <div className="flex items-start gap-3 rounded-lg border p-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-50">
-                    <CalendarClock className="h-4 w-4 text-amber-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium">Unscheduled Work</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      75 min from &quot;Ethics in AI&quot; needs a new deadline
-                    </p>
-                  </div>
-                  <Button variant="ghost" size="sm" className="text-xs shrink-0">
-                    Resolve
-                  </Button>
-                </div>
-
-                {overdueTasks.length === 0 && awaitingOutcome.length === 0 && (
-                  <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">All clear! 🎉</p>
-                    <p className="text-xs mt-1">Nothing needs your attention right now.</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        {/* Next 14 Days Tab */}
-        <TabsContent value="agenda" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Next 14 Days Agenda</CardTitle>
-              <CardDescription>Upcoming sessions across the next two weeks</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
-                {["Today", "Tomorrow", "Wed, Aug 5", "Thu, Aug 6", "Fri, Aug 7"].map((day, idx) => (
-                  <div key={day}>
-                    <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-                      {day}
-                      {idx === 0 && <Badge variant="secondary" className="text-[10px]">Today</Badge>}
-                    </h3>
-                    <div className="space-y-2">
-                      {(idx < 2 ? mockSessions.filter((s, i) => i % 3 === idx).slice(0, 2) : mockSessions.slice(0, 1)).map((session) => (
-                        <div
-                          key={`${day}-${session.id}`}
-                          className="flex items-center gap-3 rounded-lg border p-3 hover:bg-muted/50 transition-colors"
-                        >
-                          <div className="w-1 h-8 rounded-full bg-primary" />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{session.taskTitle}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {new Date(session.startTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                              {" – "}
-                              {new Date(session.endTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                            </p>
-                          </div>
-                          <Badge variant="outline" className="text-xs">
-                            {session.plannedDuration}m
-                          </Badge>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+        <Card>
+          <CardContent className="p-6">
+            {isLoading ? (
+              <div className="space-y-4">
+                <Skeleton className="h-10 w-72" />
+                <Skeleton className="h-14 w-full" />
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+            ) : !hasWindows ? (
+              <EmptyCapacity />
+            ) : (
+              <div className="space-y-5">
+                <Verdict
+                  balance={verdict.balance}
+                  count={verdict.tasks.length}
+                  days={horizon}
+                />
+                <CapacityBar
+                  available={verdict.available}
+                  committed={verdict.committed}
+                />
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
-        {/* Unscheduled Tab */}
-        <TabsContent value="unscheduled" className="space-y-4">
+        {hasWindows && !isLoading && (
+          <p className="font-mono text-xs text-muted-foreground">
+            Your weekly pattern is {formatDuration(weeklyPatternMinutes(windows.data ?? []))},
+            read in {preferences.data?.timezone ?? "your timezone"}.{" "}
+            <Link href="/availability" className="underline underline-offset-2 hover:text-foreground">
+              Adjust availability
+            </Link>
+          </p>
+        )}
+      </section>
+
+      {/* ── Attention + distribution ────────────── */}
+      <div className="grid gap-6 lg:grid-cols-[1.35fr_1fr]">
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <CardTitle className="font-display text-base">Next up</CardTitle>
+                <CardDescription>
+                  Open work due in the next {horizon} days, soonest first
+                </CardDescription>
+              </div>
+              <Button size="sm" variant="outline" render={<Link href="/tasks" />}>
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                Add task
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {isLoading ? (
+              <div className="space-y-2 p-6 pt-0">
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+              </div>
+            ) : verdict.tasks.length === 0 ? (
+              <p className="px-6 pb-6 text-sm text-muted-foreground">
+                Nothing due in this window. Widen the range or add a task.
+              </p>
+            ) : (
+              <ul className="divide-y border-t">
+                {verdict.tasks.slice(0, 8).map((task) => (
+                  <TaskRow key={task.id} task={task} />
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+
+        <div className="flex flex-col gap-6">
+          {overdue.length > 0 && (
+            <Card className="border-deficit/40 bg-deficit-soft">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 font-display text-base">
+                  <AlertTriangle className="h-4 w-4 text-deficit" />
+                  {overdue.length} overdue
+                </CardTitle>
+                <CardDescription>
+                  Past their deadline and still counted against your time.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-1.5">
+                {overdue.slice(0, 4).map((task) => (
+                  <Link
+                    key={task.id}
+                    href={`/tasks/${task.id}`}
+                    className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-card"
+                  >
+                    <span className="truncate">{task.title}</span>
+                    <span className="shrink-0 font-mono text-xs text-deficit">
+                      {formatDuration(task.remainingDuration)}
+                    </span>
+                  </Link>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Unscheduled Work</CardTitle>
-              <CardDescription>Work that currently has no valid study session</CardDescription>
+            <CardHeader className="pb-3">
+              <CardTitle className="font-display text-base">Where the time goes</CardTitle>
+              <CardDescription>Committed minutes by course</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {overdueTasks.map((task) => (
-                <div key={task.id} className="rounded-lg border border-amber-200 bg-amber-50/50 p-4">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h4 className="text-sm font-semibold">{task.title}</h4>
-                      {task.course && <p className="text-xs text-muted-foreground mt-0.5">{task.course}</p>}
+            <CardContent className="space-y-3">
+              {isLoading ? (
+                <>
+                  <Skeleton className="h-6 w-full" />
+                  <Skeleton className="h-6 w-full" />
+                </>
+              ) : byCourse.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No open work in this window.
+                </p>
+              ) : (
+                byCourse.map(([course, minutes]) => {
+                  const share = verdict.committed > 0 ? minutes / verdict.committed : 0;
+                  return (
+                    <div key={course} className="space-y-1">
+                      <div className="flex items-baseline justify-between gap-3 text-sm">
+                        <span className="truncate">{course}</span>
+                        <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                          {formatDuration(minutes)}
+                        </span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-foreground/70"
+                          style={{ width: `${Math.round(share * 100)}%` }}
+                        />
+                      </div>
                     </div>
-                    <Badge variant="outline" className="text-red-700 bg-red-50 border-0">Overdue</Badge>
-                  </div>
-                  <div className="mt-3 grid grid-cols-3 gap-4 text-xs">
-                    <div>
-                      <span className="text-muted-foreground">Remaining</span>
-                      <p className="font-semibold mt-0.5">{formatDuration(task.remainingDuration)}</p>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Original deadline</span>
-                      <p className="font-semibold mt-0.5">{new Date(task.deadline).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</p>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Remedy</span>
-                      <p className="font-semibold mt-0.5 text-amber-700">Set new deadline</p>
-                    </div>
-                  </div>
-                  <div className="mt-3 flex gap-2">
-                    <Button variant="outline" size="sm">Extend Deadline</Button>
-                    <Button variant="outline" size="sm">Add Availability</Button>
-                  </div>
-                </div>
-              ))}
-              {overdueTasks.length === 0 && (
-                <div className="text-center py-12 text-muted-foreground">
-                  <CalendarClock className="h-10 w-10 mx-auto mb-3 opacity-40" />
-                  <p className="text-sm font-medium">No unscheduled work</p>
-                  <p className="text-xs mt-1">All your tasks have valid study sessions.</p>
-                </div>
+                  );
+                })
               )}
             </CardContent>
           </Card>
-        </TabsContent>
-      </Tabs>
+        </div>
+      </div>
     </div>
+  );
+}
+
+/** The headline sentence. Plain language, no hedging, no exclamation. */
+function Verdict({
+  balance,
+  count,
+  days,
+}: {
+  balance: number;
+  count: number;
+  days: number;
+}) {
+  if (count === 0) {
+    return (
+      <div>
+        <p className="font-display text-4xl font-bold tracking-tight">Nothing due</p>
+        <p className="mt-1.5 text-sm text-muted-foreground">
+          No open work falls in the next {days} days.
+        </p>
+      </div>
+    );
+  }
+
+  const over = balance < 0;
+  return (
+    <div>
+      <p
+        className={cn(
+          "font-display text-4xl font-bold tracking-tight",
+          over ? "text-deficit" : "text-surplus",
+        )}
+      >
+        {over ? `${formatDuration(-balance)} short` : `${formatDuration(balance)} spare`}
+      </p>
+      <p className="mt-1.5 text-sm text-muted-foreground">
+        {over
+          ? `${count} ${count === 1 ? "task does" : "tasks do"} not fit in the study time you have over the next ${days} days.`
+          : `${count} ${count === 1 ? "task fits" : "tasks fit"} in the next ${days} days with room left over.`}
+      </p>
+    </div>
+  );
+}
+
+/** Shown when availability has never been set, which makes capacity unknowable. */
+function EmptyCapacity() {
+  return (
+    <div className="flex flex-col items-start gap-4 py-2">
+      <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-muted">
+        <CalendarOff className="h-5 w-5 text-muted-foreground" />
+      </div>
+      <div>
+        <p className="font-display text-xl font-semibold">No study time set</p>
+        <p className="mt-1 max-w-md text-sm text-muted-foreground">
+          StudyFlow weighs your coursework against the hours you are actually free.
+          Add your weekly availability and this becomes a real answer.
+        </p>
+      </div>
+      <Button size="sm" render={<Link href="/availability" />}>
+        Set availability
+        <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+      </Button>
+    </div>
+  );
+}
+
+function TaskRow({ task }: { task: AcademicTask }) {
+  const due = deadlineLabel(task.deadline);
+  const category = CATEGORY_CONFIG[task.category];
+  const priority = PRIORITY_CONFIG[task.priority];
+
+  return (
+    <li>
+      <Link
+        href={`/tasks/${task.id}`}
+        className="flex items-center gap-4 px-6 py-3 transition-colors hover:bg-muted/50"
+      >
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">{task.title}</p>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+            {category.label}
+            {task.course ? ` · ${task.course}` : ""}
+          </p>
+        </div>
+
+        {task.priority === "High" && (
+          <Badge className={cn("hidden shrink-0 rounded-md border-0 text-xs sm:inline-flex", priority.bg, priority.color)}>
+            {priority.label}
+          </Badge>
+        )}
+
+        <span className="shrink-0 font-mono text-xs text-muted-foreground">
+          <Clock3 className="mr-1 inline h-3 w-3" />
+          {formatDuration(task.remainingDuration)}
+        </span>
+
+        <span
+          className={cn(
+            "w-20 shrink-0 text-right font-mono text-xs",
+            due.urgent ? "text-deficit" : "text-muted-foreground",
+          )}
+        >
+          {due.text}
+        </span>
+      </Link>
+    </li>
   );
 }

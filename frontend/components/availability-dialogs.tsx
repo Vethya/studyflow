@@ -22,7 +22,9 @@ import {
 } from "@/components/ui/select";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { DAY_NAMES } from "@/lib/constants";
+import { isoToLocalInput } from "@/lib/datetime";
 import type { WindowDraft } from "@/lib/api";
+import type { UnavailablePeriod } from "@/types/availability";
 
 interface AddWindowDialogProps {
   open: boolean;
@@ -144,27 +146,39 @@ export function AddWindowDialog({ open, onOpenChange, onSubmit }: AddWindowDialo
 interface ExceptionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Omit to create; pass a period to edit it in place. */
+  period?: UnavailablePeriod | null;
   onSubmit: (draft: { startsAt: string; endsAt: string; reason?: string }) => Promise<void>;
 }
 
 /** One-off unavailable period, e.g. a trip or an exam day. */
-export function ExceptionDialog({ open, onOpenChange, onSubmit }: ExceptionDialogProps) {
+export function ExceptionDialog({
+  open,
+  onOpenChange,
+  period,
+  onSubmit,
+}: ExceptionDialogProps) {
   const [startsAt, setStartsAt] = useState("");
   const [endsAt, setEndsAt] = useState("");
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Start from a blank form each time the dialog is reopened.
-  const [wasOpen, setWasOpen] = useState(open);
-  if (open !== wasOpen) {
-    setWasOpen(open);
-    if (open) {
-      setError(null);
-      setStartsAt("");
-      setEndsAt("");
-      setReason("");
-    }
+  const isEditing = Boolean(period);
+
+  // Seed from the period being edited, or start blank, each time the dialog
+  // opens or the target changes while it is open.
+  const [session, setSession] = useState<{ open: boolean; period?: UnavailablePeriod | null }>({
+    open: false,
+  });
+  if (open && (session.open !== open || session.period !== period)) {
+    setSession({ open, period });
+    setError(null);
+    setStartsAt(period ? isoToLocalInput(period.startDate) : "");
+    setEndsAt(period ? isoToLocalInput(period.endDate) : "");
+    setReason(period?.reason ?? "");
+  } else if (!open && session.open) {
+    setSession({ open: false });
   }
 
   async function handleSubmit(event: React.FormEvent) {
@@ -195,9 +209,10 @@ export function ExceptionDialog({ open, onOpenChange, onSubmit }: ExceptionDialo
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Add exception</DialogTitle>
+          <DialogTitle>{isEditing ? "Edit exception" : "Add exception"}</DialogTitle>
           <DialogDescription>
-            Block out a one-off period. Study sessions already planned inside it are cancelled.
+            Block out a one-off period. Time inside it stops counting towards your
+            weekly study capacity.
           </DialogDescription>
         </DialogHeader>
 
@@ -251,7 +266,7 @@ export function ExceptionDialog({ open, onOpenChange, onSubmit }: ExceptionDialo
             </Button>
             <Button type="submit" disabled={isSaving}>
               {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Add exception
+              {isEditing ? "Save changes" : "Add exception"}
             </Button>
           </DialogFooter>
         </form>

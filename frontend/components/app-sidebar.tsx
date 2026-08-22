@@ -7,7 +7,7 @@ import {
   Calendar,
   ListTodo,
   Clock,
-  TrendingUp,
+  Activity,
   Settings,
   GraduationCap,
   ChevronDown,
@@ -47,30 +47,18 @@ import {
 } from "@/components/ui/collapsible";
 import { useSession } from "@/hooks/use-session";
 
-const iconMap = {
-  LayoutDashboard,
-  Calendar,
-  ListTodo,
-  Clock,
-  TrendingUp,
-  Settings,
-};
-
 const navSections = [
   {
-    label: "PLANNING",
+    label: "WORKLOAD",
     items: [
       { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-      { title: "Calendar", url: "/calendar", icon: Calendar },
       { title: "Tasks", url: "/tasks", icon: ListTodo },
+      { title: "Calendar", url: "/calendar", icon: Calendar },
     ],
   },
   {
-    label: "REVIEW",
-    items: [
-      { title: "Availability", url: "/availability", icon: Clock },
-      { title: "Progress", url: "/progress", icon: TrendingUp },
-    ],
+    label: "STUDY TIME",
+    items: [{ title: "Availability", url: "/availability", icon: Clock }],
   },
 ];
 
@@ -79,6 +67,7 @@ const settingsSubItems = [
   { title: "Security", url: "/settings/security", icon: Shield },
   { title: "Preferences", url: "/settings/preferences", icon: SlidersHorizontal },
   { title: "Timezone", url: "/settings/timezone", icon: Globe },
+  { title: "Service", url: "/settings/system", icon: Activity },
 ];
 
 /** Two-letter fallback avatar, e.g. "Meng Heang" → "MH". */
@@ -106,7 +95,7 @@ export function AppSidebar() {
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-semibold">StudyFlow</span>
                   <span className="truncate text-xs text-muted-foreground">
-                    Study planner
+                    Workload planner
                   </span>
                 </div>
               </Link>

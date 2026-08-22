@@ -9,6 +9,7 @@
 export * as account from "./account";
 export * as auth from "./auth";
 export * as availability from "./availability";
+export * as system from "./system";
 export * as tasks from "./tasks";
 
 export { ApiError, API_BASE, readCsrfToken } from "./client";
@@ -19,4 +20,5 @@ export type {
   UnavailablePeriodDraft,
   WindowDraft,
 } from "./availability";
+export type { HealthReport, ReadinessReport } from "./system";
 export type { TaskFilters } from "./tasks";

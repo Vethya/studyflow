@@ -11,9 +11,9 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
             backgroundSize: "28px 28px",
           }}
         />
-        {/* Gradient orbs */}
-        <div className="absolute top-1/3 left-1/4 w-72 h-72 bg-violet-600/30 rounded-full blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/4 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl" />
+        {/* One warm bloom, on the deficit hue the product reserves for
+            "this does not fit" — the problem the page is selling a fix for. */}
+        <div className="absolute bottom-1/3 left-1/4 h-80 w-80 rounded-full bg-deficit/20 blur-3xl" />
 
         {/* Content */}
         <div className="relative z-10 flex flex-col h-full p-10">
@@ -31,26 +31,27 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           {/* Hero */}
           <div className="flex-1 flex flex-col justify-center gap-8">
             <div className="space-y-3">
-              <h1 className="text-3xl font-bold text-white leading-tight">
-                Plan smarter.<br />
-                Stress less.<br />
-                <span className="text-violet-400">Achieve more.</span>
+              <h1 className="font-display text-3xl font-bold leading-tight text-white">
+                Find out it doesn&apos;t fit<br />
+                <span className="text-deficit">while you can still</span><br />
+                do something about it.
               </h1>
-              <p className="text-zinc-400 text-sm leading-relaxed max-w-xs">
-                StudyFlow is an AI-powered study planner built for university students. Deadlines, sessions, and priorities — all handled automatically.
+              <p className="max-w-xs text-sm leading-relaxed text-zinc-400">
+                StudyFlow weighs the coursework you owe against the study hours you
+                actually have, and tells you plainly when the two do not add up.
               </p>
             </div>
 
             {/* Feature list */}
             <div className="space-y-3">
               {[
-                { title: "Smart scheduling",  desc: "Sessions fit around your availability automatically" },
-                { title: "Deadline tracking",  desc: "Never miss a submission with smart reminders" },
-                { title: "Progress insights", desc: "See exactly how your effort maps to your workload" },
+                { title: "Your real hours", desc: "Set the weekly windows you are free, and block out the weeks you are not" },
+                { title: "Every deadline", desc: "Track coursework with estimates, priorities and due dates" },
+                { title: "One honest number", desc: "See how far over — or under — your capacity you are" },
               ].map((f) => (
                 <div key={f.title} className="flex items-start gap-3">
-                  <div className="mt-0.5 h-5 w-5 shrink-0 rounded-full bg-violet-500/20 flex items-center justify-center">
-                    <div className="h-2 w-2 rounded-full bg-violet-400" />
+                  <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/10">
+                    <div className="h-1.5 w-1.5 rounded-full bg-white/70" />
                   </div>
                   <div>
                     <p className="text-sm font-medium text-white">{f.title}</p>

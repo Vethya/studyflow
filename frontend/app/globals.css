@@ -8,7 +8,7 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-mono: var(--font-data);
   --font-display: var(--font-display);
   --font-heading: var(--font-display);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -47,75 +47,98 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+
+  /* Capacity signals. These are the only saturated colours in the product:
+     they mean "you have room" and "you are over", and nothing else. */
+  --color-surplus: var(--surplus);
+  --color-surplus-soft: var(--surplus-soft);
+  --color-deficit: var(--deficit);
+  --color-deficit-soft: var(--deficit-soft);
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  /* Paper and ink. The interface is deliberately near-monochrome so that the
+     two capacity signals below carry all the colour meaning. */
+  --background: oklch(0.977 0.003 250);
+  --foreground: oklch(0.205 0.019 262);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.205 0.019 262);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --popover-foreground: oklch(0.205 0.019 262);
+  --primary: oklch(0.235 0.021 262);
+  --primary-foreground: oklch(0.985 0.002 250);
+  --secondary: oklch(0.955 0.004 250);
+  --secondary-foreground: oklch(0.235 0.021 262);
+  --muted: oklch(0.955 0.004 250);
+  --muted-foreground: oklch(0.518 0.018 258);
+  --accent: oklch(0.945 0.006 250);
+  --accent-foreground: oklch(0.235 0.021 262);
+  --destructive: oklch(0.553 0.176 33);
+  --border: oklch(0.903 0.006 250);
+  --input: oklch(0.903 0.006 250);
+  --ring: oklch(0.518 0.018 258);
+
+  /* Time you have. */
+  --surplus: oklch(0.512 0.089 183);
+  --surplus-soft: oklch(0.947 0.028 183);
+  /* Time you owe beyond it. */
+  --deficit: oklch(0.553 0.176 33);
+  --deficit-soft: oklch(0.955 0.032 45);
+
+  --chart-1: oklch(0.205 0.019 262);
+  --chart-2: oklch(0.395 0.018 260);
+  --chart-3: oklch(0.518 0.018 258);
+  --chart-4: oklch(0.665 0.014 256);
+  --chart-5: oklch(0.803 0.009 252);
+  --radius: 0.5rem;
+  --sidebar: oklch(0.962 0.004 250);
+  --sidebar-foreground: oklch(0.205 0.019 262);
+  --sidebar-primary: oklch(0.235 0.021 262);
+  --sidebar-primary-foreground: oklch(0.985 0.002 250);
+  --sidebar-accent: oklch(0.925 0.007 250);
+  --sidebar-accent-foreground: oklch(0.235 0.021 262);
+  --sidebar-border: oklch(0.898 0.006 250);
+  --sidebar-ring: oklch(0.518 0.018 258);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: oklch(0.183 0.017 262);
+  --foreground: oklch(0.955 0.004 250);
+  --card: oklch(0.228 0.019 262);
+  --card-foreground: oklch(0.955 0.004 250);
+  --popover: oklch(0.228 0.019 262);
+  --popover-foreground: oklch(0.955 0.004 250);
+  --primary: oklch(0.925 0.006 250);
+  --primary-foreground: oklch(0.228 0.019 262);
+  --secondary: oklch(0.288 0.019 262);
+  --secondary-foreground: oklch(0.955 0.004 250);
+  --muted: oklch(0.288 0.019 262);
+  --muted-foreground: oklch(0.712 0.014 256);
+  --accent: oklch(0.318 0.02 262);
+  --accent-foreground: oklch(0.955 0.004 250);
+  --destructive: oklch(0.685 0.163 38);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(0.618 0.016 256);
+
+  --surplus: oklch(0.712 0.101 183);
+  --surplus-soft: oklch(0.318 0.045 183);
+  --deficit: oklch(0.712 0.157 40);
+  --deficit-soft: oklch(0.332 0.062 38);
+
+  --chart-1: oklch(0.955 0.004 250);
+  --chart-2: oklch(0.822 0.009 252);
+  --chart-3: oklch(0.712 0.014 256);
+  --chart-4: oklch(0.588 0.016 258);
+  --chart-5: oklch(0.448 0.018 260);
+  --sidebar: oklch(0.212 0.018 262);
+  --sidebar-foreground: oklch(0.955 0.004 250);
+  --sidebar-primary: oklch(0.925 0.006 250);
+  --sidebar-primary-foreground: oklch(0.228 0.019 262);
+  --sidebar-accent: oklch(0.298 0.019 262);
+  --sidebar-accent-foreground: oklch(0.955 0.004 250);
+  --sidebar-border: oklch(1 0 0 / 12%);
+  --sidebar-ring: oklch(0.618 0.016 256);
 }
 
 @layer base {
@@ -127,5 +150,24 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+@layer base {
+  /* Every figure in this product is a quantity of time being compared to
+     another quantity of time, so numerals must not shift width. */
+  .tabular-nums,
+  th,
+  td {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Small caps label used for eyebrows and column headers. */
+  .eyebrow {
+    font-family: var(--font-data), ui-monospace, monospace;
+    font-size: 0.6875rem;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
   }
 }

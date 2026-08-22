@@ -21,12 +21,12 @@ const pageNames: Record<string, string> = {
   "/calendar": "Calendar",
   "/tasks": "Tasks",
   "/availability": "Availability",
-  "/progress": "Progress",
   "/settings": "Settings",
   "/settings/profile": "Profile",
   "/settings/security": "Security",
   "/settings/preferences": "Preferences",
   "/settings/timezone": "Timezone",
+  "/settings/system": "Service",
 };
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {

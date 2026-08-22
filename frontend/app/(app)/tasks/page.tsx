@@ -1,21 +1,20 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,15 +23,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Search,
-  Plus,
-  MoreHorizontal,
+  AlertTriangle,
   ListTodo,
-  Clock,
-  CheckCircle2,
-  AlertCircle,
-  CircleDashed,
   Loader2,
+  MoreHorizontal,
+  Plus,
+  Search,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDuration, CATEGORY_CONFIG, PRIORITY_CONFIG, STATUS_CONFIG } from "@/lib/constants";
@@ -40,88 +37,74 @@ import { cn } from "@/lib/utils";
 import { ApiError, tasks as tasksApi } from "@/lib/api";
 import { describeError, useApi } from "@/hooks/use-api";
 import { TaskFormDialog } from "@/components/task-form-dialog";
-import type { AcademicTask } from "@/types/task";
+import { CATEGORIES, PRIORITIES, TASK_STATUSES } from "@/types/task";
+import type { AcademicTask, Category, Priority, TaskStatus } from "@/types/task";
 
-type TabValue = "all" | "in-progress" | "not-started" | "completed" | "overdue";
-
-const tabs: { value: TabValue; label: string; icon: React.ElementType }[] = [
-  { value: "all",          label: "All",         icon: ListTodo },
-  { value: "in-progress",  label: "In Progress",  icon: Clock },
-  { value: "not-started",  label: "Not Started",  icon: CircleDashed },
-  { value: "completed",    label: "Completed",    icon: CheckCircle2 },
-  { value: "overdue",      label: "Overdue",      icon: AlertCircle },
-];
-
-const TAB_STATUS: Record<Exclude<TabValue, "all">, AcademicTask["status"]> = {
-  "in-progress": "In Progress",
-  "not-started": "Not Started",
-  completed: "Completed",
-  overdue: "Overdue",
-};
-
-function getRelativeDeadline(deadline: string) {
-  const now = new Date();
-  const due = new Date(deadline);
-  const diffMs = due.getTime() - now.getTime();
-  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffDays < 0) return { label: `${Math.abs(diffDays)}d overdue`, urgent: "overdue" as const };
-  if (diffDays === 0) return { label: "Due today", urgent: "today" as const };
-  if (diffDays === 1) return { label: "Tomorrow", urgent: "soon" as const };
-  if (diffDays <= 3) return { label: `${diffDays} days`, urgent: "soon" as const };
-  return {
-    label: due.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-    urgent: "normal" as const,
-  };
-}
+const ANY = "any";
 
 export default function TasksPage() {
+  // Everything except the title search is a real backend query parameter.
+  const [status, setStatus] = useState<TaskStatus | null>(null);
+  const [category, setCategory] = useState<Category | null>(null);
+  const [priority, setPriority] = useState<Priority | null>(null);
+  const [course, setCourse] = useState("");
+  const [appliedCourse, setAppliedCourse] = useState("");
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState<TabValue>("all");
+
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<AcademicTask | null>(null);
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
 
-  // Status filtering happens server-side; the counts need the unfiltered list,
-  // so the whole set is fetched once and narrowed in the browser.
-  const load = useCallback((signal: AbortSignal) => tasksApi.listTasks({}, signal), []);
+  const load = useCallback(
+    (signal: AbortSignal) =>
+      tasksApi.listTasks(
+        {
+          status: status ?? undefined,
+          category: category ?? undefined,
+          priority: priority ?? undefined,
+          course: appliedCourse || undefined,
+        },
+        signal,
+      ),
+    [status, category, priority, appliedCourse],
+  );
   const { data, error, isLoading, reload, setData } = useApi(load);
 
-  const allTasks = useMemo(() => data ?? [], [data]);
+  const tasks = useMemo(() => data ?? [], [data]);
 
-  const filteredTasks = useMemo(() => {
+  // The API has no title search, so this last step is client-side and says so.
+  const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return allTasks.filter((task) => {
-      const matchesSearch =
-        q === "" ||
-        task.title.toLowerCase().includes(q) ||
-        (task.course?.toLowerCase().includes(q) ?? false);
-      if (activeTab === "all") return matchesSearch;
-      return matchesSearch && task.status === TAB_STATUS[activeTab];
-    });
-  }, [allTasks, search, activeTab]);
+    if (!q) return tasks;
+    return tasks.filter((task) => task.title.toLowerCase().includes(q));
+  }, [tasks, search]);
 
-  const getCount = (tab: TabValue) =>
-    tab === "all"
-      ? allTasks.length
-      : allTasks.filter((task) => task.status === TAB_STATUS[tab]).length;
+  const filterCount =
+    (status ? 1 : 0) + (category ? 1 : 0) + (priority ? 1 : 0) + (appliedCourse ? 1 : 0);
+
+  function clearFilters() {
+    setStatus(null);
+    setCategory(null);
+    setPriority(null);
+    setCourse("");
+    setAppliedCourse("");
+  }
 
   function handleSaved(saved: AcademicTask) {
     setData(
-      allTasks.some((task) => task.id === saved.id)
-        ? allTasks.map((task) => (task.id === saved.id ? saved : task))
-        : [saved, ...allTasks],
+      tasks.some((task) => task.id === saved.id)
+        ? tasks.map((task) => (task.id === saved.id ? saved : task))
+        : [saved, ...tasks],
     );
     toast.success(editing ? "Task updated" : "Task added");
     setEditing(null);
   }
 
-  /** Runs a mutation, then reloads so server-derived status stays authoritative. */
-  async function runAction(taskId: string, action: () => Promise<void>, successMessage: string) {
+  async function runAction(taskId: string, action: () => Promise<void>, message: string) {
     setBusyTaskId(taskId);
     try {
       await action();
-      toast.success(successMessage);
+      toast.success(message);
       reload();
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
@@ -135,32 +118,27 @@ export default function TasksPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       {/* ── Header ─────────────────────────────── */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Tasks</h1>
-          <p className="text-sm text-muted-foreground">
-            {isLoading
-              ? "Loading your academic workload…"
-              : `Manage your academic workload — ${allTasks.length} tasks total`}
-          </p>
+          <p className="eyebrow">Coursework</p>
+          <h1 className="mt-1 font-display text-3xl font-bold tracking-tight">Tasks</h1>
         </div>
         <Button
-          className="w-fit"
           onClick={() => {
             setEditing(null);
             setDialogOpen(true);
           }}
         >
-          <Plus className="mr-2 h-4 w-4" />
+          <Plus className="mr-1.5 h-4 w-4" />
           Add task
         </Button>
       </div>
 
       {error && (
         <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
+          <AlertTriangle className="h-4 w-4" />
           <AlertDescription className="flex items-center justify-between gap-4">
             <span>{describeError(error)}</span>
             <Button size="sm" variant="outline" onClick={reload}>Retry</Button>
@@ -168,273 +146,120 @@ export default function TasksPage() {
         </Alert>
       )}
 
-      {/* ── Tab bar ────────────────────────────── */}
-      <div className="flex gap-1 border-b overflow-x-auto pb-0 -mb-px">
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          const count = getCount(tab.value);
-          const isActive = activeTab === tab.value;
-          return (
-            <button
-              key={tab.value}
-              onClick={() => setActiveTab(tab.value)}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors",
-                isActive
-                  ? "border-foreground text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/50"
-              )}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {tab.label}
-              <span
-                className={cn(
-                  "ml-0.5 rounded-full px-1.5 py-0 text-[11px] font-semibold tabular-nums",
-                  isActive
-                    ? "bg-foreground text-background"
-                    : "bg-muted text-muted-foreground"
-                )}
-              >
-                {count}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      {/* ── Filters ────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-2">
+        <FilterSelect
+          value={status}
+          onChange={setStatus}
+          options={TASK_STATUSES}
+          placeholder="Any status"
+        />
+        <FilterSelect
+          value={category}
+          onChange={setCategory}
+          options={CATEGORIES}
+          placeholder="Any category"
+        />
+        <FilterSelect
+          value={priority}
+          onChange={setPriority}
+          options={PRIORITIES}
+          placeholder="Any priority"
+        />
 
-      {/* ── Toolbar ────────────────────────────── */}
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1 max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            setAppliedCourse(course.trim());
+          }}
+        >
           <Input
-            placeholder="Search by title or course…"
-            className="pl-9"
+            placeholder="Course"
+            className="h-9 w-36"
+            value={course}
+            onChange={(e) => setCourse(e.target.value)}
+            onBlur={() => setAppliedCourse(course.trim())}
+          />
+        </form>
+
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Filter titles"
+            className="h-9 w-44 pl-8"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+
+        {filterCount > 0 && (
+          <Button size="sm" variant="ghost" onClick={clearFilters}>
+            <X className="mr-1 h-3.5 w-3.5" />
+            Clear
+          </Button>
+        )}
+
+        <span className="ml-auto font-mono text-xs text-muted-foreground">
+          {isLoading ? "…" : `${visible.length} shown`}
+        </span>
       </div>
 
-      {/* ── Table ──────────────────────────────── */}
+      {/* ── Ledger ─────────────────────────────── */}
       <Card className="overflow-hidden">
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/50">
-                <TableHead className="w-[280px] pl-4">Task</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Priority</TableHead>
-                <TableHead>Deadline</TableHead>
-                <TableHead className="w-[160px]">Effort</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-10 pr-4" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading ? (
-                Array.from({ length: 4 }).map((_, index) => (
-                  <TableRow key={index}>
-                    <TableCell colSpan={7} className="py-3 pl-4">
-                      <Skeleton className="h-6 w-full" />
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : filteredTasks.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="py-16 text-center">
-                    <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                      <ListTodo className="h-8 w-8 opacity-30" />
-                      <span className="text-sm">
-                        {allTasks.length === 0
-                          ? "No tasks yet. Add your first one to get started."
-                          : "No tasks match your search."}
-                      </span>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredTasks.map((task) => {
-                  const catCfg = CATEGORY_CONFIG[task.category];
-                  const priCfg = PRIORITY_CONFIG[task.priority];
-                  const statCfg = STATUS_CONFIG[task.status];
-                  const effortPct =
-                    task.plannedDuration > 0
-                      ? Math.min(100, Math.round((task.actualDuration / task.plannedDuration) * 100))
-                      : 0;
-                  const dl = getRelativeDeadline(task.deadline);
-                  const isOverdue = task.status === "Overdue";
-                  const isBusy = busyTaskId === task.id;
+          {isLoading ? (
+            <div className="space-y-2 p-6">
+              {Array.from({ length: 5 }).map((_, index) => (
+                <Skeleton key={index} className="h-10 w-full" />
+              ))}
+            </div>
+          ) : visible.length === 0 ? (
+            <EmptyState hasFilters={filterCount > 0 || search !== ""} onClear={clearFilters} />
+          ) : (
+            <>
+              <div className="hidden grid-cols-[1fr_9rem_7rem_6rem_2.5rem] gap-4 border-b bg-muted/40 px-6 py-2 md:grid">
+                <span className="eyebrow">Task</span>
+                <span className="eyebrow">Deadline</span>
+                <span className="eyebrow text-right">Remaining</span>
+                <span className="eyebrow">Status</span>
+                <span />
+              </div>
 
-                  return (
-                    <TableRow
-                      key={task.id}
-                      className={cn(
-                        "group transition-colors",
-                        isOverdue && "bg-red-50/40"
-                      )}
-                    >
-                      {/* Left accent bar for overdue */}
-                      <TableCell className="pl-4">
-                        <div className="flex items-start gap-2">
-                          {isOverdue && (
-                            <div className="mt-1 h-4 w-0.5 shrink-0 rounded-full bg-red-500" />
-                          )}
-                          <div>
-                            <div className="font-medium text-sm leading-snug">{task.title}</div>
-                            {task.course && (
-                              <div className="text-xs text-muted-foreground mt-0.5">
-                                {task.course}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </TableCell>
-
-                      <TableCell>
-                        <Badge
-                          className={cn(
-                            "text-xs font-medium border-0 rounded-md",
-                            catCfg.bg,
-                            catCfg.color
-                          )}
-                        >
-                          {catCfg.label}
-                        </Badge>
-                      </TableCell>
-
-                      <TableCell>
-                        <Badge
-                          className={cn(
-                            "text-xs font-medium border-0 rounded-md",
-                            priCfg.bg,
-                            priCfg.color
-                          )}
-                        >
-                          {priCfg.label}
-                        </Badge>
-                      </TableCell>
-
-                      <TableCell>
-                        <span
-                          className={cn(
-                            "text-xs font-medium",
-                            dl.urgent === "overdue" && "text-red-600",
-                            dl.urgent === "today" && "text-orange-600",
-                            dl.urgent === "soon" && "text-amber-600",
-                            dl.urgent === "normal" && "text-muted-foreground"
-                          )}
-                        >
-                          {dl.label}
-                        </span>
-                      </TableCell>
-
-                      <TableCell>
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center justify-between text-[11px]">
-                            <span className="text-muted-foreground">{formatDuration(task.actualDuration)}</span>
-                            <span className="font-medium tabular-nums">{formatDuration(task.plannedDuration)}</span>
-                          </div>
-                          <Progress value={effortPct} className="h-1.5" />
-                        </div>
-                      </TableCell>
-
-                      <TableCell>
-                        <Badge
-                          className={cn(
-                            "text-xs font-medium border-0 rounded-md flex w-fit items-center gap-1.5",
-                            statCfg.bg,
-                            statCfg.color
-                          )}
-                        >
-                          <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", statCfg.dotColor)} />
-                          {statCfg.label}
-                        </Badge>
-                      </TableCell>
-
-                      <TableCell className="pr-4">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger
-                            render={
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                                disabled={isBusy}
-                              >
-                                {isBusy ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <MoreHorizontal className="h-4 w-4" />
-                                )}
-                              </Button>
-                            }
-                          />
-                          <DropdownMenuContent align="end" className="w-44">
-                            <DropdownMenuItem
-                              onClick={() => {
-                                setEditing(task);
-                                setDialogOpen(true);
-                              }}
-                            >
-                              Edit task
-                            </DropdownMenuItem>
-                            {task.status === "Not Started" && (
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  void runAction(
-                                    task.id,
-                                    () => tasksApi.startTask(task.id),
-                                    "Task started",
-                                  )
-                                }
-                              >
-                                Start task
-                              </DropdownMenuItem>
-                            )}
-                            {task.status === "In Progress" && (
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  void runAction(
-                                    task.id,
-                                    () => tasksApi.finishTaskEarly(task.id),
-                                    "Task finished",
-                                  )
-                                }
-                              >
-                                Finish early
-                              </DropdownMenuItem>
-                            )}
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              className="text-destructive"
-                              onClick={() =>
-                                void runAction(
-                                  task.id,
-                                  () => tasksApi.deleteTask(task.id),
-                                  "Task deleted",
-                                )
-                              }
-                            >
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-
-          {/* Footer */}
-          <div className="flex items-center justify-between px-4 py-2.5 border-t bg-muted/30">
-            <p className="text-xs text-muted-foreground">
-              {filteredTasks.length} of {allTasks.length} tasks
-            </p>
-          </div>
+              <ul className="divide-y">
+                {visible.map((task) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    busy={busyTaskId === task.id}
+                    onEdit={() => {
+                      setEditing(task);
+                      setDialogOpen(true);
+                    }}
+                    onStart={() =>
+                      void runAction(task.id, () => tasksApi.startTask(task.id), "Task started")
+                    }
+                    onFinish={() =>
+                      void runAction(
+                        task.id,
+                        () => tasksApi.finishTaskEarly(task.id),
+                        "Task finished",
+                      )
+                    }
+                    onDelete={() =>
+                      void runAction(task.id, () => tasksApi.deleteTask(task.id), "Task deleted")
+                    }
+                  />
+                ))}
+              </ul>
+            </>
+          )}
         </CardContent>
       </Card>
+
+      <p className="font-mono text-xs text-muted-foreground">
+        Status, category, priority and course are filtered by the server. Title
+        filtering happens in your browser — the API has no text search.
+      </p>
 
       <TaskFormDialog
         open={dialogOpen}
@@ -443,5 +268,167 @@ export default function TasksPage() {
         onSaved={handleSaved}
       />
     </div>
+  );
+}
+
+function FilterSelect<T extends string>({
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  value: T | null;
+  onChange: (next: T | null) => void;
+  options: readonly T[];
+  placeholder: string;
+}) {
+  return (
+    <Select
+      value={value ?? ANY}
+      onValueChange={(next) => next && onChange(next === ANY ? null : (next as T))}
+    >
+      <SelectTrigger className="h-9 w-auto min-w-[9rem]">
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={ANY}>{placeholder}</SelectItem>
+        {options.map((option) => (
+          <SelectItem key={option} value={option}>{option}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function EmptyState({ hasFilters, onClear }: { hasFilters: boolean; onClear: () => void }) {
+  return (
+    <div className="flex flex-col items-center gap-3 px-6 py-20 text-center">
+      <ListTodo className="h-8 w-8 text-muted-foreground/40" />
+      <p className="text-sm text-muted-foreground">
+        {hasFilters ? "No tasks match these filters." : "No tasks yet."}
+      </p>
+      {hasFilters && (
+        <Button size="sm" variant="outline" onClick={onClear}>
+          Clear filters
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function relativeDeadline(deadline: string) {
+  const due = new Date(deadline);
+  const days = Math.ceil((due.getTime() - Date.now()) / 86_400_000);
+  if (days < 0) return { label: `${Math.abs(days)}d overdue`, urgent: true };
+  if (days === 0) return { label: "Today", urgent: true };
+  if (days === 1) return { label: "Tomorrow", urgent: true };
+  if (days <= 3) return { label: `${days} days`, urgent: true };
+  return {
+    label: due.toLocaleDateString(undefined, { day: "numeric", month: "short" }),
+    urgent: false,
+  };
+}
+
+function TaskRow({
+  task,
+  busy,
+  onEdit,
+  onStart,
+  onFinish,
+  onDelete,
+}: {
+  task: AcademicTask;
+  busy: boolean;
+  onEdit: () => void;
+  onStart: () => void;
+  onFinish: () => void;
+  onDelete: () => void;
+}) {
+  const category = CATEGORY_CONFIG[task.category];
+  const priority = PRIORITY_CONFIG[task.priority];
+  const statusConfig = STATUS_CONFIG[task.status];
+  const due = relativeDeadline(task.deadline);
+
+  return (
+    <li className="group relative grid grid-cols-1 items-center gap-2 px-6 py-3 transition-colors hover:bg-muted/40 md:grid-cols-[1fr_9rem_7rem_6rem_2.5rem] md:gap-4">
+      {/* Overdue tasks carry a rule in the margin rather than a tinted row. */}
+      {task.status === "Overdue" && (
+        <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-deficit" aria-hidden />
+      )}
+
+      <div className="min-w-0">
+        <Link
+          href={`/tasks/${task.id}`}
+          className="block truncate text-sm font-medium underline-offset-4 hover:underline"
+        >
+          {task.title}
+        </Link>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          <Badge className={cn("rounded-md border-0 text-[11px]", category.bg, category.color)}>
+            {category.label}
+          </Badge>
+          {task.priority !== "Medium" && (
+            <Badge className={cn("rounded-md border-0 text-[11px]", priority.bg, priority.color)}>
+              {priority.label}
+            </Badge>
+          )}
+          {task.course && (
+            <span className="truncate text-xs text-muted-foreground">{task.course}</span>
+          )}
+        </div>
+      </div>
+
+      <span
+        className={cn(
+          "font-mono text-xs",
+          due.urgent ? "text-deficit" : "text-muted-foreground",
+        )}
+      >
+        {due.label}
+      </span>
+
+      <span className="font-mono text-xs text-muted-foreground md:text-right">
+        {formatDuration(task.remainingDuration)}
+      </span>
+
+      <span className="flex items-center gap-1.5 text-xs">
+        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", statusConfig.dotColor)} />
+        <span className="text-muted-foreground">{statusConfig.label}</span>
+      </span>
+
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 md:opacity-0 md:transition-opacity md:group-hover:opacity-100"
+              disabled={busy}
+              aria-label={`Actions for ${task.title}`}
+            >
+              {busy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <MoreHorizontal className="h-4 w-4" />
+              )}
+            </Button>
+          }
+        />
+        <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuItem render={<Link href={`/tasks/${task.id}`}>Open</Link>} />
+          <DropdownMenuItem onClick={onEdit}>Edit</DropdownMenuItem>
+          {task.status === "Not Started" && (
+            <DropdownMenuItem onClick={onStart}>Start</DropdownMenuItem>
+          )}
+          {task.status === "In Progress" && (
+            <DropdownMenuItem onClick={onFinish}>Finish early</DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem className="text-destructive" onClick={onDelete}>
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </li>
   );
 }

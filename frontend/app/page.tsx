@@ -3,7 +3,7 @@
 import { useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { ArrowRight, Calendar, BarChart3, Clock, Sparkles, BookOpen, Target, GraduationCap, Pencil, NotebookPen } from "lucide-react";
+import { Calendar, BarChart3, Clock, Sparkles, BookOpen, Target, GraduationCap, Pencil, NotebookPen } from "lucide-react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { ScrollTrigger } from "gsap/dist/ScrollTrigger";
@@ -322,14 +322,14 @@ export default function LandingPage() {
         {/* Centered content */}
         <div className="relative z-10 text-center px-6 pt-20 pb-0 flex-1 flex flex-col items-center justify-center">
           <h1 className="hero-headline font-[family-name:var(--font-display)] text-white font-bold text-[52px] md:text-[72px] lg:text-[80px] leading-[0.92] tracking-[-0.04em] mb-6 max-w-[700px]">
-            Students, not<br />paperwork
+            Does it all<br />actually fit?
           </h1>
 
           <div className="hero-sub max-w-[520px] mx-auto mb-8">
             <p className="font-[family-name:var(--font-display)] text-white/90 text-[16px] md:text-[17px] leading-[1.5] tracking-[-0.01em]">
-              Generate study plans instantly that <strong className="text-white font-semibold">sound like you</strong>.<br />
-              Enjoy <strong className="text-white font-semibold">unlimited, conflict-free</strong> scheduling.<br />
-              Save <strong className="text-white font-semibold">5+ hours weekly</strong> on planning.
+Add your coursework and the hours you are free.<br />
+              StudyFlow weighs one against the other and tells you<br />
+              <strong className="text-white font-semibold">how many hours short you are</strong> — while you can still act on it.
             </p>
           </div>
 
@@ -417,7 +417,7 @@ export default function LandingPage() {
       <section className="bg-[#f5f5f5] pt-28 pb-8">
         <div className="max-w-[1200px] mx-auto px-6 text-center">
           <h2 className="section-heading font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] text-[#070709] leading-[1.1]">
-            Save <span className="text-[#2597d0]">5</span> hours a week with Studyflow
+Most students find out too late
           </h2>
         </div>
       </section>
@@ -434,10 +434,10 @@ export default function LandingPage() {
               </div>
             </div>
             <h3 className="font-[family-name:var(--font-display)] text-[24px] md:text-[28px] font-semibold tracking-[-0.04em] text-[#070709] leading-[1.2] mb-4">
-              Adaptive scheduling that recalibrates.
+Your real hours, not an ideal week.
             </h3>
             <p className="text-[16px] text-[#60606c] leading-[1.5] tracking-[-0.01em] mb-8">
-              Input your availability, syllabus, and deadlines. The engine works backward to calculate exactly what you need each week — and adjusts when life happens.
+Set the weekly windows you are genuinely free to study, then block out the trips, shifts and exam days that take them back. That, minus the interruptions, is your capacity.
             </p>
             <div className="feature-img rounded-[12px] overflow-hidden border border-[#f5f5f5]">
               <Image
@@ -459,10 +459,10 @@ export default function LandingPage() {
               </div>
             </div>
             <h3 className="font-[family-name:var(--font-display)] text-[24px] md:text-[28px] font-semibold tracking-[-0.04em] text-[#070709] leading-[1.2] mb-4">
-              Track every minute. See every gain.
+Every deadline, weighed in hours.
             </h3>
             <p className="text-[16px] text-[#60606c] leading-[1.5] tracking-[-0.01em] mb-8">
-              Visual progress tracking across subjects, assignments, and revision goals. Watch your study hours compound into mastery.
+Each task carries an estimate, a priority and a due date. Add them up across the next week and you have the other half of the sum — the hours you owe.
             </p>
             <div className="feature-img rounded-[12px] overflow-hidden border border-[#f5f5f5]">
               <Image
@@ -490,20 +490,20 @@ export default function LandingPage() {
               {
                 icon: Target,
                 step: "01",
-                title: "Set your constraints",
-                desc: "Add your courses, deadlines, and available time blocks. Tell us when you're free and when you're not.",
+                title: "Set your hours",
+                desc: "Add the weekly windows you can study, and block out the days you cannot.",
               },
               {
                 icon: Sparkles,
                 step: "02",
-                title: "Engine generates your plan",
-                desc: "Our algorithm distributes workload evenly, respecting priorities and preventing burnout before exam season.",
+                title: "Add your coursework",
+                desc: "Every task gets a deadline and an estimate of how long it will take you.",
               },
               {
                 icon: Clock,
                 step: "03",
-                title: "Adapt and recalibrate",
-                desc: "Missed a session? Plans shift automatically. The engine continuously recalibrates so you never fall behind.",
+                title: "Read the balance",
+                desc: "One figure: the hours you are short, or the hours you have spare. Change something while it still helps.",
               },
             ].map((item, i) => (
               <div key={i} className="step-card bg-white rounded-[18px] p-8 shadow-[rgba(16,55,132,0.03)_0px_17px_37px_0px,rgba(16,55,132,0.03)_0px_67px_67px_0px,rgba(16,55,132,0.02)_0px_150px_90px_0px] hover:-translate-y-1 transition-transform duration-300">
@@ -546,10 +546,10 @@ export default function LandingPage() {
       <section className="cta-section bg-white py-28">
         <div className="max-w-[700px] mx-auto px-6 text-center">
           <h2 className="cta-heading font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] text-[#070709] leading-[1.1] mb-6">
-            Stop fighting your schedule.
+Know now, not in week nine.
           </h2>
           <p className="cta-sub text-[16px] md:text-[18px] text-[#60606c] leading-[1.5] tracking-[-0.01em] mb-10 max-w-[480px] mx-auto">
-            Join students who have already transformed their academic workflow with adaptive study planning.
+It takes about five minutes to enter a term of coursework and the hours you have for it.
           </p>
           <div className="cta-btn flex items-center justify-center gap-4">
             <Link href="/register">

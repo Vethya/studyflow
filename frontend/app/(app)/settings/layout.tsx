@@ -4,13 +4,14 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
-import { User, Shield, SlidersHorizontal, Globe } from "lucide-react";
+import { User, Shield, SlidersHorizontal, Globe, Activity } from "lucide-react";
 
 const navItems = [
   { title: "Profile",     href: "/settings/profile",     icon: User },
   { title: "Security",    href: "/settings/security",    icon: Shield },
   { title: "Preferences", href: "/settings/preferences", icon: SlidersHorizontal },
   { title: "Timezone",    href: "/settings/timezone",    icon: Globe },
+  { title: "Service",     href: "/settings/system",      icon: Activity },
 ];
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
@@ -19,10 +20,8 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   return (
     <div className="flex flex-col gap-6 p-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <p className="text-sm text-muted-foreground">
-          Manage your account, security, and scheduling preferences
-        </p>
+        <p className="eyebrow">Account</p>
+        <h1 className="mt-1 font-display text-3xl font-bold tracking-tight">Settings</h1>
       </div>
 
       <div className="flex flex-col gap-8 lg:flex-row lg:gap-12">

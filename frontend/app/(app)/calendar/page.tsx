@@ -2,281 +2,295 @@
 
 import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  ChevronLeft,
-  ChevronRight,
-  Plus,
-  CalendarDays,
-  AlertTriangle,
-  CalendarClock,
-} from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-// Study sessions have no backend yet; availability windows and tasks do.
-import { mockSessions } from "@/lib/mock-data";
-import { formatDuration, CATEGORY_CONFIG } from "@/lib/constants";
+import { AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { DAY_NAMES_SHORT, formatDuration } from "@/lib/constants";
+import { dayKey, minutesByDay } from "@/lib/capacity";
 import { availability as availabilityApi, tasks as tasksApi } from "@/lib/api";
 import { describeError, useApi } from "@/hooks/use-api";
+import type { AcademicTask } from "@/types/task";
 
-const HOURS = Array.from({ length: 15 }, (_, i) => i + 7); // 7AM to 9PM
-const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+// Monday-first display over data indexed 0 = Sunday.
+const DISPLAY_DAYS = [1, 2, 3, 4, 5, 6, 0];
 
-function getWeekDates(offset: number = 0) {
-  const now = new Date();
-  const startOfWeek = new Date(now);
-  const day = startOfWeek.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  startOfWeek.setDate(startOfWeek.getDate() + diff + offset * 7);
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(startOfWeek);
-    d.setDate(d.getDate() + i);
-    return d;
+/** Every date shown in a month grid, including the leading and trailing padding. */
+function monthGrid(anchor: Date): Date[] {
+  const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+  const offset = (first.getDay() + 6) % 7; // Monday = 0
+  const start = new Date(first);
+  start.setDate(first.getDate() - offset);
+
+  return Array.from({ length: 42 }, (_, i) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + i);
+    return date;
   });
 }
 
-// Category color mapping for session blocks
-const categoryColors: Record<string, string> = {
-  Assignment: "bg-indigo-100 border-l-indigo-500 text-indigo-900",
-  Reading: "bg-teal-100 border-l-teal-500 text-teal-900",
-  "Exam Preparation": "bg-rose-100 border-l-rose-500 text-rose-900",
-  Project: "bg-amber-100 border-l-amber-500 text-amber-900",
-  "Research/Writing": "bg-sky-100 border-l-sky-500 text-sky-900",
-  Other: "bg-zinc-100 border-l-zinc-500 text-zinc-900",
-};
-
 export default function CalendarPage() {
-  const [weekOffset, setWeekOffset] = useState(0);
-  const weekDates = getWeekDates(weekOffset);
-  const today = new Date();
+  const [monthOffset, setMonthOffset] = useState(0);
 
+  const anchor = useMemo(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
+  }, [monthOffset]);
+
+  const grid = useMemo(() => monthGrid(anchor), [anchor]);
+  const rangeStart = grid[0];
+  const rangeEnd = useMemo(() => {
+    const end = new Date(grid[grid.length - 1]);
+    end.setDate(end.getDate() + 1);
+    return end;
+  }, [grid]);
+
+  const loadTasks = useCallback((signal: AbortSignal) => tasksApi.listTasks({}, signal), []);
   const loadWindows = useCallback(
     (signal: AbortSignal) => availabilityApi.listWindows(signal),
     [],
   );
-  const loadTasks = useCallback((signal: AbortSignal) => tasksApi.listTasks({}, signal), []);
-
-  const windows = useApi(loadWindows);
-  const tasks = useApi(loadTasks);
-
-  const overdueTasks = useMemo(
-    () => (tasks.data ?? []).filter((task) => task.status === "Overdue"),
-    [tasks.data],
+  const loadPeriods = useCallback(
+    (signal: AbortSignal) => availabilityApi.listUnavailablePeriods(signal),
+    [],
   );
 
-  // Availability hours for shading, keyed `dayOfWeek-hour`.
-  const availHours = useMemo(() => {
-    const hours = new Set<string>();
-    for (const window of windows.data ?? []) {
-      const startH = parseInt(window.startTime.split(":")[0]);
-      const endH = parseInt(window.endTime.split(":")[0]);
-      for (let h = startH; h < endH; h++) {
-        hours.add(`${window.dayOfWeek}-${h}`);
-      }
-    }
-    return hours;
-  }, [windows.data]);
+  const tasks = useApi(loadTasks);
+  const windows = useApi(loadWindows);
+  const periods = useApi(loadPeriods);
 
-  const loadError = windows.error ?? tasks.error;
+  const isLoading = tasks.isLoading || windows.isLoading || periods.isLoading;
+  const loadError = tasks.error ?? windows.error ?? periods.error;
+
+  // Free study minutes per day, already net of blocked-out periods.
+  const freeByDay = useMemo(
+    () => minutesByDay(windows.data ?? [], periods.data ?? [], rangeStart, rangeEnd),
+    [windows.data, periods.data, rangeStart, rangeEnd],
+  );
+
+  const peakFree = useMemo(
+    () => Math.max(1, ...[...freeByDay.values()]),
+    [freeByDay],
+  );
+
+  // Deadlines land on the day they fall due, in local time.
+  const dueByDay = useMemo(() => {
+    const map = new Map<string, AcademicTask[]>();
+    for (const task of tasks.data ?? []) {
+      const key = dayKey(new Date(task.deadline));
+      const bucket = map.get(key);
+      if (bucket) bucket.push(task);
+      else map.set(key, [task]);
+    }
+    return map;
+  }, [tasks.data]);
+
+  const todayKey = dayKey(new Date());
+  const monthLabel = anchor.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 
   return (
-    <div className="flex flex-col gap-6 p-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
+      {/* ── Header ─────────────────────────────── */}
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Calendar</h1>
-          <p className="text-sm text-muted-foreground">
-            Your weekly study schedule
+          <p className="eyebrow">Month</p>
+          <h1 className="mt-1 font-display text-3xl font-bold tracking-tight">{monthLabel}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Deadlines against the study time each day actually holds.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center rounded-lg border">
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setWeekOffset((p) => p - 1)}>
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button variant="ghost" size="sm" className="h-8 px-3 text-xs font-medium" onClick={() => setWeekOffset(0)}>
-              Today
-            </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setWeekOffset((p) => p + 1)}>
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-          <span className="text-sm font-medium ml-2">
-            {weekDates[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} – {weekDates[6].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-          </span>
-          <div className="ml-auto">
-            <Button size="sm" render={<Link href="/tasks" />}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add task
-            </Button>
-          </div>
+
+        <div className="flex items-center gap-1 rounded-md border bg-card p-0.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => setMonthOffset((value) => value - 1)}
+            aria-label="Previous month"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 px-3 font-mono text-xs"
+            onClick={() => setMonthOffset(0)}
+          >
+            Today
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => setMonthOffset((value) => value + 1)}
+            aria-label="Next month"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
         </div>
       </div>
 
       {loadError && (
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
-          <AlertDescription>{describeError(loadError)}</AlertDescription>
+          <AlertDescription className="flex items-center justify-between gap-4">
+            <span>{describeError(loadError)}</span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                tasks.reload();
+                windows.reload();
+                periods.reload();
+              }}
+            >
+              Retry
+            </Button>
+          </AlertDescription>
         </Alert>
       )}
 
-      <Alert>
-        <AlertTriangle className="h-4 w-4" />
-        <AlertDescription>
-          Availability shading and the overdue list are live. The session blocks
-          themselves are sample data until the scheduling API ships.
-        </AlertDescription>
-      </Alert>
-
-      <Tabs defaultValue="week">
-        <TabsList>
-          <TabsTrigger value="week">Week</TabsTrigger>
-          <TabsTrigger value="agenda">Agenda</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="week" className="mt-4">
-          <Card>
-            <CardContent className="p-0 overflow-x-auto">
-              {/* Week grid */}
-              <div className="min-w-[800px]">
-                {/* Day headers */}
-                <div className="grid grid-cols-[60px_repeat(7,1fr)] border-b">
-                  <div className="p-2" /> {/* time gutter spacer */}
-                  {weekDates.map((date, i) => {
-                    const isToday = date.toDateString() === today.toDateString();
-                    return (
-                      <div
-                        key={i}
-                        className={`p-2 text-center border-l ${isToday ? "bg-primary/5" : ""}`}
-                      >
-                        <div className="text-xs text-muted-foreground font-medium">{DAY_LABELS[i]}</div>
-                        <div className={`text-lg font-semibold mt-0.5 ${isToday ? "bg-primary text-primary-foreground rounded-full w-8 h-8 flex items-center justify-center mx-auto" : ""}`}>
-                          {date.getDate()}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Hour rows */}
-                {HOURS.map((hour) => (
-                  <div key={hour} className="grid grid-cols-[60px_repeat(7,1fr)] min-h-[60px]">
-                    {/* Time gutter */}
-                    <div className="p-1 pr-2 text-right text-[11px] text-muted-foreground border-r">
-                      {hour === 0 ? "12 AM" : hour < 12 ? `${hour} AM` : hour === 12 ? "12 PM" : `${hour - 12} PM`}
-                    </div>
-                    {/* Day cells */}
-                    {weekDates.map((date, dayIdx) => {
-                      const dayOfWeek = date.getDay();
-                      const isAvail = availHours.has(`${dayOfWeek}-${hour}`);
-                      const isToday = date.toDateString() === today.toDateString();
-                      const dateSessions = mockSessions.filter((s) => {
-                        const sDate = new Date(s.startTime);
-                        return sDate.toDateString() === date.toDateString() && sDate.getHours() === hour;
-                      });
-
-                      return (
-                        <div
-                          key={dayIdx}
-                          className={`border-l border-t relative min-h-[60px] ${
-                            !isAvail ? "bg-muted/30" : ""
-                          } ${isToday ? "bg-primary/[0.02]" : ""}`}
-                        >
-                          {dateSessions.map((session) => {
-                            const colors = categoryColors[session.category] || categoryColors.Other;
-                            return (
-                              <div
-                                key={session.id}
-                                className={`absolute inset-x-1 top-1 rounded-md border-l-[3px] p-1.5 text-xs cursor-pointer hover:shadow-md transition-shadow ${colors}`}
-                                style={{ minHeight: `${Math.max(session.plannedDuration - 5, 20)}px` }}
-                              >
-                                <div className="font-medium truncate">{session.taskTitle}</div>
-                                <div className="opacity-70 text-[10px] mt-0.5">
-                                  {new Date(session.startTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                                  {" – "}
-                                  {new Date(session.endTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="agenda" className="mt-4 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Upcoming Sessions</CardTitle>
-              <CardDescription>Your study sessions in chronological order</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
-                {["Today", "Tomorrow", "Day 3", "Day 4", "Day 5"].map((label, idx) => (
-                  <div key={label}>
-                    <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
-                      {label}
-                      {idx === 0 && <Badge variant="secondary" className="text-[10px]">Today</Badge>}
-                    </h3>
-                    <div className="space-y-2">
-                      {mockSessions.slice(idx, idx + 2).map((session) => {
-                        const catColor = categoryColors[session.category] || categoryColors.Other;
-                        return (
-                          <div
-                            key={`${label}-${session.id}`}
-                            className="flex items-center gap-3 rounded-lg border p-3 hover:bg-muted/50 transition-colors cursor-pointer"
-                          >
-                            <div className={`w-1.5 h-10 rounded-full ${catColor.includes("indigo") ? "bg-indigo-500" : catColor.includes("rose") ? "bg-rose-500" : catColor.includes("amber") ? "bg-amber-500" : catColor.includes("teal") ? "bg-teal-500" : catColor.includes("sky") ? "bg-sky-500" : "bg-zinc-400"}`} />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium truncate">{session.taskTitle}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {new Date(session.startTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                                {" – "}
-                                {new Date(session.endTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                              </p>
-                            </div>
-                            <Badge variant="outline" className="text-xs shrink-0">
-                              {session.plannedDuration}m
-                            </Badge>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Unscheduled panel */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-500" />
-                Unscheduled & Overdue
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {overdueTasks.map((task) => (
-                <div key={task.id} className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50/50 p-3 mb-2">
-                  <div>
-                    <p className="text-sm font-medium">{task.title}</p>
-                    <p className="text-xs text-muted-foreground">{formatDuration(task.remainingDuration)} remaining</p>
-                  </div>
-                  <Button variant="outline" size="sm">Reschedule</Button>
-                </div>
+      {/* ── Grid ───────────────────────────────── */}
+      <Card className="overflow-hidden">
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="grid grid-cols-7 gap-px bg-border">
+              {Array.from({ length: 42 }).map((_, index) => (
+                <Skeleton key={index} className="h-24 rounded-none" />
               ))}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-7 border-b">
+                {DISPLAY_DAYS.map((day) => (
+                  <div key={day} className="px-3 py-2 text-center">
+                    <span className="eyebrow">{DAY_NAMES_SHORT[day]}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-7 gap-px bg-border">
+                {grid.map((date) => {
+                  const key = dayKey(date);
+                  const free = freeByDay.get(key) ?? 0;
+                  const due = dueByDay.get(key) ?? [];
+                  const inMonth = date.getMonth() === anchor.getMonth();
+
+                  return (
+                    <DayCell
+                      key={key}
+                      date={date}
+                      free={free}
+                      peakFree={peakFree}
+                      due={due}
+                      inMonth={inMonth}
+                      isToday={key === todayKey}
+                    />
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Legend ─────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 font-mono text-xs text-muted-foreground">
+        <span className="flex items-center gap-2">
+          <span className="h-1.5 w-8 rounded-full bg-surplus/50" />
+          Study time free that day
+        </span>
+        <span className="flex items-center gap-2">
+          <span className="h-1.5 w-1.5 rounded-full bg-deficit" />
+          Deadline
+        </span>
+        <span>Bars are relative to your busiest day this month.</span>
+      </div>
+    </div>
+  );
+}
+
+function DayCell({
+  date,
+  free,
+  peakFree,
+  due,
+  inMonth,
+  isToday,
+}: {
+  date: Date;
+  free: number;
+  peakFree: number;
+  due: AcademicTask[];
+  inMonth: boolean;
+  isToday: boolean;
+}) {
+  const open = due.filter((task) => task.status !== "Completed");
+
+  return (
+    <div
+      className={cn(
+        "flex min-h-24 flex-col gap-1.5 bg-card p-2",
+        !inMonth && "bg-muted/40",
+      )}
+    >
+      <div className="flex items-center justify-between">
+        <span
+          className={cn(
+            "font-mono text-xs",
+            isToday
+              ? "flex h-5 w-5 items-center justify-center rounded-full bg-foreground font-medium text-background"
+              : inMonth
+                ? "text-foreground"
+                : "text-muted-foreground/60",
+          )}
+        >
+          {date.getDate()}
+        </span>
+        {free > 0 && (
+          <span className="font-mono text-[10px] text-muted-foreground">
+            {Math.round(free / 60)}h
+          </span>
+        )}
+      </div>
+
+      {/* Capacity bar: how much study time this day holds, relative to the
+          busiest day on screen. Absent bar means no availability at all. */}
+      <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-surplus/50"
+          style={{ width: `${Math.round((free / peakFree) * 100)}%` }}
+        />
+      </div>
+
+      <div className="flex flex-col gap-1">
+        {open.slice(0, 3).map((task) => (
+          <Link
+            key={task.id}
+            href={`/tasks/${task.id}`}
+            title={`${task.title} · ${formatDuration(task.remainingDuration)}`}
+            className={cn(
+              "flex items-center gap-1 truncate rounded-sm px-1 py-0.5 text-[11px] leading-tight transition-colors hover:bg-muted",
+              task.status === "Overdue" ? "text-deficit" : "text-foreground",
+            )}
+          >
+            <span
+              className={cn(
+                "h-1.5 w-1.5 shrink-0 rounded-full",
+                task.status === "Overdue" ? "bg-deficit" : "bg-foreground/50",
+              )}
+            />
+            <span className="truncate">{task.title}</span>
+          </Link>
+        ))}
+        {open.length > 3 && (
+          <span className="px-1 font-mono text-[10px] text-muted-foreground">
+            +{open.length - 3} more
+          </span>
+        )}
+      </div>
     </div>
   );
 }

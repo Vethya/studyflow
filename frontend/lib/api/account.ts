@@ -1,8 +1,6 @@
 /** Account profile, preferences and password — `backend/src/studyflow/api/account.py`. */
 
 import { apiJson, apiVoid } from "./client";
-import { toStudentAccount } from "./mappers";
-import type { StudentAccount } from "@/types/user";
 import type { WireAccountProfile, WireLinkedIdentity, WireStudyPreferences } from "./wire";
 
 export function getProfile(signal?: AbortSignal): Promise<WireAccountProfile> {
@@ -51,14 +49,4 @@ export function changePassword(currentPassword: string, newPassword: string): Pr
     method: "PATCH",
     body: { current_password: currentPassword, new_password: newPassword },
   });
-}
-
-/** Convenience read that assembles the full `StudentAccount` the UI expects. */
-export async function getAccount(signal?: AbortSignal): Promise<StudentAccount> {
-  const [profile, preferences, identities] = await Promise.all([
-    getProfile(signal),
-    getPreferences(signal),
-    getLinkedIdentities(signal),
-  ]);
-  return toStudentAccount(profile, preferences, identities);
 }

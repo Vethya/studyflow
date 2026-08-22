@@ -5,12 +5,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertCircle, Plus, Trash2, CalendarOff, Clock4, Info, Loader2 } from "lucide-react";
+import { AlertCircle, Plus, Trash2, CalendarOff, Clock4, Info, Loader2, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { DAY_NAMES, DAY_NAMES_SHORT } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { availability as availabilityApi } from "@/lib/api";
 import type { WindowDraft } from "@/lib/api";
+import type { UnavailablePeriod } from "@/types/availability";
+import { formatDuration } from "@/lib/constants";
+import { weeklyPatternMinutes } from "@/lib/capacity";
 import { describeError, useApi } from "@/hooks/use-api";
 import { AddWindowDialog, ExceptionDialog } from "@/components/availability-dialogs";
 
@@ -31,6 +34,7 @@ export default function AvailabilityPage() {
   const [hoveredWindow, setHoveredWindow] = useState<string | null>(null);
   const [windowDialogOpen, setWindowDialogOpen] = useState(false);
   const [exceptionDialogOpen, setExceptionDialogOpen] = useState(false);
+  const [editingPeriod, setEditingPeriod] = useState<UnavailablePeriod | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
 
   const loadWindows = useCallback(
@@ -108,19 +112,26 @@ export default function AvailabilityPage() {
     }
   }
 
-  async function handleAddException(draft: {
+  async function handleSaveException(draft: {
     startsAt: string;
     endsAt: string;
     reason?: string;
   }) {
+    if (editingPeriod) {
+      const change = await availabilityApi.updateUnavailablePeriod(editingPeriod.id, draft);
+      periods.setData(
+        allPeriods.map((period) =>
+          period.id === editingPeriod.id ? change.period : period,
+        ),
+      );
+      toast.success("Exception updated");
+      setEditingPeriod(null);
+      return;
+    }
+
     const change = await availabilityApi.createUnavailablePeriod(draft);
     periods.setData([...allPeriods, change.period]);
-    const invalidated = change.invalidatedFutureSessionIds.length;
-    toast.success(
-      invalidated > 0
-        ? `Exception added — ${invalidated} scheduled session${invalidated === 1 ? "" : "s"} cancelled`
-        : "Exception added",
-    );
+    toast.success("Exception added");
   }
 
   async function handleDeleteException(id: string) {
@@ -143,9 +154,11 @@ export default function AvailabilityPage() {
       {/* ── Header ─────────────────────────────── */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Availability</h1>
-          <p className="text-sm text-muted-foreground">
-            Set your recurring study windows — the engine schedules only within these times
+          <p className="eyebrow">Study time</p>
+          <h1 className="mt-1 font-display text-3xl font-bold tracking-tight">Availability</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            The hours you are free to study. Everything StudyFlow tells you about
+            your workload is measured against these.
           </p>
         </div>
         <div className="flex gap-2">
@@ -179,12 +192,17 @@ export default function AvailabilityPage() {
         </Alert>
       )}
 
-      {/* ── Info banner ─────────────────────────── */}
-      <div className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-        <Info className="h-4 w-4 mt-0.5 shrink-0 text-blue-500" />
-        <span className="flex-1">
-          Overlapping windows on the same day are merged automatically, and editing them can
-          cancel sessions that were already scheduled.
+      {/* Weekly total, stated plainly — it is the number the dashboard divides by. */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-card px-4 py-3">
+        <div className="flex items-baseline gap-3">
+          <span className="eyebrow">Weekly pattern</span>
+          <span className="font-mono text-lg font-medium">
+            {windows.isLoading ? "—" : formatDuration(weeklyPatternMinutes(allWindows))}
+          </span>
+        </div>
+        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Info className="h-3.5 w-3.5 shrink-0" />
+          Overlapping windows on the same day are merged by the server.
         </span>
       </div>
 
@@ -194,9 +212,9 @@ export default function AvailabilityPage() {
         {/* Visual time grid */}
         <Card className="lg:col-span-2 overflow-hidden">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Weekly Schedule</CardTitle>
+            <CardTitle className="font-display text-base">Weekly Schedule</CardTitle>
             <CardDescription>
-              Green blocks show when you&apos;re available to study
+              Shaded blocks are the hours you can study
             </CardDescription>
           </CardHeader>
           <CardContent className="p-0 pb-4">
@@ -247,8 +265,8 @@ export default function AvailabilityPage() {
                               "h-6 border-b border-muted/40 transition-colors",
                               windowsTop.length > 0
                                 ? hoveredWindow && windowsTop.some(w => w.id === hoveredWindow)
-                                  ? "bg-emerald-400"
-                                  : "bg-emerald-200"
+                                  ? "bg-surplus/55"
+                                  : "bg-surplus/25"
                                 : "hover:bg-muted/50"
                             )}
                             onMouseEnter={() => windowsTop[0] && setHoveredWindow(windowsTop[0].id)}
@@ -260,8 +278,8 @@ export default function AvailabilityPage() {
                               "h-6 border-b border-muted/20 transition-colors",
                               windowsBot.length > 0
                                 ? hoveredWindow && windowsBot.some(w => w.id === hoveredWindow)
-                                  ? "bg-emerald-400"
-                                  : "bg-emerald-200"
+                                  ? "bg-surplus/55"
+                                  : "bg-surplus/25"
                                 : "hover:bg-muted/50"
                             )}
                             onMouseEnter={() => windowsBot[0] && setHoveredWindow(windowsBot[0].id)}
@@ -278,7 +296,7 @@ export default function AvailabilityPage() {
             {/* Legend */}
             <div className="flex items-center gap-4 px-4 pt-3">
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <div className="h-3 w-5 rounded-sm bg-emerald-200" />
+                <div className="h-3 w-5 rounded-sm bg-surplus/25" />
                 Available
               </div>
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -296,7 +314,7 @@ export default function AvailabilityPage() {
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-base">Windows</CardTitle>
+                <CardTitle className="font-display text-base">Windows</CardTitle>
                 <span className="text-xs text-muted-foreground">{allWindows.length} total</span>
               </div>
               <CardDescription>Hover a row to highlight it on the grid</CardDescription>
@@ -325,13 +343,13 @@ export default function AvailabilityPage() {
                           key={w.id}
                           className={cn(
                             "flex items-center justify-between px-4 py-2.5 border-b last:border-0 transition-colors cursor-default",
-                            hoveredWindow === w.id ? "bg-emerald-50" : "hover:bg-muted/40"
+                            hoveredWindow === w.id ? "bg-surplus-soft" : "hover:bg-muted/40"
                           )}
                           onMouseEnter={() => setHoveredWindow(w.id)}
                           onMouseLeave={() => setHoveredWindow(null)}
                         >
                           <div className="flex items-center gap-2">
-                            <Clock4 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                            <Clock4 className="h-3.5 w-3.5 shrink-0 text-surplus" />
                             <span className="text-sm tabular-nums">
                               {w.startTime} – {w.endTime}
                             </span>
@@ -361,7 +379,7 @@ export default function AvailabilityPage() {
           {/* Unavailable periods */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Exceptions</CardTitle>
+              <CardTitle className="font-display text-base">Exceptions</CardTitle>
               <CardDescription>One-off periods where you&apos;re not available</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
@@ -397,12 +415,27 @@ export default function AvailabilityPage() {
                           </div>
                         </div>
                       </div>
+                      <div className="flex shrink-0 items-center">
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                        onClick={() => {
+                          setEditingPeriod(period);
+                          setExceptionDialogOpen(true);
+                        }}
+                        disabled={pendingId === period.id}
+                        aria-label={`Edit ${period.title}`}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                         onClick={() => void handleDeleteException(period.id)}
                         disabled={pendingId === period.id}
+                        aria-label={`Delete ${period.title}`}
                       >
                         {pendingId === period.id ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -410,6 +443,7 @@ export default function AvailabilityPage() {
                           <Trash2 className="h-3.5 w-3.5" />
                         )}
                       </Button>
+                      </div>
                     </div>
                   );
                 })
@@ -427,8 +461,12 @@ export default function AvailabilityPage() {
       />
       <ExceptionDialog
         open={exceptionDialogOpen}
-        onOpenChange={setExceptionDialogOpen}
-        onSubmit={handleAddException}
+        onOpenChange={(next) => {
+          setExceptionDialogOpen(next);
+          if (!next) setEditingPeriod(null);
+        }}
+        period={editingPeriod}
+        onSubmit={handleSaveException}
       />
     </div>
   );
