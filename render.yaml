@@ -6,7 +6,7 @@ services:
     region: singapore
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
-    preDeployCommand: .venv/bin/alembic upgrade head
+    dockerCommand: /bin/bash -c ".venv/bin/alembic upgrade head && .venv/bin/uvicorn studyflow.app:app --host 0.0.0.0 --port 8000"
     healthCheckPath: /api/v1/ready
     envVars:
       - key: STUDYFLOW_ENVIRONMENT

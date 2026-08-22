@@ -37,8 +37,16 @@ def test_blueprint_deploys_the_backend_docker_image_on_the_free_plan() -> None:
     assert api["dockerContext"] == "./backend"
 
 
-def test_blueprint_applies_migrations_before_every_deploy() -> None:
-    assert service()["preDeployCommand"] == ".venv/bin/alembic upgrade head"
+def test_blueprint_applies_migrations_before_the_server_starts() -> None:
+    command = service()["dockerCommand"]
+
+    assert "alembic upgrade head" in command
+    assert command.index("alembic upgrade head") < command.index("uvicorn")
+    assert "--host 0.0.0.0" in command
+
+
+def test_blueprint_does_not_rely_on_paid_plan_features() -> None:
+    assert "preDeployCommand" not in service()
 
 
 def test_blueprint_checks_database_readiness_as_its_health_check() -> None:

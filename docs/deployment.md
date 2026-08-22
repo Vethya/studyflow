@@ -63,8 +63,11 @@ URL, and TLS for email delivery.
 
 1. Push this repository to GitHub and connect the Render workspace.
 2. Create a **Blueprint** deployment from the repository root so `render.yaml` applies:
-   runtime Docker, free instance, pre-deploy command, health check, and fixed environment
-   variables are all provisioned automatically.
+   runtime Docker, free instance, health check, and fixed environment variables are all
+   provisioned automatically. The start command applies migrations (`alembic upgrade head`)
+   before launching Uvicorn because pre-deploy commands require a paid plan.
+   `alembic upgrade head` is idempotent, so the extra run on every cold start costs only
+   seconds.
 3. Fill the prompted secrets when asked:
    - `STUDYFLOW_DATABASE_URL` (converted Neon URL from step 1)
    - `STUDYFLOW_SMTP_PASSWORD` (Resend API key)
