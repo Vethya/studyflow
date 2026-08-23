@@ -36,7 +36,7 @@ export function CapacityBar({ available, committed, className }: CapacityBarProp
 
   return (
     <div className={cn("space-y-3", className)}>
-      <div className="relative h-14">
+      <div className="relative h-9">
         {/* Track: the time you actually have */}
         <div
           className="absolute inset-y-0 left-0 rounded-l-md border border-border bg-muted"
@@ -48,9 +48,16 @@ export function CapacityBar({ available, committed, className }: CapacityBarProp
           <div
             className={cn(
               "absolute inset-y-0 left-0 rounded-l-md transition-[width] duration-500",
-              overcommitted ? "bg-deficit/25" : "bg-surplus/30",
+              overcommitted ? "bg-deficit/20" : "bg-surplus/25",
             )}
-            style={{ width: `${filled}%` }}
+            style={{
+              width: `${filled}%`,
+              // Diagonal hatching when the work does not fit, so the state is
+              // legible without relying on hue (SPEC §19.5).
+              backgroundImage: overcommitted
+                ? "repeating-linear-gradient(135deg, color-mix(in oklch, var(--deficit) 22%, transparent) 0 5px, transparent 5px 10px)"
+                : undefined,
+            }}
           />
         )}
 
@@ -65,7 +72,7 @@ export function CapacityBar({ available, committed, className }: CapacityBarProp
         {overflow > 0 && (
           <div
             className={cn(
-              "absolute inset-y-2 bg-deficit transition-[width] duration-500",
+              "absolute inset-y-1 bg-deficit transition-[width] duration-500",
               overflowClipped ? "rounded-r-none" : "rounded-r-md",
             )}
             style={{ left: `${TRACK}%`, width: `${overflow}%` }}
