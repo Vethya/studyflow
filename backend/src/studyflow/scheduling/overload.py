@@ -7,6 +7,7 @@ from itertools import pairwise
 from time import monotonic
 from typing import cast
 
+from ortools.graph.python import min_cost_flow  # type: ignore[import-untyped]
 from ortools.sat.python import cp_model
 
 from studyflow.scheduling._solver import (
@@ -922,6 +923,169 @@ def _uniform_witness_is_policy_optimal(
     )
 
 
+def _uniform_flow_policy_witness(
+    problem: FeasibilityProblem,
+    allocation: _UniformAllocation,
+) -> dict[str, int] | None:
+    """Optimize uniform spread and earliness as an exact min-cost flow."""
+
+    scheduled_count = sum(allocation.scheduled_counts.values())
+    slots = allocation.slots
+    if len(slots) < scheduled_count:
+        return None
+
+    chronological_days = sorted(problem.planning_days, key=lambda day: day.start_minute)
+    day_by_slot = {
+        slot_index: next(
+            day.day_index for day in chronological_days if day.start_minute <= slot < day.end_minute
+        )
+        for slot_index, slot in enumerate(slots)
+    }
+
+    eligible_slots_by_task_day: dict[tuple[str, int], list[int]] = defaultdict(list)
+    eligible_days_by_task: dict[str, set[int]] = defaultdict(set)
+    for task_id, eligible_slot_count in allocation.eligible_slots_by_task.items():
+        for slot_index in range(min(eligible_slot_count, len(slots))):
+            day_index = day_by_slot[slot_index]
+            eligible_slots_by_task_day[(task_id, day_index)].append(slot_index)
+            eligible_days_by_task[task_id].add(day_index)
+
+    maximum_candidate_days = max(
+        (
+            min(len(eligible_days_by_task[task_id]), task_scheduled_count)
+            for task_id, task_scheduled_count in allocation.scheduled_counts.items()
+            if task_scheduled_count
+        ),
+        default=1,
+    )
+    eligible_tasks_by_day_count = {
+        day_count: sum(
+            len(eligible_days_by_task[task_id]) >= day_count and task_scheduled_count >= day_count
+            for task_id, task_scheduled_count in allocation.scheduled_counts.items()
+        )
+        for day_count in range(2, maximum_candidate_days + 1)
+    }
+    extra_day_weights = {
+        day_count: maximum_candidate_days - day_count + 1
+        for day_count in range(3, maximum_candidate_days + 1)
+    }
+    maximum_extra_score = sum(
+        eligible_tasks_by_day_count[day_count] * weight
+        for day_count, weight in extra_day_weights.items()
+    )
+    second_day_weight = maximum_extra_score + 1
+    maximum_spread_score = sum(
+        eligible_tasks_by_day_count[day_count]
+        * (second_day_weight if day_count == 2 else extra_day_weights[day_count])
+        for day_count in range(2, maximum_candidate_days + 1)
+    )
+    maximum_slot_cost = scheduled_count * max(0, len(slots) - 1)
+    policy_weight = maximum_slot_cost + 1
+    # The first used day is mandatory but unscored. A dominating constant makes
+    # the parallel marginal-cost arcs select day rewards in policy order.
+    first_day_weight = maximum_spread_score + 1
+    maximum_policy_score = (
+        sum(count > 0 for count in allocation.scheduled_counts.values()) * first_day_weight
+        + maximum_spread_score
+    )
+    if maximum_policy_score * policy_weight + maximum_slot_cost > _SAFE_OBJECTIVE_MAX:
+        return None
+
+    sink = 0
+    next_node = 1
+
+    def new_node() -> int:
+        nonlocal next_node
+        node = next_node
+        next_node += 1
+        return node
+
+    flow = min_cost_flow.SimpleMinCostFlow()
+    slot_nodes = {slot_index: new_node() for slot_index in range(len(slots))}
+    for slot_node in slot_nodes.values():
+        flow.add_arc_with_capacity_and_unit_cost(slot_node, sink, 1, 0)
+
+    assignment_by_arc: dict[int, tuple[str, int]] = {}
+    for task_id, task_scheduled_count in sorted(allocation.scheduled_counts.items()):
+        if task_scheduled_count == 0:
+            continue
+        task_node = new_node()
+        distinct_node = new_node()
+        repeat_node = new_node()
+        flow.set_node_supply(task_node, task_scheduled_count)
+
+        maximum_task_days = min(
+            task_scheduled_count,
+            len(eligible_days_by_task[task_id]),
+        )
+        for day_count in range(1, maximum_task_days + 1):
+            if day_count == 1:
+                day_weight = first_day_weight
+            elif day_count == 2:
+                day_weight = second_day_weight
+            else:
+                day_weight = extra_day_weights[day_count]
+            flow.add_arc_with_capacity_and_unit_cost(
+                task_node,
+                distinct_node,
+                1,
+                -day_weight * policy_weight,
+            )
+        flow.add_arc_with_capacity_and_unit_cost(
+            task_node,
+            repeat_node,
+            task_scheduled_count,
+            0,
+        )
+
+        for day_index in sorted(eligible_days_by_task[task_id]):
+            task_day_node = new_node()
+            # One distinct unit earns this day; repeat units may share it.
+            flow.add_arc_with_capacity_and_unit_cost(
+                distinct_node,
+                task_day_node,
+                1,
+                0,
+            )
+            flow.add_arc_with_capacity_and_unit_cost(
+                repeat_node,
+                task_day_node,
+                task_scheduled_count,
+                0,
+            )
+            for slot_index in eligible_slots_by_task_day[(task_id, day_index)]:
+                arc = flow.add_arc_with_capacity_and_unit_cost(
+                    task_day_node,
+                    slot_nodes[slot_index],
+                    1,
+                    slot_index,
+                )
+                assignment_by_arc[arc] = (task_id, slot_index)
+
+    flow.set_node_supply(sink, -scheduled_count)
+    if flow.solve() != flow.OPTIMAL:
+        return None
+
+    starts_by_task: dict[str, list[int]] = defaultdict(list)
+    for arc, (task_id, slot_index) in assignment_by_arc.items():
+        if flow.flow(arc):
+            starts_by_task[task_id].append(slots[slot_index])
+
+    sessions_by_task: dict[str, list[SessionDemand]] = defaultdict(list)
+    for session in problem.sessions:
+        sessions_by_task[session.task_id].append(session)
+
+    witness_starts: dict[str, int] = {}
+    for task_id, starts in sorted(starts_by_task.items()):
+        selected_sessions = sorted(
+            sessions_by_task[task_id],
+            key=lambda session: session.session_id,
+        )[: allocation.scheduled_counts[task_id]]
+        for session, start in zip(selected_sessions, sorted(starts), strict=True):
+            witness_starts[session.session_id] = start
+    return witness_starts
+
+
 def _solve_witness_day_placement(
     problem: FeasibilityProblem,
     tasks: tuple[_TaskDemand, ...],
@@ -1518,6 +1682,23 @@ def solve_with_overload(problem: FeasibilityProblem) -> OverloadResult:
                 candidates_by_session,
                 day_options_by_session,
                 spread_greedy_starts,
+                solve_deadline,
+            )
+        flow_policy_starts = _uniform_flow_policy_witness(problem, uniform_allocation)
+        if flow_policy_starts is not None:
+            uniform_status = (
+                KernelStatus.FEASIBLE
+                if len(flow_policy_starts) == len(problem.sessions)
+                else KernelStatus.OVERLOAD
+            )
+            return _solve_witness_day_placement(
+                problem,
+                tasks,
+                uniform_status,
+                set(flow_policy_starts),
+                candidates_by_session,
+                day_options_by_session,
+                flow_policy_starts,
                 solve_deadline,
             )
         return _solve_uniform_spread_placement(
