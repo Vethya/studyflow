@@ -13,9 +13,9 @@ import {
   CalendarDays,
   CalendarOff,
   Clock3,
-  ListTodo,
+  ListChecks,
   Plus,
-  TrendingUp,
+  ChartLine,
 } from "lucide-react";
 import { CapacityBar } from "@/components/capacity-bar";
 import { QuickAddTask } from "@/components/quick-add-task";
@@ -216,7 +216,7 @@ export default function DashboardPage() {
           label="Weekly study time"
         />
         <Stat
-          icon={ListTodo}
+          icon={ListChecks}
           value={isLoading ? null : formatDuration(unscheduledMinutes)}
           label="Open work"
         />
@@ -318,10 +318,10 @@ export default function DashboardPage() {
             <Clock3 className="h-3.5 w-3.5" /> Next session
           </li>
           <li className="flex items-center gap-1.5">
-            <ListTodo className="h-3.5 w-3.5" /> Awaiting outcomes
+            <ListChecks className="h-3.5 w-3.5" /> Awaiting outcomes
           </li>
           <li className="flex items-center gap-1.5">
-            <TrendingUp className="h-3.5 w-3.5" /> Weekly effort progress
+            <ChartLine className="h-3.5 w-3.5" /> Weekly effort progress
           </li>
         </ul>
       </section>

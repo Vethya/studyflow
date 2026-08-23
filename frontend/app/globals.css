@@ -287,3 +287,19 @@
     outline-offset: 2px;
   }
 }
+
+@layer base {
+  /* Lucide ships a 2px stroke, which reads heavy at the 14–16px sizes this
+     interface uses. A lighter stroke keeps the icons legible without letting
+     them compete with the figures beside them. */
+  .lucide {
+    stroke-width: 1.5;
+  }
+
+  /* Icons carrying real weight — a warning, the logo mark — keep more
+     presence than the navigation glyphs around them. */
+  .icon-strong .lucide,
+  .lucide.icon-strong {
+    stroke-width: 1.75;
+  }
+}

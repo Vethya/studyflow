@@ -3,20 +3,18 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  LayoutDashboard,
-  Calendar,
-  ListTodo,
-  Clock,
-  TrendingUp,
+  LayoutGrid,
+  CalendarDays,
+  ListChecks,
+  Clock3,
+  ChartLine,
   Settings,
   GraduationCap,
   LogOut,
-  Plus,
 } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -34,11 +32,11 @@ import { cn } from "@/lib/utils";
  * nav, and duplicating it here meant two copies of the same navigation.
  */
 const MENU = [
-  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-  { title: "Tasks", url: "/tasks", icon: ListTodo },
-  { title: "Calendar", url: "/calendar", icon: Calendar },
-  { title: "Availability", url: "/availability", icon: Clock },
-  { title: "Progress", url: "/progress", icon: TrendingUp },
+  { title: "Dashboard", url: "/dashboard", icon: LayoutGrid },
+  { title: "Tasks", url: "/tasks", icon: ListChecks },
+  { title: "Calendar", url: "/calendar", icon: CalendarDays },
+  { title: "Availability", url: "/availability", icon: Clock3 },
+  { title: "Progress", url: "/progress", icon: ChartLine },
 ];
 
 const GENERAL = [
@@ -146,24 +144,6 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      {/* Anchors the rail with the one action that unblocks a new student:
-          nothing on the dashboard means anything until there are tasks. */}
-      <SidebarFooter className="p-3 group-data-[collapsible=icon]:hidden">
-        <div className="rounded-xl bg-primary p-4 text-primary-foreground">
-          <p className="font-display text-sm font-semibold">Add your coursework</p>
-          <p className="mt-1 text-xs leading-relaxed text-primary-foreground/70">
-            StudyFlow can only tell you whether the work fits once it knows what
-            you owe and when.
-          </p>
-          <Link
-            href="/tasks"
-            className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-primary-foreground px-3 py-1.5 text-xs font-medium text-primary transition-opacity hover:opacity-90"
-          >
-            <Plus className="size-3.5" />
-            Add task
-          </Link>
-        </div>
-      </SidebarFooter>
     </Sidebar>
   );
 }
