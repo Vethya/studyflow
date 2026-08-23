@@ -312,7 +312,7 @@ function SectionHead({
   tone?: "deficit";
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 border-b pb-2">
+    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b pb-2">
       <h2 className="font-display text-base font-semibold tracking-tight">{title}</h2>
       <div className="flex items-baseline gap-3">
         <span className={cn("font-mono text-xs text-muted-foreground", tone === "deficit" && "text-deficit")}>
@@ -455,7 +455,7 @@ function TaskRow({ task }: { task: AcademicTask }) {
     <li>
       <Link
         href={`/tasks/${task.id}`}
-        className="flex items-center gap-3 py-2.5 transition-colors hover:bg-muted/40"
+        className="flex flex-col gap-1 py-2.5 transition-colors hover:bg-muted/40 sm:flex-row sm:items-center sm:gap-3"
       >
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{task.title}</p>
@@ -474,19 +474,21 @@ function TaskRow({ task }: { task: AcademicTask }) {
           </p>
         </div>
 
-        <span className="w-16 shrink-0 text-right font-mono text-xs text-muted-foreground">
-          {formatDuration(task.remainingDuration)}
-        </span>
+        <span className="flex shrink-0 items-center gap-3 font-mono text-xs sm:contents">
+          <span className="text-muted-foreground sm:w-16 sm:text-right">
+            {formatDuration(task.remainingDuration)}
+          </span>
 
-        <span
-          className={cn(
-            "flex w-24 shrink-0 items-center justify-end gap-1 font-mono text-xs",
-            due.urgent ? "text-deficit" : "text-muted-foreground",
-          )}
-        >
-          {/* An icon carries the warning too, so urgency is never colour alone. */}
-          {due.overdue && <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />}
-          {due.text}
+          <span
+            className={cn(
+              "flex items-center gap-1 sm:w-24 sm:justify-end",
+              due.urgent ? "text-deficit" : "text-muted-foreground",
+            )}
+          >
+            {/* An icon carries the warning too, so urgency is never colour alone. */}
+            {due.overdue && <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />}
+            {due.text}
+          </span>
         </span>
       </Link>
     </li>

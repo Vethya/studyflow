@@ -7,6 +7,7 @@ import {
   Calendar,
   ListTodo,
   Clock,
+  TrendingUp,
   Settings,
   GraduationCap,
   ChevronsUpDown,
@@ -35,7 +36,7 @@ import { useSession } from "@/hooks/use-session";
 import { cn } from "@/lib/utils";
 
 /**
- * Five destinations, one flat list.
+ * Six destinations, one flat list, matching SPEC §17.1.
  *
  * Settings deliberately has no expandable sub-menu here: the settings screen
  * carries its own section nav, and duplicating it in the sidebar meant two
@@ -46,6 +47,7 @@ const NAV_ITEMS = [
   { title: "Tasks", url: "/tasks", icon: ListTodo },
   { title: "Calendar", url: "/calendar", icon: Calendar },
   { title: "Availability", url: "/availability", icon: Clock },
+  { title: "Progress", url: "/progress", icon: TrendingUp },
   { title: "Settings", url: "/settings/profile", match: "/settings", icon: Settings },
 ];
 

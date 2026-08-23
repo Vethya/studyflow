@@ -74,7 +74,12 @@ export default function CalendarPage() {
   }, [anchor, isMobile]);
 
   const rangeStart = days[0];
-  const rangeEnd = new Date(days[days.length - 1].getTime() + DAY_MS);
+  // Memoised so the interval computations below do not see a fresh Date on
+  // every render and recompute needlessly.
+  const rangeEnd = useMemo(
+    () => new Date(days[days.length - 1].getTime() + DAY_MS),
+    [days],
+  );
 
   // Grid hours are derived from the student's own windows so the view is not
   // mostly empty space; falls back to a sensible day when none exist.
