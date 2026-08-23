@@ -47,9 +47,9 @@
   --color-error: oklch(0.553 0.176 33);
   --color-error-content: oklch(0.985 0.002 250);
 
-  --radius-selector: 0.3rem;
-  --radius-field: 0.5rem;
-  --radius-box: 0.5rem;
+  --radius-selector: 0.5rem;
+  --radius-field: 0.625rem;
+  --radius-box: 0.75rem;
   --size-selector: 0.25rem;
   --size-field: 0.25rem;
   --border: 1px;
@@ -86,9 +86,9 @@
   --color-error: oklch(0.712 0.157 40);
   --color-error-content: oklch(0.228 0.019 262);
 
-  --radius-selector: 0.3rem;
-  --radius-field: 0.5rem;
-  --radius-box: 0.5rem;
+  --radius-selector: 0.5rem;
+  --radius-field: 0.625rem;
+  --radius-box: 0.75rem;
   --size-selector: 0.25rem;
   --size-field: 0.25rem;
   --border: 1px;
@@ -184,7 +184,7 @@
   --chart-3: oklch(0.518 0.018 258);
   --chart-4: oklch(0.665 0.014 256);
   --chart-5: oklch(0.803 0.009 252);
-  --radius: 0.5rem;
+  --radius: 0.75rem;
   --sidebar: oklch(0.962 0.004 250);
   --sidebar-foreground: oklch(0.205 0.019 262);
   --sidebar-primary: oklch(0.235 0.021 262);

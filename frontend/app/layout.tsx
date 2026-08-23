@@ -42,6 +42,9 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      // DaisyUI resolves its colour roles from the active theme; without this
+      // attribute `.btn-primary` and friends fall back to the base surface.
+      data-theme="studyflow"
       className={`${inter.variable} ${bricolage.variable} ${plexMono.variable} h-full`}
     >
       <body className="min-h-full font-sans antialiased">

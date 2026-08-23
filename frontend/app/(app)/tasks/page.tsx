@@ -131,10 +131,13 @@ export default function TasksPage() {
       {/* ── Header ─────────────────────────────── */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="eyebrow">Coursework</p>
-          <h1 className="mt-1 font-display text-3xl font-bold tracking-tight">Tasks</h1>
+          <h1 className="font-display text-2xl font-bold tracking-tight">Tasks</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Everything you owe, with deadlines and estimates.
+          </p>
         </div>
         <Button
+          className="rounded-full px-4"
           onClick={() => {
             setEditing(null);
             setDialogOpen(true);

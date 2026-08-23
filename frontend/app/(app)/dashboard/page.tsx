@@ -10,8 +10,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertTriangle,
   ArrowRight,
+  CalendarDays,
   CalendarOff,
-  ChevronDown,
   Clock3,
   ListTodo,
   Plus,
@@ -116,11 +116,30 @@ export default function DashboardPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-10 px-6 py-8">
+      {/* ── Page header ─────────────────────────────────────── */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="font-display text-2xl font-bold tracking-tight">
+            {firstName ? `Hello, ${firstName}` : "Dashboard"}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Whether your coursework fits the time you have.
+          </p>
+        </div>
+        <Button
+          className="rounded-full px-4"
+          onClick={() => setQuickAddOpen(true)}
+        >
+          <Plus className="mr-1.5 h-4 w-4" />
+          Add task
+        </Button>
+      </div>
+
       {/* ── Verdict: the one loud thing on the page ─────────── */}
-      <section className="flex flex-col gap-4">
+      <section className="flex flex-col gap-4 rounded-xl border bg-card p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="eyebrow">{firstName ? `${firstName}'s workload` : "Your workload"}</p>
-          <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
+          <p className="eyebrow">Capacity</p>
+          <div className="flex items-center gap-0.5 rounded-lg bg-muted p-0.5">
             {HORIZONS.map((option) => (
               <button
                 key={option.days}
@@ -171,28 +190,47 @@ export default function DashboardPage() {
             <Verdict balance={verdict.balance} count={verdict.tasks.length} days={horizon} />
             <CapacityBar available={verdict.available} committed={verdict.committed} />
 
-            {/* Supporting figures read as one sentence of data, not four boxes. */}
-            <dl className="flex flex-wrap items-baseline gap-x-6 gap-y-1 border-t pt-3 font-mono text-xs text-muted-foreground">
-              <Figure label="free today" value={formatDuration(todayRemaining)} />
-              <Figure label="open work, none scheduled" value={formatDuration(unscheduledMinutes)} />
-              <Figure
-                label={`weekly pattern · ${preferences.data?.timezone ?? "—"}`}
-                value={formatDuration(weeklyPatternMinutes(allWindows))}
-              />
+            <p className="border-t pt-3 font-mono text-xs text-muted-foreground">
+              Read in {preferences.data?.timezone ?? "your timezone"}.{" "}
               <Link
                 href="/availability"
-                className="ml-auto underline underline-offset-2 hover:text-foreground"
+                className="underline underline-offset-2 hover:text-foreground"
               >
                 Adjust availability
               </Link>
-            </dl>
+            </p>
           </>
         )}
       </section>
 
-      {/* ── Quick add: collapsed until wanted (SPEC §17.2) ───── */}
-      <section>
-        {quickAddOpen ? (
+      {/* ── Glanceable figures ──────────────────────────────── */}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat
+          icon={Clock3}
+          value={isLoading ? null : formatDuration(todayRemaining)}
+          label="Free today"
+        />
+        <Stat
+          icon={CalendarDays}
+          value={isLoading ? null : formatDuration(weeklyPatternMinutes(allWindows))}
+          label="Weekly study time"
+        />
+        <Stat
+          icon={ListTodo}
+          value={isLoading ? null : formatDuration(unscheduledMinutes)}
+          label="Open work"
+        />
+        <Stat
+          icon={AlertTriangle}
+          value={isLoading ? null : String(overloaded.length)}
+          label="Overloaded tasks"
+          tone={overloaded.length > 0 ? "deficit" : undefined}
+        />
+      </div>
+
+      {/* ── Quick add: opened from the header action (SPEC §17.2) ── */}
+      {quickAddOpen && (
+        <section>
           <Card>
             <CardContent className="p-4">
               <div className="mb-3 flex items-center justify-between">
@@ -207,17 +245,8 @@ export default function DashboardPage() {
               <QuickAddTask onCreated={handleCreated} />
             </CardContent>
           </Card>
-        ) : (
-          <button
-            onClick={() => setQuickAddOpen(true)}
-            className="flex w-full items-center gap-2 rounded-md border border-dashed bg-card/50 px-4 py-3 text-left text-sm text-muted-foreground transition-colors hover:border-solid hover:bg-card hover:text-foreground"
-          >
-            <Plus className="h-4 w-4" />
-            Quick add a task
-            <ChevronDown className="ml-auto h-3.5 w-3.5" />
-          </button>
-        )}
-      </section>
+        </section>
+      )}
 
       {/* ── Working area ────────────────────────────────────── */}
       <div className="grid gap-10 lg:grid-cols-[1.4fr_1fr]">
@@ -331,12 +360,45 @@ function SectionHead({
   );
 }
 
-function Figure({ label, value }: { label: string; value: string }) {
+/**
+ * A figure with a soft icon badge. The badge is deliberately neutral: teal and
+ * orange are reserved for capacity, so a coloured badge here would dilute the
+ * only two colours in the product that carry meaning.
+ */
+function Stat({
+  icon: Icon,
+  value,
+  label,
+  tone,
+}: {
+  icon: React.ElementType;
+  value: string | null;
+  label: string;
+  tone?: "deficit";
+}) {
   return (
-    <div className="flex items-baseline gap-1.5">
-      <dt className="sr-only">{label}</dt>
-      <dd className="font-medium text-foreground">{value}</dd>
-      <span aria-hidden>{label}</span>
+    <div className="rounded-xl border bg-card p-4">
+      <span
+        className={cn(
+          "flex size-9 items-center justify-center rounded-full",
+          tone === "deficit" ? "bg-deficit-soft text-deficit" : "bg-muted text-muted-foreground",
+        )}
+      >
+        <Icon className="size-4" />
+      </span>
+      {value === null ? (
+        <Skeleton className="mt-3 h-7 w-20" />
+      ) : (
+        <p
+          className={cn(
+            "mt-3 font-display text-2xl font-bold tabular-nums",
+            tone === "deficit" && "text-deficit",
+          )}
+        >
+          {value}
+        </p>
+      )}
+      <p className="mt-0.5 text-sm text-muted-foreground">{label}</p>
     </div>
   );
 }

@@ -37,9 +37,8 @@ export default function ProgressPage() {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 py-8">
       <div>
-        <p className="eyebrow">Effort</p>
-        <h1 className="mt-1 font-display text-3xl font-bold tracking-tight">Progress</h1>
-        <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">
+        <h1 className="font-display text-2xl font-bold tracking-tight">Progress</h1>
+        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
           Effort Progress measures the share of expected effort consumed — not content
           completion, quality, or grade.
         </p>
