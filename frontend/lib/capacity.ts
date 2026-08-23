@@ -199,6 +199,76 @@ export function minutesByDay(
   return byDay;
 }
 
+/**
+ * One task's feasibility, carrying every field SPEC §10.5 requires of an
+ * Overload explanation.
+ */
+export interface TaskFeasibility {
+  task: AcademicTask;
+  deadline: Date;
+  /** Minutes of work still owed. */
+  requiredMinutes: number;
+  /**
+   * Free minutes before this deadline that earlier-deadline work has not
+   * already claimed. Capacity is not per-task in isolation: two tasks due
+   * the same week compete for the same hours.
+   */
+  availableMinutes: number;
+  /** Positive when the work cannot fit; zero when it fits. */
+  shortfallMinutes: number;
+  isOverloaded: boolean;
+  /** Unavailable Periods that fall between now and this deadline. */
+  relevantPeriods: UnavailablePeriod[];
+}
+
+/**
+ * Earliest-deadline-first feasibility check across all open work.
+ *
+ * SPEC §10.3 schedules the earliest deadline first, and §10.4 says to place
+ * the feasible portion and leave the excess as Unscheduled Work. So capacity
+ * is consumed cumulatively: each task is measured against what is left after
+ * everything due before it has taken its share. Checking tasks independently
+ * would report every one as fitting while the set as a whole does not.
+ *
+ * This mirrors the fallback heuristic in ADR 0004 rather than CP-SAT, so it
+ * is an approximation of what the solver will conclude — good enough to warn
+ * a student, not a substitute for the engine.
+ */
+export function analyseFeasibility(
+  tasks: AcademicTask[],
+  windows: AvailabilityWindow[],
+  periods: UnavailablePeriod[],
+  now: Date = new Date(),
+): TaskFeasibility[] {
+  const open = tasks
+    .filter((task) => OPEN_STATUSES.has(task.status))
+    .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
+
+  let consumed = 0;
+  return open.map((task) => {
+    const deadline = new Date(task.deadline);
+    // An overdue deadline leaves no runway at all.
+    const capacity =
+      deadline <= now ? 0 : availableMinutes(windows, periods, now, deadline);
+    const free = Math.max(0, capacity - consumed);
+    const required = task.remainingDuration;
+    consumed += required;
+
+    return {
+      task,
+      deadline,
+      requiredMinutes: required,
+      availableMinutes: free,
+      shortfallMinutes: Math.max(0, required - free),
+      isOverloaded: required > free,
+      relevantPeriods: periods.filter((period) => {
+        const start = new Date(period.startDate);
+        return start < deadline && new Date(period.endDate) > now;
+      }),
+    };
+  });
+}
+
 /** Local-date key, `YYYY-MM-DD`. Not UTC — these are wall-clock days. */
 export function dayKey(date: Date): string {
   const year = date.getFullYear();

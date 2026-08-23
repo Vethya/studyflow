@@ -6,12 +6,30 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertTriangle, ArrowRight, CalendarOff, Clock3, Plus } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRight,
+  CalendarDays,
+  CalendarOff,
+  Clock3,
+  ListTodo,
+  Lock,
+  TrendingUp,
+} from "lucide-react";
 import { CapacityBar } from "@/components/capacity-bar";
+import { QuickAddTask } from "@/components/quick-add-task";
 import { formatDuration, CATEGORY_CONFIG, PRIORITY_CONFIG } from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import { assessCapacity, weeklyPatternMinutes } from "@/lib/capacity";
+import {
+  analyseFeasibility,
+  assessCapacity,
+  availableMinutes,
+  startOfDay,
+  weeklyPatternMinutes,
+} from "@/lib/capacity";
+import type { TaskFeasibility } from "@/lib/capacity";
 import { account as accountApi, availability as availabilityApi, tasks as tasksApi } from "@/lib/api";
 import { describeError, useApi } from "@/hooks/use-api";
 import { useSession } from "@/hooks/use-session";
@@ -55,138 +73,185 @@ export default function DashboardPage() {
   const periods = useApi(loadPeriods);
   const preferences = useApi(loadPreferences);
 
-  const isLoading =
-    tasks.isLoading || windows.isLoading || periods.isLoading || preferences.isLoading;
+  const isLoading = tasks.isLoading || windows.isLoading || periods.isLoading;
   const loadError = tasks.error ?? windows.error ?? periods.error ?? preferences.error;
 
+  const allTasks = useMemo(() => tasks.data ?? [], [tasks.data]);
+  const allWindows = useMemo(() => windows.data ?? [], [windows.data]);
+  const allPeriods = useMemo(() => periods.data ?? [], [periods.data]);
+  const hasWindows = allWindows.length > 0;
+
   const verdict = useMemo(
-    () => assessCapacity(tasks.data ?? [], windows.data ?? [], periods.data ?? [], horizon),
-    [tasks.data, windows.data, periods.data, horizon],
+    () => assessCapacity(allTasks, allWindows, allPeriods, horizon),
+    [allTasks, allWindows, allPeriods, horizon],
   );
 
-  const hasWindows = (windows.data ?? []).length > 0;
-  const overdue = useMemo(
-    () => (tasks.data ?? []).filter((task) => task.status === "Overdue"),
-    [tasks.data],
+  // SPEC §10.5: an Overload explanation is per task, not one global figure.
+  const feasibility = useMemo(
+    () => analyseFeasibility(allTasks, allWindows, allPeriods),
+    [allTasks, allWindows, allPeriods],
   );
+  const overloaded = useMemo(() => feasibility.filter((f) => f.isOverloaded), [feasibility]);
 
-  // Committed minutes grouped by course, largest first. Tasks with no course
-  // are pooled rather than dropped, so the totals still reconcile.
-  const byCourse = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const task of verdict.tasks) {
-      const key = task.course?.trim() || "No course";
-      totals.set(key, (totals.get(key) ?? 0) + task.remainingDuration);
-    }
-    return [...totals.entries()].sort((a, b) => b[1] - a[1]);
-  }, [verdict.tasks]);
+  // Study time still free between now and midnight.
+  const todayRemaining = useMemo(() => {
+    const now = new Date();
+    const endOfDay = new Date(startOfDay(now).getTime() + 24 * 60 * 60_000);
+    return availableMinutes(allWindows, allPeriods, now, endOfDay);
+  }, [allWindows, allPeriods]);
+
+  // Until a schedule exists, every open minute is Unscheduled Work by
+  // definition (SPEC §5.4) — not an empty state, a true one.
+  const unscheduledMinutes = useMemo(
+    () => feasibility.reduce((sum, f) => sum + f.requiredMinutes, 0),
+    [feasibility],
+  );
 
   const firstName = account?.name.trim().split(/\s+/)[0] ?? "";
 
-  return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 p-6">
-      {/* ── Verdict ─────────────────────────────── */}
-      <section className="flex flex-col gap-5">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p className="eyebrow">
-              {firstName ? `${firstName}'s workload` : "Your workload"}
-            </p>
-            <h1 className="mt-1 font-display text-3xl font-bold tracking-tight">
-              Does it fit?
-            </h1>
-          </div>
+  function handleCreated(task: AcademicTask) {
+    tasks.setData([task, ...allTasks]);
+  }
 
-          {/* Horizon switch. Capacity is meaningless without a window of time. */}
-          <div className="flex items-center rounded-md border bg-card p-0.5">
-            {HORIZONS.map((option) => (
-              <button
-                key={option.days}
-                onClick={() => setHorizon(option.days)}
-                className={cn(
-                  "rounded-[0.3rem] px-3 py-1.5 font-mono text-xs transition-colors",
-                  horizon === option.days
-                    ? "bg-foreground text-background"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+  return (
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
+      {/* ── Heading ─────────────────────────────── */}
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="eyebrow">{firstName ? `${firstName}'s workload` : "Your workload"}</p>
+          <h1 className="mt-1 font-display text-3xl font-bold tracking-tight">
+            What needs attention now?
+          </h1>
         </div>
 
-        {loadError && (
-          <Alert variant="destructive">
-            <AlertTriangle className="h-4 w-4" />
-            <AlertDescription className="flex items-center justify-between gap-4">
-              <span>{describeError(loadError)}</span>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  tasks.reload();
-                  windows.reload();
-                  periods.reload();
-                }}
-              >
-                Retry
-              </Button>
-            </AlertDescription>
-          </Alert>
-        )}
+        <div className="flex items-center rounded-md border bg-card p-0.5">
+          {HORIZONS.map((option) => (
+            <button
+              key={option.days}
+              onClick={() => setHorizon(option.days)}
+              className={cn(
+                "rounded-[0.3rem] px-3 py-1.5 font-mono text-xs transition-colors",
+                horizon === option.days
+                  ? "bg-foreground text-background"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-        <Card>
-          <CardContent className="p-6">
-            {isLoading ? (
-              <div className="space-y-4">
-                <Skeleton className="h-10 w-72" />
-                <Skeleton className="h-14 w-full" />
-              </div>
-            ) : !hasWindows ? (
-              <EmptyCapacity />
-            ) : (
-              <div className="space-y-5">
-                <Verdict
-                  balance={verdict.balance}
-                  count={verdict.tasks.length}
-                  days={horizon}
-                />
-                <CapacityBar
-                  available={verdict.available}
-                  committed={verdict.committed}
-                />
-              </div>
-            )}
-          </CardContent>
-        </Card>
+      {loadError && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription className="flex items-center justify-between gap-4">
+            <span>{describeError(loadError)}</span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                tasks.reload();
+                windows.reload();
+                periods.reload();
+              }}
+            >
+              Retry
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
-        {hasWindows && !isLoading && (
-          <p className="font-mono text-xs text-muted-foreground">
-            Your weekly pattern is {formatDuration(weeklyPatternMinutes(windows.data ?? []))},
-            read in {preferences.data?.timezone ?? "your timezone"}.{" "}
-            <Link href="/availability" className="underline underline-offset-2 hover:text-foreground">
-              Adjust availability
+      {/* ── Glanceable figures ──────────────────── */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat
+          label="Today's study time left"
+          value={isLoading ? null : formatDuration(todayRemaining)}
+          hint={hasWindows ? "free before midnight" : "no availability set"}
+          icon={Clock3}
+        />
+        <Stat
+          label="Due in next 7 days"
+          value={isLoading ? null : String(verdict.tasks.length)}
+          hint="open tasks"
+          icon={CalendarDays}
+        />
+        <Stat
+          label="Overloaded"
+          value={isLoading ? null : String(overloaded.length)}
+          hint={overloaded.length > 0 ? "cannot fit before deadline" : "everything fits"}
+          icon={AlertTriangle}
+          tone={overloaded.length > 0 ? "deficit" : "surplus"}
+        />
+        <Stat
+          label="Unscheduled work"
+          value={isLoading ? null : formatDuration(unscheduledMinutes)}
+          hint="no schedule generated yet"
+          icon={ListTodo}
+        />
+      </div>
+
+      {/* ── Capacity verdict ────────────────────── */}
+      <Card>
+        <CardContent className="p-6">
+          {isLoading ? (
+            <div className="space-y-4">
+              <Skeleton className="h-9 w-64" />
+              <Skeleton className="h-14 w-full" />
+            </div>
+          ) : !hasWindows ? (
+            <EmptyCapacity />
+          ) : (
+            <div className="space-y-5">
+              <Verdict balance={verdict.balance} count={verdict.tasks.length} days={horizon} />
+              <CapacityBar available={verdict.available} committed={verdict.committed} />
+              <p className="font-mono text-xs text-muted-foreground">
+                Weekly pattern {formatDuration(weeklyPatternMinutes(allWindows))}, read in{" "}
+                {preferences.data?.timezone ?? "your timezone"}.{" "}
+                <Link
+                  href="/availability"
+                  className="underline underline-offset-2 hover:text-foreground"
+                >
+                  Adjust availability
+                </Link>
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Quick Add Task (SPEC §17.2) ─────────── */}
+      <Card>
+        <CardHeader className="pb-4">
+          <CardTitle className="font-display text-base">Quick add</CardTitle>
+          <CardDescription>
+            Capture a deadline now; add course, priority and notes later on{" "}
+            <Link href="/tasks" className="underline underline-offset-2 hover:text-foreground">
+              Tasks
             </Link>
-          </p>
-        )}
-      </section>
+            .
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <QuickAddTask onCreated={handleCreated} />
+        </CardContent>
+      </Card>
 
-      {/* ── Attention + distribution ────────────── */}
-      <div className="grid gap-6 lg:grid-cols-[1.35fr_1fr]">
+      {/* ── Deadlines + overload ────────────────── */}
+      <div className="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
         <Card>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <CardTitle className="font-display text-base">Next up</CardTitle>
-                <CardDescription>
-                  Open work due in the next {horizon} days, soonest first
-                </CardDescription>
+                <CardTitle className="font-display text-base">Upcoming deadlines</CardTitle>
+                <CardDescription>Open work due in the next {horizon} days</CardDescription>
               </div>
-              <Button size="sm" variant="outline" nativeButton={false} render={<Link href="/tasks" />}>
-                <Plus className="mr-1.5 h-3.5 w-3.5" />
-                Add task
-              </Button>
+              <Link
+                href="/tasks"
+                className="shrink-0 font-mono text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              >
+                All tasks →
+              </Link>
             </div>
           </CardHeader>
           <CardContent className="p-0">
@@ -194,15 +259,14 @@ export default function DashboardPage() {
               <div className="space-y-2 p-6 pt-0">
                 <Skeleton className="h-12 w-full" />
                 <Skeleton className="h-12 w-full" />
-                <Skeleton className="h-12 w-full" />
               </div>
             ) : verdict.tasks.length === 0 ? (
               <p className="px-6 pb-6 text-sm text-muted-foreground">
-                Nothing due in this window. Widen the range or add a task.
+                Nothing due in this window. Widen the range, or add a task above.
               </p>
             ) : (
               <ul className="divide-y border-t">
-                {verdict.tasks.slice(0, 8).map((task) => (
+                {verdict.tasks.slice(0, 6).map((task) => (
                   <TaskRow key={task.id} task={task} />
                 ))}
               </ul>
@@ -210,80 +274,192 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <div className="flex flex-col gap-6">
-          {overdue.length > 0 && (
-            <Card className="border-deficit/40 bg-deficit-soft">
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 font-display text-base">
-                  <AlertTriangle className="h-4 w-4 text-deficit" />
-                  {overdue.length} overdue
-                </CardTitle>
-                <CardDescription>
-                  Past their deadline and still counted against your time.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-1.5">
-                {overdue.slice(0, 4).map((task) => (
-                  <Link
-                    key={task.id}
-                    href={`/tasks/${task.id}`}
-                    className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-card"
-                  >
-                    <span className="truncate">{task.title}</span>
-                    <span className="shrink-0 font-mono text-xs text-deficit">
-                      {formatDuration(task.remainingDuration)}
-                    </span>
-                  </Link>
-                ))}
-              </CardContent>
-            </Card>
-          )}
+        <Card className={cn(overloaded.length > 0 && "border-deficit/40")}>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 font-display text-base">
+              <AlertTriangle
+                className={cn(
+                  "h-4 w-4",
+                  overloaded.length > 0 ? "text-deficit" : "text-muted-foreground",
+                )}
+              />
+              Overload warnings
+            </CardTitle>
+            <CardDescription>
+              Work that cannot fit before its own deadline
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {isLoading ? (
+              <Skeleton className="h-24 w-full" />
+            ) : !hasWindows ? (
+              <p className="text-sm text-muted-foreground">
+                Set your availability to detect overload.
+              </p>
+            ) : overloaded.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Nothing is overloaded. Every open task fits before its deadline.
+              </p>
+            ) : (
+              overloaded.slice(0, 3).map((item) => <OverloadCard key={item.task.id} item={item} />)
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="font-display text-base">Where the time goes</CardTitle>
-              <CardDescription>Committed minutes by course</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {isLoading ? (
-                <>
-                  <Skeleton className="h-6 w-full" />
-                  <Skeleton className="h-6 w-full" />
-                </>
-              ) : byCourse.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No open work in this window.
-                </p>
-              ) : (
-                byCourse.map(([course, minutes]) => {
-                  const share = verdict.committed > 0 ? minutes / verdict.committed : 0;
-                  return (
-                    <div key={course} className="space-y-1">
-                      <div className="flex items-baseline justify-between gap-3 text-sm">
-                        <span className="truncate">{course}</span>
-                        <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                          {formatDuration(minutes)}
-                        </span>
-                      </div>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full rounded-full bg-foreground/70"
-                          style={{ width: `${Math.round(share * 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </CardContent>
-          </Card>
+      {/* ── Blocked on the scheduling engine ────── */}
+      <Card className="border-dashed bg-muted/30">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 font-display text-base">
+            <Lock className="h-4 w-4 text-muted-foreground" />
+            Waiting on the scheduling engine
+          </CardTitle>
+          <CardDescription>
+            These three panels are specified in §17.2 but every figure in them comes
+            from Study Sessions, which the API does not expose yet.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-3">
+          <Pending
+            icon={Clock3}
+            title="Next session"
+            detail="Needs generated sessions from CP-SAT."
+          />
+          <Pending
+            icon={ListTodo}
+            title="Awaiting outcomes"
+            detail="Needs past sessions to record Completed, Delayed or Missed against."
+          />
+          <Pending
+            icon={TrendingUp}
+            title="Weekly effort progress"
+            detail="Needs Actual Duration, which only session outcomes produce."
+          />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/** One glanceable figure. */
+function Stat({
+  label,
+  value,
+  hint,
+  icon: Icon,
+  tone,
+}: {
+  label: string;
+  value: string | null;
+  hint: string;
+  icon: React.ElementType;
+  tone?: "surplus" | "deficit";
+}) {
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-2">
+          <p className="eyebrow leading-tight">{label}</p>
+          <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </div>
+        {value === null ? (
+          <Skeleton className="mt-2 h-7 w-20" />
+        ) : (
+          <p
+            className={cn(
+              "mt-1.5 font-display text-2xl font-semibold tabular-nums",
+              tone === "deficit" && "text-deficit",
+              tone === "surplus" && "text-surplus",
+            )}
+          >
+            {value}
+          </p>
+        )}
+        <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Every field SPEC §10.5 requires of an Overload explanation. */
+function OverloadCard({ item }: { item: TaskFeasibility }) {
+  return (
+    <div className="rounded-md border border-deficit/30 bg-deficit-soft p-3">
+      <Link
+        href={`/tasks/${item.task.id}`}
+        className="block truncate text-sm font-medium underline-offset-4 hover:underline"
+      >
+        {item.task.title}
+      </Link>
+
+      <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-xs">
+        <dt className="text-muted-foreground">Deadline</dt>
+        <dd className="text-right">
+          {item.deadline.toLocaleDateString(undefined, { day: "numeric", month: "short" })}
+        </dd>
+
+        <dt className="text-muted-foreground">Required</dt>
+        <dd className="text-right">{formatDuration(item.requiredMinutes)}</dd>
+
+        <dt className="text-muted-foreground">Available</dt>
+        <dd className="text-right">{formatDuration(item.availableMinutes)}</dd>
+
+        <dt className="font-medium text-deficit">Shortfall</dt>
+        <dd className="text-right font-medium text-deficit">
+          {formatDuration(item.shortfallMinutes)}
+        </dd>
+      </dl>
+
+      {item.relevantPeriods.length > 0 && (
+        <>
+          <Separator className="my-2 bg-deficit/20" />
+          <p className="text-xs text-muted-foreground">
+            <CalendarOff className="mr-1 inline h-3 w-3" />
+            Blocked by {item.relevantPeriods.map((p) => p.title).join(", ")}
+          </p>
+        </>
+      )}
+
+      {/* §10.5: remedies are the student's to choose; StudyFlow never applies
+          them automatically. */}
+      <div className="mt-2.5 flex flex-wrap gap-2">
+        <Link
+          href={`/tasks/${item.task.id}`}
+          className="rounded border border-deficit/30 bg-card px-2 py-1 text-xs transition-colors hover:bg-muted"
+        >
+          Extend deadline
+        </Link>
+        <Link
+          href="/availability"
+          className="rounded border border-deficit/30 bg-card px-2 py-1 text-xs transition-colors hover:bg-muted"
+        >
+          Add availability
+        </Link>
       </div>
     </div>
   );
 }
 
-/** The headline sentence. Plain language, no hedging, no exclamation. */
+function Pending({
+  icon: Icon,
+  title,
+  detail,
+}: {
+  icon: React.ElementType;
+  title: string;
+  detail: string;
+}) {
+  return (
+    <div className="rounded-md border border-dashed bg-card/60 p-3">
+      <p className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+        <Icon className="h-3.5 w-3.5" />
+        {title}
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground/80">{detail}</p>
+    </div>
+  );
+}
+
 function Verdict({
   balance,
   count,
@@ -296,7 +472,7 @@ function Verdict({
   if (count === 0) {
     return (
       <div>
-        <p className="font-display text-4xl font-bold tracking-tight">Nothing due</p>
+        <p className="font-display text-3xl font-bold tracking-tight">Nothing due</p>
         <p className="mt-1.5 text-sm text-muted-foreground">
           No open work falls in the next {days} days.
         </p>
@@ -309,7 +485,7 @@ function Verdict({
     <div>
       <p
         className={cn(
-          "font-display text-4xl font-bold tracking-tight",
+          "font-display text-3xl font-bold tracking-tight",
           over ? "text-deficit" : "text-surplus",
         )}
       >
@@ -324,7 +500,6 @@ function Verdict({
   );
 }
 
-/** Shown when availability has never been set, which makes capacity unknowable. */
 function EmptyCapacity() {
   return (
     <div className="flex flex-col items-start gap-4 py-2">
@@ -366,13 +541,18 @@ function TaskRow({ task }: { task: AcademicTask }) {
         </div>
 
         {task.priority === "High" && (
-          <Badge className={cn("hidden shrink-0 rounded-md border-0 text-xs sm:inline-flex", priority.bg, priority.color)}>
+          <Badge
+            className={cn(
+              "hidden shrink-0 rounded-md border-0 text-xs sm:inline-flex",
+              priority.bg,
+              priority.color,
+            )}
+          >
             {priority.label}
           </Badge>
         )}
 
         <span className="shrink-0 font-mono text-xs text-muted-foreground">
-          <Clock3 className="mr-1 inline h-3 w-3" />
           {formatDuration(task.remainingDuration)}
         </span>
 
