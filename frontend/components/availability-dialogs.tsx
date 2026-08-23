@@ -93,7 +93,9 @@ export function AddWindowDialog({ open, onOpenChange, onSubmit }: AddWindowDialo
             <Label className="text-xs font-medium">Day</Label>
             <Select value={dayOfWeek} onValueChange={(v) => v && setDayOfWeek(v as string)}>
               <SelectTrigger className="w-full">
-                <SelectValue />
+                {/* Base UI renders the raw value unless given a render
+                    function, which would show the index instead of the day. */}
+                <SelectValue>{(value) => DAY_NAMES[Number(value)]}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {DAY_NAMES.map((day, index) => (

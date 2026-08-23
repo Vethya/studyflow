@@ -37,6 +37,7 @@ import { cn } from "@/lib/utils";
 import { ApiError, tasks as tasksApi } from "@/lib/api";
 import { describeError, useApi } from "@/hooks/use-api";
 import { TaskFormDialog } from "@/components/task-form-dialog";
+import { localInputToIso } from "@/lib/datetime";
 import { CATEGORIES, PRIORITIES, TASK_STATUSES } from "@/types/task";
 import type { AcademicTask, Category, Priority, TaskStatus } from "@/types/task";
 
@@ -50,6 +51,8 @@ export default function TasksPage() {
   const [course, setCourse] = useState("");
   const [appliedCourse, setAppliedCourse] = useState("");
   const [search, setSearch] = useState("");
+  // SPEC §17.4 lists "Filter by Deadline"; the API takes RFC 3339 bounds.
+  const [dueBefore, setDueBefore] = useState("");
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<AcademicTask | null>(null);
@@ -63,10 +66,11 @@ export default function TasksPage() {
           category: category ?? undefined,
           priority: priority ?? undefined,
           course: appliedCourse || undefined,
+          deadlineTo: dueBefore ? localInputToIso(dueBefore) : undefined,
         },
         signal,
       ),
-    [status, category, priority, appliedCourse],
+    [status, category, priority, appliedCourse, dueBefore],
   );
   const { data, error, isLoading, reload, setData } = useApi(load);
 
@@ -80,7 +84,11 @@ export default function TasksPage() {
   }, [tasks, search]);
 
   const filterCount =
-    (status ? 1 : 0) + (category ? 1 : 0) + (priority ? 1 : 0) + (appliedCourse ? 1 : 0);
+    (status ? 1 : 0) +
+    (category ? 1 : 0) +
+    (priority ? 1 : 0) +
+    (appliedCourse ? 1 : 0) +
+    (dueBefore ? 1 : 0);
 
   function clearFilters() {
     setStatus(null);
@@ -88,6 +96,7 @@ export default function TasksPage() {
     setPriority(null);
     setCourse("");
     setAppliedCourse("");
+    setDueBefore("");
   }
 
   function handleSaved(saved: AcademicTask) {
@@ -182,6 +191,17 @@ export default function TasksPage() {
           />
         </form>
 
+        <label className="flex items-center gap-1.5">
+          <span className="eyebrow whitespace-nowrap">Due before</span>
+          <Input
+            type="datetime-local"
+            className="h-9 w-[13rem]"
+            value={dueBefore}
+            onChange={(e) => setDueBefore(e.target.value)}
+            aria-label="Show tasks due before"
+          />
+        </label>
+
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -257,8 +277,8 @@ export default function TasksPage() {
       </Card>
 
       <p className="font-mono text-xs text-muted-foreground">
-        Status, category, priority and course are filtered by the server. Title
-        filtering happens in your browser — the API has no text search.
+        Status, category, priority, course and deadline are filtered by the server.
+        Title filtering happens in your browser — the API has no text search.
       </p>
 
       <TaskFormDialog

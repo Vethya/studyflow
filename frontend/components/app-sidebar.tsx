@@ -26,6 +26,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -155,12 +156,15 @@ export function AppSidebar() {
               >
                 {account && (
                   <>
-                    <DropdownMenuLabel className="font-normal">
-                      <span className="block text-sm font-medium">{account.name}</span>
-                      <span className="block truncate font-mono text-xs text-muted-foreground">
-                        {account.email}
-                      </span>
-                    </DropdownMenuLabel>
+                    {/* Base UI requires a GroupLabel to sit inside a Group. */}
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel className="font-normal">
+                        <span className="block text-sm font-medium">{account.name}</span>
+                        <span className="block truncate font-mono text-xs text-muted-foreground">
+                          {account.email}
+                        </span>
+                      </DropdownMenuLabel>
+                    </DropdownMenuGroup>
                     <DropdownMenuSeparator />
                   </>
                 )}

@@ -1,6 +1,100 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@plugin "daisyui" {
+  themes: false;
+  logs: false;
+}
+
+/**
+ * StudyFlow's DaisyUI theme.
+ *
+ * DaisyUI ships opinionated, colourful, softly-shadowed defaults. Adopting
+ * them wholesale would erase the thing that makes this product legible: the
+ * interface is deliberately near-monochrome so that teal and orange can mean
+ * "you have room" and "you are over" — and nothing else. So every DaisyUI
+ * colour role is mapped onto the existing ink palette, `--depth` and `--noise`
+ * are switched off, and the radii match what the app already used.
+ */
+@plugin "daisyui/theme" {
+  name: "studyflow";
+  default: true;
+  prefersdark: false;
+  color-scheme: light;
+
+  --color-base-100: oklch(1 0 0);
+  --color-base-200: oklch(0.977 0.003 250);
+  --color-base-300: oklch(0.94 0.005 250);
+  --color-base-content: oklch(0.205 0.019 262);
+
+  /* Primary is ink, not a hue: emphasis comes from weight, never colour. */
+  --color-primary: oklch(0.235 0.021 262);
+  --color-primary-content: oklch(0.985 0.002 250);
+  --color-secondary: oklch(0.955 0.004 250);
+  --color-secondary-content: oklch(0.235 0.021 262);
+  --color-accent: oklch(0.945 0.006 250);
+  --color-accent-content: oklch(0.235 0.021 262);
+  --color-neutral: oklch(0.395 0.018 260);
+  --color-neutral-content: oklch(0.985 0.002 250);
+
+  --color-info: oklch(0.518 0.018 258);
+  --color-info-content: oklch(0.985 0.002 250);
+  /* The only two saturated roles in the product. */
+  --color-success: oklch(0.512 0.089 183);
+  --color-success-content: oklch(0.985 0.002 250);
+  --color-warning: oklch(0.553 0.176 33);
+  --color-warning-content: oklch(0.985 0.002 250);
+  --color-error: oklch(0.553 0.176 33);
+  --color-error-content: oklch(0.985 0.002 250);
+
+  --radius-selector: 0.3rem;
+  --radius-field: 0.5rem;
+  --radius-box: 0.5rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  /* Flat and precise. This is a ledger, not a dashboard toy. */
+  --depth: 0;
+  --noise: 0;
+}
+
+@plugin "daisyui/theme" {
+  name: "studyflow-dark";
+  prefersdark: true;
+  color-scheme: dark;
+
+  --color-base-100: oklch(0.228 0.019 262);
+  --color-base-200: oklch(0.183 0.017 262);
+  --color-base-300: oklch(0.288 0.019 262);
+  --color-base-content: oklch(0.955 0.004 250);
+
+  --color-primary: oklch(0.925 0.006 250);
+  --color-primary-content: oklch(0.228 0.019 262);
+  --color-secondary: oklch(0.288 0.019 262);
+  --color-secondary-content: oklch(0.955 0.004 250);
+  --color-accent: oklch(0.318 0.02 262);
+  --color-accent-content: oklch(0.955 0.004 250);
+  --color-neutral: oklch(0.448 0.018 260);
+  --color-neutral-content: oklch(0.955 0.004 250);
+
+  --color-info: oklch(0.712 0.014 256);
+  --color-info-content: oklch(0.228 0.019 262);
+  --color-success: oklch(0.712 0.101 183);
+  --color-success-content: oklch(0.228 0.019 262);
+  --color-warning: oklch(0.712 0.157 40);
+  --color-warning-content: oklch(0.228 0.019 262);
+  --color-error: oklch(0.712 0.157 40);
+  --color-error-content: oklch(0.228 0.019 262);
+
+  --radius-selector: 0.3rem;
+  --radius-field: 0.5rem;
+  --radius-box: 0.5rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
 
 @custom-variant dark (&:is(.dark *));
 
@@ -169,5 +263,27 @@
     letter-spacing: 0.09em;
     text-transform: uppercase;
     color: var(--muted-foreground);
+  }
+}
+
+@layer base {
+  /* Anyone who has asked their OS to reduce motion gets no transitions,
+     no animation, and no smooth scrolling — including DaisyUI's own. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* A visible focus ring everywhere, not just where a component remembered
+     to add one (SPEC §19.5). */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
 }
