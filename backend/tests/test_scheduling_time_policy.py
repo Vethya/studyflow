@@ -380,6 +380,10 @@ def test_unproven_global_spread_is_a_technical_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     original_solve = cp_model.CpSolver.solve
+    monkeypatch.setattr(
+        "studyflow.scheduling.overload._uniform_flow_policy_witness",
+        lambda *args, **kwargs: None,
+    )
 
     def downgrade_spread(
         solver: cp_model.CpSolver,
