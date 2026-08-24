@@ -132,7 +132,7 @@ class RecoverySnapshotOutcome(Base):
         primary_key=True,
     )
     session_id: Mapped[UUID] = mapped_column(
-        ForeignKey("study_session_outcomes.session_id", ondelete="RESTRICT"), primary_key=True
+        ForeignKey("study_session_outcomes.session_id", ondelete="CASCADE"), primary_key=True
     )
 
 

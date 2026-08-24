@@ -506,6 +506,17 @@ def test_recovery_snapshot_trigger_is_deleted_with_its_outcome() -> None:
     assert trigger_foreign_key.ondelete == "CASCADE"
 
 
+def test_recovery_snapshot_outcome_is_deleted_with_its_outcome() -> None:
+    table = Base.metadata.tables["recovery_snapshot_outcomes"]
+    outcome_foreign_key = next(
+        foreign_key
+        for foreign_key in table.foreign_key_constraints
+        if next(iter(foreign_key.columns)).name == "session_id"
+    )
+
+    assert outcome_foreign_key.ondelete == "CASCADE"
+
+
 @pytest.mark.anyio
 async def test_overload_revision_cannot_resolve_outcome_or_replace_active_schedule() -> None:
     harness = await _harness(
