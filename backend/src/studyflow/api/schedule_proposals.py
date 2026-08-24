@@ -10,13 +10,17 @@ from pydantic import BaseModel
 from studyflow.api.account import AccountError, require_csrf_session, require_session
 from studyflow.auth.session_authentication import SessionPrincipal
 from studyflow.availability.unavailable import UnavailablePeriod, UnavailablePeriods
+from studyflow.scheduling.acceptance import ScheduleAcceptance, StaleScheduleProposalError
 from studyflow.scheduling.assembly import (
     AvailabilityTimezoneConfirmationRequiredError,
     SchedulingInputError,
     SchedulingInputTooLargeError,
 )
 from studyflow.scheduling.proposals import (
+    ProposalExpiredError,
     ProposalKind,
+    ProposalNotFeasibleError,
+    ProposalScheduleConflictError,
     ProposalStatus,
     ScheduleProposalRecord,
     ScheduleProposalRepository,
@@ -90,12 +94,20 @@ class ScheduleProposalError(BaseModel):
     detail: str
 
 
+class AcceptedScheduleResponse(BaseModel):
+    sessions: list[ProposedSessionResponse]
+
+
 def get_schedule_generation(request: Request) -> ScheduleGeneration:
     return cast(ScheduleGeneration, request.app.state.schedule_generation)
 
 
 def get_schedule_proposals(request: Request) -> ScheduleProposalRepository:
     return cast(ScheduleProposalRepository, request.app.state.schedule_proposals)
+
+
+def get_schedule_acceptance(request: Request) -> ScheduleAcceptance:
+    return cast(ScheduleAcceptance, request.app.state.schedule_acceptance)
 
 
 def get_academic_tasks(request: Request) -> AcademicTasks:
@@ -274,3 +286,64 @@ async def get_current_schedule_proposal(
             status_code=status.HTTP_404_NOT_FOUND, detail="Schedule proposal not found"
         )
     return await _with_titles(proposal, principal.account_id, tasks, unavailable)
+
+
+@router.post(
+    "/{proposal_id}/accept",
+    response_model=AcceptedScheduleResponse,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
+        status.HTTP_403_FORBIDDEN: {"model": AccountError},
+        status.HTTP_404_NOT_FOUND: {"model": ScheduleProposalError},
+        status.HTTP_409_CONFLICT: {"model": ScheduleProposalError},
+    },
+)
+async def accept_schedule_proposal(
+    proposal_id: UUID,
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    acceptance: Annotated[ScheduleAcceptance, Depends(get_schedule_acceptance)],
+    tasks: Annotated[AcademicTasks, Depends(get_academic_tasks)],
+) -> AcceptedScheduleResponse:
+    try:
+        sessions = await acceptance.accept(principal.account_id, proposal_id)
+    except (
+        ProposalNotFeasibleError,
+        ProposalExpiredError,
+        ProposalScheduleConflictError,
+        StaleScheduleProposalError,
+    ) as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    if sessions is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found")
+    titles = {task.id: task.title for task in await tasks.list(principal.account_id)}
+    return AcceptedScheduleResponse(
+        sessions=[
+            ProposedSessionResponse(
+                id=item.id,
+                task_id=item.task_id,
+                task_title=titles.get(item.task_id),
+                starts_at=item.starts_at,
+                ends_at=item.ends_at,
+                planned_duration_minutes=item.planned_duration_minutes,
+            )
+            for item in sorted(sessions, key=lambda value: (value.starts_at, value.id))
+        ]
+    )
+
+
+@router.post(
+    "/{proposal_id}/reject",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
+        status.HTTP_403_FORBIDDEN: {"model": AccountError},
+        status.HTTP_404_NOT_FOUND: {"model": ScheduleProposalError},
+    },
+)
+async def reject_schedule_proposal(
+    proposal_id: UUID,
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    acceptance: Annotated[ScheduleAcceptance, Depends(get_schedule_acceptance)],
+) -> None:
+    if not await acceptance.reject(principal.account_id, proposal_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found")
