@@ -1508,7 +1508,10 @@ def solve_with_overload(problem: FeasibilityProblem) -> OverloadResult:
             (),
             empty_diagnostics("EMPTY"),
         )
-    if not problem.planning_days:
+    if not problem.planning_days and any(
+        candidate_start_intervals(session, problem.planning_start_minute)
+        for session in problem.sessions
+    ):
         return OverloadResult(
             KernelStatus.TECHNICAL_FAILURE,
             (),
@@ -1516,7 +1519,6 @@ def solve_with_overload(problem: FeasibilityProblem) -> OverloadResult:
             empty_diagnostics("DAY_DOMAIN_REQUIRED"),
             "Local planning-day metadata is required for schedule policy",
         )
-
     solve_deadline = monotonic() + float(problem.max_solve_seconds)
     try:
         tasks = _task_demands(problem, solve_deadline)

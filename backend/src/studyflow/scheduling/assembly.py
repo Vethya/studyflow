@@ -9,6 +9,8 @@ from studyflow.availability.windows import AvailabilityWindow, AvailabilityWindo
 from studyflow.scheduling.calendar import expand_calendar
 from studyflow.scheduling.contracts import (
     FeasibilityProblem,
+    MinuteWindow,
+    PlanningDay,
     SessionDemand,
     TaskPriority,
 )
@@ -103,23 +105,29 @@ def assemble_schedule_problem(
             f"Schedule cannot exceed {MAX_ASSEMBLED_SESSIONS} sessions"
         )
 
-    calendar = expand_calendar(
-        availability_windows,
-        unavailable_periods,
-        timezone_name=preferences.timezone,
-        planning_start=planning_start_utc,
-        horizon_end=horizon_end,
-    )
-    if calendar.planning_days.day_count > MAX_PLANNING_DAYS:
-        raise SchedulingInputTooLargeError(
-            f"Schedule cannot exceed {MAX_PLANNING_DAYS} planning days"
+    horizon_end_minute, _ = _minute_bounds(horizon_end)
+    if horizon_end_minute <= planning_start_minute:
+        concrete_windows: tuple[MinuteWindow, ...] = ()
+        planning_days: tuple[PlanningDay, ...] = ()
+    else:
+        calendar = expand_calendar(
+            availability_windows,
+            unavailable_periods,
+            timezone_name=preferences.timezone,
+            planning_start=planning_start_utc,
+            horizon_end=horizon_end,
         )
-    if calendar.windows.window_count > MAX_ASSEMBLED_WINDOWS:
-        raise SchedulingInputTooLargeError(
-            f"Schedule cannot exceed {MAX_ASSEMBLED_WINDOWS} availability windows"
-        )
+        if calendar.planning_days.day_count > MAX_PLANNING_DAYS:
+            raise SchedulingInputTooLargeError(
+                f"Schedule cannot exceed {MAX_PLANNING_DAYS} planning days"
+            )
+        if calendar.windows.window_count > MAX_ASSEMBLED_WINDOWS:
+            raise SchedulingInputTooLargeError(
+                f"Schedule cannot exceed {MAX_ASSEMBLED_WINDOWS} availability windows"
+            )
 
-    concrete_windows = calendar.windows.materialize()
+        concrete_windows = calendar.windows.materialize()
+        planning_days = calendar.planning_days.materialize()
     sessions: list[SessionDemand] = []
     for task, split in zip(eligible_tasks, splits, strict=True):
         deadline_minute, _ = _minute_bounds(task.deadline_at)
@@ -141,5 +149,5 @@ def assemble_schedule_problem(
         planning_start_minute=planning_start_minute,
         minimum_break_minutes=preferences.minimum_break_minutes,
         max_solve_seconds=max_solve_seconds,
-        planning_days=calendar.planning_days.materialize(),
+        planning_days=planning_days,
     )

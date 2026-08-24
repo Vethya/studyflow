@@ -8,11 +8,13 @@ from studyflow.availability.unavailable import UnavailablePeriodDraft
 from studyflow.availability.windows import AvailabilityWindowDraft
 from studyflow.scheduling import (
     AvailabilityTimezoneConfirmationRequiredError,
+    KernelStatus,
     MinuteWindow,
     PlanningDay,
     SchedulingInputTooLargeError,
     TaskPriority,
     assemble_schedule_problem,
+    solve_with_overload,
 )
 from studyflow.tasks.service import (
     AcademicTaskRecord,
@@ -164,6 +166,22 @@ def test_no_availability_keeps_work_for_overload_reporting() -> None:
 
     assert len(problem.sessions) == 1
     assert problem.sessions[0].allowed_windows == ()
+
+
+def test_subminute_horizon_becomes_normal_overload_input() -> None:
+    planning_start = datetime(2026, 1, 5, 8, 0, 45, tzinfo=UTC)
+    problem = assemble_schedule_problem(
+        [_task(TASK_A_ID, planning_start + timedelta(seconds=5), 60)],
+        [AvailabilityWindowDraft(0, time(8), time(9))],
+        [],
+        _preferences(),
+        planning_start=planning_start,
+    )
+
+    assert len(problem.sessions) == 1
+    assert problem.sessions[0].allowed_windows == ()
+    assert problem.planning_days == ()
+    assert solve_with_overload(problem).status is KernelStatus.OVERLOAD
 
 
 def test_rejects_horizon_before_materializing_calendar() -> None:
