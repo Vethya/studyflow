@@ -872,7 +872,8 @@
             "header": [{ "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
             "url": { "raw": "{{base_url}}/api/v1/schedule-proposals/{{proposal_id}}/accept", "host": ["{{base_url}}"], "path": ["api", "v1", "schedule-proposals", "{{proposal_id}}", "accept"] }
           },
-          "response": []
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) {", "  const sessions = pm.response.json().sessions;", "  if (sessions.length > 0) pm.collectionVariables.set('session_id', sessions[0].id);", "}"] } }]
         },
         {
           "name": "Reject Schedule Proposal",
