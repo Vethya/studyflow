@@ -152,6 +152,7 @@ def test_account_authentication_schema_is_in_the_upgrade_path() -> None:
     assert "CREATE TABLE schedule_proposals" in result.stdout
     assert "CREATE TABLE study_sessions" in result.stdout
     assert "CREATE TABLE proposal_task_allocations" in result.stdout
+    assert "CREATE TABLE study_session_outcomes" in result.stdout
     for constraint_name in (
         "ck_academic_tasks_category",
         "ck_academic_tasks_priority",

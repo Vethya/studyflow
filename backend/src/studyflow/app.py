@@ -88,6 +88,8 @@ from studyflow.availability.unavailable import (
 from studyflow.availability.windows import AvailabilityWindows, AvailabilityWindowService
 from studyflow.database import Database, DatabaseRuntime
 from studyflow.scheduling.acceptance import ScheduleAcceptance, ScheduleAcceptanceService
+from studyflow.scheduling.outcome_repositories import SqlAlchemyStudySessionOutcomeRepository
+from studyflow.scheduling.outcomes import StudySessions, StudySessionService
 from studyflow.scheduling.proposals import ScheduleProposalRepository
 from studyflow.scheduling.repositories import SqlAlchemyScheduleProposalRepository
 from studyflow.scheduling.service import ScheduleGeneration, ScheduleGenerationService
@@ -142,6 +144,7 @@ def create_app(
     schedule_generation: ScheduleGeneration | None = None,
     schedule_proposals: ScheduleProposalRepository | None = None,
     schedule_acceptance: ScheduleAcceptance | None = None,
+    study_sessions: StudySessions | None = None,
     oidc_login: OIDCLogin | None = None,
     oidc_start_rate_limiter: OIDCStartRateLimit | None = None,
     oidc_account_linking: OIDCAccountLinking | None = None,
@@ -299,6 +302,9 @@ def create_app(
         resolved_account_preferences,
         resolved_schedule_proposals,
     )
+    resolved_study_sessions = study_sessions or StudySessionService(
+        SqlAlchemyStudySessionOutcomeRepository(transactions)
+    )
     application.state.settings = resolved_settings
     application.state.cookie_policy = CookiePolicy.for_environment(resolved_settings.environment)
     application.state.database = resolved_database
@@ -358,6 +364,7 @@ def create_app(
     application.state.schedule_generation = resolved_schedule_generation
     application.state.schedule_proposals = resolved_schedule_proposals
     application.state.schedule_acceptance = resolved_schedule_acceptance
+    application.state.study_sessions = resolved_study_sessions
     application.include_router(api_router)
 
     return application

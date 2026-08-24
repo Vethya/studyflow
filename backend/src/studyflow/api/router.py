@@ -6,6 +6,7 @@ from studyflow.api.availability import router as availability_router
 from studyflow.api.health import router as health_router
 from studyflow.api.readiness import router as readiness_router
 from studyflow.api.schedule_proposals import router as schedule_proposals_router
+from studyflow.api.study_sessions import router as study_sessions_router
 from studyflow.api.tasks import router as tasks_router
 
 API_V1_PREFIX = "/api/v1"
@@ -17,4 +18,5 @@ api_router.include_router(auth_router)
 api_router.include_router(health_router)
 api_router.include_router(readiness_router)
 api_router.include_router(schedule_proposals_router)
+api_router.include_router(study_sessions_router)
 api_router.include_router(tasks_router)
