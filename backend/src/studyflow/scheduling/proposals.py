@@ -110,6 +110,16 @@ class NewScheduleProposal:
             raise ValueError("Proposal task allocations must be unique by task")
         if any(session.task_id not in allocation_task_ids for session in self.sessions):
             raise ValueError("Every proposed session must have a task allocation")
+        scheduled_minutes_by_task = dict.fromkeys(allocation_task_ids, 0)
+        for session in self.sessions:
+            scheduled_minutes_by_task[session.task_id] += session.planned_duration_minutes
+        if any(
+            allocation.scheduled_minutes != scheduled_minutes_by_task[allocation.task_id]
+            for allocation in self.allocations
+        ):
+            raise ValueError(
+                "Allocation scheduled_minutes must equal proposed session minutes for its task"
+            )
 
 
 @dataclass(frozen=True, slots=True)
