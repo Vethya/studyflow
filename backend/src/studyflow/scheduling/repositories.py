@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import Select, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.repositories import SessionTransactions
@@ -19,6 +19,10 @@ from studyflow.scheduling.proposals import (
     StudySessionRecord,
     TaskAllocationRecord,
 )
+
+
+def _locked_proposal_for_account(account_id: UUID) -> Select[tuple[ProposalRow]]:
+    return select(ProposalRow).where(ProposalRow.account_id == account_id).with_for_update()
 
 
 class SqlAlchemyScheduleProposalRepository:
@@ -95,9 +99,7 @@ class SqlAlchemyScheduleProposalRepository:
 
     async def get(self, account_id: UUID) -> ScheduleProposalRecord | None:
         async with self._database.transaction() as session:
-            proposal = await session.scalar(
-                select(ProposalRow).where(ProposalRow.account_id == account_id)
-            )
+            proposal = await session.scalar(_locked_proposal_for_account(account_id))
             if proposal is None:
                 return None
             sessions = list(

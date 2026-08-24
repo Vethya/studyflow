@@ -3,6 +3,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import CheckConstraint, select
+from sqlalchemy.dialects import postgresql
 
 from studyflow.database import Base, Database
 from studyflow.database.models import AcademicTask, StudentAccount
@@ -14,7 +15,10 @@ from studyflow.scheduling import (
     ProposalKind,
     ProposalStatus,
 )
-from studyflow.scheduling.repositories import SqlAlchemyScheduleProposalRepository
+from studyflow.scheduling.repositories import (
+    SqlAlchemyScheduleProposalRepository,
+    _locked_proposal_for_account,
+)
 
 FINGERPRINT = "a" * 64
 
@@ -129,6 +133,16 @@ def test_proposal_rejects_allocation_not_backed_by_scheduled_sessions() -> None:
             (NewProposedSession(task_id, starts_at, starts_at + timedelta(minutes=30), 30),),
             (_allocation(task_id, starts_at + timedelta(days=1), 60),),
         )
+
+
+def test_proposal_read_lock_serializes_child_loading_with_mutations() -> None:
+    statement = _locked_proposal_for_account(uuid4())
+
+    compiled = str(
+        statement.compile(dialect=postgresql.dialect())  # type: ignore[no-untyped-call]
+    )
+
+    assert compiled.endswith(" FOR UPDATE")
 
 
 @pytest.mark.anyio
