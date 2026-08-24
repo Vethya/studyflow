@@ -26,7 +26,7 @@ from studyflow.scheduling.outcomes import (
     StudySessionOutcomeRecord,
     StudySessions,
 )
-from studyflow.scheduling.recovery import ScheduleRecovery
+from studyflow.scheduling.recovery import InvalidRecoveryTriggerError, ScheduleRecovery
 from studyflow.scheduling.service import ScheduleGenerationFailedError
 from studyflow.tasks.service import AcademicTasks
 
@@ -163,7 +163,7 @@ async def record_study_session_outcome(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Study session not found")
     try:
         revision = await recovery.propose(principal.account_id, session_id)
-    except SchedulingInputError as error:
+    except (InvalidRecoveryTriggerError, SchedulingInputError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except ScheduleGenerationFailedError as error:
         raise HTTPException(

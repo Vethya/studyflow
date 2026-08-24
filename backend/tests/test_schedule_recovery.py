@@ -37,6 +37,8 @@ from studyflow.scheduling import (
 )
 from studyflow.scheduling.acceptance import ScheduleAcceptanceService, StaleScheduleProposalError
 from studyflow.scheduling.contracts import FeasibilityProblem, OverloadResult
+from studyflow.scheduling.outcome_repositories import SqlAlchemyStudySessionOutcomeRepository
+from studyflow.scheduling.outcomes import StudySessionService
 from studyflow.scheduling.overload import solve_with_overload
 from studyflow.scheduling.recovery import MISSED_REVISION_REASON, ScheduleRecoveryService
 from studyflow.scheduling.recovery_repositories import (
@@ -230,6 +232,71 @@ async def test_recovery_includes_invalidated_future_work_once() -> None:
         assert invalidated_session.invalidated_at.replace(tzinfo=UTC) == NOW
         assert invalidated_outcome is not None
         assert invalidated_outcome.remaining_minutes == 60
+    finally:
+        await harness.database.stop()
+
+
+@pytest.mark.anyio
+async def test_recovery_excludes_past_session_until_its_outcome_is_recorded() -> None:
+    harness = await _harness(deadline=NOW + timedelta(days=1))
+    awaiting_outcome_id = uuid4()
+    try:
+        async with harness.database.transaction() as session:
+            session.add(
+                SessionRow(
+                    id=awaiting_outcome_id,
+                    account_id=harness.account_id,
+                    task_id=harness.task_id,
+                    proposal_id=None,
+                    starts_at=NOW - timedelta(hours=4),
+                    ends_at=NOW - timedelta(hours=3),
+                    planned_duration_minutes=60,
+                )
+            )
+
+        first = await harness.recovery.propose(harness.account_id, harness.missed_session_id)
+        assert first is not None
+        assert first.allocations[0].required_minutes == 120
+        assert await harness.acceptance.accept(harness.account_id, first.id) is not None
+
+        outcomes = StudySessionService(
+            SqlAlchemyStudySessionOutcomeRepository(harness.database), clock=lambda: NOW
+        )
+        assert await outcomes.record_missed(harness.account_id, awaiting_outcome_id) is not None
+        second = await harness.recovery.propose(harness.account_id, awaiting_outcome_id)
+
+        assert second is not None
+        assert second.allocations[0].required_minutes == 180
+    finally:
+        await harness.database.stop()
+
+
+@pytest.mark.anyio
+async def test_session_starting_exactly_now_is_preserved_not_replaced() -> None:
+    harness = await _harness(
+        deadline=NOW + timedelta(days=1),
+        windows=(AvailabilityWindowDraft(0, time(12), time(18)),),
+    )
+    try:
+        async with harness.database.transaction() as session:
+            future = await session.get(SessionRow, harness.future_session_id)
+            assert future is not None
+            future.starts_at = NOW
+            future.ends_at = NOW + timedelta(hours=1)
+
+        proposal = await harness.recovery.propose(harness.account_id, harness.missed_session_id)
+
+        assert proposal is not None
+        assert proposal.allocations[0].required_minutes == 60
+        assert sum(item.planned_duration_minutes for item in proposal.sessions) == 60
+        accepted = await harness.acceptance.accept(harness.account_id, proposal.id)
+        assert accepted is not None
+        async with harness.database.transaction() as session:
+            active_ids = set(
+                await session.scalars(select(SessionRow.id).where(SessionRow.proposal_id.is_(None)))
+            )
+        assert harness.future_session_id in active_ids
+        assert {item.id for item in accepted}.issubset(active_ids)
     finally:
         await harness.database.stop()
 
