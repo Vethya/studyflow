@@ -1,5 +1,11 @@
 """Pure scheduling domain and Google OR-Tools kernel."""
 
+from studyflow.scheduling.assembly import (
+    AvailabilityTimezoneConfirmationRequiredError,
+    SchedulingInputError,
+    SchedulingInputTooLargeError,
+    assemble_schedule_problem,
+)
 from studyflow.scheduling.calendar import ExpandedCalendar, expand_calendar
 from studyflow.scheduling.contracts import (
     FeasibilityProblem,
@@ -24,6 +30,7 @@ from studyflow.scheduling.splitting import (
 )
 
 __all__ = [
+    "AvailabilityTimezoneConfirmationRequiredError",
     "ExpandedCalendar",
     "FeasibilityProblem",
     "FeasibilityResult",
@@ -32,12 +39,15 @@ __all__ = [
     "OverloadResult",
     "PlanningDay",
     "ScheduledSession",
+    "SchedulingInputError",
+    "SchedulingInputTooLargeError",
     "SessionDemand",
     "SessionDraft",
     "SessionSplit",
     "SolverDiagnostics",
     "TaskAllocation",
     "TaskPriority",
+    "assemble_schedule_problem",
     "classify_overload_status",
     "expand_calendar",
     "solve_feasibility",
