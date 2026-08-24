@@ -74,7 +74,10 @@ class ScheduleAcceptanceService:
         if persisted is not None and snapshots is not None:
             try:
                 current_snapshot = await snapshots.capture(
-                    account_id, persisted.missed_session_id, now
+                    account_id,
+                    persisted.missed_session_id,
+                    now,
+                    preferences.minimum_break_minutes,
                 )
             except InvalidRecoveryTriggerError as error:
                 raise StaleScheduleProposalError(
