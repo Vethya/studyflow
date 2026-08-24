@@ -19,8 +19,8 @@ from studyflow.availability.windows import (
     AvailabilityWindowDraft,
 )
 from studyflow.database.models import AvailabilityWindow as AvailabilityWindowRow
-from studyflow.database.models import StudySession as SessionRow
 from studyflow.database.models import StudentAccount
+from studyflow.database.models import StudySession as SessionRow
 from studyflow.database.models import UnavailablePeriod as UnavailablePeriodRow
 
 
