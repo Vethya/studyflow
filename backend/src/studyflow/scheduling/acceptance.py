@@ -94,10 +94,11 @@ class ScheduleAcceptanceService:
             )
         if current_fingerprint != proposal.input_fingerprint:
             raise StaleScheduleProposalError("Schedule inputs changed; generate a new proposal")
+        mutation_now = self._clock()
         return await self._proposals.accept(
             account_id,
             proposal_id,
-            now,
+            mutation_now,
             preferences.minimum_break_minutes,
         )
 

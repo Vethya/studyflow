@@ -16,7 +16,7 @@ from studyflow.api.schedule_proposals import (
 )
 from studyflow.auth.session_authentication import SessionPrincipal
 from studyflow.availability.unavailable import UnavailablePeriods
-from studyflow.scheduling.assembly import SchedulingInputError
+from studyflow.scheduling.assembly import SchedulingInputError, SchedulingInputTooLargeError
 from studyflow.scheduling.outcomes import (
     DuplicateSessionOutcomeError,
     FutureSessionOutcomeError,
@@ -124,6 +124,7 @@ async def get_study_session(
         status.HTTP_403_FORBIDDEN: {"model": AccountError},
         status.HTTP_404_NOT_FOUND: {"model": StudySessionError},
         status.HTTP_409_CONFLICT: {"model": StudySessionError},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": StudySessionError},
         status.HTTP_503_SERVICE_UNAVAILABLE: {"model": StudySessionError},
     },
 )
@@ -163,6 +164,10 @@ async def record_study_session_outcome(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Study session not found")
     try:
         revision = await recovery.propose(principal.account_id, session_id)
+    except SchedulingInputTooLargeError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
     except (InvalidRecoveryTriggerError, SchedulingInputError) as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except ScheduleGenerationFailedError as error:

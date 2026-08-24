@@ -25,7 +25,7 @@ def upgrade() -> None:
             ["proposal_id"], ["schedule_recovery_snapshots.proposal_id"], ondelete="CASCADE"
         ),
         sa.ForeignKeyConstraint(
-            ["session_id"], ["study_session_outcomes.session_id"], ondelete="RESTRICT"
+            ["session_id"], ["study_session_outcomes.session_id"], ondelete="CASCADE"
         ),
         sa.PrimaryKeyConstraint("proposal_id", "session_id", name="pk_recovery_snapshot_outcomes"),
     )

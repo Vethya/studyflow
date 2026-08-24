@@ -13,6 +13,7 @@ from studyflow.availability.unavailable import UnavailablePeriods
 from studyflow.database import Base, Database
 from studyflow.database.models import AcademicTask, StudentAccount
 from studyflow.database.models import StudySession as SessionRow
+from studyflow.scheduling.assembly import SchedulingInputTooLargeError
 from studyflow.scheduling.outcome_repositories import SqlAlchemyStudySessionOutcomeRepository
 from studyflow.scheduling.outcomes import (
     DuplicateSessionOutcomeError,
@@ -432,3 +433,39 @@ async def test_retry_maps_invalid_recovery_trigger_to_conflict() -> None:
     assert response.status_code == 409
     assert response.json()["detail"] == "Recovery trigger is no longer unresolved"
     assert not sessions.recorded
+
+
+@pytest.mark.anyio
+async def test_recovery_input_too_large_maps_to_documented_422() -> None:
+    session = StudySessionRecord(
+        SESSION_ID,
+        ACCOUNT_ID,
+        uuid4(),
+        None,
+        NOW - timedelta(hours=2),
+        NOW - timedelta(hours=1),
+        60,
+    )
+    outcome = StudySessionOutcomeRecord(SESSION_ID, SessionOutcomeKind.MISSED, 0, 60, NOW, None)
+    sessions = StudySessionsStub(StudySessionDetails(session, outcome), outcome)
+    application = _api(
+        sessions,
+        recovery=RecoveryStub(None, SchedulingInputTooLargeError("Recovery is too large")),
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        response = await client.post(
+            f"/api/v1/study-sessions/{SESSION_ID}/outcomes",
+            json={"outcome": "missed"},
+            headers={"X-CSRF-Token": "csrf"},
+        )
+
+    operation = application.openapi()["paths"]["/api/v1/study-sessions/{session_id}/outcomes"][
+        "post"
+    ]
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Recovery is too large"
+    assert "422" in operation["responses"]
