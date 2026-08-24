@@ -15,7 +15,11 @@ from studyflow.scheduling import (
     StaleScheduleProposalError,
     schedule_input_fingerprint,
 )
-from studyflow.scheduling.proposals import ScheduleProposalRecord, ScheduleProposalRepository
+from studyflow.scheduling.proposals import (
+    ScheduleProposalRecord,
+    ScheduleProposalRepository,
+    StudySessionRecord,
+)
 from studyflow.tasks.service import AcademicTasks
 
 ACCOUNT_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -58,7 +62,7 @@ class RepositoryStub:
         proposal_id: UUID,
         now: datetime,
         minimum_break_minutes: int,
-    ):  # type: ignore[no-untyped-def]
+    ) -> tuple[StudySessionRecord, ...]:
         self.accept_calls.append((account_id, proposal_id, now, minimum_break_minutes))
         return ()
 
