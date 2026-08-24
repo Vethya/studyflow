@@ -214,6 +214,54 @@ async def test_recovery_preserves_break_after_in_progress_session() -> None:
 
 
 @pytest.mark.anyio
+async def test_recovery_preserves_remaining_break_after_recent_session() -> None:
+    harness = await _harness(
+        deadline=NOW + timedelta(days=1),
+        windows=(AvailabilityWindowDraft(0, time(12), time(18)),),
+        minimum_break_minutes=30,
+    )
+    recent_session_id = uuid4()
+    recent_session_ends_at = NOW - timedelta(minutes=10)
+    try:
+        async with harness.database.transaction() as session:
+            session.add_all(
+                [
+                    SessionRow(
+                        id=recent_session_id,
+                        account_id=harness.account_id,
+                        task_id=harness.task_id,
+                        proposal_id=None,
+                        starts_at=recent_session_ends_at - timedelta(minutes=45),
+                        ends_at=recent_session_ends_at,
+                        planned_duration_minutes=45,
+                    ),
+                    OutcomeRow(
+                        session_id=recent_session_id,
+                        kind="completed",
+                        actual_minutes=45,
+                        remaining_minutes=0,
+                        recorded_at=NOW,
+                        rescheduled_at=None,
+                    ),
+                ]
+            )
+
+        proposal = await harness.recovery.propose(
+            harness.account_id,
+            harness.missed_session_id,
+        )
+
+        assert proposal is not None
+        assert proposal.status is ProposalStatus.FEASIBLE
+        assert proposal.sessions
+        assert min(
+            item.starts_at for item in proposal.sessions
+        ) >= recent_session_ends_at + timedelta(minutes=30)
+    finally:
+        await harness.database.stop()
+
+
+@pytest.mark.anyio
 async def test_recovery_reports_exact_overload_and_overdue_work() -> None:
     overload = await _harness(
         deadline=NOW + timedelta(hours=2),
