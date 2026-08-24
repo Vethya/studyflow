@@ -702,7 +702,7 @@
     },
     {
       "name": "Schedule Proposals",
-      "description": "Authenticated generation and preview of inactive schedule proposals.",
+      "description": "Authenticated generation, preview, acceptance, and rejection of inactive schedule proposals.",
       "item": [
         {
           "name": "Generate Schedule Proposal",
@@ -716,7 +716,7 @@
             "description": "Generates and stores an inactive proposal from the authenticated student's current tasks and availability."
           },
           "response": [],
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 201', () => pm.response.to.have.status(201));"] } }]
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 201', () => pm.response.to.have.status(201));", "if (pm.response.code === 201) pm.collectionVariables.set('proposal_id', pm.response.json().id);"] } }]
         },
         {
           "name": "Get Current Schedule Proposal",
@@ -728,6 +728,31 @@
           },
           "response": [],
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Accept Schedule Proposal",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }
+            ],
+            "url": { "raw": "{{base_url}}/api/v1/schedule-proposals/{{proposal_id}}/accept", "host": ["{{base_url}}"], "path": ["api", "v1", "schedule-proposals", "{{proposal_id}}", "accept"] },
+            "description": "Accepts the complete feasible proposal and atomically replaces the active future schedule."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Reject Schedule Proposal",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/schedule-proposals/{{proposal_id}}/reject", "host": ["{{base_url}}"], "path": ["api", "v1", "schedule-proposals", "{{proposal_id}}", "reject"] },
+            "description": "Rejects the inactive proposal without changing the active schedule. Acceptance and rejection are alternative actions."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
         }
       ]
     },
@@ -849,6 +874,12 @@
       "value": "",
       "type": "string",
       "description": "Generated seven days ahead before Academic Task requests."
+    },
+    {
+      "key": "proposal_id",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated by the generate schedule proposal request."
     },
     {
       "key": "period_id",
