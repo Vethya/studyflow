@@ -7,11 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.availability.repositories import (
     NoFutureSessions,
+    SqlAlchemyFutureSessionInvalidator,
     SqlAlchemyUnavailablePeriodRepository,
 )
 from studyflow.availability.unavailable import UnavailablePeriodDraft
 from studyflow.database import Base, Database
-from studyflow.database.models import StudentAccount
+from studyflow.database.models import AcademicTask, StudentAccount
+from studyflow.database.models import StudySession as SessionRow
 from studyflow.database.models import UnavailablePeriod as UnavailablePeriodRow
 
 
@@ -28,6 +30,91 @@ class FailingInvalidator:
         account.name = "Invalidation side effect"
         await session.flush()
         raise RuntimeError("future-session invalidation failed")
+
+
+@pytest.mark.anyio
+async def test_unavailable_period_invalidates_only_overlapping_accepted_future_sessions() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    account_id, task_id = uuid4(), uuid4()
+    now = datetime(2026, 8, 24, 10, tzinfo=UTC)
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            session.add(
+                StudentAccount(
+                    id=account_id,
+                    email="owner@example.com",
+                    name="Owner",
+                    password_hash="$argon2id$hash",
+                    email_verified_at=now,
+                    timezone="UTC",
+                )
+            )
+            session.add(
+                AcademicTask(
+                    id=task_id,
+                    account_id=account_id,
+                    title="Exam preparation",
+                    category="exam_preparation",
+                    deadline_at=now + timedelta(days=2),
+                    original_estimate_minutes=120,
+                    planned_duration_minutes=120,
+                )
+            )
+            overlapping_id, later_id, in_progress_id = uuid4(), uuid4(), uuid4()
+            session.add_all(
+                [
+                    SessionRow(
+                        id=overlapping_id,
+                        account_id=account_id,
+                        task_id=task_id,
+                        proposal_id=None,
+                        starts_at=now + timedelta(hours=2),
+                        ends_at=now + timedelta(hours=3),
+                        planned_duration_minutes=60,
+                    ),
+                    SessionRow(
+                        id=later_id,
+                        account_id=account_id,
+                        task_id=task_id,
+                        proposal_id=None,
+                        starts_at=now + timedelta(hours=4),
+                        ends_at=now + timedelta(hours=5),
+                        planned_duration_minutes=60,
+                    ),
+                    SessionRow(
+                        id=in_progress_id,
+                        account_id=account_id,
+                        task_id=task_id,
+                        proposal_id=None,
+                        starts_at=now - timedelta(minutes=30),
+                        ends_at=now + timedelta(minutes=30),
+                        planned_duration_minutes=60,
+                    ),
+                ]
+            )
+
+        repository = SqlAlchemyUnavailablePeriodRepository(
+            database,
+            SqlAlchemyFutureSessionInvalidator(clock=lambda: now),
+        )
+        change = await repository.create(
+            account_id,
+            UnavailablePeriodDraft(
+                now + timedelta(hours=2, minutes=30),
+                now + timedelta(hours=3, minutes=30),
+            ),
+        )
+
+        assert change.invalidated_future_session_ids == [overlapping_id]
+        async with database.transaction() as session:
+            remaining_ids = set(await session.scalars(select(SessionRow.id)))
+        assert remaining_ids == {later_id, in_progress_id}
+    finally:
+        await database.stop()
 
 
 @pytest.mark.anyio
