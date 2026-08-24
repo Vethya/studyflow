@@ -25,7 +25,7 @@ def upgrade() -> None:
         sa.Column("captured_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["account_id"], ["student_accounts.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(
-            ["missed_session_id"], ["study_session_outcomes.session_id"], ondelete="RESTRICT"
+            ["missed_session_id"], ["study_session_outcomes.session_id"], ondelete="CASCADE"
         ),
         sa.ForeignKeyConstraint(["proposal_id"], ["schedule_proposals.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("proposal_id", name="pk_schedule_recovery_snapshots"),

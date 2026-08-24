@@ -97,7 +97,7 @@ class ScheduleRecoverySnapshot(Base):
         ForeignKey("student_accounts.id", ondelete="CASCADE"), index=True
     )
     missed_session_id: Mapped[UUID] = mapped_column(
-        ForeignKey("study_session_outcomes.session_id", ondelete="RESTRICT"), index=True
+        ForeignKey("study_session_outcomes.session_id", ondelete="CASCADE"), index=True
     )
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
