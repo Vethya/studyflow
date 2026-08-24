@@ -26,6 +26,17 @@ from studyflow.scheduling.contracts import (
     TaskPriority,
 )
 from studyflow.scheduling.kernel import solve_feasibility
+from studyflow.scheduling.outcomes import (
+    DuplicateSessionOutcomeError,
+    FutureSessionOutcomeError,
+    ProposedSessionOutcomeError,
+    SessionOutcomeKind,
+    StudySessionDetails,
+    StudySessionOutcomeRecord,
+    StudySessionOutcomeRepository,
+    StudySessions,
+    StudySessionService,
+)
 from studyflow.scheduling.overload import classify_overload_status, solve_with_overload
 from studyflow.scheduling.proposals import (
     NewProposedSession,
@@ -56,9 +67,11 @@ from studyflow.scheduling.splitting import (
 
 __all__ = [
     "AvailabilityTimezoneConfirmationRequiredError",
+    "DuplicateSessionOutcomeError",
     "ExpandedCalendar",
     "FeasibilityProblem",
     "FeasibilityResult",
+    "FutureSessionOutcomeError",
     "KernelStatus",
     "MinuteWindow",
     "NewProposedSession",
@@ -71,6 +84,7 @@ __all__ = [
     "ProposalNotFeasibleError",
     "ProposalScheduleConflictError",
     "ProposalStatus",
+    "ProposedSessionOutcomeError",
     "ScheduleAcceptance",
     "ScheduleAcceptanceService",
     "ScheduleGeneration",
@@ -83,10 +97,16 @@ __all__ = [
     "SchedulingInputTooLargeError",
     "SessionDemand",
     "SessionDraft",
+    "SessionOutcomeKind",
     "SessionSplit",
     "SolverDiagnostics",
     "StaleScheduleProposalError",
+    "StudySessionDetails",
+    "StudySessionOutcomeRecord",
+    "StudySessionOutcomeRepository",
     "StudySessionRecord",
+    "StudySessionService",
+    "StudySessions",
     "TaskAllocation",
     "TaskAllocationRecord",
     "TaskPriority",
