@@ -165,6 +165,32 @@ def test_spring_forward_uses_actual_local_day_and_skips_nonexistent_hour() -> No
     )
 
 
+def test_spring_gap_can_collapse_one_occurrence_without_aborting_expansion() -> None:
+    start = datetime(2026, 3, 8, 5, tzinfo=UTC)
+    end = datetime(2026, 3, 9, 4, tzinfo=UTC)
+
+    collapsed = _run(
+        [AvailabilityWindowDraft(6, time(2), time(3))],
+        start,
+        end,
+        timezone_name="America/New_York",
+    )
+    partial = _run(
+        [AvailabilityWindowDraft(6, time(1, 30), time(3))],
+        start,
+        end,
+        timezone_name="America/New_York",
+    )
+
+    assert collapsed.windows == ()
+    assert partial.windows == (
+        MinuteWindow(
+            _minute(datetime(2026, 3, 8, 6, 30, tzinfo=UTC)),
+            _minute(datetime(2026, 3, 8, 7, tzinfo=UTC)),
+        ),
+    )
+
+
 def test_fall_back_uses_later_ambiguous_end_and_longer_local_day() -> None:
     start = datetime(2026, 11, 1, 4, tzinfo=UTC)
     end = datetime(2026, 11, 2, 5, tzinfo=UTC)
