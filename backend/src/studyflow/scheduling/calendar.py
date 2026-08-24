@@ -203,13 +203,20 @@ def expand_calendar(
     blocked = _merge_intervals(blocked_intervals)
     windows = tuple(MinuteWindow(start, end) for start, end in _subtract(available, blocked))
 
+    # Resolve each local midnight once.  A midnight transition can be
+    # ambiguous, and resolving the same wall time with start/end fold policies
+    # independently would make adjacent planning days overlap.
+    local_midnights = {
+        local_start + timedelta(days=day_offset): _resolve_local(
+            datetime.combine(local_start + timedelta(days=day_offset), time()), zone
+        )
+        for day_offset in range((local_end - local_start).days + 2)
+    }
     planning_days: list[PlanningDay] = []
     for day_offset in range((local_end - local_start).days + 1):
         local_date = local_start + timedelta(days=day_offset)
-        day_start = _resolve_local(datetime.combine(local_date, time()), zone)
-        day_end = _resolve_local(
-            datetime.combine(local_date + timedelta(days=1), time()), zone, is_end=True
-        )
+        day_start = local_midnights[local_date]
+        day_end = local_midnights[local_date + timedelta(days=1)]
         day_start_minute = max(_minute_bounds(day_start.astimezone(UTC))[1], planning_start_minute)
         day_end_minute = min(_minute_bounds(day_end.astimezone(UTC))[0], horizon_end_minute)
         if day_start_minute < day_end_minute:

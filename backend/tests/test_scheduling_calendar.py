@@ -6,7 +6,7 @@ import pytest
 
 from studyflow.availability.unavailable import UnavailablePeriodDraft
 from studyflow.availability.windows import AvailabilityWindowDraft
-from studyflow.scheduling import MinuteWindow, PlanningDay
+from studyflow.scheduling import FeasibilityProblem, MinuteWindow, PlanningDay
 from studyflow.scheduling.calendar import ExpandedCalendar, expand_calendar
 
 
@@ -188,6 +188,24 @@ def test_fall_back_uses_later_ambiguous_end_and_longer_local_day() -> None:
             _minute(datetime(2026, 11, 1, 4, tzinfo=UTC)),
             _minute(datetime(2026, 11, 2, 5, tzinfo=UTC)),
         ),
+    )
+
+
+def test_ambiguous_midnight_keeps_havana_planning_days_contiguous() -> None:
+    start = datetime(2026, 10, 31, 4, tzinfo=UTC)
+    end = datetime(2026, 11, 2, 5, tzinfo=UTC)
+
+    result = _run([], start, end, timezone_name="America/Havana")
+
+    assert len(result.planning_days) == 2
+    assert all(
+        following.start_minute == previous.end_minute
+        for previous, following in zip(result.planning_days, result.planning_days[1:], strict=False)
+    )
+    FeasibilityProblem(
+        (),
+        planning_start_minute=result.planning_days[0].start_minute,
+        planning_days=result.planning_days,
     )
 
 
