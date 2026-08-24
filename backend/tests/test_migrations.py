@@ -162,6 +162,7 @@ def test_account_authentication_schema_is_in_the_upgrade_path() -> None:
         "FOREIGN KEY(missed_session_id) REFERENCES study_session_outcomes (session_id) "
         "ON DELETE CASCADE"
     ) in result.stdout
+    assert "CREATE TABLE recovery_snapshot_outcomes" in result.stdout
     for constraint_name in (
         "ck_academic_tasks_category",
         "ck_academic_tasks_priority",

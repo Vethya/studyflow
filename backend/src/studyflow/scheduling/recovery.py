@@ -57,6 +57,16 @@ class RecoverySnapshot:
     unresolved_outcomes: tuple[StudySessionOutcomeRecord, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class PersistedRecoverySnapshot:
+    proposal_id: UUID
+    account_id: UUID
+    missed_session_id: UUID
+    captured_at: datetime
+    unfinished_work: tuple[RecoveryTaskWork, ...]
+    unresolved_outcome_ids: tuple[UUID, ...]
+
+
 class InvalidRecoveryTriggerError(ValueError):
     """Raised when a session is not an unresolved missed-session trigger."""
 
@@ -73,6 +83,10 @@ class RecoverySnapshotRepository(Protocol):
     async def save(
         self, account_id: UUID, proposal_id: UUID, snapshot: RecoverySnapshot
     ) -> bool: ...
+
+    async def get(
+        self, account_id: UUID, proposal_id: UUID
+    ) -> PersistedRecoverySnapshot | None: ...
 
 
 class ScheduleRecovery(Protocol):

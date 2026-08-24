@@ -55,6 +55,7 @@ from studyflow.scheduling.proposals import (
 from studyflow.scheduling.recovery import (
     MISSED_REVISION_REASON,
     InvalidRecoveryTriggerError,
+    PersistedRecoverySnapshot,
     RecoverySnapshot,
     RecoverySnapshotRepository,
     RecoveryTaskWork,
@@ -90,6 +91,7 @@ __all__ = [
     "NewScheduleProposal",
     "NewTaskAllocation",
     "OverloadResult",
+    "PersistedRecoverySnapshot",
     "PlanningDay",
     "ProposalExpiredError",
     "ProposalKind",

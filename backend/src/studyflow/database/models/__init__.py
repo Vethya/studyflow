@@ -13,6 +13,7 @@ from studyflow.database.models.authentication import (
 from studyflow.database.models.availability import AvailabilityWindow, UnavailablePeriod
 from studyflow.database.models.scheduling import (
     ProposalTaskAllocation,
+    RecoverySnapshotOutcome,
     RecoveryTaskWork,
     ScheduleProposal,
     ScheduleRecoverySnapshot,
@@ -32,6 +33,7 @@ __all__ = [
     "AuthenticationSession",
     "AvailabilityWindow",
     "ProposalTaskAllocation",
+    "RecoverySnapshotOutcome",
     "RecoveryTaskWork",
     "ScheduleProposal",
     "ScheduleRecoverySnapshot",

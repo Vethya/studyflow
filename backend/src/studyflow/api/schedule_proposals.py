@@ -211,7 +211,7 @@ def _response(
     )
 
 
-async def _with_titles(
+async def schedule_proposal_response(
     proposal: ScheduleProposalRecord,
     account_id: UUID,
     tasks: AcademicTasks,
@@ -263,7 +263,7 @@ async def generate_schedule_proposal(
         ) from error
     if proposal is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
-    return await _with_titles(proposal, principal.account_id, tasks, unavailable)
+    return await schedule_proposal_response(proposal, principal.account_id, tasks, unavailable)
 
 
 @router.get(
@@ -285,7 +285,7 @@ async def get_current_schedule_proposal(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Schedule proposal not found"
         )
-    return await _with_titles(proposal, principal.account_id, tasks, unavailable)
+    return await schedule_proposal_response(proposal, principal.account_id, tasks, unavailable)
 
 
 @router.post(

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.repositories import SessionTransactions
 from studyflow.database.models import ProposalTaskAllocation as AllocationRow
+from studyflow.database.models import RecoverySnapshotOutcome as SnapshotOutcomeRow
 from studyflow.database.models import RecoveryTaskWork as WorkRow
 from studyflow.database.models import ScheduleProposal as ProposalRow
 from studyflow.database.models import ScheduleRecoverySnapshot as SnapshotRow
@@ -19,6 +20,7 @@ from studyflow.scheduling.outcomes import SessionOutcomeKind, StudySessionOutcom
 from studyflow.scheduling.proposals import StudySessionRecord
 from studyflow.scheduling.recovery import (
     InvalidRecoveryTriggerError,
+    PersistedRecoverySnapshot,
     RecoverySnapshot,
     RecoveryTaskWork,
 )
@@ -139,7 +141,44 @@ class SqlAlchemyRecoverySnapshotRepository:
                 )
                 for item in snapshot.unfinished_work
             )
+            session.add_all(
+                SnapshotOutcomeRow(proposal_id=proposal_id, session_id=item.session_id)
+                for item in snapshot.unresolved_outcomes
+            )
             return True
+
+    async def get(self, account_id: UUID, proposal_id: UUID) -> PersistedRecoverySnapshot | None:
+        async with self._database.transaction() as session:
+            snapshot = await session.scalar(
+                select(SnapshotRow).where(
+                    SnapshotRow.proposal_id == proposal_id,
+                    SnapshotRow.account_id == account_id,
+                )
+            )
+            if snapshot is None:
+                return None
+            work = list(
+                await session.scalars(
+                    select(WorkRow)
+                    .where(WorkRow.proposal_id == proposal_id)
+                    .order_by(WorkRow.task_id)
+                )
+            )
+            outcome_ids = tuple(
+                await session.scalars(
+                    select(SnapshotOutcomeRow.session_id)
+                    .where(SnapshotOutcomeRow.proposal_id == proposal_id)
+                    .order_by(SnapshotOutcomeRow.session_id)
+                )
+            )
+            return PersistedRecoverySnapshot(
+                proposal_id,
+                account_id,
+                snapshot.missed_session_id,
+                self._aware(snapshot.captured_at),
+                tuple(RecoveryTaskWork(item.task_id, item.unfinished_minutes) for item in work),
+                outcome_ids,
+            )
 
     @staticmethod
     def _aware(value: datetime) -> datetime:
