@@ -30,10 +30,12 @@ from studyflow.scheduling import (
     InvalidRecoveryTriggerError,
     KernelStatus,
     ProposalKind,
+    ProposalNotFeasibleError,
     ProposalStatus,
     ScheduleGenerationFailedError,
     SolverDiagnostics,
 )
+from studyflow.scheduling.acceptance import ScheduleAcceptanceService, StaleScheduleProposalError
 from studyflow.scheduling.contracts import FeasibilityProblem, OverloadResult
 from studyflow.scheduling.overload import solve_with_overload
 from studyflow.scheduling.recovery import MISSED_REVISION_REASON, ScheduleRecoveryService
@@ -56,6 +58,7 @@ class Harness:
     missed_session_id: UUID
     future_session_id: UUID
     recovery: ScheduleRecoveryService
+    acceptance: ScheduleAcceptanceService
     proposals: SqlAlchemyScheduleProposalRepository
 
 
@@ -136,17 +139,36 @@ async def _harness(
         SqlAlchemyUnavailablePeriodRepository(database, NoFutureSessions()), clock=lambda: NOW
     )
     proposals = SqlAlchemyScheduleProposalRepository(database)
+    snapshots = SqlAlchemyRecoverySnapshotRepository(database)
     recovery = ScheduleRecoveryService(
         tasks,
         availability,
         unavailable,
         preferences,
-        SqlAlchemyRecoverySnapshotRepository(database),
+        snapshots,
         proposals,
         clock=lambda: NOW,
         solver=solver or solve_with_overload,
     )
-    return Harness(database, account_id, task_id, missed_id, future_id, recovery, proposals)
+    acceptance = ScheduleAcceptanceService(
+        tasks,
+        availability,
+        unavailable,
+        preferences,
+        proposals,
+        snapshots,
+        clock=lambda: NOW,
+    )
+    return Harness(
+        database,
+        account_id,
+        task_id,
+        missed_id,
+        future_id,
+        recovery,
+        acceptance,
+        proposals,
+    )
 
 
 @pytest.mark.anyio
@@ -377,6 +399,31 @@ async def test_task_deletion_invalidates_its_pending_recovery_proposal() -> None
             assert await session.get(SnapshotRow, proposal.id) is None
             work_count = await session.scalar(select(func.count()).select_from(RecoveryTaskWork))
         assert work_count == 0
+
+    finally:
+        await harness.database.stop()
+
+
+@pytest.mark.anyio
+async def test_revision_acceptance_resolves_outcome_and_replaces_future_schedule() -> None:
+    harness = await _harness(deadline=NOW + timedelta(days=1))
+    try:
+        proposal = await harness.recovery.propose(harness.account_id, harness.missed_session_id)
+        assert proposal is not None
+
+        accepted = await harness.acceptance.accept(harness.account_id, proposal.id)
+
+        assert accepted is not None
+        async with harness.database.transaction() as session:
+            outcome = await session.get(OutcomeRow, harness.missed_session_id)
+            active_ids = set(
+                await session.scalars(select(SessionRow.id).where(SessionRow.proposal_id.is_(None)))
+            )
+        assert outcome is not None
+        assert outcome.rescheduled_at is not None
+        assert outcome.rescheduled_at.replace(tzinfo=UTC) == NOW
+        assert harness.future_session_id not in active_ids
+        assert {item.id for item in accepted}.issubset(active_ids)
     finally:
         await harness.database.stop()
 
@@ -390,6 +437,76 @@ def test_recovery_snapshot_trigger_is_deleted_with_its_outcome() -> None:
     )
 
     assert trigger_foreign_key.ondelete == "CASCADE"
+
+
+@pytest.mark.anyio
+async def test_overload_revision_cannot_resolve_outcome_or_replace_active_schedule() -> None:
+    harness = await _harness(
+        deadline=NOW + timedelta(hours=2),
+        windows=(AvailabilityWindowDraft(0, time(13), time(14)),),
+    )
+    try:
+        proposal = await harness.recovery.propose(harness.account_id, harness.missed_session_id)
+        assert proposal is not None and proposal.status is ProposalStatus.OVERLOAD
+        with pytest.raises(ProposalNotFeasibleError):
+            await harness.acceptance.accept(harness.account_id, proposal.id)
+        async with harness.database.transaction() as session:
+            outcome = await session.get(OutcomeRow, harness.missed_session_id)
+            active_ids = set(
+                await session.scalars(select(SessionRow.id).where(SessionRow.proposal_id.is_(None)))
+            )
+        assert outcome is not None and outcome.rescheduled_at is None
+        assert harness.future_session_id in active_ids
+    finally:
+        await harness.database.stop()
+
+
+@pytest.mark.anyio
+async def test_revision_acceptance_rejects_stale_recovery_inputs() -> None:
+    harness = await _harness(deadline=NOW + timedelta(days=1))
+    try:
+        proposal = await harness.recovery.propose(harness.account_id, harness.missed_session_id)
+        assert proposal is not None
+        async with harness.database.transaction() as session:
+            session.add(
+                SessionRow(
+                    account_id=harness.account_id,
+                    task_id=harness.task_id,
+                    proposal_id=None,
+                    starts_at=NOW + timedelta(hours=6),
+                    ends_at=NOW + timedelta(hours=7),
+                    planned_duration_minutes=60,
+                )
+            )
+
+        with pytest.raises(StaleScheduleProposalError):
+            await harness.acceptance.accept(harness.account_id, proposal.id)
+
+        async with harness.database.transaction() as session:
+            outcome = await session.get(OutcomeRow, harness.missed_session_id)
+        assert outcome is not None and outcome.rescheduled_at is None
+    finally:
+        await harness.database.stop()
+
+
+@pytest.mark.anyio
+async def test_rejecting_revision_leaves_outcome_and_active_schedule_unchanged() -> None:
+    harness = await _harness(deadline=NOW + timedelta(days=1))
+    try:
+        proposal = await harness.recovery.propose(harness.account_id, harness.missed_session_id)
+        assert proposal is not None
+
+        assert await harness.acceptance.reject(harness.account_id, proposal.id)
+
+        async with harness.database.transaction() as session:
+            outcome = await session.get(OutcomeRow, harness.missed_session_id)
+            active_ids = set(
+                await session.scalars(select(SessionRow.id).where(SessionRow.proposal_id.is_(None)))
+            )
+        assert outcome is not None and outcome.rescheduled_at is None
+        assert active_ids == {harness.missed_session_id, harness.future_session_id}
+    finally:
+        await harness.database.stop()
 
 
 @pytest.mark.anyio

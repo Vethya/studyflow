@@ -9,6 +9,7 @@ from httpx import ASGITransport, AsyncClient
 
 from studyflow.app import create_app
 from studyflow.auth.session_authentication import SessionPrincipal
+from studyflow.availability.unavailable import UnavailablePeriods
 from studyflow.database import Base, Database
 from studyflow.database.models import AcademicTask, StudentAccount
 from studyflow.database.models import StudySession as SessionRow
@@ -23,6 +24,15 @@ from studyflow.scheduling.outcomes import (
     StudySessions,
     StudySessionService,
 )
+from studyflow.scheduling.proposals import (
+    ProposalKind,
+    ProposalStatus,
+    ScheduleProposalRecord,
+    StudySessionRecord,
+)
+from studyflow.scheduling.recovery import ScheduleRecovery
+from studyflow.scheduling.service import ScheduleGenerationFailedError
+from studyflow.tasks.service import AcademicTasks
 
 NOW = datetime(2026, 8, 24, 12, tzinfo=UTC)
 ACCOUNT_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -190,6 +200,7 @@ class StudySessionsStub:
     details: StudySessionDetails | None
     outcome: StudySessionOutcomeRecord | None
     error: Exception | None = None
+    recorded: bool = False
 
     async def get(self, account_id: UUID, session_id: UUID) -> StudySessionDetails | None:
         return self.details
@@ -199,20 +210,64 @@ class StudySessionsStub:
     ) -> StudySessionOutcomeRecord | None:
         if self.error is not None:
             raise self.error
+        self.recorded = True
         return self.outcome
 
 
-def _api(stub: StudySessionsStub, *, authenticated: bool = True) -> FastAPI:
+@dataclass
+class RecoveryStub:
+    result: ScheduleProposalRecord | None
+    error: Exception | None = None
+
+    async def propose(
+        self, account_id: UUID, missed_session_id: UUID
+    ) -> ScheduleProposalRecord | None:
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+class EmptyTasksStub:
+    async def list(self, account_id: UUID, filters: object = None) -> list[object]:
+        return []
+
+
+class EmptyUnavailableStub:
+    async def list_periods(self, account_id: UUID) -> list[object]:
+        return []
+
+
+def _revision() -> ScheduleProposalRecord:
+    return ScheduleProposalRecord(
+        uuid4(),
+        ACCOUNT_ID,
+        ProposalKind.REVISION,
+        "Missed study session",
+        ProposalStatus.FEASIBLE,
+        "a" * 64,
+        NOW,
+        (),
+        (),
+    )
+
+
+def _api(
+    stub: StudySessionsStub,
+    *,
+    authenticated: bool = True,
+    recovery: RecoveryStub | None = None,
+) -> FastAPI:
     return create_app(
         session_authentication=AuthenticationStub(authenticated),
         study_sessions=cast(StudySessions, stub),
+        schedule_recovery=cast(ScheduleRecovery, recovery or RecoveryStub(_revision())),
+        academic_tasks=cast(AcademicTasks, EmptyTasksStub()),
+        unavailable_periods=cast(UnavailablePeriods, EmptyUnavailableStub()),
     )
 
 
 @pytest.mark.anyio
 async def test_study_session_api_gets_and_records_missed_with_csrf() -> None:
-    from studyflow.scheduling.proposals import StudySessionRecord
-
     session = StudySessionRecord(
         SESSION_ID,
         ACCOUNT_ID,
@@ -242,8 +297,10 @@ async def test_study_session_api_gets_and_records_missed_with_csrf() -> None:
     assert fetched.status_code == 200 and fetched.json()["outcome"] is None
     assert missing_csrf.status_code == 403
     assert recorded.status_code == 201
-    assert recorded.json()["kind"] == "missed"
-    assert recorded.json()["remaining_minutes"] == 60
+    assert recorded.headers["location"] == "/api/v1/schedule-proposals/current"
+    assert recorded.json()["outcome"]["kind"] == "missed"
+    assert recorded.json()["outcome"]["remaining_minutes"] == 60
+    assert recorded.json()["revision"]["kind"] == "revision"
 
 
 @pytest.mark.anyio
@@ -277,3 +334,35 @@ async def test_study_session_api_hides_cross_user_and_maps_conflicts() -> None:
     assert missing_get.status_code == 404
     assert missing_post.status_code == 404
     assert conflict.status_code == 409
+
+
+@pytest.mark.anyio
+async def test_recovery_failure_returns_503_after_missed_outcome_is_recorded() -> None:
+    session = StudySessionRecord(
+        SESSION_ID,
+        ACCOUNT_ID,
+        uuid4(),
+        None,
+        NOW - timedelta(hours=2),
+        NOW - timedelta(hours=1),
+        60,
+    )
+    outcome = StudySessionOutcomeRecord(SESSION_ID, SessionOutcomeKind.MISSED, 0, 60, NOW, None)
+    sessions = StudySessionsStub(StudySessionDetails(session, outcome), outcome)
+    application = _api(
+        sessions,
+        recovery=RecoveryStub(None, ScheduleGenerationFailedError("Solver failed")),
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        response = await client.post(
+            f"/api/v1/study-sessions/{SESSION_ID}/outcomes",
+            json={"outcome": "missed"},
+            headers={"X-CSRF-Token": "csrf"},
+        )
+
+    assert response.status_code == 503
+    assert sessions.recorded and sessions.outcome == outcome

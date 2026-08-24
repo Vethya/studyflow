@@ -3,14 +3,18 @@
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import Select, delete, select
+from sqlalchemy import Select, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.repositories import SessionTransactions
 from studyflow.database.models import AcademicTask, StudentAccount
 from studyflow.database.models import ProposalTaskAllocation as AllocationRow
+from studyflow.database.models import RecoverySnapshotOutcome as SnapshotOutcomeRow
+from studyflow.database.models import RecoveryTaskWork as RecoveryWorkRow
 from studyflow.database.models import ScheduleProposal as ProposalRow
+from studyflow.database.models import ScheduleRecoverySnapshot as RecoverySnapshotRow
 from studyflow.database.models import StudySession as SessionRow
+from studyflow.database.models import StudySessionOutcome as OutcomeRow
 from studyflow.scheduling.proposals import (
     NewScheduleProposal,
     ProposalExpiredError,
@@ -196,9 +200,21 @@ class SqlAlchemyScheduleProposalRepository:
             for item in proposed:
                 item.proposal_id = None
             await session.flush()
+            covered_outcome_ids = select(SnapshotOutcomeRow.session_id).where(
+                SnapshotOutcomeRow.proposal_id == proposal.id
+            )
+            await session.execute(
+                update(OutcomeRow)
+                .where(
+                    OutcomeRow.session_id.in_(covered_outcome_ids),
+                    OutcomeRow.rescheduled_at.is_(None),
+                )
+                .values(rescheduled_at=now_utc)
+            )
             await session.execute(
                 delete(AllocationRow).where(AllocationRow.proposal_id == proposal.id)
             )
+            await self._delete_recovery_snapshot(session, proposal.id)
             await session.execute(delete(ProposalRow).where(ProposalRow.id == proposal.id))
             await session.flush()
             return tuple(self._session_record(item) for item in proposed)
@@ -222,7 +238,20 @@ class SqlAlchemyScheduleProposalRepository:
     async def _delete_proposal(session: AsyncSession, proposal_id: UUID) -> None:
         await session.execute(delete(AllocationRow).where(AllocationRow.proposal_id == proposal_id))
         await session.execute(delete(SessionRow).where(SessionRow.proposal_id == proposal_id))
+        await SqlAlchemyScheduleProposalRepository._delete_recovery_snapshot(session, proposal_id)
         await session.execute(delete(ProposalRow).where(ProposalRow.id == proposal_id))
+
+    @staticmethod
+    async def _delete_recovery_snapshot(session: AsyncSession, proposal_id: UUID) -> None:
+        await session.execute(
+            delete(SnapshotOutcomeRow).where(SnapshotOutcomeRow.proposal_id == proposal_id)
+        )
+        await session.execute(
+            delete(RecoveryWorkRow).where(RecoveryWorkRow.proposal_id == proposal_id)
+        )
+        await session.execute(
+            delete(RecoverySnapshotRow).where(RecoverySnapshotRow.proposal_id == proposal_id)
+        )
 
     @staticmethod
     def _aware(value: datetime) -> datetime:
