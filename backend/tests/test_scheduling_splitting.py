@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from studyflow.scheduling import SessionDraft, split_task_sessions
+from studyflow.scheduling import MAX_SUPPORTED_SESSION_COUNT, SessionDraft, split_task_sessions
 
 
 def test_splits_work_into_preferred_length_and_exact_remainder() -> None:
@@ -21,6 +21,24 @@ def test_work_shorter_than_preference_stays_one_session() -> None:
 
     assert len(sessions) == 1
     assert sessions[0].duration_minutes == 10
+
+
+def test_exact_divisibility_has_no_short_remainder_session() -> None:
+    sessions = split_task_sessions("task", remaining_minutes=120, preferred_session_length=60)
+
+    assert [session.duration_minutes for session in sessions] == [60, 60]
+    assert sum(session.duration_minutes for session in sessions) == 120
+
+
+def test_accepts_supported_session_count_and_rejects_one_more() -> None:
+    maximum_work = MAX_SUPPORTED_SESSION_COUNT * 10
+
+    sessions = split_task_sessions("task", maximum_work, preferred_session_length=10)
+
+    assert len(sessions) == MAX_SUPPORTED_SESSION_COUNT
+    assert sum(session.duration_minutes for session in sessions) == maximum_work
+    with pytest.raises(ValueError, match="maximum supported"):
+        split_task_sessions("task", maximum_work + 1, preferred_session_length=10)
 
 
 def test_repeated_splits_have_stable_order_and_identities() -> None:

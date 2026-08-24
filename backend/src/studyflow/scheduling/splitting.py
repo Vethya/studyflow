@@ -4,6 +4,10 @@ from dataclasses import dataclass
 
 MIN_PREFERRED_SESSION_LENGTH = 10
 MAX_PREFERRED_SESSION_LENGTH = 240
+# NFR-02 defines the representative scheduler workload as "up to 250
+# sessions".  Keep splitting bounded to that concrete supported workload so a
+# malformed or unbounded task cannot allocate an arbitrary-sized tuple.
+MAX_SUPPORTED_SESSION_COUNT = 250
 
 
 def _require_integer(name: str, value: object) -> int:
@@ -57,6 +61,13 @@ def split_task_sessions(
         raise ValueError(
             "preferred_session_length must be between "
             f"{MIN_PREFERRED_SESSION_LENGTH} and {MAX_PREFERRED_SESSION_LENGTH} minutes"
+        )
+
+    session_count = (remaining + preferred - 1) // preferred
+    if session_count > MAX_SUPPORTED_SESSION_COUNT:
+        raise ValueError(
+            f"remaining_minutes requires {session_count} sessions; the maximum supported is "
+            f"{MAX_SUPPORTED_SESSION_COUNT}"
         )
 
     full_sessions, remainder = divmod(remaining, preferred)
