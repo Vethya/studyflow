@@ -90,7 +90,7 @@ class SqlAlchemyRecoverySnapshotRepository:
                         unfinished[item.task_id] += outcome.remaining_minutes
                         unresolved.append(self._outcome_record(outcome))
                     continue
-                if self._aware(item.starts_at) >= now_utc:
+                if self._aware(item.starts_at) > now_utc:
                     unfinished[item.task_id] += item.planned_duration_minutes
                     future.append(self._session_record(item))
                     continue
@@ -99,9 +99,11 @@ class SqlAlchemyRecoverySnapshotRepository:
                 if self._aware(item.ends_at) > now_utc:
                     continue
                 outcome = outcome_by_session.get(item.id)
-                if outcome is None:
-                    unfinished[item.task_id] += item.planned_duration_minutes
-                elif outcome.remaining_minutes > 0 and outcome.rescheduled_at is None:
+                if (
+                    outcome is not None
+                    and outcome.remaining_minutes > 0
+                    and outcome.rescheduled_at is None
+                ):
                     unfinished[item.task_id] += outcome.remaining_minutes
                     unresolved.append(self._outcome_record(outcome))
             return RecoverySnapshot(

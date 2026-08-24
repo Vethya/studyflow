@@ -30,7 +30,7 @@ from studyflow.scheduling.proposals import (
     ScheduleProposalRecord,
     StudySessionRecord,
 )
-from studyflow.scheduling.recovery import ScheduleRecovery
+from studyflow.scheduling.recovery import InvalidRecoveryTriggerError, ScheduleRecovery
 from studyflow.scheduling.service import ScheduleGenerationFailedError
 from studyflow.tasks.service import AcademicTasks
 
@@ -395,4 +395,40 @@ async def test_unresolved_missed_outcome_retries_recovery_without_duplicate_inse
 
     assert response.status_code == 201
     assert response.json()["outcome"]["kind"] == "missed"
+    assert not sessions.recorded
+
+
+@pytest.mark.anyio
+async def test_retry_maps_invalid_recovery_trigger_to_conflict() -> None:
+    session = StudySessionRecord(
+        SESSION_ID,
+        ACCOUNT_ID,
+        uuid4(),
+        None,
+        NOW - timedelta(hours=2),
+        NOW - timedelta(hours=1),
+        60,
+    )
+    outcome = StudySessionOutcomeRecord(SESSION_ID, SessionOutcomeKind.MISSED, 0, 60, NOW, None)
+    sessions = StudySessionsStub(StudySessionDetails(session, outcome), outcome)
+    application = _api(
+        sessions,
+        recovery=RecoveryStub(
+            None,
+            InvalidRecoveryTriggerError("Recovery trigger is no longer unresolved"),
+        ),
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        response = await client.post(
+            f"/api/v1/study-sessions/{SESSION_ID}/outcomes",
+            json={"outcome": "missed"},
+            headers={"X-CSRF-Token": "csrf"},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Recovery trigger is no longer unresolved"
     assert not sessions.recorded
