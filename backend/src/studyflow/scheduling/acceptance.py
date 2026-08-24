@@ -10,7 +10,6 @@ from studyflow.accounts.preferences import AccountPreferences
 from studyflow.availability.unavailable import UnavailablePeriods
 from studyflow.availability.windows import AvailabilityWindows
 from studyflow.scheduling.proposals import (
-    ProposalKind,
     ScheduleProposalRepository,
     StudySessionRecord,
 )
@@ -70,14 +69,11 @@ class ScheduleAcceptanceService:
             self._availability_windows.list_windows(account_id),
             self._unavailable_periods.list_periods(account_id),
         )
-        if proposal.kind is ProposalKind.REVISION:
-            if self._recovery_snapshots is None:
-                raise StaleScheduleProposalError("Recovery proposal snapshot is missing")
-            persisted = await self._recovery_snapshots.get(account_id, proposal_id)
-            if persisted is None:
-                raise StaleScheduleProposalError("Recovery proposal snapshot is missing")
+        snapshots = self._recovery_snapshots
+        persisted = await snapshots.get(account_id, proposal_id) if snapshots is not None else None
+        if persisted is not None and snapshots is not None:
             try:
-                current_snapshot = await self._recovery_snapshots.capture(
+                current_snapshot = await snapshots.capture(
                     account_id, persisted.missed_session_id, now
                 )
             except InvalidRecoveryTriggerError as error:
