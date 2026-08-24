@@ -71,6 +71,7 @@ class SqlAlchemyRecoverySnapshotRepository:
             }
             unfinished: defaultdict[UUID, int] = defaultdict(int)
             future: list[StudySessionRecord] = []
+            in_progress: list[StudySessionRecord] = []
             unresolved: list[StudySessionOutcomeRecord] = []
             for item in accepted:
                 if self._aware(item.starts_at) >= now_utc:
@@ -78,6 +79,7 @@ class SqlAlchemyRecoverySnapshotRepository:
                     future.append(self._session_record(item))
                     continue
                 if self._aware(item.ends_at) > now_utc:
+                    in_progress.append(self._session_record(item))
                     continue
                 outcome = outcome_by_session.get(item.id)
                 if outcome is None:
@@ -93,6 +95,7 @@ class SqlAlchemyRecoverySnapshotRepository:
                     for task_id, minutes in sorted(unfinished.items(), key=lambda item: item[0])
                 ),
                 tuple(future),
+                tuple(in_progress),
                 tuple(unresolved),
             )
 
