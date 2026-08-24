@@ -327,7 +327,7 @@ def test_rejects_an_incomplete_day_domain_instead_of_silently_losing_starts() ->
     assert result.detail == "Planning days do not cover every start for session 'session'"
 
 
-def test_requires_local_day_metadata_for_policy_scheduling() -> None:
+def test_schedules_without_optional_local_day_metadata() -> None:
     result = solve_with_overload(
         FeasibilityProblem(
             (demand("session", "task", 2, (0, 10), deadline=10),),
@@ -335,9 +335,8 @@ def test_requires_local_day_metadata_for_policy_scheduling() -> None:
         )
     )
 
-    assert result.status is KernelStatus.TECHNICAL_FAILURE
-    assert result.diagnostics.solver_status == "DAY_DOMAIN_REQUIRED"
-    assert result.detail == "Local planning-day metadata is required for schedule policy"
+    assert result.status is KernelStatus.FEASIBLE
+    assert [(session.start_minute, session.end_minute) for session in result.sessions] == [(0, 2)]
 
 
 def test_unproven_constructive_earliness_is_a_technical_failure(

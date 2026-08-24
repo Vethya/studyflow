@@ -1,7 +1,7 @@
 """Assemble persisted study data into a normalized solver problem."""
 
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from studyflow.accounts.preferences import StudyPreferences
 from studyflow.availability.unavailable import UnavailablePeriod, UnavailablePeriodDraft
@@ -17,7 +17,7 @@ from studyflow.scheduling.contracts import (
 from studyflow.scheduling.splitting import split_task_sessions
 from studyflow.tasks.service import AcademicTaskRecord, TaskStatus
 
-MAX_PLANNING_DAYS = 366
+MAX_FAIRNESS_PLANNING_DAYS = 366
 MAX_ASSEMBLED_SESSIONS = 10_000
 MAX_ASSEMBLED_WINDOWS = 10_000
 
@@ -86,11 +86,6 @@ def assemble_schedule_problem(
         )
 
     horizon_end = max(task.deadline_at.astimezone(UTC) for task in eligible_tasks)
-    if horizon_end - planning_start_utc > timedelta(days=MAX_PLANNING_DAYS):
-        raise SchedulingInputTooLargeError(
-            f"Scheduling horizon cannot exceed {MAX_PLANNING_DAYS} days"
-        )
-
     splits = tuple(
         split_task_sessions(
             str(task.id),
@@ -117,17 +112,17 @@ def assemble_schedule_problem(
             planning_start=planning_start_utc,
             horizon_end=horizon_end,
         )
-        if calendar.planning_days.day_count > MAX_PLANNING_DAYS:
-            raise SchedulingInputTooLargeError(
-                f"Schedule cannot exceed {MAX_PLANNING_DAYS} planning days"
-            )
         if calendar.windows.window_count > MAX_ASSEMBLED_WINDOWS:
             raise SchedulingInputTooLargeError(
                 f"Schedule cannot exceed {MAX_ASSEMBLED_WINDOWS} availability windows"
             )
 
         concrete_windows = calendar.windows.materialize()
-        planning_days = calendar.planning_days.materialize()
+        planning_days = (
+            calendar.planning_days.materialize()
+            if calendar.planning_days.day_count <= MAX_FAIRNESS_PLANNING_DAYS
+            else ()
+        )
     sessions: list[SessionDemand] = []
     for task, split in zip(eligible_tasks, splits, strict=True):
         deadline_minute, _ = _minute_bounds(task.deadline_at)
