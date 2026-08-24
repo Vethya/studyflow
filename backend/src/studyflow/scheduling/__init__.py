@@ -1,5 +1,6 @@
 """Pure scheduling domain and Google OR-Tools kernel."""
 
+from studyflow.scheduling.calendar import ExpandedCalendar, expand_calendar
 from studyflow.scheduling.contracts import (
     FeasibilityProblem,
     FeasibilityResult,
@@ -23,6 +24,7 @@ from studyflow.scheduling.splitting import (
 )
 
 __all__ = [
+    "ExpandedCalendar",
     "FeasibilityProblem",
     "FeasibilityResult",
     "KernelStatus",
@@ -37,6 +39,7 @@ __all__ = [
     "TaskAllocation",
     "TaskPriority",
     "classify_overload_status",
+    "expand_calendar",
     "solve_feasibility",
     "solve_with_overload",
     "split_task",
