@@ -138,8 +138,21 @@ async def record_study_session_outcome(
     unavailable: Annotated[UnavailablePeriods, Depends(get_unavailable_periods)],
 ) -> MissedSessionRecoveryResponse:
     del body  # The request model intentionally permits only the PR9 `missed` outcome.
+    outcome: StudySessionOutcomeRecord | None
     try:
-        outcome = await sessions.record_missed(principal.account_id, session_id)
+        details = await sessions.get(principal.account_id, session_id)
+        existing = details.outcome if details is not None else None
+        if (
+            existing is not None
+            and existing.kind is SessionOutcomeKind.MISSED
+            and existing.remaining_minutes > 0
+            and existing.rescheduled_at is None
+        ):
+            outcome = existing
+        elif existing is not None:
+            raise DuplicateSessionOutcomeError("The study session already has an outcome")
+        else:
+            outcome = await sessions.record_missed(principal.account_id, session_id)
     except (
         ProposedSessionOutcomeError,
         FutureSessionOutcomeError,

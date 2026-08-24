@@ -900,7 +900,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
             "body": { "mode": "raw", "raw": "{\n  \"outcome\": \"missed\"\n}", "options": { "raw": { "language": "json" } } },
             "url": { "raw": "{{base_url}}/api/v1/study-sessions/{{session_id}}/outcomes", "host": ["{{base_url}}"], "path": ["api", "v1", "study-sessions", "{{session_id}}", "outcomes"] },
-            "description": "Records Missed and returns the inactive recovery revision preview. A solver failure returns 503 after preserving the outcome."
+            "description": "Records Missed and returns the inactive recovery revision preview. Repeating this request retries recovery for an unresolved Missed outcome without duplicating it. A solver failure returns 503 after preserving the outcome."
           },
           "response": []
         }

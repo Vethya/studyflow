@@ -71,13 +71,16 @@ class RepositoryStub:
 
 
 def _service(
-    preferences: StudyPreferences, fingerprint: str
+    preferences: StudyPreferences,
+    fingerprint: str,
+    *,
+    kind: ProposalKind = ProposalKind.GENERATION,
 ) -> tuple[ScheduleAcceptanceService, RepositoryStub]:
     proposal = ScheduleProposalRecord(
         uuid4(),
         ACCOUNT_ID,
-        ProposalKind.GENERATION,
-        None,
+        kind,
+        "Manual revision" if kind is ProposalKind.REVISION else None,
         ProposalStatus.FEASIBLE,
         fingerprint,
         datetime(2026, 8, 24, tzinfo=UTC),
@@ -111,6 +114,16 @@ async def test_accept_recomputes_fingerprint_before_repository_mutation() -> Non
             10,
         )
     ]
+
+
+@pytest.mark.anyio
+async def test_ordinary_revision_without_recovery_snapshot_uses_schedule_fingerprint() -> None:
+    preferences = StudyPreferences("UTC", 60, 10, False)
+    fingerprint = schedule_input_fingerprint([], [], [], preferences)
+    service, repository = _service(preferences, fingerprint, kind=ProposalKind.REVISION)
+
+    assert await service.accept(ACCOUNT_ID, repository.proposal.id) == ()
+    assert len(repository.accept_calls) == 1
 
 
 @pytest.mark.anyio
