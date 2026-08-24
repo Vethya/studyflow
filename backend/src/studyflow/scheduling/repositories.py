@@ -1,6 +1,6 @@
 """SQLAlchemy schedule proposal repository."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import Select, delete, select
@@ -122,7 +122,11 @@ class SqlAlchemyScheduleProposalRepository:
             return self._record(proposal, sessions, allocations)
 
     async def accept(
-        self, account_id: UUID, proposal_id: UUID, now: datetime
+        self,
+        account_id: UUID,
+        proposal_id: UUID,
+        now: datetime,
+        minimum_break_minutes: int,
     ) -> tuple[StudySessionRecord, ...] | None:
         async with self._database.transaction() as session:
             account = await session.get(StudentAccount, account_id, with_for_update=True)
@@ -148,26 +152,36 @@ class SqlAlchemyScheduleProposalRepository:
             now_utc = self._aware(now).astimezone(UTC)
             if any(self._aware(item.starts_at) < now_utc for item in proposed):
                 raise ProposalExpiredError("The schedule proposal has expired")
-            in_progress = list(
+            preserved = list(
                 await session.scalars(
                     select(SessionRow)
                     .where(
                         SessionRow.account_id == account_id,
                         SessionRow.proposal_id.is_(None),
                         SessionRow.starts_at <= now_utc,
-                        SessionRow.ends_at > now_utc,
                     )
+                    .order_by(SessionRow.ends_at, SessionRow.id)
                     .with_for_update()
                 )
             )
             if any(
                 self._overlaps(candidate, existing)
                 for candidate in proposed
-                for existing in in_progress
+                for existing in preserved
+                if self._aware(existing.ends_at) > now_utc
             ):
                 raise ProposalScheduleConflictError(
                     "The proposal overlaps a session already in progress"
                 )
+            if proposed and preserved:
+                first_proposed_start = self._aware(proposed[0].starts_at)
+                latest_preserved_end = max(self._aware(item.ends_at) for item in preserved)
+                if first_proposed_start < latest_preserved_end + timedelta(
+                    minutes=minimum_break_minutes
+                ):
+                    raise ProposalScheduleConflictError(
+                        "The proposal violates the minimum break after preserved work"
+                    )
             await session.execute(
                 delete(SessionRow)
                 .where(

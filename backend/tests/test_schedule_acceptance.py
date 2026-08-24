@@ -47,13 +47,19 @@ class PreferencesStub:
 @dataclass
 class RepositoryStub:
     proposal: ScheduleProposalRecord
-    accept_calls: list[tuple[UUID, UUID, datetime]]
+    accept_calls: list[tuple[UUID, UUID, datetime, int]]
 
     async def get(self, account_id: UUID) -> ScheduleProposalRecord:
         return self.proposal
 
-    async def accept(self, account_id: UUID, proposal_id: UUID, now: datetime):  # type: ignore[no-untyped-def]
-        self.accept_calls.append((account_id, proposal_id, now))
+    async def accept(
+        self,
+        account_id: UUID,
+        proposal_id: UUID,
+        now: datetime,
+        minimum_break_minutes: int,
+    ):  # type: ignore[no-untyped-def]
+        self.accept_calls.append((account_id, proposal_id, now, minimum_break_minutes))
         return ()
 
     async def reject(self, account_id: UUID, proposal_id: UUID) -> bool:
@@ -93,7 +99,14 @@ async def test_accept_recomputes_fingerprint_before_repository_mutation() -> Non
     service, repository = _service(preferences, fingerprint)
 
     assert await service.accept(ACCOUNT_ID, repository.proposal.id) == ()
-    assert len(repository.accept_calls) == 1
+    assert repository.accept_calls == [
+        (
+            ACCOUNT_ID,
+            repository.proposal.id,
+            datetime(2026, 8, 25, tzinfo=UTC),
+            10,
+        )
+    ]
 
 
 @pytest.mark.anyio

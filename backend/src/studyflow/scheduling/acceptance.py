@@ -61,7 +61,12 @@ class ScheduleAcceptanceService:
         current_fingerprint = schedule_input_fingerprint(tasks, windows, unavailable, preferences)
         if current_fingerprint != proposal.input_fingerprint:
             raise StaleScheduleProposalError("Schedule inputs changed; generate a new proposal")
-        return await self._proposals.accept(account_id, proposal_id, self._clock())
+        return await self._proposals.accept(
+            account_id,
+            proposal_id,
+            self._clock(),
+            preferences.minimum_break_minutes,
+        )
 
     async def reject(self, account_id: UUID, proposal_id: UUID) -> bool:
         return await self._proposals.reject(account_id, proposal_id)

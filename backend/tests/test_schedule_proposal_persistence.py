@@ -260,7 +260,7 @@ async def test_accept_replaces_only_future_sessions_and_preserves_started_work()
         )
         assert proposal is not None
 
-        accepted = await repository.accept(owner_id, proposal.id, now)
+        accepted = await repository.accept(owner_id, proposal.id, now, 0)
 
         assert accepted is not None and accepted[0].proposal_id is None
         assert await repository.get(owner_id) is None
@@ -294,7 +294,7 @@ async def test_accept_rejects_expired_overload_and_in_progress_conflicts_atomica
         )
         assert expired is not None
         with pytest.raises(ProposalExpiredError):
-            await repository.accept(owner_id, expired.id, now)
+            await repository.accept(owner_id, expired.id, now, 0)
         assert await repository.get(owner_id) is not None
 
         overload_draft = replace(
@@ -304,7 +304,7 @@ async def test_accept_rejects_expired_overload_and_in_progress_conflicts_atomica
         overload = await repository.replace(owner_id, overload_draft)
         assert overload is not None
         with pytest.raises(ProposalNotFeasibleError):
-            await repository.accept(owner_id, overload.id, now)
+            await repository.accept(owner_id, overload.id, now, 0)
 
         conflict = await repository.replace(
             owner_id, _proposal(task_id, now + timedelta(minutes=10), 30)
@@ -322,7 +322,42 @@ async def test_accept_rejects_expired_overload_and_in_progress_conflicts_atomica
                 )
             )
         with pytest.raises(ProposalScheduleConflictError):
-            await repository.accept(owner_id, conflict.id, now)
+            await repository.accept(owner_id, conflict.id, now, 0)
         assert await repository.get(owner_id) is not None
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_accept_enforces_break_after_latest_preserved_session() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        owner_id, _, task_id, _ = await _seed(database)
+        repository = SqlAlchemyScheduleProposalRepository(database)
+        now = datetime(2026, 8, 25, 10, tzinfo=UTC)
+        async with database.transaction() as session:
+            session.add(
+                SessionRow(
+                    account_id=owner_id,
+                    task_id=task_id,
+                    proposal_id=None,
+                    starts_at=now - timedelta(minutes=35),
+                    ends_at=now - timedelta(minutes=5),
+                    planned_duration_minutes=30,
+                )
+            )
+        proposal = await repository.replace(
+            owner_id,
+            _proposal(task_id, now + timedelta(minutes=4), 30),
+        )
+        assert proposal is not None
+
+        with pytest.raises(ProposalScheduleConflictError, match="minimum break"):
+            await repository.accept(owner_id, proposal.id, now, 10)
+        assert await repository.get(owner_id) is not None
+
+        accepted = await repository.accept(owner_id, proposal.id, now, 9)
+        assert accepted is not None
     finally:
         await database.stop()

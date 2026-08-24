@@ -167,7 +167,11 @@ class ScheduleProposalRepository(Protocol):
     async def get(self, account_id: UUID) -> ScheduleProposalRecord | None: ...
 
     async def accept(
-        self, account_id: UUID, proposal_id: UUID, now: datetime
+        self,
+        account_id: UUID,
+        proposal_id: UUID,
+        now: datetime,
+        minimum_break_minutes: int,
     ) -> tuple[StudySessionRecord, ...] | None: ...
 
     async def reject(self, account_id: UUID, proposal_id: UUID) -> bool: ...
