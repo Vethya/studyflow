@@ -449,11 +449,11 @@ def _local_interval(
     start = _resolve_local(start_naive, zone)
     end = _resolve_local(end_naive, zone, is_end=True)
     if end <= start:
-        # A non-crossing wall interval ending at the first valid instant after
-        # a spring-forward gap can collapse completely (for example, 02:00-
-        # 03:00 in New York).  It contributes no elapsed UTC time this week;
-        # retain errors for all other invalid interval orderings.
-        if not crosses_midnight and end_time > start_time:
+        # A timezone gap can collapse an otherwise valid wall interval.  This
+        # includes cross-midnight rules when a jurisdiction skips a whole day.
+        # Metadata ordering is validated before expansion, so this branch does
+        # not hide malformed persisted rules.
+        if crosses_midnight or end_time > start_time:
             return None
         raise ValueError("Availability window must have positive duration")
     return start.astimezone(UTC), end.astimezone(UTC)

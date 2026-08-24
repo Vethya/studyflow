@@ -216,6 +216,17 @@ def test_spring_gap_can_collapse_one_occurrence_without_aborting_expansion() -> 
     )
 
 
+def test_skipped_local_day_can_collapse_cross_midnight_occurrence() -> None:
+    result = _run(
+        [AvailabilityWindowDraft(4, time(23, 30), time(0, 30))],
+        datetime(2011, 12, 30, 9, tzinfo=UTC),
+        datetime(2011, 12, 30, 12, tzinfo=UTC),
+        timezone_name="Pacific/Apia",
+    )
+
+    assert result.windows == ()
+
+
 def test_fall_back_uses_later_ambiguous_end_and_longer_local_day() -> None:
     start = datetime(2026, 11, 1, 4, tzinfo=UTC)
     end = datetime(2026, 11, 2, 5, tzinfo=UTC)
