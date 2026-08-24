@@ -91,6 +91,8 @@ from studyflow.scheduling.acceptance import ScheduleAcceptance, ScheduleAcceptan
 from studyflow.scheduling.outcome_repositories import SqlAlchemyStudySessionOutcomeRepository
 from studyflow.scheduling.outcomes import StudySessions, StudySessionService
 from studyflow.scheduling.proposals import ScheduleProposalRepository
+from studyflow.scheduling.recovery import ScheduleRecovery, ScheduleRecoveryService
+from studyflow.scheduling.recovery_repositories import SqlAlchemyRecoverySnapshotRepository
 from studyflow.scheduling.repositories import SqlAlchemyScheduleProposalRepository
 from studyflow.scheduling.service import ScheduleGeneration, ScheduleGenerationService
 from studyflow.settings import Settings
@@ -145,6 +147,7 @@ def create_app(
     schedule_proposals: ScheduleProposalRepository | None = None,
     schedule_acceptance: ScheduleAcceptance | None = None,
     study_sessions: StudySessions | None = None,
+    schedule_recovery: ScheduleRecovery | None = None,
     oidc_login: OIDCLogin | None = None,
     oidc_start_rate_limiter: OIDCStartRateLimit | None = None,
     oidc_account_linking: OIDCAccountLinking | None = None,
@@ -305,6 +308,14 @@ def create_app(
     resolved_study_sessions = study_sessions or StudySessionService(
         SqlAlchemyStudySessionOutcomeRepository(transactions)
     )
+    resolved_schedule_recovery = schedule_recovery or ScheduleRecoveryService(
+        resolved_academic_tasks,
+        resolved_availability_windows,
+        resolved_unavailable_periods,
+        resolved_account_preferences,
+        SqlAlchemyRecoverySnapshotRepository(transactions),
+        resolved_schedule_proposals,
+    )
     application.state.settings = resolved_settings
     application.state.cookie_policy = CookiePolicy.for_environment(resolved_settings.environment)
     application.state.database = resolved_database
@@ -365,6 +376,7 @@ def create_app(
     application.state.schedule_proposals = resolved_schedule_proposals
     application.state.schedule_acceptance = resolved_schedule_acceptance
     application.state.study_sessions = resolved_study_sessions
+    application.state.schedule_recovery = resolved_schedule_recovery
     application.include_router(api_router)
 
     return application

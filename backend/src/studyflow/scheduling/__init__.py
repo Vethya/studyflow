@@ -52,6 +52,16 @@ from studyflow.scheduling.proposals import (
     StudySessionRecord,
     TaskAllocationRecord,
 )
+from studyflow.scheduling.recovery import (
+    MISSED_REVISION_REASON,
+    InvalidRecoveryTriggerError,
+    RecoverySnapshot,
+    RecoverySnapshotRepository,
+    RecoveryTaskWork,
+    ScheduleRecovery,
+    ScheduleRecoveryService,
+    recovery_input_fingerprint,
+)
 from studyflow.scheduling.service import (
     ScheduleGeneration,
     ScheduleGenerationFailedError,
@@ -66,12 +76,14 @@ from studyflow.scheduling.splitting import (
 )
 
 __all__ = [
+    "MISSED_REVISION_REASON",
     "AvailabilityTimezoneConfirmationRequiredError",
     "DuplicateSessionOutcomeError",
     "ExpandedCalendar",
     "FeasibilityProblem",
     "FeasibilityResult",
     "FutureSessionOutcomeError",
+    "InvalidRecoveryTriggerError",
     "KernelStatus",
     "MinuteWindow",
     "NewProposedSession",
@@ -85,6 +97,9 @@ __all__ = [
     "ProposalScheduleConflictError",
     "ProposalStatus",
     "ProposedSessionOutcomeError",
+    "RecoverySnapshot",
+    "RecoverySnapshotRepository",
+    "RecoveryTaskWork",
     "ScheduleAcceptance",
     "ScheduleAcceptanceService",
     "ScheduleGeneration",
@@ -92,6 +107,8 @@ __all__ = [
     "ScheduleGenerationService",
     "ScheduleProposalRecord",
     "ScheduleProposalRepository",
+    "ScheduleRecovery",
+    "ScheduleRecoveryService",
     "ScheduledSession",
     "SchedulingInputError",
     "SchedulingInputTooLargeError",
@@ -113,6 +130,7 @@ __all__ = [
     "assemble_schedule_problem",
     "classify_overload_status",
     "expand_calendar",
+    "recovery_input_fingerprint",
     "schedule_input_fingerprint",
     "solve_feasibility",
     "solve_with_overload",
