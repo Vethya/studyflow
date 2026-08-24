@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from studyflow.api.account import AccountError, require_csrf_session, require_session
 from studyflow.auth.session_authentication import SessionPrincipal
+from studyflow.availability.unavailable import UnavailablePeriod, UnavailablePeriods
 from studyflow.scheduling.assembly import (
     AvailabilityTimezoneConfirmationRequiredError,
     SchedulingInputError,
@@ -60,8 +61,16 @@ class UnscheduledWorkResponse(BaseModel):
     unscheduled_minutes: int
 
 
+class RelevantUnavailablePeriodResponse(BaseModel):
+    id: UUID
+    starts_at: datetime
+    ends_at: datetime
+    reason: str | None
+
+
 class OverloadWarningResponse(BaseModel):
     affected_tasks: list[UnscheduledWorkResponse]
+    relevant_unavailable_periods: list[RelevantUnavailablePeriodResponse]
     remedies: list[Literal["extend_deadline", "add_availability"]]
 
 
@@ -91,6 +100,10 @@ def get_schedule_proposals(request: Request) -> ScheduleProposalRepository:
 
 def get_academic_tasks(request: Request) -> AcademicTasks:
     return cast(AcademicTasks, request.app.state.academic_tasks)
+
+
+def get_unavailable_periods(request: Request) -> UnavailablePeriods:
+    return cast(UnavailablePeriods, request.app.state.unavailable_periods)
 
 
 def _allocation_response(
@@ -123,7 +136,9 @@ def _unscheduled_response(
 
 
 def _response(
-    proposal: ScheduleProposalRecord, tasks: list[AcademicTaskRecord]
+    proposal: ScheduleProposalRecord,
+    tasks: list[AcademicTaskRecord],
+    unavailable_periods: list[UnavailablePeriod],
 ) -> ScheduleProposalResponse:
     titles = {task.id: task.title for task in tasks}
     ordered_allocations = sorted(
@@ -138,6 +153,24 @@ def _response(
     warning = (
         OverloadWarningResponse(
             affected_tasks=unscheduled,
+            relevant_unavailable_periods=[
+                RelevantUnavailablePeriodResponse(
+                    id=period.id,
+                    starts_at=period.starts_at,
+                    ends_at=period.ends_at,
+                    reason=period.reason,
+                )
+                for period in sorted(
+                    unavailable_periods,
+                    key=lambda item: (item.starts_at, item.ends_at, item.id),
+                )
+                if period.ends_at > proposal.created_at
+                and any(
+                    period.starts_at < allocation.deadline_at
+                    for allocation in ordered_allocations
+                    if allocation.unscheduled_minutes > 0
+                )
+            ],
             remedies=["extend_deadline", "add_availability"],
         )
         if proposal.status is ProposalStatus.OVERLOAD
@@ -170,8 +203,15 @@ async def _with_titles(
     proposal: ScheduleProposalRecord,
     account_id: UUID,
     tasks: AcademicTasks,
+    unavailable: UnavailablePeriods,
 ) -> ScheduleProposalResponse:
-    return _response(proposal, await tasks.list(account_id))
+    task_records = await tasks.list(account_id)
+    unavailable_periods = (
+        await unavailable.list_periods(account_id)
+        if proposal.status is ProposalStatus.OVERLOAD
+        else []
+    )
+    return _response(proposal, task_records, unavailable_periods)
 
 
 @router.post(
@@ -191,6 +231,7 @@ async def generate_schedule_proposal(
     principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
     generation: Annotated[ScheduleGeneration, Depends(get_schedule_generation)],
     tasks: Annotated[AcademicTasks, Depends(get_academic_tasks)],
+    unavailable: Annotated[UnavailablePeriods, Depends(get_unavailable_periods)],
 ) -> ScheduleProposalResponse:
     try:
         proposal = await generation.generate(principal.account_id)
@@ -210,7 +251,7 @@ async def generate_schedule_proposal(
         ) from error
     if proposal is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
-    return await _with_titles(proposal, principal.account_id, tasks)
+    return await _with_titles(proposal, principal.account_id, tasks, unavailable)
 
 
 @router.get(
@@ -225,10 +266,11 @@ async def get_current_schedule_proposal(
     principal: Annotated[SessionPrincipal, Depends(require_session)],
     proposals: Annotated[ScheduleProposalRepository, Depends(get_schedule_proposals)],
     tasks: Annotated[AcademicTasks, Depends(get_academic_tasks)],
+    unavailable: Annotated[UnavailablePeriods, Depends(get_unavailable_periods)],
 ) -> ScheduleProposalResponse:
     proposal = await proposals.get(principal.account_id)
     if proposal is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Schedule proposal not found"
         )
-    return await _with_titles(proposal, principal.account_id, tasks)
+    return await _with_titles(proposal, principal.account_id, tasks, unavailable)

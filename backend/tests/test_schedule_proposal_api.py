@@ -9,6 +9,7 @@ from httpx import ASGITransport, AsyncClient
 
 from studyflow.app import create_app
 from studyflow.auth.session_authentication import SessionPrincipal
+from studyflow.availability.unavailable import UnavailablePeriod, UnavailablePeriods
 from studyflow.scheduling import (
     AvailabilityTimezoneConfirmationRequiredError,
     ProposalKind,
@@ -76,6 +77,14 @@ class TasksStub:
         return self.records
 
 
+@dataclass
+class UnavailablePeriodsStub:
+    periods: list[UnavailablePeriod]
+
+    async def list_periods(self, account_id: UUID) -> list[UnavailablePeriod]:
+        return self.periods
+
+
 def _task() -> AcademicTaskRecord:
     now = datetime(2026, 8, 24, tzinfo=UTC)
     return AcademicTaskRecord(
@@ -141,19 +150,40 @@ def _app(
     proposals: ProposalsStub,
     *,
     authenticated: bool = True,
+    unavailable_periods: list[UnavailablePeriod] | None = None,
 ) -> FastAPI:
     return create_app(
         session_authentication=AuthenticationStub(authenticated),
         schedule_generation=cast(ScheduleGeneration, generation),
         schedule_proposals=cast(ScheduleProposalRepository, proposals),
         academic_tasks=cast(AcademicTasks, TasksStub([_task()])),
+        unavailable_periods=cast(
+            UnavailablePeriods,
+            UnavailablePeriodsStub(unavailable_periods or []),
+        ),
     )
 
 
 @pytest.mark.anyio
 async def test_generate_and_get_preview_with_overload_details() -> None:
     proposal = _proposal()
-    application = _app(GenerationStub(proposal), ProposalsStub(proposal))
+    relevant_period = UnavailablePeriod(
+        uuid4(),
+        datetime(2026, 8, 25, 13, tzinfo=UTC),
+        datetime(2026, 8, 25, 14, tzinfo=UTC),
+        "Doctor appointment",
+    )
+    after_deadline = UnavailablePeriod(
+        uuid4(),
+        datetime(2026, 8, 26, 12, tzinfo=UTC),
+        datetime(2026, 8, 26, 13, tzinfo=UTC),
+        None,
+    )
+    application = _app(
+        GenerationStub(proposal),
+        ProposalsStub(proposal),
+        unavailable_periods=[after_deadline, relevant_period],
+    )
     async with AsyncClient(
         transport=ASGITransport(app=application),
         base_url="https://test",
@@ -185,6 +215,14 @@ async def test_generate_and_get_preview_with_overload_details() -> None:
     assert body["overload_warning"]["remedies"] == [
         "extend_deadline",
         "add_availability",
+    ]
+    assert body["overload_warning"]["relevant_unavailable_periods"] == [
+        {
+            "id": str(relevant_period.id),
+            "starts_at": "2026-08-25T13:00:00Z",
+            "ends_at": "2026-08-25T14:00:00Z",
+            "reason": "Doctor appointment",
+        }
     ]
     assert len(body["task_allocations"]) == 1
 
