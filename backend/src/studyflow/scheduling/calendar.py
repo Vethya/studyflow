@@ -85,13 +85,19 @@ def _local_interval(
     end_time: time,
     crosses_midnight: bool,
     zone: tzinfo,
-) -> tuple[datetime, datetime]:
+) -> tuple[datetime, datetime] | None:
     start_naive = datetime.combine(local_date, start_time)
     end_date = local_date + timedelta(days=1) if crosses_midnight else local_date
     end_naive = datetime.combine(end_date, end_time)
     start = _resolve_local(start_naive, zone)
     end = _resolve_local(end_naive, zone, is_end=True)
     if end <= start:
+        # A non-crossing wall interval ending at the first valid instant after
+        # a spring-forward gap can collapse completely (for example, 02:00-
+        # 03:00 in New York).  It contributes no elapsed UTC time this week;
+        # retain errors for all other invalid interval orderings.
+        if not crosses_midnight and end_time > start_time:
+            return None
         raise ValueError("Availability window must have positive duration")
     return start.astimezone(UTC), end.astimezone(UTC)
 
@@ -181,7 +187,10 @@ def expand_calendar(
             weekday, start_time, end_time, crosses_midnight = _window_fields(window)
             if rule_date.weekday() != weekday:
                 continue
-            start, end = _local_interval(rule_date, start_time, end_time, crosses_midnight, zone)
+            interval = _local_interval(rule_date, start_time, end_time, crosses_midnight, zone)
+            if interval is None:
+                continue
+            start, end = interval
             _, start_ceil = _minute_bounds(start)
             _, end_floor = _minute_bounds(end)
             clipped_start = max(start_ceil, planning_start_minute)
