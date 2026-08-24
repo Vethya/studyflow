@@ -67,6 +67,7 @@ async def _harness(
         AvailabilityWindowDraft(0, time(13), time(18)),
     ),
     solver: Callable[[FeasibilityProblem], OverloadResult] | None = None,
+    minimum_break_minutes: int = 0,
 ) -> Harness:
     database = Database("sqlite+aiosqlite:///:memory:")
     await database.start()
@@ -127,7 +128,7 @@ async def _harness(
             )
     tasks = AcademicTaskService(SqlAlchemyAcademicTaskRepository(database), clock=lambda: NOW)
     preferences = StudyPreferencesService(SqlAlchemyStudyPreferencesRepository(database))
-    await preferences.update(account_id, "UTC", 60, 0)
+    await preferences.update(account_id, "UTC", 60, minimum_break_minutes)
     availability = AvailabilityWindowService(SqlAlchemyAvailabilityWindowRepository(database))
     await availability.replace(account_id, list(windows))
     unavailable = UnavailablePeriodService(
@@ -171,6 +172,43 @@ async def test_recovery_counts_missed_and_future_work_once_and_leaves_active_sch
             )
         assert active_ids == {harness.missed_session_id, harness.future_session_id}
         assert snapshot_work == 120
+    finally:
+        await harness.database.stop()
+
+
+@pytest.mark.anyio
+async def test_recovery_preserves_break_after_in_progress_session() -> None:
+    harness = await _harness(
+        deadline=NOW + timedelta(days=1),
+        windows=(AvailabilityWindowDraft(0, time(12), time(18)),),
+        minimum_break_minutes=30,
+    )
+    in_progress_ends_at = NOW + timedelta(minutes=30)
+    try:
+        async with harness.database.transaction() as session:
+            session.add(
+                SessionRow(
+                    id=uuid4(),
+                    account_id=harness.account_id,
+                    task_id=harness.task_id,
+                    proposal_id=None,
+                    starts_at=NOW - timedelta(minutes=15),
+                    ends_at=in_progress_ends_at,
+                    planned_duration_minutes=45,
+                )
+            )
+
+        proposal = await harness.recovery.propose(
+            harness.account_id,
+            harness.missed_session_id,
+        )
+
+        assert proposal is not None
+        assert proposal.status is ProposalStatus.FEASIBLE
+        assert proposal.sessions
+        assert min(item.starts_at for item in proposal.sessions) >= in_progress_ends_at + timedelta(
+            minutes=30
+        )
     finally:
         await harness.database.stop()
 

@@ -5,12 +5,16 @@ import hashlib
 import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from uuid import UUID
 
 from studyflow.accounts.preferences import AccountPreferences, StudyPreferences
-from studyflow.availability.unavailable import UnavailablePeriod, UnavailablePeriods
+from studyflow.availability.unavailable import (
+    UnavailablePeriod,
+    UnavailablePeriodDraft,
+    UnavailablePeriods,
+)
 from studyflow.availability.windows import AvailabilityWindow, AvailabilityWindows
 from studyflow.scheduling.assembly import assemble_schedule_problem
 from studyflow.scheduling.contracts import (
@@ -49,6 +53,7 @@ class RecoverySnapshot:
     captured_at: datetime
     unfinished_work: tuple[RecoveryTaskWork, ...]
     active_future_sessions: tuple[StudySessionRecord, ...]
+    in_progress_sessions: tuple[StudySessionRecord, ...]
     unresolved_outcomes: tuple[StudySessionOutcomeRecord, ...]
 
 
@@ -94,6 +99,16 @@ def recovery_input_fingerprint(
         ),
         "base_schedule_input": schedule_input_fingerprint(tasks, windows, unavailable, preferences),
         "missed_session_id": str(snapshot.missed_session_id),
+        "in_progress_sessions": sorted(
+            (
+                str(item.id),
+                str(item.task_id),
+                _utc_text(item.starts_at),
+                _utc_text(item.ends_at),
+                item.planned_duration_minutes,
+            )
+            for item in snapshot.in_progress_sessions
+        ),
         "unfinished_work": sorted(
             (str(item.task_id), item.unfinished_minutes) for item in snapshot.unfinished_work
         ),
@@ -108,7 +123,7 @@ def recovery_input_fingerprint(
             )
             for item in snapshot.unresolved_outcomes
         ),
-        "version": 1,
+        "version": 2,
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
@@ -164,8 +179,20 @@ class ScheduleRecoveryService:
             for task in recovery_tasks
             if task.status is not TaskStatus.COMPLETED and task.deadline_at <= now
         )
+        preserved_work = tuple(
+            UnavailablePeriodDraft(
+                starts_at=now,
+                ends_at=session.ends_at + timedelta(minutes=preferences.minimum_break_minutes),
+                reason="Study session in progress",
+            )
+            for session in snapshot.in_progress_sessions
+        )
         problem = assemble_schedule_problem(
-            current, windows, unavailable, preferences, planning_start=now
+            current,
+            windows,
+            (*unavailable, *preserved_work),
+            preferences,
+            planning_start=now,
         )
         result = await asyncio.to_thread(self._solver, problem)
         result = self._include_overdue(result, overdue)
