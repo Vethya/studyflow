@@ -16,7 +16,12 @@ from studyflow.availability.repositories import (
 from studyflow.availability.unavailable import UnavailablePeriodService
 from studyflow.availability.windows import AvailabilityWindowDraft, AvailabilityWindowService
 from studyflow.database import Base, Database
-from studyflow.database.models import AcademicTask, RecoveryTaskWork, StudentAccount
+from studyflow.database.models import (
+    AcademicTask,
+    RecoveryTaskWork,
+    ScheduleProposal,
+    StudentAccount,
+)
 from studyflow.database.models import ScheduleRecoverySnapshot as SnapshotRow
 from studyflow.database.models import StudySession as SessionRow
 from studyflow.database.models import StudySessionOutcome as OutcomeRow
@@ -31,7 +36,10 @@ from studyflow.scheduling import (
 from studyflow.scheduling.contracts import FeasibilityProblem, OverloadResult
 from studyflow.scheduling.overload import solve_with_overload
 from studyflow.scheduling.recovery import MISSED_REVISION_REASON, ScheduleRecoveryService
-from studyflow.scheduling.recovery_repositories import SqlAlchemyRecoverySnapshotRepository
+from studyflow.scheduling.recovery_repositories import (
+    SqlAlchemyRecoverySnapshotRepository,
+    SqlAlchemyTaskRecoveryProposalInvalidator,
+)
 from studyflow.scheduling.repositories import SqlAlchemyScheduleProposalRepository
 from studyflow.tasks.repositories import SqlAlchemyAcademicTaskRepository
 from studyflow.tasks.service import AcademicTaskService
@@ -203,6 +211,63 @@ async def test_recovery_reports_exact_overload_and_overdue_work() -> None:
     finally:
         await overload.database.stop()
         await overdue.database.stop()
+
+
+@pytest.mark.anyio
+async def test_recovery_does_not_restore_completed_overdue_work() -> None:
+    harness = await _harness(deadline=NOW - timedelta(minutes=1), future_minutes=0, windows=())
+    try:
+        async with harness.database.transaction() as session:
+            task = await session.get(AcademicTask, harness.task_id)
+            assert task is not None
+            task.estimate_frozen_at = NOW - timedelta(hours=2)
+            task.finished_early_at = NOW - timedelta(minutes=30)
+
+        proposal = await harness.recovery.propose(
+            harness.account_id,
+            harness.missed_session_id,
+        )
+
+        assert proposal is not None
+        assert proposal.status is ProposalStatus.FEASIBLE
+        assert proposal.sessions == ()
+        assert proposal.allocations == ()
+    finally:
+        await harness.database.stop()
+
+
+@pytest.mark.anyio
+async def test_task_deletion_invalidates_its_pending_recovery_proposal() -> None:
+    harness = await _harness(deadline=NOW + timedelta(days=1))
+    try:
+        proposal = await harness.recovery.propose(harness.account_id, harness.missed_session_id)
+        assert proposal is not None
+        tasks = SqlAlchemyAcademicTaskRepository(
+            harness.database,
+            recovery_invalidator=SqlAlchemyTaskRecoveryProposalInvalidator(),
+        )
+
+        assert await tasks.delete(harness.account_id, harness.task_id)
+
+        async with harness.database.transaction() as session:
+            assert await session.get(AcademicTask, harness.task_id) is None
+            assert await session.get(ScheduleProposal, proposal.id) is None
+            assert await session.get(SnapshotRow, proposal.id) is None
+            work_count = await session.scalar(select(func.count()).select_from(RecoveryTaskWork))
+        assert work_count == 0
+    finally:
+        await harness.database.stop()
+
+
+def test_recovery_snapshot_trigger_is_deleted_with_its_outcome() -> None:
+    table = Base.metadata.tables["schedule_recovery_snapshots"]
+    trigger_foreign_key = next(
+        foreign_key
+        for foreign_key in table.foreign_key_constraints
+        if next(iter(foreign_key.columns)).name == "missed_session_id"
+    )
+
+    assert trigger_foreign_key.ondelete == "CASCADE"
 
 
 @pytest.mark.anyio

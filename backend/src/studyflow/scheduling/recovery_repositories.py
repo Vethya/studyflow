@@ -4,9 +4,11 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.repositories import SessionTransactions
+from studyflow.database.models import ProposalTaskAllocation as AllocationRow
 from studyflow.database.models import RecoveryTaskWork as WorkRow
 from studyflow.database.models import ScheduleProposal as ProposalRow
 from studyflow.database.models import ScheduleRecoverySnapshot as SnapshotRow
@@ -147,3 +149,32 @@ class SqlAlchemyRecoverySnapshotRepository:
             cls._aware(item.recorded_at),
             cls._aware(item.rescheduled_at) if item.rescheduled_at is not None else None,
         )
+
+
+class SqlAlchemyTaskRecoveryProposalInvalidator:
+    async def invalidate_for_task(
+        self,
+        session: AsyncSession,
+        account_id: UUID,
+        task_id: UUID,
+    ) -> None:
+        proposal_ids = tuple(
+            await session.scalars(
+                select(SnapshotRow.proposal_id)
+                .join(WorkRow, WorkRow.proposal_id == SnapshotRow.proposal_id)
+                .where(
+                    SnapshotRow.account_id == account_id,
+                    WorkRow.task_id == task_id,
+                )
+                .with_for_update()
+            )
+        )
+        if not proposal_ids:
+            return
+        await session.execute(delete(WorkRow).where(WorkRow.proposal_id.in_(proposal_ids)))
+        await session.execute(delete(SnapshotRow).where(SnapshotRow.proposal_id.in_(proposal_ids)))
+        await session.execute(
+            delete(AllocationRow).where(AllocationRow.proposal_id.in_(proposal_ids))
+        )
+        await session.execute(delete(SessionRow).where(SessionRow.proposal_id.in_(proposal_ids)))
+        await session.execute(delete(ProposalRow).where(ProposalRow.id.in_(proposal_ids)))

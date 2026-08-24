@@ -92,7 +92,10 @@ from studyflow.scheduling.outcome_repositories import SqlAlchemyStudySessionOutc
 from studyflow.scheduling.outcomes import StudySessions, StudySessionService
 from studyflow.scheduling.proposals import ScheduleProposalRepository
 from studyflow.scheduling.recovery import ScheduleRecovery, ScheduleRecoveryService
-from studyflow.scheduling.recovery_repositories import SqlAlchemyRecoverySnapshotRepository
+from studyflow.scheduling.recovery_repositories import (
+    SqlAlchemyRecoverySnapshotRepository,
+    SqlAlchemyTaskRecoveryProposalInvalidator,
+)
 from studyflow.scheduling.repositories import SqlAlchemyScheduleProposalRepository
 from studyflow.scheduling.service import ScheduleGeneration, ScheduleGenerationService
 from studyflow.settings import Settings
@@ -277,6 +280,7 @@ def create_app(
         SqlAlchemyAcademicTaskRepository(
             transactions,
             SqlAlchemyTaskDeadlineSessionInvalidator(),
+            recovery_invalidator=SqlAlchemyTaskRecoveryProposalInvalidator(),
         )
     )
     resolved_availability_windows = availability_windows or AvailabilityWindowService(
