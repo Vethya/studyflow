@@ -227,6 +227,23 @@ def test_skipped_local_day_can_collapse_cross_midnight_occurrence() -> None:
     assert result.windows == ()
 
 
+def test_skipped_local_day_looks_back_far_enough_for_shifted_interval() -> None:
+    planning_start = datetime(2011, 12, 30, 10, tzinfo=UTC)
+    result = _run(
+        [AvailabilityWindowDraft(3, time(23, 30), time(0, 30))],
+        planning_start,
+        datetime(2011, 12, 30, 11, tzinfo=UTC),
+        timezone_name="Pacific/Apia",
+    )
+
+    assert result.windows == (
+        MinuteWindow(
+            _minute(planning_start),
+            _minute(datetime(2011, 12, 30, 10, 30, tzinfo=UTC)),
+        ),
+    )
+
+
 def test_fall_back_uses_later_ambiguous_end_and_longer_local_day() -> None:
     start = datetime(2026, 11, 1, 4, tzinfo=UTC)
     end = datetime(2026, 11, 2, 5, tzinfo=UTC)

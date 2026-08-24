@@ -24,6 +24,9 @@ _MICROSECONDS_PER_MINUTE = 60_000_000
 _MINUTES_PER_DAY = 1_440
 _MINUTES_PER_WEEK = 10_080
 _MONDAY_EPOCH_MINUTE = 4 * _MINUTES_PER_DAY
+# IANA's largest civil offset jump is 24 hours.  A cross-midnight rule can
+# therefore start two nominal dates before the local date at the UTC horizon.
+_RULE_DATE_LOOKBACK_DAYS = 2
 
 AvailabilityInput = AvailabilityWindow | AvailabilityWindowDraft
 UnavailableInput = UnavailablePeriod | UnavailablePeriodDraft
@@ -552,7 +555,9 @@ def expand_calendar(
         if clipped_start < clipped_end:
             blocked_intervals.append((clipped_start, clipped_end))
     blocked = tuple(_merge_intervals(blocked_intervals))
-    first_rule_date = local_start if local_start == date.min else local_start - timedelta(days=1)
+    first_rule_date = date.fromordinal(
+        max(date.min.toordinal(), local_start.toordinal() - _RULE_DATE_LOOKBACK_DAYS)
+    )
 
     effective_local_end = local_end
     local_end_midnight = _resolve_local(datetime.combine(local_end, time()), zone).astimezone(UTC)
