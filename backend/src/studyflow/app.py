@@ -87,6 +87,8 @@ from studyflow.availability.unavailable import (
 )
 from studyflow.availability.windows import AvailabilityWindows, AvailabilityWindowService
 from studyflow.database import Database, DatabaseRuntime
+from studyflow.scheduling.repositories import SqlAlchemyScheduleProposalRepository
+from studyflow.scheduling.service import ScheduleGeneration, ScheduleGenerationService
 from studyflow.settings import Settings
 from studyflow.tasks.repositories import SqlAlchemyAcademicTaskRepository
 from studyflow.tasks.service import AcademicTasks, AcademicTaskService
@@ -132,6 +134,7 @@ def create_app(
     academic_tasks: AcademicTasks | None = None,
     availability_windows: AvailabilityWindows | None = None,
     unavailable_periods: UnavailablePeriods | None = None,
+    schedule_generation: ScheduleGeneration | None = None,
     oidc_login: OIDCLogin | None = None,
     oidc_start_rate_limiter: OIDCStartRateLimit | None = None,
     oidc_account_linking: OIDCAccountLinking | None = None,
@@ -254,6 +257,25 @@ def create_app(
             allow_methods=["*"],
             allow_headers=["*"],
         )
+    resolved_account_preferences = account_preferences or StudyPreferencesService(
+        SqlAlchemyStudyPreferencesRepository(transactions)
+    )
+    resolved_academic_tasks = academic_tasks or AcademicTaskService(
+        SqlAlchemyAcademicTaskRepository(transactions)
+    )
+    resolved_availability_windows = availability_windows or AvailabilityWindowService(
+        SqlAlchemyAvailabilityWindowRepository(transactions)
+    )
+    resolved_unavailable_periods = unavailable_periods or UnavailablePeriodService(
+        SqlAlchemyUnavailablePeriodRepository(transactions, NoFutureSessions())
+    )
+    resolved_schedule_generation = schedule_generation or ScheduleGenerationService(
+        resolved_academic_tasks,
+        resolved_availability_windows,
+        resolved_unavailable_periods,
+        resolved_account_preferences,
+        SqlAlchemyScheduleProposalRepository(transactions),
+    )
     application.state.settings = resolved_settings
     application.state.cookie_policy = CookiePolicy.for_environment(resolved_settings.environment)
     application.state.database = resolved_database
@@ -301,23 +323,16 @@ def create_app(
     application.state.account_profiles = account_profiles or AccountProfileService(
         SqlAlchemyAccountProfileRepository(transactions)
     )
-    application.state.account_preferences = account_preferences or StudyPreferencesService(
-        SqlAlchemyStudyPreferencesRepository(transactions)
-    )
+    application.state.account_preferences = resolved_account_preferences
     application.state.account_passwords = resolved_account_passwords
     application.state.account_password_change_rate_limiter = (
         account_password_change_rate_limiter
         or DatabaseAccountPasswordChangeRateLimiter(transactions)
     )
-    application.state.academic_tasks = academic_tasks or AcademicTaskService(
-        SqlAlchemyAcademicTaskRepository(transactions)
-    )
-    application.state.availability_windows = availability_windows or AvailabilityWindowService(
-        SqlAlchemyAvailabilityWindowRepository(transactions)
-    )
-    application.state.unavailable_periods = unavailable_periods or UnavailablePeriodService(
-        SqlAlchemyUnavailablePeriodRepository(transactions, NoFutureSessions())
-    )
+    application.state.academic_tasks = resolved_academic_tasks
+    application.state.availability_windows = resolved_availability_windows
+    application.state.unavailable_periods = resolved_unavailable_periods
+    application.state.schedule_generation = resolved_schedule_generation
     application.include_router(api_router)
 
     return application
