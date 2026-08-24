@@ -113,10 +113,14 @@ def _window_fields(window: AvailabilityInput) -> tuple[int, time, time, bool]:
         for value in (start_time, end_time)
     ):
         raise ValueError("Availability times must be local minute values")
-    crosses_midnight = getattr(window, "crosses_midnight", end_time <= start_time)
-    if end_time <= start_time:
-        crosses_midnight = True
-    return weekday, start_time, end_time, crosses_midnight
+    wall_crosses_midnight = end_time <= start_time
+    persisted_crosses_midnight = getattr(window, "crosses_midnight", None)
+    if persisted_crosses_midnight is not None:
+        if not isinstance(persisted_crosses_midnight, bool):
+            raise ValueError("crosses_midnight must be a boolean")
+        if persisted_crosses_midnight != wall_crosses_midnight:
+            raise ValueError("crosses_midnight does not match availability wall-time ordering")
+    return weekday, start_time, end_time, wall_crosses_midnight
 
 
 def _period_bounds(period: UnavailableInput) -> tuple[datetime, datetime]:
