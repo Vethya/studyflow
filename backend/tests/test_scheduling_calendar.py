@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from uuid import uuid4
 
 import pytest
@@ -31,6 +31,11 @@ def _run(
 def _minute(value: datetime) -> int:
     epoch = datetime(1970, 1, 1, tzinfo=UTC)
     return int((value - epoch).total_seconds() // 60)
+
+
+def _exact_minute(value: datetime) -> int:
+    delta = value - datetime(1970, 1, 1, tzinfo=UTC)
+    return delta.days * 1_440 + delta.seconds // 60
 
 
 def test_expands_ordinary_week_and_planning_days() -> None:
@@ -251,7 +256,7 @@ def test_ambiguous_midnight_keeps_havana_planning_days_contiguous() -> None:
     FeasibilityProblem(
         (),
         planning_start_minute=result.planning_days[0].start_minute,
-        planning_days=result.planning_days,
+        planning_days=result.planning_days.materialize(),
     )
 
 
@@ -279,6 +284,95 @@ def test_output_is_deterministic_independent_of_input_order() -> None:
     )
 
     assert first == second
+
+
+def test_date_max_horizon_stays_lazy_countable_and_indexable() -> None:
+    start = datetime(2026, 1, 5, tzinfo=UTC)
+    end = datetime.max.replace(tzinfo=UTC)
+
+    result = _run(
+        [
+            AvailabilityWindowDraft(0, time(9), time(11)),
+            AvailabilityWindowDraft(4, time(22), time(2)),
+        ],
+        start,
+        end,
+    )
+
+    day_count = (date.max - start.date()).days + 1
+    monday_count = (date.max - start.date()).days // 7 + 1
+    friday_count = (date.max - (start.date() + timedelta(days=4))).days // 7 + 1
+    assert len(result.planning_days) == day_count
+    assert result.planning_days[0].day_index == 0
+    assert result.planning_days[-1] == PlanningDay(
+        day_count - 1,
+        _exact_minute(datetime.combine(date.max, time(), tzinfo=UTC)),
+        _exact_minute(end),
+    )
+    assert len(result.windows) == monday_count + friday_count
+    assert result.windows[0] == MinuteWindow(
+        _minute(datetime(2026, 1, 5, 9, tzinfo=UTC)),
+        _minute(datetime(2026, 1, 5, 11, tzinfo=UTC)),
+    )
+    assert result.windows[-1] == MinuteWindow(
+        _exact_minute(datetime.combine(date.max, time(22), tzinfo=UTC)),
+        _exact_minute(end),
+    )
+
+
+def test_far_future_blocked_range_is_counted_without_expanding_each_week() -> None:
+    start = datetime(2026, 1, 5, tzinfo=UTC)
+    blocked_start = datetime(2030, 1, 1, tzinfo=UTC)
+    blocked_end = datetime(9990, 1, 1, tzinfo=UTC)
+    end = datetime.max.replace(tzinfo=UTC)
+
+    result = _run(
+        [AvailabilityWindowDraft(0, time(9), time(11))],
+        start,
+        end,
+        [UnavailablePeriodDraft(blocked_start, blocked_end)],
+    )
+
+    all_mondays = (date.max - start.date()).days // 7 + 1
+    first_blocked_monday = blocked_start.date() + timedelta(
+        days=(-blocked_start.date().weekday()) % 7
+    )
+    blocked_mondays = (blocked_end.date() - first_blocked_monday).days // 7 + 1
+    if first_blocked_monday + timedelta(days=(blocked_mondays - 1) * 7) >= blocked_end.date():
+        blocked_mondays -= 1
+    assert len(result.windows) == all_mondays - blocked_mondays
+    assert result.windows[-1].start > _minute(blocked_end)
+
+
+def test_lazy_utc_count_handles_clipped_and_continuous_availability() -> None:
+    start = datetime(2026, 1, 5, 10, tzinfo=UTC)
+    end = datetime(2026, 1, 12, 10, tzinfo=UTC)
+    always_available = [AvailabilityWindowDraft(weekday, time(), time()) for weekday in range(7)]
+
+    result = _run(
+        always_available,
+        start,
+        end,
+        [UnavailablePeriodDraft(start, start + timedelta(hours=1))],
+    )
+
+    assert len(result.windows) == 1
+    assert result.windows.materialize() == (
+        MinuteWindow(_minute(start + timedelta(hours=1)), _minute(end)),
+    )
+
+
+def test_date_max_does_not_overflow_positive_offset_timezone() -> None:
+    result = _run(
+        [],
+        datetime(9999, 12, 30, tzinfo=UTC),
+        datetime.max.replace(tzinfo=UTC),
+        timezone_name="Asia/Phnom_Penh",
+    )
+
+    assert len(result.planning_days) == 2
+    assert result.planning_days[-1].end_minute == _exact_minute(datetime.max.replace(tzinfo=UTC))
+    assert len(result.windows) == 0
 
 
 @pytest.mark.parametrize(
