@@ -33,6 +33,12 @@ from studyflow.scheduling.proposals import (
     StudySessionRecord,
     TaskAllocationRecord,
 )
+from studyflow.scheduling.service import (
+    ScheduleGeneration,
+    ScheduleGenerationFailedError,
+    ScheduleGenerationService,
+    schedule_input_fingerprint,
+)
 from studyflow.scheduling.splitting import (
     SessionDraft,
     SessionSplit,
@@ -54,6 +60,9 @@ __all__ = [
     "PlanningDay",
     "ProposalKind",
     "ProposalStatus",
+    "ScheduleGeneration",
+    "ScheduleGenerationFailedError",
+    "ScheduleGenerationService",
     "ScheduleProposalRecord",
     "ScheduleProposalRepository",
     "ScheduledSession",
@@ -70,6 +79,7 @@ __all__ = [
     "assemble_schedule_problem",
     "classify_overload_status",
     "expand_calendar",
+    "schedule_input_fingerprint",
     "solve_feasibility",
     "solve_with_overload",
     "split_task",
