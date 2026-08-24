@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -12,7 +13,10 @@ from studyflow.scheduling import (
     NewProposedSession,
     NewScheduleProposal,
     NewTaskAllocation,
+    ProposalExpiredError,
     ProposalKind,
+    ProposalNotFeasibleError,
+    ProposalScheduleConflictError,
     ProposalStatus,
 )
 from studyflow.scheduling.repositories import (
@@ -210,5 +214,115 @@ async def test_repository_enforces_ownership_and_reject_preserves_accepted_sessi
         async with database.transaction() as session:
             remaining = list(await session.scalars(select(SessionRow)))
         assert len(remaining) == 1 and remaining[0].proposal_id is None
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_accept_replaces_only_future_sessions_and_preserves_started_work() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        owner_id, _, task_id, _ = await _seed(database)
+        repository = SqlAlchemyScheduleProposalRepository(database)
+        now = datetime(2026, 8, 25, 10, tzinfo=UTC)
+        async with database.transaction() as session:
+            session.add_all(
+                [
+                    SessionRow(
+                        account_id=owner_id,
+                        task_id=task_id,
+                        proposal_id=None,
+                        starts_at=now - timedelta(hours=2),
+                        ends_at=now - timedelta(hours=1),
+                        planned_duration_minutes=60,
+                    ),
+                    SessionRow(
+                        account_id=owner_id,
+                        task_id=task_id,
+                        proposal_id=None,
+                        starts_at=now - timedelta(minutes=15),
+                        ends_at=now + timedelta(minutes=15),
+                        planned_duration_minutes=30,
+                    ),
+                    SessionRow(
+                        account_id=owner_id,
+                        task_id=task_id,
+                        proposal_id=None,
+                        starts_at=now + timedelta(hours=2),
+                        ends_at=now + timedelta(hours=3),
+                        planned_duration_minutes=60,
+                    ),
+                ]
+            )
+        proposal = await repository.replace(
+            owner_id, _proposal(task_id, now + timedelta(hours=1), 30)
+        )
+        assert proposal is not None
+
+        accepted = await repository.accept(owner_id, proposal.id, now)
+
+        assert accepted is not None and accepted[0].proposal_id is None
+        assert await repository.get(owner_id) is None
+        async with database.transaction() as session:
+            sessions = list(
+                await session.scalars(
+                    select(SessionRow).order_by(SessionRow.starts_at, SessionRow.id)
+                )
+            )
+        assert len(sessions) == 3
+        assert [item.starts_at.replace(tzinfo=UTC) for item in sessions] == [
+            now - timedelta(hours=2),
+            now - timedelta(minutes=15),
+            now + timedelta(hours=1),
+        ]
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_accept_rejects_expired_overload_and_in_progress_conflicts_atomically() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        owner_id, _, task_id, _ = await _seed(database)
+        repository = SqlAlchemyScheduleProposalRepository(database)
+        now = datetime(2026, 8, 25, 10, tzinfo=UTC)
+
+        expired = await repository.replace(
+            owner_id, _proposal(task_id, now - timedelta(minutes=1), 30)
+        )
+        assert expired is not None
+        with pytest.raises(ProposalExpiredError):
+            await repository.accept(owner_id, expired.id, now)
+        assert await repository.get(owner_id) is not None
+
+        overload_draft = replace(
+            _proposal(task_id, now + timedelta(hours=1), 30),
+            status=ProposalStatus.OVERLOAD,
+        )
+        overload = await repository.replace(owner_id, overload_draft)
+        assert overload is not None
+        with pytest.raises(ProposalNotFeasibleError):
+            await repository.accept(owner_id, overload.id, now)
+
+        conflict = await repository.replace(
+            owner_id, _proposal(task_id, now + timedelta(minutes=10), 30)
+        )
+        assert conflict is not None
+        async with database.transaction() as session:
+            session.add(
+                SessionRow(
+                    account_id=owner_id,
+                    task_id=task_id,
+                    proposal_id=None,
+                    starts_at=now - timedelta(minutes=5),
+                    ends_at=now + timedelta(minutes=20),
+                    planned_duration_minutes=25,
+                )
+            )
+        with pytest.raises(ProposalScheduleConflictError):
+            await repository.accept(owner_id, conflict.id, now)
+        assert await repository.get(owner_id) is not None
     finally:
         await database.stop()
