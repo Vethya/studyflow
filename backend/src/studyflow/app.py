@@ -77,8 +77,8 @@ from studyflow.auth.session_authentication import (
 from studyflow.auth.sessions import SessionService
 from studyflow.auth.verification import EmailVerification, EmailVerificationService
 from studyflow.availability.repositories import (
-    NoFutureSessions,
     SqlAlchemyAvailabilityWindowRepository,
+    SqlAlchemyFutureSessionInvalidator,
     SqlAlchemyUnavailablePeriodRepository,
 )
 from studyflow.availability.unavailable import (
@@ -271,7 +271,10 @@ def create_app(
         SqlAlchemyAvailabilityWindowRepository(transactions)
     )
     resolved_unavailable_periods = unavailable_periods or UnavailablePeriodService(
-        SqlAlchemyUnavailablePeriodRepository(transactions, NoFutureSessions())
+        SqlAlchemyUnavailablePeriodRepository(
+            transactions,
+            SqlAlchemyFutureSessionInvalidator(),
+        )
     )
     resolved_schedule_proposals = schedule_proposals or SqlAlchemyScheduleProposalRepository(
         transactions
