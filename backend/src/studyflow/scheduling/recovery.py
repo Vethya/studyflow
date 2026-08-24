@@ -32,7 +32,7 @@ from studyflow.scheduling.service import (
     _utc_text,
     schedule_input_fingerprint,
 )
-from studyflow.tasks.service import AcademicTaskRecord, AcademicTasks
+from studyflow.tasks.service import AcademicTaskRecord, AcademicTasks, TaskStatus
 
 MISSED_REVISION_REASON = "Missed study session"
 
@@ -159,7 +159,11 @@ class ScheduleRecoveryService:
             if task.id in work
         )
         current = tuple(task for task in recovery_tasks if task.deadline_at > now)
-        overdue = tuple(task for task in recovery_tasks if task.deadline_at <= now)
+        overdue = tuple(
+            task
+            for task in recovery_tasks
+            if task.status is not TaskStatus.COMPLETED and task.deadline_at <= now
+        )
         problem = assemble_schedule_problem(
             current, windows, unavailable, preferences, planning_start=now
         )
