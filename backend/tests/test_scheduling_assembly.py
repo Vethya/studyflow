@@ -184,16 +184,19 @@ def test_subminute_horizon_becomes_normal_overload_input() -> None:
     assert solve_with_overload(problem).status is KernelStatus.OVERLOAD
 
 
-def test_rejects_horizon_before_materializing_calendar() -> None:
+def test_distant_task_omits_fairness_days_without_rejecting_schedule() -> None:
     planning_start = datetime(2026, 1, 5, tzinfo=UTC)
-    with pytest.raises(SchedulingInputTooLargeError, match="horizon"):
-        assemble_schedule_problem(
-            [_task(TASK_A_ID, planning_start + timedelta(days=367), 60)],
-            [AvailabilityWindowDraft(0, time(9), time(10))],
-            [],
-            _preferences(),
-            planning_start=planning_start,
-        )
+    problem = assemble_schedule_problem(
+        [_task(TASK_A_ID, planning_start + timedelta(days=367), 60)],
+        [AvailabilityWindowDraft(0, time(9), time(10))],
+        [],
+        _preferences(),
+        planning_start=planning_start,
+    )
+
+    assert len(problem.sessions) == 1
+    assert problem.planning_days == ()
+    assert solve_with_overload(problem).status is KernelStatus.FEASIBLE
 
 
 def test_rejects_too_many_sessions_before_calendar_expansion() -> None:
