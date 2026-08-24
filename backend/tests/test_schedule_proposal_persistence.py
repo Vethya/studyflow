@@ -116,6 +116,21 @@ def test_schedule_proposal_tables_are_registered_with_constraints() -> None:
     assert Base.metadata.tables["study_sessions"].c.proposal_id.nullable
 
 
+def test_proposal_rejects_allocation_not_backed_by_scheduled_sessions() -> None:
+    task_id = uuid4()
+    starts_at = datetime(2026, 8, 25, 10, tzinfo=UTC)
+
+    with pytest.raises(ValueError, match="scheduled_minutes"):
+        NewScheduleProposal(
+            ProposalKind.GENERATION,
+            None,
+            ProposalStatus.FEASIBLE,
+            FINGERPRINT,
+            (NewProposedSession(task_id, starts_at, starts_at + timedelta(minutes=30), 30),),
+            (_allocation(task_id, starts_at + timedelta(days=1), 60),),
+        )
+
+
 @pytest.mark.anyio
 async def test_repository_roundtrips_orders_and_replaces_single_proposal() -> None:
     database = Database("sqlite+aiosqlite:///:memory:")
