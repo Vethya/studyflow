@@ -1,5 +1,10 @@
 """Pure scheduling domain and Google OR-Tools kernel."""
 
+from studyflow.scheduling.acceptance import (
+    ScheduleAcceptance,
+    ScheduleAcceptanceService,
+    StaleScheduleProposalError,
+)
 from studyflow.scheduling.assembly import (
     AvailabilityTimezoneConfirmationRequiredError,
     SchedulingInputError,
@@ -26,7 +31,10 @@ from studyflow.scheduling.proposals import (
     NewProposedSession,
     NewScheduleProposal,
     NewTaskAllocation,
+    ProposalExpiredError,
     ProposalKind,
+    ProposalNotFeasibleError,
+    ProposalScheduleConflictError,
     ProposalStatus,
     ScheduleProposalRecord,
     ScheduleProposalRepository,
@@ -58,8 +66,13 @@ __all__ = [
     "NewTaskAllocation",
     "OverloadResult",
     "PlanningDay",
+    "ProposalExpiredError",
     "ProposalKind",
+    "ProposalNotFeasibleError",
+    "ProposalScheduleConflictError",
     "ProposalStatus",
+    "ScheduleAcceptance",
+    "ScheduleAcceptanceService",
     "ScheduleGeneration",
     "ScheduleGenerationFailedError",
     "ScheduleGenerationService",
@@ -72,6 +85,7 @@ __all__ = [
     "SessionDraft",
     "SessionSplit",
     "SolverDiagnostics",
+    "StaleScheduleProposalError",
     "StudySessionRecord",
     "TaskAllocation",
     "TaskAllocationRecord",
