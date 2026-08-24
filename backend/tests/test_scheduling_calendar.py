@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, time, timedelta
+from uuid import uuid4
 
 import pytest
 
 from studyflow.availability.unavailable import UnavailablePeriodDraft
-from studyflow.availability.windows import AvailabilityWindowDraft
+from studyflow.availability.windows import AvailabilityWindow, AvailabilityWindowDraft
 from studyflow.scheduling import FeasibilityProblem, MinuteWindow, PlanningDay
 from studyflow.scheduling.calendar import ExpandedCalendar, expand_calendar
 
 
 def _run(
-    windows: list[AvailabilityWindowDraft],
+    windows: Sequence[AvailabilityWindow | AvailabilityWindowDraft],
     start: datetime,
     end: datetime,
     unavailable: list[UnavailablePeriodDraft] | None = None,
@@ -67,6 +69,24 @@ def test_preserves_cross_midnight_window_as_one_concrete_interval() -> None:
             _minute(datetime(2026, 1, 6, 2, tzinfo=UTC)),
         ),
     )
+
+
+@pytest.mark.parametrize(
+    ("start_time", "end_time", "crosses_midnight"),
+    [
+        (time(9), time(10), True),
+        (time(22), time(2), False),
+    ],
+)
+def test_rejects_inconsistent_persisted_crossing_metadata(
+    start_time: time, end_time: time, crosses_midnight: bool
+) -> None:
+    with pytest.raises(ValueError, match="crosses_midnight"):
+        _run(
+            [AvailabilityWindow(uuid4(), 0, start_time, end_time, crosses_midnight)],
+            datetime(2026, 1, 5, tzinfo=UTC),
+            datetime(2026, 1, 6, tzinfo=UTC),
+        )
 
 
 def test_merges_touching_and_overlapping_concrete_windows() -> None:
