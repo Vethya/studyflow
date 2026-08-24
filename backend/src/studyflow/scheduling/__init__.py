@@ -22,6 +22,17 @@ from studyflow.scheduling.contracts import (
 )
 from studyflow.scheduling.kernel import solve_feasibility
 from studyflow.scheduling.overload import classify_overload_status, solve_with_overload
+from studyflow.scheduling.proposals import (
+    NewProposedSession,
+    NewScheduleProposal,
+    NewTaskAllocation,
+    ProposalKind,
+    ProposalStatus,
+    ScheduleProposalRecord,
+    ScheduleProposalRepository,
+    StudySessionRecord,
+    TaskAllocationRecord,
+)
 from studyflow.scheduling.splitting import (
     SessionDraft,
     SessionSplit,
@@ -36,8 +47,15 @@ __all__ = [
     "FeasibilityResult",
     "KernelStatus",
     "MinuteWindow",
+    "NewProposedSession",
+    "NewScheduleProposal",
+    "NewTaskAllocation",
     "OverloadResult",
     "PlanningDay",
+    "ProposalKind",
+    "ProposalStatus",
+    "ScheduleProposalRecord",
+    "ScheduleProposalRepository",
     "ScheduledSession",
     "SchedulingInputError",
     "SchedulingInputTooLargeError",
@@ -45,7 +63,9 @@ __all__ = [
     "SessionDraft",
     "SessionSplit",
     "SolverDiagnostics",
+    "StudySessionRecord",
     "TaskAllocation",
+    "TaskAllocationRecord",
     "TaskPriority",
     "assemble_schedule_problem",
     "classify_overload_status",
