@@ -87,6 +87,35 @@ class StudySessionOutcome(Base):
     rescheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ScheduleRecoverySnapshot(Base):
+    __tablename__ = "schedule_recovery_snapshots"
+
+    proposal_id: Mapped[UUID] = mapped_column(
+        ForeignKey("schedule_proposals.id", ondelete="CASCADE"), primary_key=True
+    )
+    account_id: Mapped[UUID] = mapped_column(
+        ForeignKey("student_accounts.id", ondelete="CASCADE"), index=True
+    )
+    missed_session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("study_session_outcomes.session_id", ondelete="RESTRICT"), index=True
+    )
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class RecoveryTaskWork(Base):
+    __tablename__ = "recovery_task_work"
+    __table_args__ = (CheckConstraint("unfinished_minutes > 0", name="positive_unfinished"),)
+
+    proposal_id: Mapped[UUID] = mapped_column(
+        ForeignKey("schedule_recovery_snapshots.proposal_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    task_id: Mapped[UUID] = mapped_column(
+        ForeignKey("academic_tasks.id", ondelete="CASCADE"), primary_key=True
+    )
+    unfinished_minutes: Mapped[int] = mapped_column(Integer)
+
+
 class ProposalTaskAllocation(Base):
     __tablename__ = "proposal_task_allocations"
     __table_args__ = (
