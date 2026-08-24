@@ -87,6 +87,7 @@ from studyflow.availability.unavailable import (
 )
 from studyflow.availability.windows import AvailabilityWindows, AvailabilityWindowService
 from studyflow.database import Database, DatabaseRuntime
+from studyflow.scheduling.proposals import ScheduleProposalRepository
 from studyflow.scheduling.repositories import SqlAlchemyScheduleProposalRepository
 from studyflow.scheduling.service import ScheduleGeneration, ScheduleGenerationService
 from studyflow.settings import Settings
@@ -135,6 +136,7 @@ def create_app(
     availability_windows: AvailabilityWindows | None = None,
     unavailable_periods: UnavailablePeriods | None = None,
     schedule_generation: ScheduleGeneration | None = None,
+    schedule_proposals: ScheduleProposalRepository | None = None,
     oidc_login: OIDCLogin | None = None,
     oidc_start_rate_limiter: OIDCStartRateLimit | None = None,
     oidc_account_linking: OIDCAccountLinking | None = None,
@@ -269,12 +271,15 @@ def create_app(
     resolved_unavailable_periods = unavailable_periods or UnavailablePeriodService(
         SqlAlchemyUnavailablePeriodRepository(transactions, NoFutureSessions())
     )
+    resolved_schedule_proposals = schedule_proposals or SqlAlchemyScheduleProposalRepository(
+        transactions
+    )
     resolved_schedule_generation = schedule_generation or ScheduleGenerationService(
         resolved_academic_tasks,
         resolved_availability_windows,
         resolved_unavailable_periods,
         resolved_account_preferences,
-        SqlAlchemyScheduleProposalRepository(transactions),
+        resolved_schedule_proposals,
     )
     application.state.settings = resolved_settings
     application.state.cookie_policy = CookiePolicy.for_environment(resolved_settings.environment)
@@ -333,6 +338,7 @@ def create_app(
     application.state.availability_windows = resolved_availability_windows
     application.state.unavailable_periods = resolved_unavailable_periods
     application.state.schedule_generation = resolved_schedule_generation
+    application.state.schedule_proposals = resolved_schedule_proposals
     application.include_router(api_router)
 
     return application
