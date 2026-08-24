@@ -53,7 +53,7 @@ class RecoverySnapshot:
     captured_at: datetime
     unfinished_work: tuple[RecoveryTaskWork, ...]
     active_future_sessions: tuple[StudySessionRecord, ...]
-    in_progress_sessions: tuple[StudySessionRecord, ...]
+    preserved_busy_sessions: tuple[StudySessionRecord, ...]
     unresolved_outcomes: tuple[StudySessionOutcomeRecord, ...]
 
 
@@ -63,7 +63,11 @@ class InvalidRecoveryTriggerError(ValueError):
 
 class RecoverySnapshotRepository(Protocol):
     async def capture(
-        self, account_id: UUID, missed_session_id: UUID, now: datetime
+        self,
+        account_id: UUID,
+        missed_session_id: UUID,
+        now: datetime,
+        minimum_break_minutes: int,
     ) -> RecoverySnapshot | None: ...
 
     async def save(
@@ -99,7 +103,7 @@ def recovery_input_fingerprint(
         ),
         "base_schedule_input": schedule_input_fingerprint(tasks, windows, unavailable, preferences),
         "missed_session_id": str(snapshot.missed_session_id),
-        "in_progress_sessions": sorted(
+        "preserved_busy_sessions": sorted(
             (
                 str(item.id),
                 str(item.task_id),
@@ -107,7 +111,7 @@ def recovery_input_fingerprint(
                 _utc_text(item.ends_at),
                 item.planned_duration_minutes,
             )
-            for item in snapshot.in_progress_sessions
+            for item in snapshot.preserved_busy_sessions
         ),
         "unfinished_work": sorted(
             (str(item.task_id), item.unfinished_minutes) for item in snapshot.unfinished_work
@@ -123,7 +127,7 @@ def recovery_input_fingerprint(
             )
             for item in snapshot.unresolved_outcomes
         ),
-        "version": 2,
+        "version": 3,
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
@@ -156,11 +160,16 @@ class ScheduleRecoveryService:
         self, account_id: UUID, missed_session_id: UUID
     ) -> ScheduleProposalRecord | None:
         now = self._clock()
-        snapshot = await self._snapshots.capture(account_id, missed_session_id, now)
-        if snapshot is None:
-            return None
         preferences = await self._preferences.get(account_id)
         if preferences is None:
+            return None
+        snapshot = await self._snapshots.capture(
+            account_id,
+            missed_session_id,
+            now,
+            preferences.minimum_break_minutes,
+        )
+        if snapshot is None:
             return None
         tasks, windows, unavailable = await asyncio.gather(
             self._tasks.list(account_id),
@@ -183,9 +192,9 @@ class ScheduleRecoveryService:
             UnavailablePeriodDraft(
                 starts_at=now,
                 ends_at=session.ends_at + timedelta(minutes=preferences.minimum_break_minutes),
-                reason="Study session in progress",
+                reason="Preserved study-session break",
             )
-            for session in snapshot.in_progress_sessions
+            for session in snapshot.preserved_busy_sessions
         )
         problem = assemble_schedule_problem(
             current,

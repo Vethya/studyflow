@@ -1,7 +1,7 @@
 """SQLAlchemy recovery snapshot capture and persistence."""
 
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import delete, select
@@ -29,7 +29,11 @@ class SqlAlchemyRecoverySnapshotRepository:
         self._database = database
 
     async def capture(
-        self, account_id: UUID, missed_session_id: UUID, now: datetime
+        self,
+        account_id: UUID,
+        missed_session_id: UUID,
+        now: datetime,
+        minimum_break_minutes: int,
     ) -> RecoverySnapshot | None:
         async with self._database.transaction() as session:
             account = await session.get(StudentAccount, account_id, with_for_update=True)
@@ -71,15 +75,16 @@ class SqlAlchemyRecoverySnapshotRepository:
             }
             unfinished: defaultdict[UUID, int] = defaultdict(int)
             future: list[StudySessionRecord] = []
-            in_progress: list[StudySessionRecord] = []
+            preserved_busy: list[StudySessionRecord] = []
             unresolved: list[StudySessionOutcomeRecord] = []
             for item in accepted:
                 if self._aware(item.starts_at) >= now_utc:
                     unfinished[item.task_id] += item.planned_duration_minutes
                     future.append(self._session_record(item))
                     continue
+                if self._aware(item.ends_at) + timedelta(minutes=minimum_break_minutes) > now_utc:
+                    preserved_busy.append(self._session_record(item))
                 if self._aware(item.ends_at) > now_utc:
-                    in_progress.append(self._session_record(item))
                     continue
                 outcome = outcome_by_session.get(item.id)
                 if outcome is None:
@@ -95,7 +100,7 @@ class SqlAlchemyRecoverySnapshotRepository:
                     for task_id, minutes in sorted(unfinished.items(), key=lambda item: item[0])
                 ),
                 tuple(future),
-                tuple(in_progress),
+                tuple(preserved_busy),
                 tuple(unresolved),
             )
 
