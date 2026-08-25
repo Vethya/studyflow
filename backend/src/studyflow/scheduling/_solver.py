@@ -12,7 +12,14 @@ def candidate_start_intervals(demand: SessionDemand, planning_start_minute: int)
         earliest_start = max(window.start, planning_start_minute)
         if earliest_start <= latest_start:
             intervals.append([earliest_start, latest_start])
-    return intervals
+
+    merged: list[list[int]] = []
+    for first, last in sorted(intervals):
+        if merged and first <= merged[-1][1] + 1:
+            merged[-1][1] = max(merged[-1][1], last)
+        else:
+            merged.append([first, last])
+    return merged
 
 
 def solver_diagnostics(

@@ -84,6 +84,75 @@ def test_earliness_is_deterministic_within_the_maximum_spread() -> None:
     assert {session.start_minute // 10 for session in schedules[0]} == {0, 1}
 
 
+def test_constructive_spread_does_not_sacrifice_global_earliness() -> None:
+    problem = FeasibilityProblem(
+        tuple(
+            demand(f"session-{index}", "task", 4, (1, 10), (10, 19), deadline=20)
+            for index in range(3)
+        ),
+        planning_start_minute=0,
+        minimum_break_minutes=1,
+        planning_days=(
+            PlanningDay(0, 0, 10),
+            PlanningDay(1, 10, 20),
+        ),
+    )
+
+    result = solve_with_overload(problem)
+
+    assert result.status is KernelStatus.FEASIBLE
+    assert [session.start_minute for session in result.sessions] == [1, 6, 11]
+
+
+def test_uniform_policy_falls_back_to_staged_objectives_when_weights_are_unsafe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("studyflow.scheduling.overload._SAFE_OBJECTIVE_MAX", 0)
+    problem = FeasibilityProblem(
+        tuple(
+            demand(f"session-{index}", "task", 4, (1, 10), (10, 19), deadline=20)
+            for index in range(3)
+        ),
+        planning_start_minute=0,
+        minimum_break_minutes=1,
+        planning_days=(
+            PlanningDay(0, 0, 10),
+            PlanningDay(1, 10, 20),
+        ),
+    )
+
+    result = solve_with_overload(problem)
+
+    assert result.status is KernelStatus.FEASIBLE
+    assert [session.start_minute for session in result.sessions] == [1, 6, 11]
+
+
+def test_uniform_overload_optimizes_earliness_after_spread() -> None:
+    windows = ((12, 19), (21, 29))
+    problem = FeasibilityProblem(
+        (
+            demand("single", "single-task", 3, *windows, deadline=30),
+            demand("long-a", "long-task", 3, *windows, deadline=30),
+            demand("long-b", "long-task", 3, *windows, deadline=30),
+            demand("blocked-a", "blocked-task", 3, *windows, deadline=10),
+            demand("blocked-b", "blocked-task", 3, *windows, deadline=10),
+            demand("blocked-c", "blocked-task", 3, *windows, deadline=10),
+        ),
+        planning_start_minute=0,
+        minimum_break_minutes=1,
+        planning_days=(
+            PlanningDay(0, 0, 10),
+            PlanningDay(1, 10, 20),
+            PlanningDay(2, 20, 30),
+        ),
+    )
+
+    result = solve_with_overload(problem)
+
+    assert result.status is KernelStatus.OVERLOAD
+    assert [session.start_minute for session in result.sessions] == [12, 16, 21]
+
+
 def test_every_long_task_gets_a_second_day_before_any_gets_a_third() -> None:
     windows = ((0, 4), (10, 11), (20, 21))
     problem = FeasibilityProblem(
@@ -146,10 +215,10 @@ def test_spread_depth_is_capped_by_schedulable_session_count(
     )
 
     assert result.status is KernelStatus.FEASIBLE
-    assert solve_calls == 2  # allocation and earliness; no pointless spread passes
+    assert solve_calls == 0  # Direct earliest placement needs no optimization pass.
 
 
-def test_many_spread_depths_use_one_weighted_spread_solve(
+def test_many_spread_depths_use_a_constructive_maximum_without_solver_passes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     original_solve = cp_model.CpSolver.solve
@@ -182,7 +251,7 @@ def test_many_spread_depths_use_one_weighted_spread_solve(
 
     assert result.status is KernelStatus.FEASIBLE
     assert len(result.sessions) == 12
-    assert solve_calls == 3  # allocation, one weighted spread pass, and earliness
+    assert solve_calls == 0
 
 
 def test_day_metadata_does_not_forbid_a_session_crossing_local_midnight() -> None:
@@ -271,10 +340,7 @@ def test_requires_local_day_metadata_for_policy_scheduling() -> None:
     assert result.detail == "Local planning-day metadata is required for schedule policy"
 
 
-@pytest.mark.parametrize(("solve_number", "objective_name"), [(2, "spread"), (3, "earliness")])
-def test_unproven_placement_objective_is_a_technical_failure(
-    solve_number: int,
-    objective_name: str,
+def test_unproven_constructive_earliness_is_a_technical_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     original_solve = cp_model.CpSolver.solve
@@ -287,7 +353,7 @@ def test_unproven_placement_objective_is_a_technical_failure(
         nonlocal solve_calls
         solve_calls += 1
         status = original_solve(solver, model)
-        return cp_model.FEASIBLE if solve_calls == solve_number else status
+        return cp_model.FEASIBLE if solve_calls == 1 else status
 
     monkeypatch.setattr(
         "studyflow.scheduling.overload.cp_model.CpSolver.solve",
@@ -296,18 +362,61 @@ def test_unproven_placement_objective_is_a_technical_failure(
     result = solve_with_overload(
         FeasibilityProblem(
             (
-                demand("a", "task", 2, (0, 4), (10, 14), deadline=14),
-                demand("b", "task", 2, (0, 4), (10, 14), deadline=14),
+                demand("a", "task", 2, (0, 4), deadline=4),
+                demand("b", "task", 2, (0, 4), deadline=4),
             ),
             planning_start_minute=0,
-            planning_days=(PlanningDay(0, 0, 10), PlanningDay(1, 10, 20)),
+            planning_days=(PlanningDay(0, 0, 10),),
         )
     )
 
     assert result.status is KernelStatus.TECHNICAL_FAILURE
     assert result.sessions == ()
     assert result.allocations == ()
-    assert result.detail == f"The {objective_name} placement objective was not proven optimal"
+    assert result.detail == "The earliness placement objective was not proven optimal"
+
+
+def test_unproven_global_spread_is_a_technical_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_solve = cp_model.CpSolver.solve
+    monkeypatch.setattr(
+        "studyflow.scheduling.overload._uniform_flow_policy_witness",
+        lambda *args, **kwargs: None,
+    )
+
+    def downgrade_spread(
+        solver: cp_model.CpSolver,
+        model: cp_model.CpModel,
+    ) -> cp_model.CpSolverStatus:
+        status = original_solve(solver, model)
+        return cp_model.FEASIBLE if status == cp_model.OPTIMAL else status
+
+    monkeypatch.setattr(
+        "studyflow.scheduling.overload.cp_model.CpSolver.solve",
+        downgrade_spread,
+    )
+    windows = ((0, 4), (10, 11), (20, 21))
+    result = solve_with_overload(
+        FeasibilityProblem(
+            tuple(
+                demand(f"{task_id}-{index}", task_id, 1, *windows, deadline=21)
+                for task_id in ("alpha", "beta")
+                for index in range(3)
+            ),
+            planning_start_minute=0,
+            planning_days=(
+                PlanningDay(0, 0, 10),
+                PlanningDay(1, 10, 20),
+                PlanningDay(2, 20, 30),
+            ),
+        )
+    )
+
+    assert result.status is KernelStatus.TECHNICAL_FAILURE
+    assert result.sessions == ()
+    assert result.allocations == ()
+    assert result.detail == "The spread placement objective was not proven optimal"
 
 
 @pytest.mark.parametrize(
