@@ -166,4 +166,24 @@ class ScheduleProposalRepository(Protocol):
 
     async def get(self, account_id: UUID) -> ScheduleProposalRecord | None: ...
 
+    async def accept(
+        self,
+        account_id: UUID,
+        proposal_id: UUID,
+        now: datetime,
+        minimum_break_minutes: int,
+    ) -> tuple[StudySessionRecord, ...] | None: ...
+
     async def reject(self, account_id: UUID, proposal_id: UUID) -> bool: ...
+
+
+class ProposalNotFeasibleError(ValueError):
+    """Raised when an overload proposal is submitted for acceptance."""
+
+
+class ProposalExpiredError(ValueError):
+    """Raised when a proposed session would begin in the past."""
+
+
+class ProposalScheduleConflictError(ValueError):
+    """Raised when a proposal overlaps preserved in-progress work."""

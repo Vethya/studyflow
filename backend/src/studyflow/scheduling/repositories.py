@@ -1,6 +1,6 @@
 """SQLAlchemy schedule proposal repository."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import Select, delete, select
@@ -13,7 +13,10 @@ from studyflow.database.models import ScheduleProposal as ProposalRow
 from studyflow.database.models import StudySession as SessionRow
 from studyflow.scheduling.proposals import (
     NewScheduleProposal,
+    ProposalExpiredError,
     ProposalKind,
+    ProposalNotFeasibleError,
+    ProposalScheduleConflictError,
     ProposalStatus,
     ScheduleProposalRecord,
     StudySessionRecord,
@@ -118,8 +121,91 @@ class SqlAlchemyScheduleProposalRepository:
             )
             return self._record(proposal, sessions, allocations)
 
+    async def accept(
+        self,
+        account_id: UUID,
+        proposal_id: UUID,
+        now: datetime,
+        minimum_break_minutes: int,
+    ) -> tuple[StudySessionRecord, ...] | None:
+        async with self._database.transaction() as session:
+            account = await session.get(StudentAccount, account_id, with_for_update=True)
+            if account is None:
+                return None
+            proposal = await session.scalar(
+                select(ProposalRow)
+                .where(ProposalRow.id == proposal_id, ProposalRow.account_id == account_id)
+                .with_for_update()
+            )
+            if proposal is None:
+                return None
+            if ProposalStatus(proposal.status) is not ProposalStatus.FEASIBLE:
+                raise ProposalNotFeasibleError("Only feasible proposals can be accepted")
+            proposed = list(
+                await session.scalars(
+                    select(SessionRow)
+                    .where(SessionRow.proposal_id == proposal.id)
+                    .order_by(SessionRow.starts_at, SessionRow.id)
+                    .with_for_update()
+                )
+            )
+            now_utc = self._aware(now).astimezone(UTC)
+            if any(self._aware(item.starts_at) < now_utc for item in proposed):
+                raise ProposalExpiredError("The schedule proposal has expired")
+            preserved = list(
+                await session.scalars(
+                    select(SessionRow)
+                    .where(
+                        SessionRow.account_id == account_id,
+                        SessionRow.proposal_id.is_(None),
+                        SessionRow.starts_at <= now_utc,
+                    )
+                    .order_by(SessionRow.ends_at, SessionRow.id)
+                    .with_for_update()
+                )
+            )
+            if any(
+                self._overlaps(candidate, existing)
+                for candidate in proposed
+                for existing in preserved
+                if self._aware(existing.ends_at) > now_utc
+            ):
+                raise ProposalScheduleConflictError(
+                    "The proposal overlaps a session already in progress"
+                )
+            if proposed and preserved:
+                first_proposed_start = self._aware(proposed[0].starts_at)
+                latest_preserved_end = max(self._aware(item.ends_at) for item in preserved)
+                if first_proposed_start < latest_preserved_end + timedelta(
+                    minutes=minimum_break_minutes
+                ):
+                    raise ProposalScheduleConflictError(
+                        "The proposal violates the minimum break after preserved work"
+                    )
+            await session.execute(
+                delete(SessionRow)
+                .where(
+                    SessionRow.account_id == account_id,
+                    SessionRow.proposal_id.is_(None),
+                    SessionRow.starts_at > now_utc,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            for item in proposed:
+                item.proposal_id = None
+            await session.flush()
+            await session.execute(
+                delete(AllocationRow).where(AllocationRow.proposal_id == proposal.id)
+            )
+            await session.execute(delete(ProposalRow).where(ProposalRow.id == proposal.id))
+            await session.flush()
+            return tuple(self._session_record(item) for item in proposed)
+
     async def reject(self, account_id: UUID, proposal_id: UUID) -> bool:
         async with self._database.transaction() as session:
+            account = await session.get(StudentAccount, account_id, with_for_update=True)
+            if account is None:
+                return False
             proposal = await session.scalar(
                 select(ProposalRow)
                 .where(ProposalRow.id == proposal_id, ProposalRow.account_id == account_id)
@@ -141,6 +227,24 @@ class SqlAlchemyScheduleProposalRepository:
         return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
     @classmethod
+    def _overlaps(cls, left: SessionRow, right: SessionRow) -> bool:
+        return cls._aware(left.starts_at) < cls._aware(right.ends_at) and cls._aware(
+            right.starts_at
+        ) < cls._aware(left.ends_at)
+
+    @classmethod
+    def _session_record(cls, item: SessionRow) -> StudySessionRecord:
+        return StudySessionRecord(
+            id=item.id,
+            account_id=item.account_id,
+            task_id=item.task_id,
+            proposal_id=item.proposal_id,
+            starts_at=cls._aware(item.starts_at),
+            ends_at=cls._aware(item.ends_at),
+            planned_duration_minutes=item.planned_duration_minutes,
+        )
+
+    @classmethod
     def _record(
         cls,
         proposal: ProposalRow,
@@ -155,18 +259,7 @@ class SqlAlchemyScheduleProposalRepository:
             status=ProposalStatus(proposal.status),
             input_fingerprint=proposal.input_fingerprint,
             created_at=cls._aware(proposal.created_at),
-            sessions=tuple(
-                StudySessionRecord(
-                    id=item.id,
-                    account_id=item.account_id,
-                    task_id=item.task_id,
-                    proposal_id=item.proposal_id,
-                    starts_at=cls._aware(item.starts_at),
-                    ends_at=cls._aware(item.ends_at),
-                    planned_duration_minutes=item.planned_duration_minutes,
-                )
-                for item in sessions
-            ),
+            sessions=tuple(cls._session_record(item) for item in sessions),
             allocations=tuple(
                 TaskAllocationRecord(
                     proposal_id=item.proposal_id,

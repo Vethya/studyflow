@@ -77,8 +77,8 @@ from studyflow.auth.session_authentication import (
 from studyflow.auth.sessions import SessionService
 from studyflow.auth.verification import EmailVerification, EmailVerificationService
 from studyflow.availability.repositories import (
-    NoFutureSessions,
     SqlAlchemyAvailabilityWindowRepository,
+    SqlAlchemyFutureSessionInvalidator,
     SqlAlchemyUnavailablePeriodRepository,
 )
 from studyflow.availability.unavailable import (
@@ -87,11 +87,15 @@ from studyflow.availability.unavailable import (
 )
 from studyflow.availability.windows import AvailabilityWindows, AvailabilityWindowService
 from studyflow.database import Database, DatabaseRuntime
+from studyflow.scheduling.acceptance import ScheduleAcceptance, ScheduleAcceptanceService
 from studyflow.scheduling.proposals import ScheduleProposalRepository
 from studyflow.scheduling.repositories import SqlAlchemyScheduleProposalRepository
 from studyflow.scheduling.service import ScheduleGeneration, ScheduleGenerationService
 from studyflow.settings import Settings
-from studyflow.tasks.repositories import SqlAlchemyAcademicTaskRepository
+from studyflow.tasks.repositories import (
+    SqlAlchemyAcademicTaskRepository,
+    SqlAlchemyTaskDeadlineSessionInvalidator,
+)
 from studyflow.tasks.service import AcademicTasks, AcademicTaskService
 
 
@@ -137,6 +141,7 @@ def create_app(
     unavailable_periods: UnavailablePeriods | None = None,
     schedule_generation: ScheduleGeneration | None = None,
     schedule_proposals: ScheduleProposalRepository | None = None,
+    schedule_acceptance: ScheduleAcceptance | None = None,
     oidc_login: OIDCLogin | None = None,
     oidc_start_rate_limiter: OIDCStartRateLimit | None = None,
     oidc_account_linking: OIDCAccountLinking | None = None,
@@ -263,18 +268,31 @@ def create_app(
         SqlAlchemyStudyPreferencesRepository(transactions)
     )
     resolved_academic_tasks = academic_tasks or AcademicTaskService(
-        SqlAlchemyAcademicTaskRepository(transactions)
+        SqlAlchemyAcademicTaskRepository(
+            transactions,
+            SqlAlchemyTaskDeadlineSessionInvalidator(),
+        )
     )
     resolved_availability_windows = availability_windows or AvailabilityWindowService(
         SqlAlchemyAvailabilityWindowRepository(transactions)
     )
     resolved_unavailable_periods = unavailable_periods or UnavailablePeriodService(
-        SqlAlchemyUnavailablePeriodRepository(transactions, NoFutureSessions())
+        SqlAlchemyUnavailablePeriodRepository(
+            transactions,
+            SqlAlchemyFutureSessionInvalidator(),
+        )
     )
     resolved_schedule_proposals = schedule_proposals or SqlAlchemyScheduleProposalRepository(
         transactions
     )
     resolved_schedule_generation = schedule_generation or ScheduleGenerationService(
+        resolved_academic_tasks,
+        resolved_availability_windows,
+        resolved_unavailable_periods,
+        resolved_account_preferences,
+        resolved_schedule_proposals,
+    )
+    resolved_schedule_acceptance = schedule_acceptance or ScheduleAcceptanceService(
         resolved_academic_tasks,
         resolved_availability_windows,
         resolved_unavailable_periods,
@@ -339,6 +357,7 @@ def create_app(
     application.state.unavailable_periods = resolved_unavailable_periods
     application.state.schedule_generation = resolved_schedule_generation
     application.state.schedule_proposals = resolved_schedule_proposals
+    application.state.schedule_acceptance = resolved_schedule_acceptance
     application.include_router(api_router)
 
     return application

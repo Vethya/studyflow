@@ -13,7 +13,9 @@ from studyflow.availability.unavailable import UnavailablePeriod, UnavailablePer
 from studyflow.scheduling import (
     AvailabilityTimezoneConfirmationRequiredError,
     ProposalKind,
+    ProposalNotFeasibleError,
     ProposalStatus,
+    ScheduleAcceptance,
     ScheduleGeneration,
     ScheduleGenerationFailedError,
     SchedulingInputTooLargeError,
@@ -67,6 +69,23 @@ class ProposalsStub:
 
     async def get(self, account_id: UUID) -> ScheduleProposalRecord | None:
         return self.result
+
+
+@dataclass
+class AcceptanceStub:
+    result: tuple[StudySessionRecord, ...] | None = None
+    error: Exception | None = None
+    reject_result: bool = True
+
+    async def accept(
+        self, account_id: UUID, proposal_id: UUID
+    ) -> tuple[StudySessionRecord, ...] | None:
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+    async def reject(self, account_id: UUID, proposal_id: UUID) -> bool:
+        return self.reject_result
 
 
 @dataclass
@@ -151,6 +170,7 @@ def _app(
     *,
     authenticated: bool = True,
     unavailable_periods: list[UnavailablePeriod] | None = None,
+    acceptance: AcceptanceStub | None = None,
 ) -> FastAPI:
     return create_app(
         session_authentication=AuthenticationStub(authenticated),
@@ -161,6 +181,7 @@ def _app(
             UnavailablePeriods,
             UnavailablePeriodsStub(unavailable_periods or []),
         ),
+        schedule_acceptance=cast(ScheduleAcceptance, acceptance or AcceptanceStub()),
     )
 
 
@@ -277,3 +298,72 @@ def test_schedule_proposal_openapi_contract() -> None:
     assert {"409", "422", "503"}.issubset(
         schema["paths"]["/api/v1/schedule-proposals"]["post"]["responses"]
     )
+    assert "/api/v1/schedule-proposals/{proposal_id}/accept" in schema["paths"]
+    assert "/api/v1/schedule-proposals/{proposal_id}/reject" in schema["paths"]
+
+
+@pytest.mark.anyio
+async def test_accept_and_reject_proposal_are_csrf_protected() -> None:
+    proposal = _proposal()
+    acceptance = AcceptanceStub(tuple(proposal.sessions))
+    application = _app(GenerationStub(proposal), ProposalsStub(proposal), acceptance=acceptance)
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        missing_csrf = await client.post(f"/api/v1/schedule-proposals/{proposal.id}/accept")
+        accepted = await client.post(
+            f"/api/v1/schedule-proposals/{proposal.id}/accept",
+            headers={"X-CSRF-Token": "csrf"},
+        )
+        rejected = await client.post(
+            f"/api/v1/schedule-proposals/{proposal.id}/reject",
+            headers={"X-CSRF-Token": "csrf"},
+        )
+
+    assert missing_csrf.status_code == 403
+    assert accepted.status_code == 200
+    assert len(accepted.json()["sessions"]) == 2
+    assert rejected.status_code == 204
+
+
+@pytest.mark.anyio
+async def test_acceptance_maps_missing_and_conflicting_proposals() -> None:
+    proposal = _proposal()
+    missing_app = _app(
+        GenerationStub(),
+        ProposalsStub(None),
+        acceptance=AcceptanceStub(None, reject_result=False),
+    )
+    conflict_app = _app(
+        GenerationStub(),
+        ProposalsStub(proposal),
+        acceptance=AcceptanceStub(error=ProposalNotFeasibleError("Overload")),
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=missing_app),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        missing_accept = await client.post(
+            f"/api/v1/schedule-proposals/{proposal.id}/accept",
+            headers={"X-CSRF-Token": "csrf"},
+        )
+        missing_reject = await client.post(
+            f"/api/v1/schedule-proposals/{proposal.id}/reject",
+            headers={"X-CSRF-Token": "csrf"},
+        )
+    async with AsyncClient(
+        transport=ASGITransport(app=conflict_app),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        conflict = await client.post(
+            f"/api/v1/schedule-proposals/{proposal.id}/accept",
+            headers={"X-CSRF-Token": "csrf"},
+        )
+
+    assert missing_accept.status_code == 404
+    assert missing_reject.status_code == 404
+    assert conflict.status_code == 409
