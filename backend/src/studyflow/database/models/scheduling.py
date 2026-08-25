@@ -69,6 +69,24 @@ class StudySession(Base):
     planned_duration_minutes: Mapped[int] = mapped_column(Integer)
 
 
+class StudySessionOutcome(Base):
+    __tablename__ = "study_session_outcomes"
+    __table_args__ = (
+        CheckConstraint("kind IN ('completed', 'delayed', 'missed')", name="kind"),
+        CheckConstraint("actual_minutes >= 0", name="nonnegative_actual"),
+        CheckConstraint("remaining_minutes >= 0", name="nonnegative_remaining"),
+    )
+
+    session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("study_sessions.id", ondelete="CASCADE"), primary_key=True
+    )
+    kind: Mapped[str] = mapped_column(String(16))
+    actual_minutes: Mapped[int] = mapped_column(Integer)
+    remaining_minutes: Mapped[int] = mapped_column(Integer)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    rescheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class ProposalTaskAllocation(Base):
     __tablename__ = "proposal_task_allocations"
     __table_args__ = (

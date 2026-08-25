@@ -15,6 +15,7 @@ from studyflow.database.models.scheduling import (
     ProposalTaskAllocation,
     ScheduleProposal,
     StudySession,
+    StudySessionOutcome,
 )
 from studyflow.database.models.tasks import AcademicTask, TaskDeadlineHistory
 
@@ -32,6 +33,7 @@ __all__ = [
     "ScheduleProposal",
     "StudentAccount",
     "StudySession",
+    "StudySessionOutcome",
     "TaskDeadlineHistory",
     "UnavailablePeriod",
 ]

@@ -842,6 +842,68 @@
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
         }
       ]
+    },
+    {
+      "name": "Scheduling",
+      "description": "Generate, inspect, accept, and recover study schedules.",
+      "item": [
+        {
+          "name": "Generate Schedule Proposal",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/schedule-proposals", "host": ["{{base_url}}"], "path": ["api", "v1", "schedule-proposals"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Current Schedule Proposal",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/schedule-proposals/current", "host": ["{{base_url}}"], "path": ["api", "v1", "schedule-proposals", "current"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Accept Schedule Proposal",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/schedule-proposals/{{proposal_id}}/accept", "host": ["{{base_url}}"], "path": ["api", "v1", "schedule-proposals", "{{proposal_id}}", "accept"] }
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) {", "  const sessions = pm.response.json().sessions;", "  if (sessions.length > 0) pm.collectionVariables.set('session_id', sessions[0].id);", "}"] } }]
+        },
+        {
+          "name": "Reject Schedule Proposal",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/schedule-proposals/{{proposal_id}}/reject", "host": ["{{base_url}}"], "path": ["api", "v1", "schedule-proposals", "{{proposal_id}}", "reject"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Study Session",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/study-sessions/{{session_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "study-sessions", "{{session_id}}"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Mark Study Session Missed",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"outcome\": \"missed\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/study-sessions/{{session_id}}/outcomes", "host": ["{{base_url}}"], "path": ["api", "v1", "study-sessions", "{{session_id}}", "outcomes"] }
+          },
+          "response": []
+        }
+      ]
     }
   ],
   "variable": [
@@ -886,6 +948,18 @@
       "value": "",
       "type": "string",
       "description": "Automatically populated by the create unavailable period request."
+    },
+    {
+      "key": "proposal_id",
+      "value": "",
+      "type": "string",
+      "description": "Set from a generated schedule proposal."
+    },
+    {
+      "key": "session_id",
+      "value": "",
+      "type": "string",
+      "description": "Set from an accepted study session."
     },
     {
       "key": "google_oidc_code",
