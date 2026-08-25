@@ -77,8 +77,8 @@ from studyflow.auth.session_authentication import (
 from studyflow.auth.sessions import SessionService
 from studyflow.auth.verification import EmailVerification, EmailVerificationService
 from studyflow.availability.repositories import (
-    NoFutureSessions,
     SqlAlchemyAvailabilityWindowRepository,
+    SqlAlchemyFutureSessionInvalidator,
     SqlAlchemyUnavailablePeriodRepository,
 )
 from studyflow.availability.unavailable import (
@@ -87,8 +87,22 @@ from studyflow.availability.unavailable import (
 )
 from studyflow.availability.windows import AvailabilityWindows, AvailabilityWindowService
 from studyflow.database import Database, DatabaseRuntime
+from studyflow.scheduling.acceptance import ScheduleAcceptance, ScheduleAcceptanceService
+from studyflow.scheduling.outcome_repositories import SqlAlchemyStudySessionOutcomeRepository
+from studyflow.scheduling.outcomes import StudySessions, StudySessionService
+from studyflow.scheduling.proposals import ScheduleProposalRepository
+from studyflow.scheduling.recovery import ScheduleRecovery, ScheduleRecoveryService
+from studyflow.scheduling.recovery_repositories import (
+    SqlAlchemyRecoverySnapshotRepository,
+    SqlAlchemyTaskRecoveryProposalInvalidator,
+)
+from studyflow.scheduling.repositories import SqlAlchemyScheduleProposalRepository
+from studyflow.scheduling.service import ScheduleGeneration, ScheduleGenerationService
 from studyflow.settings import Settings
-from studyflow.tasks.repositories import SqlAlchemyAcademicTaskRepository
+from studyflow.tasks.repositories import (
+    SqlAlchemyAcademicTaskRepository,
+    SqlAlchemyTaskDeadlineSessionInvalidator,
+)
 from studyflow.tasks.service import AcademicTasks, AcademicTaskService
 
 
@@ -132,6 +146,11 @@ def create_app(
     academic_tasks: AcademicTasks | None = None,
     availability_windows: AvailabilityWindows | None = None,
     unavailable_periods: UnavailablePeriods | None = None,
+    schedule_generation: ScheduleGeneration | None = None,
+    schedule_proposals: ScheduleProposalRepository | None = None,
+    schedule_acceptance: ScheduleAcceptance | None = None,
+    study_sessions: StudySessions | None = None,
+    schedule_recovery: ScheduleRecovery | None = None,
     oidc_login: OIDCLogin | None = None,
     oidc_start_rate_limiter: OIDCStartRateLimit | None = None,
     oidc_account_linking: OIDCAccountLinking | None = None,
@@ -254,6 +273,55 @@ def create_app(
             allow_methods=["*"],
             allow_headers=["*"],
         )
+    resolved_account_preferences = account_preferences or StudyPreferencesService(
+        SqlAlchemyStudyPreferencesRepository(transactions)
+    )
+    resolved_academic_tasks = academic_tasks or AcademicTaskService(
+        SqlAlchemyAcademicTaskRepository(
+            transactions,
+            SqlAlchemyTaskDeadlineSessionInvalidator(),
+            recovery_invalidator=SqlAlchemyTaskRecoveryProposalInvalidator(),
+        )
+    )
+    resolved_availability_windows = availability_windows or AvailabilityWindowService(
+        SqlAlchemyAvailabilityWindowRepository(transactions)
+    )
+    resolved_unavailable_periods = unavailable_periods or UnavailablePeriodService(
+        SqlAlchemyUnavailablePeriodRepository(
+            transactions,
+            SqlAlchemyFutureSessionInvalidator(),
+        )
+    )
+    resolved_schedule_proposals = schedule_proposals or SqlAlchemyScheduleProposalRepository(
+        transactions
+    )
+    resolved_recovery_snapshots = SqlAlchemyRecoverySnapshotRepository(transactions)
+    resolved_schedule_generation = schedule_generation or ScheduleGenerationService(
+        resolved_academic_tasks,
+        resolved_availability_windows,
+        resolved_unavailable_periods,
+        resolved_account_preferences,
+        resolved_schedule_proposals,
+    )
+    resolved_schedule_acceptance = schedule_acceptance or ScheduleAcceptanceService(
+        resolved_academic_tasks,
+        resolved_availability_windows,
+        resolved_unavailable_periods,
+        resolved_account_preferences,
+        resolved_schedule_proposals,
+        resolved_recovery_snapshots,
+    )
+    resolved_study_sessions = study_sessions or StudySessionService(
+        SqlAlchemyStudySessionOutcomeRepository(transactions)
+    )
+    resolved_schedule_recovery = schedule_recovery or ScheduleRecoveryService(
+        resolved_academic_tasks,
+        resolved_availability_windows,
+        resolved_unavailable_periods,
+        resolved_account_preferences,
+        resolved_recovery_snapshots,
+        resolved_schedule_proposals,
+    )
     application.state.settings = resolved_settings
     application.state.cookie_policy = CookiePolicy.for_environment(resolved_settings.environment)
     application.state.database = resolved_database
@@ -301,23 +369,20 @@ def create_app(
     application.state.account_profiles = account_profiles or AccountProfileService(
         SqlAlchemyAccountProfileRepository(transactions)
     )
-    application.state.account_preferences = account_preferences or StudyPreferencesService(
-        SqlAlchemyStudyPreferencesRepository(transactions)
-    )
+    application.state.account_preferences = resolved_account_preferences
     application.state.account_passwords = resolved_account_passwords
     application.state.account_password_change_rate_limiter = (
         account_password_change_rate_limiter
         or DatabaseAccountPasswordChangeRateLimiter(transactions)
     )
-    application.state.academic_tasks = academic_tasks or AcademicTaskService(
-        SqlAlchemyAcademicTaskRepository(transactions)
-    )
-    application.state.availability_windows = availability_windows or AvailabilityWindowService(
-        SqlAlchemyAvailabilityWindowRepository(transactions)
-    )
-    application.state.unavailable_periods = unavailable_periods or UnavailablePeriodService(
-        SqlAlchemyUnavailablePeriodRepository(transactions, NoFutureSessions())
-    )
+    application.state.academic_tasks = resolved_academic_tasks
+    application.state.availability_windows = resolved_availability_windows
+    application.state.unavailable_periods = resolved_unavailable_periods
+    application.state.schedule_generation = resolved_schedule_generation
+    application.state.schedule_proposals = resolved_schedule_proposals
+    application.state.schedule_acceptance = resolved_schedule_acceptance
+    application.state.study_sessions = resolved_study_sessions
+    application.state.schedule_recovery = resolved_schedule_recovery
     application.include_router(api_router)
 
     return application

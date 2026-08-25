@@ -11,6 +11,15 @@ from studyflow.database.models.authentication import (
     StudentAccount,
 )
 from studyflow.database.models.availability import AvailabilityWindow, UnavailablePeriod
+from studyflow.database.models.scheduling import (
+    ProposalTaskAllocation,
+    RecoverySnapshotOutcome,
+    RecoveryTaskWork,
+    ScheduleProposal,
+    ScheduleRecoverySnapshot,
+    StudySession,
+    StudySessionOutcome,
+)
 from studyflow.database.models.tasks import AcademicTask, TaskDeadlineHistory
 
 __all__ = [
@@ -23,7 +32,14 @@ __all__ = [
     "AuthenticationRegistration",
     "AuthenticationSession",
     "AvailabilityWindow",
+    "ProposalTaskAllocation",
+    "RecoverySnapshotOutcome",
+    "RecoveryTaskWork",
+    "ScheduleProposal",
+    "ScheduleRecoverySnapshot",
     "StudentAccount",
+    "StudySession",
+    "StudySessionOutcome",
     "TaskDeadlineHistory",
     "UnavailablePeriod",
 ]

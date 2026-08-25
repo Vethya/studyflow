@@ -1,5 +1,6 @@
 """SQLAlchemy availability repositories."""
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
@@ -19,6 +20,8 @@ from studyflow.availability.windows import (
 )
 from studyflow.database.models import AvailabilityWindow as AvailabilityWindowRow
 from studyflow.database.models import StudentAccount
+from studyflow.database.models import StudySession as SessionRow
+from studyflow.database.models import StudySessionOutcome as OutcomeRow
 from studyflow.database.models import UnavailablePeriod as UnavailablePeriodRow
 
 
@@ -43,6 +46,53 @@ class NoFutureSessions:
         ends_at: datetime,
     ) -> list[UUID]:
         return []
+
+
+class SqlAlchemyFutureSessionInvalidator:
+    def __init__(
+        self,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
+        self._clock = clock
+
+    async def remove_conflicting_future_sessions(
+        self,
+        session: AsyncSession,
+        account_id: UUID,
+        starts_at: datetime,
+        ends_at: datetime,
+    ) -> list[UUID]:
+        now = self._clock().astimezone(UTC)
+        rows = list(
+            await session.scalars(
+                select(SessionRow)
+                .where(
+                    SessionRow.account_id == account_id,
+                    SessionRow.proposal_id.is_(None),
+                    SessionRow.invalidated_at.is_(None),
+                    SessionRow.starts_at > now,
+                    SessionRow.starts_at < ends_at,
+                    SessionRow.ends_at > starts_at,
+                )
+                .order_by(SessionRow.starts_at, SessionRow.id)
+                .with_for_update()
+            )
+        )
+        invalidated_ids = [row.id for row in rows]
+        for row in rows:
+            row.invalidated_at = now
+            row.invalidation_reason = "availability"
+            session.add(
+                OutcomeRow(
+                    session_id=row.id,
+                    kind="delayed",
+                    actual_minutes=0,
+                    remaining_minutes=row.planned_duration_minutes,
+                    recorded_at=now,
+                    rescheduled_at=None,
+                )
+            )
+        return invalidated_ids
 
 
 class SqlAlchemyAvailabilityWindowRepository:

@@ -7,7 +7,12 @@ from sqlalchemy import select
 
 from studyflow.database import Base, Database
 from studyflow.database.models import AcademicTask, StudentAccount, TaskDeadlineHistory
-from studyflow.tasks.repositories import SqlAlchemyAcademicTaskRepository
+from studyflow.database.models import StudySession as SessionRow
+from studyflow.database.models import StudySessionOutcome as OutcomeRow
+from studyflow.tasks.repositories import (
+    SqlAlchemyAcademicTaskRepository,
+    SqlAlchemyTaskDeadlineSessionInvalidator,
+)
 from studyflow.tasks.service import (
     EstimateFrozenError,
     NewAcademicTask,
@@ -17,6 +22,96 @@ from studyflow.tasks.service import (
     TaskPriority,
     TaskStatus,
 )
+
+
+@pytest.mark.anyio
+async def test_earlier_deadline_invalidates_only_future_sessions_that_cross_it() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    account_id = uuid4()
+    now = datetime(2026, 7, 29, 12, tzinfo=UTC)
+    old_deadline = now + timedelta(days=2)
+    new_deadline = now + timedelta(days=1)
+    draft = NewAcademicTask(
+        "Write report",
+        TaskCategory.RESEARCH_WRITING,
+        TaskPriority.HIGH,
+        "Thesis",
+        None,
+        old_deadline,
+        180,
+    )
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            session.add(
+                StudentAccount(
+                    id=account_id,
+                    email="student@example.com",
+                    name="Student",
+                    password_hash="$argon2id$hash",
+                    email_verified_at=now,
+                    timezone="UTC",
+                )
+            )
+        repository = SqlAlchemyAcademicTaskRepository(
+            database,
+            SqlAlchemyTaskDeadlineSessionInvalidator(),
+            clock=lambda: now,
+        )
+        task = await repository.create(account_id, draft)
+        valid_id, invalid_id = uuid4(), uuid4()
+        async with database.transaction() as session:
+            session.add_all(
+                [
+                    SessionRow(
+                        id=valid_id,
+                        account_id=account_id,
+                        task_id=task.id,
+                        proposal_id=None,
+                        starts_at=new_deadline - timedelta(hours=2),
+                        ends_at=new_deadline,
+                        planned_duration_minutes=120,
+                    ),
+                    SessionRow(
+                        id=invalid_id,
+                        account_id=account_id,
+                        task_id=task.id,
+                        proposal_id=None,
+                        starts_at=new_deadline - timedelta(minutes=30),
+                        ends_at=new_deadline + timedelta(minutes=30),
+                        planned_duration_minutes=60,
+                    ),
+                ]
+            )
+
+        updated = await repository.update(
+            account_id,
+            task.id,
+            replace(draft, deadline_at=new_deadline),
+            now,
+        )
+
+        assert updated is not None and updated.deadline_at == new_deadline
+        async with database.transaction() as session:
+            remaining_ids = set(await session.scalars(select(SessionRow.id)))
+            invalidated = await session.get(SessionRow, invalid_id)
+            outcome = await session.get(OutcomeRow, invalid_id)
+        assert remaining_ids == {valid_id, invalid_id}
+        assert invalidated is not None
+        assert invalidated.invalidated_at is not None
+        assert invalidated.invalidated_at.replace(tzinfo=UTC) == now
+        assert invalidated.invalidation_reason == "deadline"
+        assert outcome is not None
+        assert (outcome.kind, outcome.remaining_minutes, outcome.rescheduled_at) == (
+            "delayed",
+            60,
+            None,
+        )
+    finally:
+        await database.stop()
 
 
 @pytest.mark.anyio

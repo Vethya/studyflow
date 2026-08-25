@@ -200,3 +200,15 @@ def test_openapi_documents_both_task_list_validation_error_shapes() -> None:
             {"$ref": "#/components/schemas/HTTPValidationError"},
         ]
     }
+
+
+def test_openapi_documents_study_session_list_filters() -> None:
+    schema = create_app().openapi()
+    operation = schema["paths"]["/api/v1/study-sessions"]["get"]
+    parameters = {parameter["name"]: parameter for parameter in operation["parameters"]}
+
+    assert set(parameters) == {"from", "to", "task_id"}
+    assert parameters["from"]["required"] is False
+    assert parameters["to"]["required"] is False
+    assert parameters["task_id"]["required"] is False
+    assert set(operation["responses"]) >= {"200", "401", "422"}
