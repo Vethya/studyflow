@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import cast
 from uuid import UUID, uuid4
@@ -13,6 +13,7 @@ from studyflow.availability.unavailable import UnavailablePeriods
 from studyflow.database import Base, Database
 from studyflow.database.models import AcademicTask, StudentAccount
 from studyflow.database.models import StudySession as SessionRow
+from studyflow.database.models import StudySessionOutcome as OutcomeRow
 from studyflow.scheduling.assembly import SchedulingInputTooLargeError
 from studyflow.scheduling.outcome_repositories import SqlAlchemyStudySessionOutcomeRepository
 from studyflow.scheduling.outcomes import (
@@ -21,6 +22,7 @@ from studyflow.scheduling.outcomes import (
     ProposedSessionOutcomeError,
     SessionOutcomeKind,
     StudySessionDetails,
+    StudySessionFilters,
     StudySessionOutcomeRecord,
     StudySessions,
     StudySessionService,
@@ -181,6 +183,139 @@ async def test_missed_outcome_rejects_future_and_proposed_sessions() -> None:
         await database.stop()
 
 
+@pytest.mark.anyio
+async def test_list_sessions_is_owner_scoped_and_excludes_proposed_and_invalidated_rows() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        account_id, other_account_id, task_id, proposal_id = uuid4(), uuid4(), uuid4(), uuid4()
+        accepted_id, proposed_id, invalidated_id, outside_id, other_id = (
+            uuid4(),
+            uuid4(),
+            uuid4(),
+            uuid4(),
+            uuid4(),
+        )
+        from studyflow.database.models import ScheduleProposal
+
+        async with database.transaction() as db_session:
+            await db_session.run_sync(lambda sync: Base.metadata.create_all(sync.connection()))
+            db_session.add_all(
+                [
+                    StudentAccount(
+                        id=account_id,
+                        email="student@example.com",
+                        name="Student",
+                        password_hash="$argon2id$hash",
+                        email_verified_at=NOW,
+                        timezone="UTC",
+                    ),
+                    StudentAccount(
+                        id=other_account_id,
+                        email="other@example.com",
+                        name="Other",
+                        password_hash="$argon2id$hash",
+                        email_verified_at=NOW,
+                        timezone="UTC",
+                    ),
+                    AcademicTask(
+                        id=task_id,
+                        account_id=account_id,
+                        title="Essay",
+                        category="assignment",
+                        deadline_at=NOW + timedelta(days=3),
+                        original_estimate_minutes=180,
+                        planned_duration_minutes=180,
+                    ),
+                    ScheduleProposal(
+                        id=proposal_id,
+                        account_id=account_id,
+                        kind="generation",
+                        revision_reason=None,
+                        status="feasible",
+                        input_fingerprint="a" * 64,
+                    ),
+                ]
+            )
+            db_session.add_all(
+                [
+                    SessionRow(
+                        id=accepted_id,
+                        account_id=account_id,
+                        task_id=task_id,
+                        proposal_id=None,
+                        starts_at=NOW - timedelta(minutes=30),
+                        ends_at=NOW + timedelta(minutes=30),
+                        planned_duration_minutes=60,
+                    ),
+                    SessionRow(
+                        id=proposed_id,
+                        account_id=account_id,
+                        task_id=task_id,
+                        proposal_id=proposal_id,
+                        starts_at=NOW,
+                        ends_at=NOW + timedelta(hours=1),
+                        planned_duration_minutes=60,
+                    ),
+                    SessionRow(
+                        id=invalidated_id,
+                        account_id=account_id,
+                        task_id=task_id,
+                        proposal_id=None,
+                        starts_at=NOW,
+                        ends_at=NOW + timedelta(hours=1),
+                        planned_duration_minutes=60,
+                        invalidated_at=NOW - timedelta(hours=1),
+                        invalidation_reason="availability",
+                    ),
+                    SessionRow(
+                        id=outside_id,
+                        account_id=account_id,
+                        task_id=task_id,
+                        proposal_id=None,
+                        starts_at=NOW + timedelta(days=2),
+                        ends_at=NOW + timedelta(days=2, hours=1),
+                        planned_duration_minutes=60,
+                    ),
+                    SessionRow(
+                        id=other_id,
+                        account_id=other_account_id,
+                        task_id=task_id,
+                        proposal_id=None,
+                        starts_at=NOW,
+                        ends_at=NOW + timedelta(hours=1),
+                        planned_duration_minutes=60,
+                    ),
+                ]
+            )
+            db_session.add(
+                OutcomeRow(
+                    session_id=accepted_id,
+                    kind="missed",
+                    actual_minutes=0,
+                    remaining_minutes=60,
+                    recorded_at=NOW,
+                    rescheduled_at=None,
+                )
+            )
+
+        service = StudySessionService(SqlAlchemyStudySessionOutcomeRepository(database))
+        listed = await service.list(
+            account_id,
+            StudySessionFilters(
+                starts_from=NOW,
+                starts_to=NOW + timedelta(days=1),
+                task_id=task_id,
+            ),
+        )
+
+        assert [details.session.id for details in listed] == [accepted_id]
+        assert listed[0].outcome is not None
+        assert listed[0].outcome.kind is SessionOutcomeKind.MISSED
+    finally:
+        await database.stop()
+
+
 @dataclass
 class AuthenticationStub:
     authenticated: bool = True
@@ -202,6 +337,14 @@ class StudySessionsStub:
     outcome: StudySessionOutcomeRecord | None
     error: Exception | None = None
     recorded: bool = False
+    listed: list[StudySessionDetails] = field(default_factory=list)
+    filters: StudySessionFilters | None = None
+
+    async def list(
+        self, account_id: UUID, filters: StudySessionFilters
+    ) -> list[StudySessionDetails]:
+        self.filters = filters
+        return self.listed
 
     async def get(self, account_id: UUID, session_id: UUID) -> StudySessionDetails | None:
         return self.details
@@ -302,6 +445,99 @@ async def test_study_session_api_gets_and_records_missed_with_csrf() -> None:
     assert recorded.json()["outcome"]["kind"] == "missed"
     assert recorded.json()["outcome"]["remaining_minutes"] == 60
     assert recorded.json()["revision"]["kind"] == "revision"
+
+
+@pytest.mark.anyio
+async def test_study_session_api_lists_sessions_with_filters() -> None:
+    task_id = uuid4()
+    session = StudySessionRecord(
+        SESSION_ID,
+        ACCOUNT_ID,
+        task_id,
+        None,
+        NOW - timedelta(hours=2),
+        NOW - timedelta(hours=1),
+        60,
+    )
+    outcome = StudySessionOutcomeRecord(SESSION_ID, SessionOutcomeKind.MISSED, 0, 60, NOW, None)
+    sessions = StudySessionsStub(
+        StudySessionDetails(session, outcome),
+        outcome,
+        listed=[StudySessionDetails(session, outcome)],
+    )
+    application = _api(sessions)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        response = await client.get(
+            "/api/v1/study-sessions",
+            params={
+                "from": (NOW - timedelta(days=1)).isoformat(),
+                "to": (NOW + timedelta(days=1)).isoformat(),
+                "task_id": str(task_id),
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "id": str(SESSION_ID),
+            "task_id": str(task_id),
+            "starts_at": "2026-08-24T10:00:00Z",
+            "ends_at": "2026-08-24T11:00:00Z",
+            "planned_duration_minutes": 60,
+            "outcome": {
+                "session_id": str(SESSION_ID),
+                "kind": "missed",
+                "actual_minutes": 0,
+                "remaining_minutes": 60,
+                "recorded_at": "2026-08-24T12:00:00Z",
+                "rescheduled_at": None,
+            },
+        }
+    ]
+    assert sessions.filters == StudySessionFilters(
+        starts_from=NOW - timedelta(days=1),
+        starts_to=NOW + timedelta(days=1),
+        task_id=task_id,
+    )
+
+
+@pytest.mark.anyio
+async def test_study_session_api_validates_list_time_range_and_authentication() -> None:
+    sessions = StudySessionsStub(None, None)
+    application = _api(sessions)
+    unauthenticated = _api(StudySessionsStub(None, None), authenticated=False)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        empty = await client.get("/api/v1/study-sessions")
+        naive = await client.get("/api/v1/study-sessions", params={"from": "2026-08-24T10:00:00"})
+        reversed_range = await client.get(
+            "/api/v1/study-sessions",
+            params={
+                "from": "2026-08-24T12:00:00Z",
+                "to": "2026-08-24T10:00:00Z",
+            },
+        )
+    async with AsyncClient(
+        transport=ASGITransport(app=unauthenticated),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        unauthorized = await client.get("/api/v1/study-sessions")
+
+    assert empty.status_code == 200 and empty.json() == []
+    assert sessions.filters == StudySessionFilters()
+    assert naive.status_code == 422
+    assert reversed_range.status_code == 422
+    assert unauthorized.status_code == 401
 
 
 @pytest.mark.anyio

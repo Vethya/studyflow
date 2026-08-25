@@ -885,6 +885,17 @@
           "response": []
         },
         {
+          "name": "List Study Sessions",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/study-sessions", "host": ["{{base_url}}"], "path": ["api", "v1", "study-sessions"] },
+            "description": "Lists the authenticated student's accepted, non-invalidated Study Sessions. Optional from and to timestamps use an inclusive-start, exclusive-end overlap range; task_id narrows the result to one Academic Task."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) {", "  const sessions = pm.response.json();", "  if (sessions.length > 0) pm.collectionVariables.set('session_id', sessions[0].id);", "}"] } }]
+        },
+        {
           "name": "Get Study Session",
           "request": {
             "method": "GET",
