@@ -1,34 +1,34 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertCircle, Plus, Trash2, CalendarOff, Clock4, Info, Loader2, Pencil } from "lucide-react";
+import { Callout } from "@/components/ui/callout";
+import { Plus, Trash2, CalendarDays, CalendarOff, Clock4, Loader2, Pencil, RefreshCw, X } from "lucide-react";
+import { EmptyState, PageHeader, PageShell, StatTile } from "@/components/page-kit";
+import { GridLegend, WeekGrid, type GridBlock, type GridColumn } from "@/components/week-grid";
 import { toast } from "sonner";
 import { DAY_NAMES, DAY_NAMES_SHORT } from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import { availability as availabilityApi } from "@/lib/api";
+import { ScheduleTechnicalFailure, availability as availabilityApi, scheduling } from "@/lib/api";
+import { SchedulePreview } from "@/components/schedule-preview";
 import type { WindowDraft } from "@/lib/api";
 import type { UnavailablePeriod } from "@/types/availability";
+import type { ScheduleProposal } from "@/types/schedule";
 import { formatDuration } from "@/lib/constants";
 import { weeklyPatternMinutes } from "@/lib/capacity";
 import { describeError, useApi } from "@/hooks/use-api";
 import { AddWindowDialog, ExceptionDialog } from "@/components/availability-dialogs";
 
-// Build a 30-min grid from 7:00 to 22:00
-const HOUR_START = 7;
-const HOUR_END = 22;
-const HOURS = Array.from({ length: HOUR_END - HOUR_START }, (_, i) => HOUR_START + i);
-
-function timeToSlot(time: string): number {
-  const [h, m] = time.split(":").map(Number);
-  return (h - HOUR_START) * 2 + (m >= 30 ? 1 : 0);
-}
-
-// Display Monday-first while the data itself is indexed 0 = Sunday.
+/** Display Monday-first while the data itself is indexed 0 = Sunday. */
 const DISPLAY_DAYS = [1, 2, 3, 4, 5, 6, 0];
+
+/** `"18:30"` → minutes since midnight. */
+function toMinutes(time: string): number {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+}
 
 export default function AvailabilityPage() {
   const [hoveredWindow, setHoveredWindow] = useState<string | null>(null);
@@ -36,6 +36,32 @@ export default function AvailabilityPage() {
   const [exceptionDialogOpen, setExceptionDialogOpen] = useState(false);
   const [editingPeriod, setEditingPeriod] = useState<UnavailablePeriod | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  /**
+   * SPEC §17.5: a saved availability change can invalidate future sessions.
+   * Their count is surfaced, and the student may then ask for a new plan —
+   * StudyFlow never regenerates on its own (SPEC §11.1).
+   */
+  const [invalidatedCount, setInvalidatedCount] = useState(0);
+  const [planStale, setPlanStale] = useState(false);
+  const [proposal, setProposal] = useState<ScheduleProposal | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [isGenerating, setGenerating] = useState(false);
+  const [technicalFailure, setTechnicalFailure] = useState<string | null>(null);
+
+  async function requestRegeneration() {
+    setGenerating(true);
+    setTechnicalFailure(null);
+    try {
+      const next = await scheduling.generateProposal();
+      setProposal(next);
+      setPreviewOpen(true);
+    } catch (cause) {
+      if (cause instanceof ScheduleTechnicalFailure) setTechnicalFailure(cause.message);
+      else toast.error(describeError(cause));
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   const loadWindows = useCallback(
     (signal: AbortSignal) => availabilityApi.listWindows(signal),
@@ -52,17 +78,39 @@ export default function AvailabilityPage() {
   const allWindows = useMemo(() => windows.data ?? [], [windows.data]);
   const allPeriods = useMemo(() => periods.data ?? [], [periods.data]);
 
-  // Lookup for the grid: dayOfWeek → occupied slot ranges.
-  const avMap = useMemo(() => {
-    const map: Record<number, { id: string; startSlot: number; endSlot: number }[]> = {};
-    for (const w of allWindows) {
-      (map[w.dayOfWeek] ??= []).push({
+  const columns: GridColumn[] = useMemo(
+    () => DISPLAY_DAYS.map((day) => ({ key: String(day), label: DAY_NAMES_SHORT[day] })),
+    [],
+  );
+
+  const blocks: GridBlock[] = useMemo(
+    () =>
+      allWindows.map((w) => ({
         id: w.id,
-        startSlot: timeToSlot(w.startTime),
-        endSlot: timeToSlot(w.endTime),
-      });
+        columnKey: String(w.dayOfWeek),
+        start: toMinutes(w.startTime),
+        end: toMinutes(w.endTime),
+        variant: "available" as const,
+        title: `${DAY_NAMES[w.dayOfWeek]} ${w.startTime}–${w.endTime}`,
+      })),
+    [allWindows],
+  );
+
+  // The grid spans the student's own hours with an hour of air either side,
+  // so a pattern of evening-only windows does not render as a wall of empty
+  // morning. The fallback matches a plausible study day.
+  const hourRange = useMemo(() => {
+    if (allWindows.length === 0) return { start: 7, end: 22 };
+    let min = 24 * 60;
+    let max = 0;
+    for (const w of allWindows) {
+      min = Math.min(min, toMinutes(w.startTime));
+      max = Math.max(max, toMinutes(w.endTime));
     }
-    return map;
+    return {
+      start: Math.max(0, Math.floor(min / 60) - 1),
+      end: Math.min(24, Math.max(Math.ceil(max / 60) + 1, Math.floor(min / 60) + 6)),
+    };
   }, [allWindows]);
 
   const sortedAvail = useMemo(
@@ -93,6 +141,8 @@ export default function AvailabilityPage() {
 
   async function handleAddWindow(draft: WindowDraft) {
     await saveWindows([...toDraft(), draft]);
+    setInvalidatedCount((count) => count || 0);
+    setPlanStale(true);
     toast.success("Window added");
   }
 
@@ -104,6 +154,7 @@ export default function AvailabilityPage() {
           .filter((w) => w.id !== id)
           .map((w) => ({ dayOfWeek: w.dayOfWeek, startTime: w.startTime, endTime: w.endTime })),
       );
+      setPlanStale(true);
       toast.success("Window removed");
     } catch (cause) {
       toast.error(describeError(cause));
@@ -124,6 +175,7 @@ export default function AvailabilityPage() {
           period.id === editingPeriod.id ? change.period : period,
         ),
       );
+      setInvalidatedCount(change.invalidatedFutureSessionIds.length);
       toast.success("Exception updated");
       setEditingPeriod(null);
       return;
@@ -131,6 +183,7 @@ export default function AvailabilityPage() {
 
     const change = await availabilityApi.createUnavailablePeriod(draft);
     periods.setData([...allPeriods, change.period]);
+    setInvalidatedCount(change.invalidatedFutureSessionIds.length);
     toast.success("Exception added");
   }
 
@@ -150,227 +203,260 @@ export default function AvailabilityPage() {
   const loadError = windows.error ?? periods.error;
 
   return (
-    <div className="flex flex-col gap-6 p-6">
-      {/* ── Header ─────────────────────────────── */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight">Availability</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            The hours you are free to study. Everything StudyFlow tells you about
-            your workload is measured against these.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setExceptionDialogOpen(true)}>
-            <CalendarOff className="mr-1.5 h-4 w-4" />
-            Add Exception
-          </Button>
-          <Button size="sm" onClick={() => setWindowDialogOpen(true)}>
-            <Plus className="mr-1.5 h-4 w-4" />
-            Add Window
-          </Button>
-        </div>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Availability"
+        description="The hours you are free to study. Everything StudyFlow tells you about your workload is measured against these."
+        actions={
+          <>
+            <Button
+              variant="outline"
+              onClick={() => void requestRegeneration()}
+              disabled={isGenerating}
+            >
+              {isGenerating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+              Re-plan my time
+            </Button>
+            <Button variant="outline" onClick={() => setExceptionDialogOpen(true)}>
+              <CalendarOff />
+              Add exception
+            </Button>
+            <Button onClick={() => setWindowDialogOpen(true)}>
+              <Plus />
+              Add window
+            </Button>
+          </>
+        }
+      />
 
       {loadError && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription className="flex items-center justify-between gap-4">
-            <span>{describeError(loadError)}</span>
+        <Callout
+          tone="danger"
+          title="Could not load your availability"
+          actions={
             <Button
-              size="sm"
               variant="outline"
+              size="sm"
               onClick={() => {
                 windows.reload();
                 periods.reload();
               }}
             >
-              Retry
+              Try again
             </Button>
-          </AlertDescription>
-        </Alert>
+          }
+        >
+          {describeError(loadError)}
+        </Callout>
       )}
 
-      {/* Weekly total, stated plainly — it is the number the dashboard divides by. */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-card px-4 py-3">
-        <div className="flex items-baseline gap-3">
-          <span className="eyebrow">Weekly pattern</span>
-          <span className="font-mono text-lg font-medium">
-            {windows.isLoading ? "—" : formatDuration(weeklyPatternMinutes(allWindows))}
-          </span>
-        </div>
-        <span className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Info className="h-3.5 w-3.5 shrink-0" />
-          Overlapping windows on the same day are merged by the server.
-        </span>
+      {technicalFailure && (
+        <Callout
+          tone="danger"
+          title="StudyFlow could not work out a plan"
+          actions={
+            <Button variant="outline" size="sm" onClick={() => void requestRegeneration()}>
+              Try again
+            </Button>
+          }
+        >
+          {technicalFailure} This is a problem on our side, not a sign that your work does
+          not fit. Your current plan has not changed.
+        </Callout>
+      )}
+
+      {/* SPEC §17.5: say what the change broke, then offer the remedy. */}
+      {(invalidatedCount > 0 || planStale) && (
+        <Callout
+          tone="warning"
+          title={
+            invalidatedCount > 0
+              ? `${invalidatedCount} planned ${
+                  invalidatedCount === 1 ? "session no longer fits" : "sessions no longer fit"
+                }`
+              : "Your plan is out of date"
+          }
+          actions={
+            <>
+              <Button
+                size="sm"
+                onClick={() => void requestRegeneration()}
+                disabled={isGenerating}
+              >
+                {isGenerating && <Loader2 className="animate-spin" />}
+                Re-plan my time
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setInvalidatedCount(0);
+                  setPlanStale(false);
+                }}
+              >
+                Not now
+              </Button>
+            </>
+          }
+        >
+          {invalidatedCount > 0
+            ? "That work has been put back on your list. StudyFlow can look for new slots whenever you are ready."
+            : "You changed your study hours, so your current sessions may no longer be the best fit."}
+        </Callout>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <StatTile
+          icon={Clock4}
+          value={windows.isLoading ? null : formatDuration(weeklyPatternMinutes(allWindows))}
+          label="Weekly study time"
+          tone="surplus"
+        />
+        <StatTile
+          icon={CalendarDays}
+          value={windows.isLoading ? null : String(allWindows.length)}
+          label={allWindows.length === 1 ? "Weekly window" : "Weekly windows"}
+        />
+        <StatTile
+          icon={CalendarOff}
+          value={periods.isLoading ? null : String(allPeriods.length)}
+          label={allPeriods.length === 1 ? "Exception" : "Exceptions"}
+        />
       </div>
 
       {/* ── Main content ───────────────────────── */}
       <div className="grid gap-6 lg:grid-cols-3">
+        <div className="flex min-w-0 flex-col gap-3 lg:col-span-2">
+          <div>
+            <h2 className="font-display text-base font-semibold tracking-tight">Your week</h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              The same grid the calendar uses. Hover a window to find it in the list.
+            </p>
+          </div>
 
-        {/* Visual time grid */}
-        <Card className="lg:col-span-2 overflow-hidden">
-          <CardHeader className="pb-3">
-            <CardTitle className="font-display text-base">Weekly Schedule</CardTitle>
-            <CardDescription>
-              Shaded blocks are the hours you can study
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-0 pb-4">
-            <div className="overflow-x-auto">
-              <div
-                className="grid min-w-[480px]"
-                style={{ gridTemplateColumns: "48px repeat(7, 1fr)" }}
-              >
-                {/* Day headers */}
-                <div className="border-b" />
-                {DISPLAY_DAYS.map((dayIdx) => (
-                  <div
-                    key={dayIdx}
-                    className="border-b border-l py-2 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide"
-                  >
-                    {DAY_NAMES_SHORT[dayIdx]}
-                  </div>
-                ))}
-
-                {/* Time rows — 30-min slots */}
-                {HOURS.map((hour) => (
-                  <div key={hour} className="contents">
-                    {/* Hour label */}
-                    <div className="relative">
-                      <span className="absolute -top-2 right-2 text-[10px] text-muted-foreground tabular-nums">
-                        {hour % 12 === 0 ? 12 : hour % 12}
-                        {hour < 12 ? "am" : "pm"}
-                      </span>
-                      <div className="h-6 border-b border-muted/40" />
-                      <div className="h-6 border-b border-muted/20" />
-                    </div>
-
-                    {/* Each day cell */}
-                    {DISPLAY_DAYS.map((dayIdx) => {
-                      const slotTop = (hour - HOUR_START) * 2;
-                      const slotBot = slotTop + 1;
-                      const windowsTop = (avMap[dayIdx] || []).filter(
-                        (w) => slotTop >= w.startSlot && slotTop < w.endSlot
-                      );
-                      const windowsBot = (avMap[dayIdx] || []).filter(
-                        (w) => slotBot >= w.startSlot && slotBot < w.endSlot
-                      );
-                      return (
-                        <div key={`${dayIdx}-${hour}`} className="border-l">
-                          {/* Top half */}
-                          <div
-                            className={cn(
-                              "h-6 border-b border-muted/40 transition-colors",
-                              windowsTop.length > 0
-                                ? hoveredWindow && windowsTop.some(w => w.id === hoveredWindow)
-                                  ? "bg-surplus/55"
-                                  : "bg-surplus/25"
-                                : "hover:bg-muted/50"
-                            )}
-                            onMouseEnter={() => windowsTop[0] && setHoveredWindow(windowsTop[0].id)}
-                            onMouseLeave={() => setHoveredWindow(null)}
-                          />
-                          {/* Bottom half */}
-                          <div
-                            className={cn(
-                              "h-6 border-b border-muted/20 transition-colors",
-                              windowsBot.length > 0
-                                ? hoveredWindow && windowsBot.some(w => w.id === hoveredWindow)
-                                  ? "bg-surplus/55"
-                                  : "bg-surplus/25"
-                                : "hover:bg-muted/50"
-                            )}
-                            onMouseEnter={() => windowsBot[0] && setHoveredWindow(windowsBot[0].id)}
-                            onMouseLeave={() => setHoveredWindow(null)}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Legend */}
-            <div className="flex items-center gap-4 px-4 pt-3">
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <div className="h-3 w-5 rounded-sm bg-surplus/25" />
-                Available
-              </div>
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <div className="h-3 w-5 rounded-sm bg-muted" />
-                Unavailable
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+          {windows.isLoading ? (
+            <Skeleton className="h-[26rem] w-full rounded-xl" />
+          ) : allWindows.length === 0 ? (
+            <EmptyState
+              icon={Clock4}
+              title="No study hours yet"
+              action={
+                <Button size="sm" onClick={() => setWindowDialogOpen(true)}>
+                  Add your first window
+                </Button>
+              }
+            >
+              Tell StudyFlow when you are free and it can tell you what fits.
+            </EmptyState>
+          ) : (
+            <WeekGrid
+              columns={columns}
+              blocks={blocks}
+              hourStart={hourRange.start}
+              hourEnd={hourRange.end}
+              highlightedId={hoveredWindow}
+              onHighlight={setHoveredWindow}
+            />
+          )}
+          <GridLegend />
+        </div>
 
         {/* Right column */}
-        <div className="flex flex-col gap-4">
+        <div className="flex min-w-0 flex-col gap-4">
 
-          {/* Windows list */}
-          <Card>
-            <CardHeader className="pb-3">
+          {/*
+            One row per weekday rather than a heading plus a row for every
+            window. Eight windows used to render sixteen stacked elements and
+            hid the days you are *not* free, which is exactly what you look at
+            this list to check.
+          */}
+          <Card className="py-0">
+            <CardHeader className="border-b py-3">
               <div className="flex items-center justify-between">
-                <CardTitle className="font-display text-base">Windows</CardTitle>
-                <span className="text-xs text-muted-foreground">{allWindows.length} total</span>
+                <CardTitle className="font-display text-base">Your weekly hours</CardTitle>
+                <span className="text-xs text-muted-foreground">
+                  {formatDuration(weeklyPatternMinutes(allWindows))} a week
+                </span>
               </div>
-              <CardDescription>Hover a row to highlight it on the grid</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-0 p-0">
+            <CardContent className="p-0">
               {windows.isLoading ? (
                 <div className="space-y-2 p-4">
                   <Skeleton className="h-8 w-full" />
                   <Skeleton className="h-8 w-full" />
                 </div>
-              ) : allWindows.length === 0 ? (
-                <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-                  No windows yet. Add one so sessions can be scheduled.
-                </p>
               ) : (
-                DAY_NAMES.map((dayName, dayIdx) => {
-                  const dayWindows = sortedAvail.filter((a) => a.dayOfWeek === dayIdx);
-                  if (dayWindows.length === 0) return null;
-                  return (
-                    <div key={dayIdx}>
-                      <div className="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground bg-muted/40 border-b border-t first:border-t-0">
-                        {dayName}
-                      </div>
-                      {dayWindows.map((w) => (
-                        <div
-                          key={w.id}
+                <ul className="divide-y">
+                  {DISPLAY_DAYS.map((dayIdx) => {
+                    const dayWindows = sortedAvail.filter((a) => a.dayOfWeek === dayIdx);
+                    const dayMinutes = dayWindows.reduce(
+                      (sum, w) => sum + (toMinutes(w.endTime) - toMinutes(w.startTime)),
+                      0,
+                    );
+                    return (
+                      <li
+                        key={dayIdx}
+                        className="flex items-start gap-3 px-4 py-2.5"
+                      >
+                        <span
                           className={cn(
-                            "flex items-center justify-between px-4 py-2.5 border-b last:border-0 transition-colors cursor-default",
-                            hoveredWindow === w.id ? "bg-surplus-soft" : "hover:bg-muted/40"
+                            "w-10 shrink-0 pt-1 text-xs font-medium",
+                            dayWindows.length > 0
+                              ? "text-foreground"
+                              : "text-muted-foreground/60",
                           )}
-                          onMouseEnter={() => setHoveredWindow(w.id)}
-                          onMouseLeave={() => setHoveredWindow(null)}
                         >
-                          <div className="flex items-center gap-2">
-                            <Clock4 className="h-3.5 w-3.5 shrink-0 text-surplus" />
-                            <span className="text-sm tabular-nums">
-                              {w.startTime} – {w.endTime}
+                          {DAY_NAMES_SHORT[dayIdx]}
+                        </span>
+
+                        <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
+                          {dayWindows.length === 0 ? (
+                            <span className="pt-1 text-xs text-muted-foreground/60">
+                              Not free
                             </span>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                            onClick={() => void handleDeleteWindow(w.id)}
-                            disabled={pendingId === w.id}
-                          >
-                            {pendingId === w.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-3.5 w-3.5" />
-                            )}
-                          </Button>
+                          ) : (
+                            dayWindows.map((w) => (
+                              <span
+                                key={w.id}
+                                onMouseEnter={() => setHoveredWindow(w.id)}
+                                onMouseLeave={() => setHoveredWindow(null)}
+                                className={cn(
+                                  "group/window flex items-center gap-1 rounded-md border py-1 ps-2 pe-1 text-xs tabular-nums transition-colors",
+                                  hoveredWindow === w.id
+                                    ? "border-surplus bg-surplus/25"
+                                    : "border-surplus/40 bg-surplus-soft",
+                                )}
+                              >
+                                {w.startTime}–{w.endTime}
+                                <button
+                                  onClick={() => void handleDeleteWindow(w.id)}
+                                  disabled={pendingId === w.id}
+                                  aria-label={`Remove ${DAY_NAMES[dayIdx]} ${w.startTime} to ${w.endTime}`}
+                                  className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-card hover:text-deficit"
+                                >
+                                  {pendingId === w.id ? (
+                                    <Loader2 className="size-3 animate-spin" />
+                                  ) : (
+                                    <X className="size-3" />
+                                  )}
+                                </button>
+                              </span>
+                            ))
+                          )}
                         </div>
-                      ))}
-                    </div>
-                  );
-                })
+
+                        <span
+                          className={cn(
+                            "w-14 shrink-0 pt-1 text-end text-xs tabular-nums",
+                            dayMinutes > 0 ? "text-muted-foreground" : "text-muted-foreground/50",
+                          )}
+                        >
+                          {dayMinutes > 0 ? formatDuration(dayMinutes) : "—"}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
               )}
             </CardContent>
           </Card>
@@ -379,7 +465,7 @@ export default function AvailabilityPage() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="font-display text-base">Exceptions</CardTitle>
-              <CardDescription>One-off periods where you&apos;re not available</CardDescription>
+              <p className="text-sm text-muted-foreground">Days you know you cannot study</p>
             </CardHeader>
             <CardContent className="space-y-2">
               {periods.isLoading ? (
@@ -453,6 +539,18 @@ export default function AvailabilityPage() {
         </div>
       </div>
 
+      <SchedulePreview
+        proposal={proposal}
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        onAccepted={() => {
+          setProposal(null);
+          setInvalidatedCount(0);
+          setPlanStale(false);
+        }}
+        onRejected={() => setProposal(null)}
+      />
+
       <AddWindowDialog
         open={windowDialogOpen}
         onOpenChange={setWindowDialogOpen}
@@ -467,6 +565,6 @@ export default function AvailabilityPage() {
         period={editingPeriod}
         onSubmit={handleSaveException}
       />
-    </div>
+    </PageShell>
   );
 }

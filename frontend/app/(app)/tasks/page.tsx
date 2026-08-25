@@ -4,10 +4,12 @@ import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Callout } from "@/components/ui/callout";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Select,
   SelectContent,
@@ -23,8 +25,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  AlertTriangle,
+  ArrowUpDown,
   ListTodo,
+  SlidersHorizontal,
   Loader2,
   MoreHorizontal,
   Plus,
@@ -32,7 +35,9 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { formatDuration, CATEGORY_CONFIG, PRIORITY_CONFIG, STATUS_CONFIG } from "@/lib/constants";
+import { formatDuration, CATEGORY_CONFIG, STATUS_CONFIG } from "@/lib/constants";
+import { describeDeadline } from "@/lib/datetime";
+import { EmptyState, PageHeader, PageShell } from "@/components/page-kit";
 import { cn } from "@/lib/utils";
 import { ApiError, tasks as tasksApi } from "@/lib/api";
 import { describeError, useApi } from "@/hooks/use-api";
@@ -43,6 +48,16 @@ import type { AcademicTask, Category, Priority, TaskStatus } from "@/types/task"
 
 const ANY = "any";
 
+type SortKey = "deadline" | "deadline-desc" | "priority" | "remaining" | "title";
+
+const SORT_LABELS: Record<SortKey, string> = {
+  deadline: "Soonest first",
+  "deadline-desc": "Latest first",
+  priority: "Priority",
+  remaining: "Most work left",
+  title: "Name (A–Z)",
+};
+
 export default function TasksPage() {
   // Everything except the title search is a real backend query parameter.
   const [status, setStatus] = useState<TaskStatus | null>(null);
@@ -51,12 +66,16 @@ export default function TasksPage() {
   const [course, setCourse] = useState("");
   const [appliedCourse, setAppliedCourse] = useState("");
   const [search, setSearch] = useState("");
-  // SPEC §17.4 lists "Filter by Deadline"; the API takes RFC 3339 bounds.
+  // The API takes RFC 3339 bounds for the deadline filter.
   const [dueBefore, setDueBefore] = useState("");
+  const [sort, setSort] = useState<SortKey>("deadline");
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<AcademicTask | null>(null);
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+  // SPEC §7.8 and §7.5: both of these destroy work, so both confirm first.
+  const [confirmDelete, setConfirmDelete] = useState<AcademicTask | null>(null);
+  const [confirmFinish, setConfirmFinish] = useState<AcademicTask | null>(null);
 
   const load = useCallback(
     (signal: AbortSignal) =>
@@ -76,12 +95,37 @@ export default function TasksPage() {
 
   const tasks = useMemo(() => data ?? [], [data]);
 
-  // The API has no title search, so this last step is client-side and says so.
+  // The API has no text search, so title filtering happens here in the browser.
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return tasks;
     return tasks.filter((task) => task.title.toLowerCase().includes(q));
   }, [tasks, search]);
+
+  const visibleSorted = useMemo(() => {
+    const rows = [...visible];
+    const byDeadline = (a: AcademicTask, b: AcademicTask) =>
+      new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+
+    switch (sort) {
+      case "deadline":
+        return rows.sort(byDeadline);
+      case "deadline-desc":
+        return rows.sort((a, b) => byDeadline(b, a));
+      case "remaining":
+        return rows.sort((a, b) => b.remainingDuration - a.remainingDuration);
+      case "priority": {
+        // High first, then Medium, then Low; ties fall back to the deadline so
+        // the order is stable rather than whatever the API happened to return.
+        const rank: Record<Priority, number> = { High: 0, Medium: 1, Low: 2 };
+        return rows.sort((a, b) => rank[a.priority] - rank[b.priority] || byDeadline(a, b));
+      }
+      case "title":
+        return rows.sort((a, b) => a.title.localeCompare(b.title));
+      default:
+        return rows;
+    }
+  }, [visible, sort]);
 
   const filterCount =
     (status ? 1 : 0) +
@@ -97,6 +141,7 @@ export default function TasksPage() {
     setCourse("");
     setAppliedCourse("");
     setDueBefore("");
+    setSearch("");
   }
 
   function handleSaved(saved: AcademicTask) {
@@ -127,108 +172,194 @@ export default function TasksPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
-      {/* ── Header ─────────────────────────────── */}
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight">Tasks</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Everything you owe, with deadlines and estimates.
-          </p>
-        </div>
-        <Button
-          className="rounded-full px-4"
-          onClick={() => {
-            setEditing(null);
-            setDialogOpen(true);
-          }}
-        >
-          <Plus className="mr-1.5 h-4 w-4" />
-          Add task
-        </Button>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Tasks"
+        description="Everything you owe, with deadlines and estimates."
+        actions={
+          <Button
+            onClick={() => {
+              setEditing(null);
+              setDialogOpen(true);
+            }}
+          >
+            <Plus />
+            Add task
+          </Button>
+        }
+      />
 
       {error && (
-        <Alert variant="destructive">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertDescription className="flex items-center justify-between gap-4">
-            <span>{describeError(error)}</span>
-            <Button size="sm" variant="outline" onClick={reload}>Retry</Button>
-          </AlertDescription>
-        </Alert>
+        <Callout
+          tone="danger"
+          title="Could not load your tasks"
+          actions={
+            <Button variant="outline" size="sm" onClick={reload}>
+              Try again
+            </Button>
+          }
+        >
+          {describeError(error)}
+        </Callout>
       )}
 
-      {/* ── Filters ────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-2">
-        <FilterSelect
-          value={status}
-          onChange={setStatus}
-          options={TASK_STATUSES}
-          placeholder="Any status"
-        />
-        <FilterSelect
-          value={category}
-          onChange={setCategory}
-          options={CATEGORIES}
-          placeholder="Any category"
-        />
-        <FilterSelect
-          value={priority}
-          onChange={setPriority}
-          options={PRIORITIES}
-          placeholder="Any priority"
-        />
+      {/* ── Toolbar ────────────────────────────── */}
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Search leads, because it is what a long list is actually used
+              with. It used to be the fifth control in a wrapped row of seven. */}
+          <div className="relative min-w-56 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search tasks"
+              aria-label="Search tasks by title"
+              className="h-10 w-full ps-9 pe-9"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                aria-label="Clear search"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
+            )}
+          </div>
 
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            setAppliedCourse(course.trim());
-          }}
-        >
-          <Input
-            placeholder="Course"
-            className="h-9 w-36"
-            value={course}
-            onChange={(e) => setCourse(e.target.value)}
-            onBlur={() => setAppliedCourse(course.trim())}
-          />
-        </form>
+          <Select value={sort} onValueChange={(next) => next && setSort(next as SortKey)}>
+            <SelectTrigger className="h-10" aria-label="Sort tasks">
+              <ArrowUpDown className="text-muted-foreground" />
+              <SelectValue>
+                {(selected) => SORT_LABELS[selected as SortKey] ?? "Sort"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+                <SelectItem key={key} value={key}>
+                  {SORT_LABELS[key]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-        <label className="flex items-center gap-1.5">
-          <span className="eyebrow whitespace-nowrap">Due before</span>
-          <Input
-            type="datetime-local"
-            className="h-9 w-[13rem]"
-            value={dueBefore}
-            onChange={(e) => setDueBefore(e.target.value)}
-            aria-label="Show tasks due before"
-          />
-        </label>
+          {/* The five filters live behind one control instead of spilling
+              across two wrapped rows of half-labelled inputs. */}
+          <Popover>
+            <PopoverTrigger
+              render={
+                <Button variant="outline" className="h-10">
+                  <SlidersHorizontal />
+                  Filters
+                  {filterCount > 0 && (
+                    <span className="ms-0.5 flex size-5 items-center justify-center rounded-full bg-foreground text-[0.6875rem] font-semibold text-background">
+                      {filterCount}
+                    </span>
+                  )}
+                </Button>
+              }
+            />
+            <PopoverContent align="end" className="w-80 p-4">
+              <div className="space-y-3">
+                <FilterField label="Status">
+                  <FilterSelect
+                    value={status}
+                    onChange={setStatus}
+                    options={TASK_STATUSES}
+                    placeholder="Any status"
+                  />
+                </FilterField>
+                <FilterField label="Category">
+                  <FilterSelect
+                    value={category}
+                    onChange={setCategory}
+                    options={CATEGORIES}
+                    placeholder="Any category"
+                  />
+                </FilterField>
+                <FilterField label="Priority">
+                  <FilterSelect
+                    value={priority}
+                    onChange={setPriority}
+                    options={PRIORITIES}
+                    placeholder="Any priority"
+                  />
+                </FilterField>
+                <FilterField label="Course">
+                  <Input
+                    placeholder="Any course"
+                    className="h-9 w-full"
+                    value={course}
+                    onChange={(e) => setCourse(e.target.value)}
+                    onBlur={() => setAppliedCourse(course.trim())}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") setAppliedCourse(course.trim());
+                    }}
+                  />
+                </FilterField>
+                <FilterField label="Due before">
+                  <Input
+                    type="datetime-local"
+                    className="h-9 w-full"
+                    value={dueBefore}
+                    onChange={(e) => setDueBefore(e.target.value)}
+                    aria-label="Show tasks due before"
+                  />
+                </FilterField>
 
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Filter titles"
-            className="h-9 w-44 pl-8"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+                {filterCount > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full"
+                    onClick={clearFilters}
+                  >
+                    Clear all filters
+                  </Button>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
 
-        {filterCount > 0 && (
-          <Button size="sm" variant="ghost" onClick={clearFilters}>
-            <X className="mr-1 h-3.5 w-3.5" />
-            Clear
-          </Button>
+        {/* Active filters stay visible outside the popover, each removable on
+            its own — otherwise a filtered list looks like an empty one. */}
+        {(filterCount > 0 || search !== "") && (
+          <div className="flex flex-wrap items-center gap-2">
+            {search && <Chip label={`“${search}”`} onClear={() => setSearch("")} />}
+            {status && <Chip label={status} onClear={() => setStatus(null)} />}
+            {category && <Chip label={category} onClear={() => setCategory(null)} />}
+            {priority && <Chip label={`${priority} priority`} onClear={() => setPriority(null)} />}
+            {appliedCourse && (
+              <Chip
+                label={appliedCourse}
+                onClear={() => {
+                  setCourse("");
+                  setAppliedCourse("");
+                }}
+              />
+            )}
+            {dueBefore && (
+              <Chip label="Due before set" onClear={() => setDueBefore("")} />
+            )}
+            <button
+              onClick={clearFilters}
+              className="text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            >
+              Clear all
+            </button>
+            <span className="ms-auto text-xs text-muted-foreground">
+              {isLoading ? "…" : `${visibleSorted.length} of ${tasks.length}`}
+            </span>
+          </div>
         )}
-
-        <span className="ml-auto font-mono text-xs text-muted-foreground">
-          {isLoading ? "…" : `${visible.length} shown`}
-        </span>
       </div>
 
       {/* ── Ledger ─────────────────────────────── */}
-      <Card className="overflow-hidden">
+      {/* `py-0`: Card applies `py-(--card-spacing)` by default, which left a
+          band of empty space above the first row and below the last. */}
+      <Card className="overflow-hidden py-0">
         <CardContent className="p-0">
           {isLoading ? (
             <div className="space-y-2 p-6">
@@ -237,19 +368,38 @@ export default function TasksPage() {
               ))}
             </div>
           ) : visible.length === 0 ? (
-            <EmptyState hasFilters={filterCount > 0 || search !== ""} onClear={clearFilters} />
+            <EmptyState
+              icon={ListTodo}
+              title={
+                filterCount > 0 || search !== ""
+                  ? "No tasks match these filters"
+                  : "No tasks yet"
+              }
+              className="border-0"
+              action={
+                filterCount > 0 || search !== "" ? (
+                  <Button size="sm" variant="outline" onClick={clearFilters}>
+                    Clear filters
+                  </Button>
+                ) : undefined
+              }
+            >
+              {filterCount > 0 || search !== ""
+                ? "Try widening the filters above."
+                : "Add your first task to see how it fits your week."}
+            </EmptyState>
           ) : (
             <>
               <div className="hidden grid-cols-[minmax(0,1fr)_7rem_6rem_7rem_2.5rem] gap-4 border-b bg-muted/40 px-6 py-2 lg:grid">
-                <span className="eyebrow">Task</span>
-                <span className="eyebrow">Deadline</span>
-                <span className="eyebrow text-right">Remaining</span>
-                <span className="eyebrow">Status</span>
+                <span className="text-xs font-medium text-muted-foreground">Task</span>
+                <span className="text-xs font-medium text-muted-foreground">Due</span>
+                <span className="text-end text-xs font-medium text-muted-foreground">Left</span>
+                <span className="text-xs font-medium text-muted-foreground">Status</span>
                 <span />
               </div>
 
               <ul className="divide-y">
-                {visible.map((task) => (
+                {visibleSorted.map((task) => (
                   <TaskRow
                     key={task.id}
                     task={task}
@@ -261,16 +411,8 @@ export default function TasksPage() {
                     onStart={() =>
                       void runAction(task.id, () => tasksApi.startTask(task.id), "Task started")
                     }
-                    onFinish={() =>
-                      void runAction(
-                        task.id,
-                        () => tasksApi.finishTaskEarly(task.id),
-                        "Task finished",
-                      )
-                    }
-                    onDelete={() =>
-                      void runAction(task.id, () => tasksApi.deleteTask(task.id), "Task deleted")
-                    }
+                    onFinish={() => setConfirmFinish(task)}
+                    onDelete={() => setConfirmDelete(task)}
                   />
                 ))}
               </ul>
@@ -279,18 +421,77 @@ export default function TasksPage() {
         </CardContent>
       </Card>
 
-      <p className="font-mono text-xs text-muted-foreground">
-        Status, category, priority, course and deadline are filtered by the server.
-        Title filtering happens in your browser — the API has no text search.
-      </p>
-
       <TaskFormDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         task={editing}
         onSaved={handleSaved}
       />
-    </div>
+
+      {/* SPEC §7.8: deletion also removes sessions and behaviour history, so
+          the dialog names what goes rather than asking "are you sure?". */}
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        onOpenChange={(next) => !next && setConfirmDelete(null)}
+        title={`Delete “${confirmDelete?.title ?? ""}”?`}
+        description="This also removes its study sessions and the record of time you have already put in. It cannot be undone."
+        confirmLabel="Delete task"
+        destructive
+        onConfirm={async () => {
+          const target = confirmDelete;
+          if (!target) return;
+          await runAction(target.id, () => tasksApi.deleteTask(target.id), "Task deleted");
+          setConfirmDelete(null);
+        }}
+      />
+
+      {/* SPEC §7.5: finishing early zeroes remaining work and drops future
+          sessions, but keeps the time already recorded. */}
+      <ConfirmDialog
+        open={confirmFinish !== null}
+        onOpenChange={(next) => !next && setConfirmFinish(null)}
+        title={`Finish “${confirmFinish?.title ?? ""}” now?`}
+        description="StudyFlow will treat this task as done, drop its upcoming sessions, and keep the time you have already logged."
+        confirmLabel="Mark it finished"
+        onConfirm={async () => {
+          const target = confirmFinish;
+          if (!target) return;
+          await runAction(target.id, () => tasksApi.finishTaskEarly(target.id), "Task finished");
+          setConfirmFinish(null);
+        }}
+      />
+    </PageShell>
+  );
+}
+
+function FilterField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium text-muted-foreground">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+/** A removable summary of one active filter. */
+function Chip({ label, onClear }: { label: string; onClear: () => void }) {
+  return (
+    <span className="flex items-center gap-1 rounded-full border bg-card py-1 ps-2.5 pe-1 text-xs">
+      <span className="max-w-40 truncate">{label}</span>
+      <button
+        onClick={onClear}
+        aria-label={`Remove ${label} filter`}
+        className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <X className="size-3" />
+      </button>
+    </span>
   );
 }
 
@@ -310,7 +511,7 @@ function FilterSelect<T extends string>({
       value={value ?? ANY}
       onValueChange={(next) => next && onChange(next === ANY ? null : (next as T))}
     >
-      <SelectTrigger className="h-9 w-auto min-w-[9.5rem]">
+      <SelectTrigger className="h-9 w-full">
         {/* Base UI renders the raw value by default, which would show the
             sentinel "any" rather than the option's label. */}
         <SelectValue>{(selected) => (selected === ANY ? placeholder : String(selected))}</SelectValue>
@@ -323,35 +524,6 @@ function FilterSelect<T extends string>({
       </SelectContent>
     </Select>
   );
-}
-
-function EmptyState({ hasFilters, onClear }: { hasFilters: boolean; onClear: () => void }) {
-  return (
-    <div className="flex flex-col items-center gap-3 px-6 py-20 text-center">
-      <ListTodo className="h-8 w-8 text-muted-foreground/40" />
-      <p className="text-sm text-muted-foreground">
-        {hasFilters ? "No tasks match these filters." : "No tasks yet."}
-      </p>
-      {hasFilters && (
-        <Button size="sm" variant="outline" onClick={onClear}>
-          Clear filters
-        </Button>
-      )}
-    </div>
-  );
-}
-
-function relativeDeadline(deadline: string) {
-  const due = new Date(deadline);
-  const days = Math.ceil((due.getTime() - Date.now()) / 86_400_000);
-  if (days < 0) return { label: `${Math.abs(days)}d overdue`, urgent: true };
-  if (days === 0) return { label: "Today", urgent: true };
-  if (days === 1) return { label: "Tomorrow", urgent: true };
-  if (days <= 3) return { label: `${days} days`, urgent: true };
-  return {
-    label: due.toLocaleDateString(undefined, { day: "numeric", month: "short" }),
-    urgent: false,
-  };
 }
 
 function TaskRow({
@@ -370,17 +542,11 @@ function TaskRow({
   onDelete: () => void;
 }) {
   const category = CATEGORY_CONFIG[task.category];
-  const priority = PRIORITY_CONFIG[task.priority];
   const statusConfig = STATUS_CONFIG[task.status];
-  const due = relativeDeadline(task.deadline);
+  const due = describeDeadline(task.deadline);
 
   return (
     <li className="group relative py-3 pl-6 pr-14 transition-colors hover:bg-muted/40 lg:pr-6">
-      {/* Overdue tasks carry a rule in the margin rather than a tinted row. */}
-      {task.status === "Overdue" && (
-        <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-deficit" aria-hidden />
-      )}
-
       <div className="flex flex-col gap-2 lg:grid lg:grid-cols-[minmax(0,1fr)_7rem_6rem_7rem_2.5rem] lg:items-center lg:gap-4">
         <div className="min-w-0">
           <Link
@@ -389,18 +555,19 @@ function TaskRow({
           >
             {task.title}
           </Link>
-          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
-            <Badge className={cn("rounded-md border-0 text-[11px]", category.bg, category.color)}>
-              {category.label}
-            </Badge>
-            {task.priority !== "Medium" && (
-              <Badge className={cn("rounded-md border-0 text-[11px]", priority.bg, priority.color)}>
-                {priority.label}
+          {/* Category and course are attributes, not signals, so they stay in
+              ink. Only High priority earns a chip — Medium is the default and
+              Low is not worth the reader's attention. */}
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            {task.priority === "High" && (
+              <Badge variant="outline" className="px-1.5 text-[0.6875rem]">
+                High
               </Badge>
             )}
-            {task.course && (
-              <span className="truncate text-xs text-muted-foreground">{task.course}</span>
-            )}
+            <span className="truncate text-xs text-muted-foreground">
+              {category.label}
+              {task.course ? ` · ${task.course}` : ""}
+            </span>
           </div>
         </div>
 
@@ -409,14 +576,14 @@ function TaskRow({
         <div className="flex flex-wrap items-center gap-x-5 gap-y-1 lg:contents">
           <span
             className={cn(
-              "min-w-0 font-mono text-xs",
+              "min-w-0 text-xs font-medium tabular-nums",
               due.urgent ? "text-deficit" : "text-muted-foreground",
             )}
           >
-            {due.label}
+            {due.short}
           </span>
 
-          <span className="min-w-0 font-mono text-xs text-muted-foreground lg:text-right">
+          <span className="min-w-0 text-xs tabular-nums text-muted-foreground lg:text-end">
             {formatDuration(task.remainingDuration)}
           </span>
 
