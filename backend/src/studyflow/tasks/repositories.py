@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from studyflow.auth.repositories import SessionTransactions
 from studyflow.database.models import AcademicTask, TaskDeadlineHistory
 from studyflow.database.models import StudySession as SessionRow
+from studyflow.database.models import StudySessionOutcome as OutcomeRow
 from studyflow.tasks.service import (
     AcademicTaskRecord,
     EstimateFrozenError,
@@ -35,6 +36,15 @@ class TaskDeadlineSessionInvalidator(Protocol):
     ) -> list[UUID]: ...
 
 
+class TaskRecoveryProposalInvalidator(Protocol):
+    async def invalidate_for_task(
+        self,
+        session: AsyncSession,
+        account_id: UUID,
+        task_id: UUID,
+    ) -> None: ...
+
+
 class NoTaskDeadlineSessions:
     async def remove_sessions_after_deadline(
         self,
@@ -45,6 +55,16 @@ class NoTaskDeadlineSessions:
         now: datetime,
     ) -> list[UUID]:
         return []
+
+
+class NoTaskRecoveryProposals:
+    async def invalidate_for_task(
+        self,
+        session: AsyncSession,
+        account_id: UUID,
+        task_id: UUID,
+    ) -> None:
+        return None
 
 
 class SqlAlchemyTaskDeadlineSessionInvalidator:
@@ -63,6 +83,7 @@ class SqlAlchemyTaskDeadlineSessionInvalidator:
                     SessionRow.account_id == account_id,
                     SessionRow.task_id == task_id,
                     SessionRow.proposal_id.is_(None),
+                    SessionRow.invalidated_at.is_(None),
                     SessionRow.starts_at > now,
                     SessionRow.ends_at > deadline_at,
                 )
@@ -72,7 +93,18 @@ class SqlAlchemyTaskDeadlineSessionInvalidator:
         )
         invalidated_ids = [row.id for row in rows]
         for row in rows:
-            await session.delete(row)
+            row.invalidated_at = now
+            row.invalidation_reason = "deadline"
+            session.add(
+                OutcomeRow(
+                    session_id=row.id,
+                    kind="delayed",
+                    actual_minutes=0,
+                    remaining_minutes=row.planned_duration_minutes,
+                    recorded_at=now,
+                    rescheduled_at=None,
+                )
+            )
         return invalidated_ids
 
 
@@ -82,10 +114,12 @@ class SqlAlchemyAcademicTaskRepository:
         database: SessionTransactions,
         invalidator: TaskDeadlineSessionInvalidator | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        recovery_invalidator: TaskRecoveryProposalInvalidator | None = None,
     ) -> None:
         self._database = database
         self._invalidator = invalidator or NoTaskDeadlineSessions()
         self._clock = clock
+        self._recovery_invalidator = recovery_invalidator or NoTaskRecoveryProposals()
 
     async def create(self, account_id: UUID, task: NewAcademicTask) -> AcademicTaskRecord:
         async with self._database.transaction() as session:
@@ -224,6 +258,11 @@ class SqlAlchemyAcademicTaskRepository:
             )
             if row is None:
                 return False
+            await self._recovery_invalidator.invalidate_for_task(
+                session,
+                account_id,
+                row.id,
+            )
             await session.execute(
                 delete(TaskDeadlineHistory).where(TaskDeadlineHistory.task_id == row.id)
             )

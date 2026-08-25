@@ -52,6 +52,12 @@ class StudySession(Base):
     __table_args__ = (
         CheckConstraint("ends_at > starts_at", name="interval_order"),
         CheckConstraint("planned_duration_minutes > 0", name="positive_duration"),
+        CheckConstraint(
+            "(invalidated_at IS NULL AND invalidation_reason IS NULL) OR "
+            "(invalidated_at IS NOT NULL AND "
+            "invalidation_reason IN ('availability', 'deadline'))",
+            name="invalidation_state",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -67,6 +73,8 @@ class StudySession(Base):
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     planned_duration_minutes: Mapped[int] = mapped_column(Integer)
+    invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    invalidation_reason: Mapped[str | None] = mapped_column(String(16))
 
 
 class StudySessionOutcome(Base):
@@ -85,6 +93,35 @@ class StudySessionOutcome(Base):
     remaining_minutes: Mapped[int] = mapped_column(Integer)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     rescheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ScheduleRecoverySnapshot(Base):
+    __tablename__ = "schedule_recovery_snapshots"
+
+    proposal_id: Mapped[UUID] = mapped_column(
+        ForeignKey("schedule_proposals.id", ondelete="CASCADE"), primary_key=True
+    )
+    account_id: Mapped[UUID] = mapped_column(
+        ForeignKey("student_accounts.id", ondelete="CASCADE"), index=True
+    )
+    missed_session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("study_session_outcomes.session_id", ondelete="CASCADE"), index=True
+    )
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class RecoveryTaskWork(Base):
+    __tablename__ = "recovery_task_work"
+    __table_args__ = (CheckConstraint("unfinished_minutes > 0", name="positive_unfinished"),)
+
+    proposal_id: Mapped[UUID] = mapped_column(
+        ForeignKey("schedule_recovery_snapshots.proposal_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    task_id: Mapped[UUID] = mapped_column(
+        ForeignKey("academic_tasks.id", ondelete="CASCADE"), primary_key=True
+    )
+    unfinished_minutes: Mapped[int] = mapped_column(Integer)
 
 
 class ProposalTaskAllocation(Base):
