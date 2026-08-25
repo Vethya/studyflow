@@ -155,6 +155,9 @@ def test_account_authentication_schema_is_in_the_upgrade_path() -> None:
     assert "CREATE TABLE study_session_outcomes" in result.stdout
     assert "CREATE TABLE schedule_recovery_snapshots" in result.stdout
     assert "CREATE TABLE recovery_task_work" in result.stdout
+    assert "ADD COLUMN invalidated_at TIMESTAMP WITH TIME ZONE" in result.stdout
+    assert "ADD COLUMN invalidation_reason VARCHAR(16)" in result.stdout
+    assert "CONSTRAINT ck_study_sessions_invalidation_state CHECK" in result.stdout
     assert (
         "FOREIGN KEY(missed_session_id) REFERENCES study_session_outcomes (session_id) "
         "ON DELETE CASCADE"
