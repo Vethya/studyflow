@@ -102,3 +102,14 @@ def test_schedule_acceptance_populates_the_study_session_id() -> None:
 
     assert "pm.response.json().sessions" in test_script
     assert "pm.collectionVariables.set('session_id', sessions[0].id)" in test_script
+
+
+def test_study_session_list_populates_the_study_session_id() -> None:
+    collection = load_json(COLLECTION_PATH)
+    scheduling = find_item(collection["item"], "Scheduling")
+    session_list = find_item(scheduling["item"], "List Study Sessions")
+
+    test_script = "\n".join(session_list["event"][0]["script"]["exec"])
+
+    assert "pm.response.json()" in test_script
+    assert "pm.collectionVariables.set('session_id', sessions[0].id)" in test_script

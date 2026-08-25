@@ -15,6 +15,7 @@ from studyflow.scheduling.outcomes import (
     ProposedSessionOutcomeError,
     SessionOutcomeKind,
     StudySessionDetails,
+    StudySessionFilters,
     StudySessionOutcomeRecord,
 )
 from studyflow.scheduling.proposals import StudySessionRecord
@@ -23,6 +24,34 @@ from studyflow.scheduling.proposals import StudySessionRecord
 class SqlAlchemyStudySessionOutcomeRepository:
     def __init__(self, database: SessionTransactions) -> None:
         self._database = database
+
+    async def list(
+        self, account_id: UUID, filters: StudySessionFilters
+    ) -> list[StudySessionDetails]:
+        async with self._database.transaction() as session:
+            statement = (
+                select(SessionRow, OutcomeRow)
+                .outerjoin(OutcomeRow, OutcomeRow.session_id == SessionRow.id)
+                .where(
+                    SessionRow.account_id == account_id,
+                    SessionRow.proposal_id.is_(None),
+                    SessionRow.invalidated_at.is_(None),
+                )
+            )
+            if filters.starts_from is not None:
+                statement = statement.where(SessionRow.ends_at > filters.starts_from)
+            if filters.starts_to is not None:
+                statement = statement.where(SessionRow.starts_at < filters.starts_to)
+            if filters.task_id is not None:
+                statement = statement.where(SessionRow.task_id == filters.task_id)
+            rows = await session.execute(statement.order_by(SessionRow.starts_at, SessionRow.id))
+            return [
+                StudySessionDetails(
+                    self._session_record(session_row),
+                    self._outcome_record(outcome_row) if outcome_row is not None else None,
+                )
+                for session_row, outcome_row in rows
+            ]
 
     async def get(self, account_id: UUID, session_id: UUID) -> StudySessionDetails | None:
         async with self._database.transaction() as session:
@@ -38,15 +67,7 @@ class SqlAlchemyStudySessionOutcomeRepository:
                 return None
             outcome = await session.get(OutcomeRow, session_id)
             return StudySessionDetails(
-                StudySessionRecord(
-                    row.id,
-                    row.account_id,
-                    row.task_id,
-                    row.proposal_id,
-                    self._aware(row.starts_at),
-                    self._aware(row.ends_at),
-                    row.planned_duration_minutes,
-                ),
+                self._session_record(row),
                 self._outcome_record(outcome) if outcome is not None else None,
             )
 
@@ -91,6 +112,18 @@ class SqlAlchemyStudySessionOutcomeRepository:
     @staticmethod
     def _aware(value: datetime) -> datetime:
         return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+    @classmethod
+    def _session_record(cls, row: SessionRow) -> StudySessionRecord:
+        return StudySessionRecord(
+            row.id,
+            row.account_id,
+            row.task_id,
+            row.proposal_id,
+            cls._aware(row.starts_at),
+            cls._aware(row.ends_at),
+            row.planned_duration_minutes,
+        )
 
     @classmethod
     def _outcome_record(cls, row: OutcomeRow) -> StudySessionOutcomeRecord:
