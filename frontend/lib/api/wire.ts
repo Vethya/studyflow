@@ -120,3 +120,96 @@ export interface WireUnavailablePeriodChange {
   period: WireUnavailablePeriod;
   invalidated_future_session_ids: string[];
 }
+
+// ─── Study sessions and scheduling ──────────────────────────────
+// `backend/src/studyflow/api/study_sessions.py` and
+// `backend/src/studyflow/api/schedule_proposals.py`.
+
+export type WireSessionOutcomeKind = "completed" | "delayed" | "missed";
+
+export interface WireSessionOutcome {
+  session_id: string;
+  kind: WireSessionOutcomeKind;
+  actual_minutes: number;
+  remaining_minutes: number;
+  recorded_at: string;
+  rescheduled_at: string | null;
+}
+
+/**
+ * An accepted session. Note there is no `task_title` here — unlike the
+ * proposal's session shape — so callers join titles from the task list.
+ */
+export interface WireStudySession {
+  id: string;
+  task_id: string;
+  starts_at: string;
+  ends_at: string;
+  planned_duration_minutes: number;
+  outcome: WireSessionOutcome | null;
+}
+
+export interface WireProposedSession {
+  id: string;
+  task_id: string;
+  task_title: string | null;
+  starts_at: string;
+  ends_at: string;
+  planned_duration_minutes: number;
+}
+
+export interface WireTaskAllocation {
+  task_id: string;
+  task_title: string | null;
+  deadline_at: string;
+  required_minutes: number;
+  scheduled_minutes: number;
+  unscheduled_minutes: number;
+  raw_calendar_capacity_minutes: number;
+  available_minutes_before_deadline: number;
+  shortfall_minutes: number;
+}
+
+export interface WireUnscheduledWork {
+  task_id: string;
+  task_title: string | null;
+  required_minutes: number;
+  available_minutes_before_deadline: number;
+  shortfall_minutes: number;
+  unscheduled_minutes: number;
+}
+
+export interface WireRelevantUnavailablePeriod {
+  id: string;
+  starts_at: string;
+  ends_at: string;
+  reason: string | null;
+}
+
+export interface WireOverloadWarning {
+  affected_tasks: WireUnscheduledWork[];
+  relevant_unavailable_periods: WireRelevantUnavailablePeriod[];
+  remedies: ("extend_deadline" | "add_availability")[];
+}
+
+export interface WireScheduleProposal {
+  id: string;
+  kind: "generation" | "revision";
+  revision_reason: string | null;
+  status: "feasible" | "overload";
+  created_at: string;
+  sessions: WireProposedSession[];
+  task_allocations: WireTaskAllocation[];
+  unscheduled_work: WireUnscheduledWork[];
+  overload_warning: WireOverloadWarning | null;
+}
+
+export interface WireAcceptedSchedule {
+  sessions: WireProposedSession[];
+}
+
+export interface WireMissedSessionRecovery {
+  session: WireStudySession;
+  outcome: WireSessionOutcome;
+  revision: WireScheduleProposal;
+}

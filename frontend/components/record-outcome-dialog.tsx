@@ -24,16 +24,28 @@ import { describeError } from "@/hooks/use-api";
 import { LARGE_ENTRY_FACTOR, type SessionOutcome, type StudySession } from "@/types/session";
 import type { OutcomeResult } from "@/lib/api";
 
+/**
+ * SPEC §12 defines three outcomes, but the API's RecordSessionOutcomeRequest
+ * currently accepts `outcome: "missed"` only — Completed and Delayed exist in
+ * the domain enum with no route behind them.
+ *
+ * They stay visible and disabled rather than hidden: the student can see the
+ * choice exists and is coming, instead of picking one, filling in the minutes
+ * and hitting a 422 on save.
+ */
 const OPTIONS: {
   value: SessionOutcome;
   label: string;
   hint: string;
   icon: React.ElementType;
+  available: boolean;
 }[] = [
-  { value: "Completed", label: "Finished it", hint: "The work for this session is done", icon: CheckCircle2 },
-  { value: "Delayed", label: "Partly done", hint: "I worked, but there is more left", icon: Clock },
-  { value: "Missed", label: "Didn’t study", hint: "This session didn’t happen", icon: XCircle },
+  { value: "Completed", label: "Finished it", hint: "The work for this session is done", icon: CheckCircle2, available: false },
+  { value: "Delayed", label: "Partly done", hint: "I worked, but there is more left", icon: Clock, available: false },
+  { value: "Missed", label: "Didn’t study", hint: "This session didn’t happen", icon: XCircle, available: true },
 ];
+
+const UNAVAILABLE = OPTIONS.filter((o) => !o.available).length > 0;
 
 /**
  * Records what actually happened in a past session (SPEC §12).
@@ -60,7 +72,7 @@ export function RecordOutcomeDialog({
   onOpenChange: (open: boolean) => void;
   onRecorded: (result: OutcomeResult) => void;
 }) {
-  const [outcome, setOutcome] = React.useState<SessionOutcome>("Completed");
+  const [outcome, setOutcome] = React.useState<SessionOutcome>("Missed");
   const [worked, setWorked] = React.useState("");
   const [remaining, setRemaining] = React.useState("");
   const [remainingTouched, setRemainingTouched] = React.useState(false);
@@ -80,7 +92,7 @@ export function RecordOutcomeDialog({
   const [lastSessionId, setLastSessionId] = React.useState<string | null>(null);
   if (open && session && session.id !== lastSessionId) {
     setLastSessionId(session.id);
-    setOutcome("Completed");
+    setOutcome("Missed");
     setWorked(String(session.plannedDuration));
     setRemaining("");
     setRemainingTouched(false);
@@ -158,10 +170,13 @@ export function RecordOutcomeDialog({
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => setOutcome(option.value)}
+                      onClick={() => option.available && setOutcome(option.value)}
                       aria-pressed={selected}
+                      disabled={!option.available}
+                      title={option.available ? undefined : "Not available yet"}
                       className={cn(
                         "flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                        !option.available && "cursor-not-allowed opacity-50",
                         selected
                           ? "border-foreground bg-muted"
                           : "border-border hover:bg-muted/50",
@@ -184,6 +199,12 @@ export function RecordOutcomeDialog({
                   );
                 })}
               </div>
+              {UNAVAILABLE && (
+                <p className="pt-1 text-xs text-muted-foreground">
+                  Recording finished and partly-done sessions is still being built.
+                  For now you can only report a session you missed.
+                </p>
+              )}
             </fieldset>
 
             {outcome !== "Missed" && (

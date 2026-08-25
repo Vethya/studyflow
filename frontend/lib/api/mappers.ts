@@ -6,6 +6,9 @@
 import type { AcademicTask, Category, Priority, TaskStatus } from "@/types/task";
 import type { AvailabilityWindow, UnavailablePeriod } from "@/types/availability";
 import type { StudentAccount } from "@/types/user";
+import type { SessionOutcome, StudySession } from "@/types/session";
+import type { ScheduleProposal } from "@/types/schedule";
+import type { EffortProgress, WeeklyProgress } from "@/types/progress";
 import type {
   WireAcademicTask,
   WireAvailabilityWindow,
@@ -15,6 +18,9 @@ import type {
   WireTaskPriority,
   WireTaskStatus,
   WireUnavailablePeriod,
+  WireStudySession,
+  WireProposedSession,
+  WireScheduleProposal,
 } from "./wire";
 
 // ─── Enum mapping ────────────────────────────────────────────────
@@ -152,5 +158,134 @@ export function toStudentAccount(
     timezone: preferences.timezone,
     preferredSessionLength: preferences.preferred_session_length_minutes,
     minimumBreak: preferences.minimum_break_minutes,
+  };
+}
+
+// ─── Study sessions and scheduling ──────────────────────────────
+
+/**
+ * A session is "awaiting outcome" when it has finished but carries none
+ * (SPEC §12.1). The API does not flag this; it is derived from the clock,
+ * which is also how the app treats the work — still remaining, never
+ * auto-marked Missed.
+ */
+export function toStudySession(
+  wire: WireStudySession,
+  titles?: Map<string, string>,
+): StudySession {
+  const kind = wire.outcome?.kind;
+  const outcome: SessionOutcome | undefined =
+    kind === "completed" ? "Completed"
+    : kind === "delayed" ? "Delayed"
+    : kind === "missed" ? "Missed"
+    : undefined;
+
+  return {
+    id: wire.id,
+    taskId: wire.task_id,
+    taskTitle: titles?.get(wire.task_id) ?? "Untitled task",
+    category: "Other",
+    startTime: wire.starts_at,
+    endTime: wire.ends_at,
+    plannedDuration: wire.planned_duration_minutes,
+    actualDuration: wire.outcome?.actual_minutes,
+    outcome,
+    isAwaitingOutcome: outcome === undefined && new Date(wire.ends_at) < new Date(),
+  };
+}
+
+function toProposedSession(wire: WireProposedSession): StudySession {
+  return {
+    id: wire.id,
+    taskId: wire.task_id,
+    taskTitle: wire.task_title ?? "Untitled task",
+    category: "Other",
+    startTime: wire.starts_at,
+    endTime: wire.ends_at,
+    plannedDuration: wire.planned_duration_minutes,
+    isAwaitingOutcome: false,
+  };
+}
+
+export function toScheduleProposal(wire: WireScheduleProposal): ScheduleProposal {
+  const periods = wire.overload_warning?.relevant_unavailable_periods ?? [];
+
+  return {
+    id: wire.id,
+    // Only a revision carries a reason; a plain regeneration has none.
+    reason:
+      wire.kind === "revision"
+        ? (wire.revision_reason ?? "Your plan needs updating.")
+        : undefined,
+    proposedSessions: wire.sessions.map(toProposedSession),
+    unscheduledWork: wire.unscheduled_work.map((u) => ({
+      taskId: u.task_id,
+      taskTitle: u.task_title ?? "Untitled task",
+      remainingMinutes: u.unscheduled_minutes,
+      reason:
+        u.available_minutes_before_deadline < u.required_minutes
+          ? "There is not enough free study time before its deadline."
+          : "It could not be placed in the time available.",
+    })),
+    // The overload explanation SPEC §10.5 requires is assembled from the
+    // allocation figures, which carry every field it asks for.
+    overloadWarnings: wire.task_allocations
+      .filter((a) => a.shortfall_minutes > 0)
+      .map((a) => ({
+        taskId: a.task_id,
+        taskTitle: a.task_title ?? "Untitled task",
+        deadline: a.deadline_at,
+        requiredMinutes: a.required_minutes,
+        availableMinutes: a.available_minutes_before_deadline,
+        shortfallMinutes: a.shortfall_minutes,
+        relevantUnavailablePeriods: periods.map(
+          (p) => p.reason ?? "an unavailable period",
+        ),
+      })),
+    createdAt: wire.created_at,
+  };
+}
+
+/** SPEC §13: effort = worked / (worked + estimated remaining). */
+export function toEffortProgress(
+  tasks: AcademicTask[],
+  sessions: StudySession[],
+): EffortProgress[] {
+  const now = new Date();
+  return tasks.map((task) => {
+    const mine = sessions.filter((s) => s.taskId === task.id);
+    const worked = mine.reduce((sum, s) => sum + (s.actualDuration ?? 0), 0);
+    const remaining = task.remainingDuration;
+    const denominator = worked + remaining;
+    return {
+      taskId: task.id,
+      taskTitle: task.title,
+      actualDuration: worked,
+      estimatedRemaining: remaining,
+      effortPercent: denominator > 0 ? Math.round((worked / denominator) * 100) : 0,
+      sessionsCompleted: mine.filter((s) => s.outcome === "Completed").length,
+      sessionsUpcoming: mine.filter((s) => !s.outcome && new Date(s.startTime) > now).length,
+      status: task.status,
+    };
+  });
+}
+
+export function toWeeklyProgress(sessions: StudySession[]): WeeklyProgress {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); // Monday
+  const end = new Date(start.getTime() + 7 * 86_400_000);
+
+  const week = sessions.filter((s) => {
+    const at = new Date(s.startTime);
+    return at >= start && at < end;
+  });
+
+  return {
+    weekStart: start.toISOString(),
+    totalMinutesStudied: week.reduce((sum, s) => sum + (s.actualDuration ?? 0), 0),
+    totalMinutesPlanned: week.reduce((sum, s) => sum + s.plannedDuration, 0),
+    sessionsCompleted: week.filter((s) => s.outcome === "Completed").length,
+    tasksCompleted: 0,
   };
 }
