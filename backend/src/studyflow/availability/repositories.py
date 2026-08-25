@@ -21,6 +21,7 @@ from studyflow.availability.windows import (
 from studyflow.database.models import AvailabilityWindow as AvailabilityWindowRow
 from studyflow.database.models import StudentAccount
 from studyflow.database.models import StudySession as SessionRow
+from studyflow.database.models import StudySessionOutcome as OutcomeRow
 from studyflow.database.models import UnavailablePeriod as UnavailablePeriodRow
 
 
@@ -68,6 +69,7 @@ class SqlAlchemyFutureSessionInvalidator:
                 .where(
                     SessionRow.account_id == account_id,
                     SessionRow.proposal_id.is_(None),
+                    SessionRow.invalidated_at.is_(None),
                     SessionRow.starts_at > now,
                     SessionRow.starts_at < ends_at,
                     SessionRow.ends_at > starts_at,
@@ -78,7 +80,18 @@ class SqlAlchemyFutureSessionInvalidator:
         )
         invalidated_ids = [row.id for row in rows]
         for row in rows:
-            await session.delete(row)
+            row.invalidated_at = now
+            row.invalidation_reason = "availability"
+            session.add(
+                OutcomeRow(
+                    session_id=row.id,
+                    kind="delayed",
+                    actual_minutes=0,
+                    remaining_minutes=row.planned_duration_minutes,
+                    recorded_at=now,
+                    rescheduled_at=None,
+                )
+            )
         return invalidated_ids
 
 

@@ -31,6 +31,7 @@ class SqlAlchemyStudySessionOutcomeRepository:
                     SessionRow.id == session_id,
                     SessionRow.account_id == account_id,
                     SessionRow.proposal_id.is_(None),
+                    SessionRow.invalidated_at.is_(None),
                 )
             )
             if row is None:
@@ -58,7 +59,11 @@ class SqlAlchemyStudySessionOutcomeRepository:
                 return None
             row = await session.scalar(
                 select(SessionRow)
-                .where(SessionRow.id == session_id, SessionRow.account_id == account_id)
+                .where(
+                    SessionRow.id == session_id,
+                    SessionRow.account_id == account_id,
+                    SessionRow.invalidated_at.is_(None),
+                )
                 .with_for_update()
             )
             if row is None:

@@ -78,6 +78,16 @@ class SqlAlchemyRecoverySnapshotRepository:
             preserved_busy: list[StudySessionRecord] = []
             unresolved: list[StudySessionOutcomeRecord] = []
             for item in accepted:
+                if item.invalidated_at is not None:
+                    outcome = outcome_by_session.get(item.id)
+                    if (
+                        outcome is not None
+                        and outcome.remaining_minutes > 0
+                        and outcome.rescheduled_at is None
+                    ):
+                        unfinished[item.task_id] += outcome.remaining_minutes
+                        unresolved.append(self._outcome_record(outcome))
+                    continue
                 if self._aware(item.starts_at) >= now_utc:
                     unfinished[item.task_id] += item.planned_duration_minutes
                     future.append(self._session_record(item))

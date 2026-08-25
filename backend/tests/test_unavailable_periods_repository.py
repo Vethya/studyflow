@@ -14,6 +14,7 @@ from studyflow.availability.unavailable import UnavailablePeriodDraft
 from studyflow.database import Base, Database
 from studyflow.database.models import AcademicTask, StudentAccount
 from studyflow.database.models import StudySession as SessionRow
+from studyflow.database.models import StudySessionOutcome as OutcomeRow
 from studyflow.database.models import UnavailablePeriod as UnavailablePeriodRow
 
 
@@ -112,7 +113,19 @@ async def test_unavailable_period_invalidates_only_overlapping_accepted_future_s
         assert change.invalidated_future_session_ids == [overlapping_id]
         async with database.transaction() as session:
             remaining_ids = set(await session.scalars(select(SessionRow.id)))
-        assert remaining_ids == {later_id, in_progress_id}
+            invalidated = await session.get(SessionRow, overlapping_id)
+            outcome = await session.get(OutcomeRow, overlapping_id)
+        assert remaining_ids == {overlapping_id, later_id, in_progress_id}
+        assert invalidated is not None
+        assert invalidated.invalidated_at is not None
+        assert invalidated.invalidated_at.replace(tzinfo=UTC) == now
+        assert invalidated.invalidation_reason == "availability"
+        assert outcome is not None
+        assert (outcome.kind, outcome.remaining_minutes, outcome.rescheduled_at) == (
+            "delayed",
+            60,
+            None,
+        )
     finally:
         await database.stop()
 

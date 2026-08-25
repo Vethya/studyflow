@@ -52,6 +52,12 @@ class StudySession(Base):
     __table_args__ = (
         CheckConstraint("ends_at > starts_at", name="interval_order"),
         CheckConstraint("planned_duration_minutes > 0", name="positive_duration"),
+        CheckConstraint(
+            "(invalidated_at IS NULL AND invalidation_reason IS NULL) OR "
+            "(invalidated_at IS NOT NULL AND "
+            "invalidation_reason IN ('availability', 'deadline'))",
+            name="invalidation_state",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -67,6 +73,8 @@ class StudySession(Base):
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     planned_duration_minutes: Mapped[int] = mapped_column(Integer)
+    invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    invalidation_reason: Mapped[str | None] = mapped_column(String(16))
 
 
 class StudySessionOutcome(Base):
