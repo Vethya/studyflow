@@ -8,7 +8,7 @@ import type { AvailabilityWindow, UnavailablePeriod } from "@/types/availability
 import type { StudentAccount } from "@/types/user";
 import type { SessionOutcome, StudySession } from "@/types/session";
 import type { ScheduleProposal } from "@/types/schedule";
-import type { EffortProgress, WeeklyProgress } from "@/types/progress";
+import type { EffortProgress } from "@/types/progress";
 import type {
   WireAcademicTask,
   WireAvailabilityWindow,
@@ -270,22 +270,3 @@ export function toEffortProgress(
   });
 }
 
-export function toWeeklyProgress(sessions: StudySession[]): WeeklyProgress {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); // Monday
-  const end = new Date(start.getTime() + 7 * 86_400_000);
-
-  const week = sessions.filter((s) => {
-    const at = new Date(s.startTime);
-    return at >= start && at < end;
-  });
-
-  return {
-    weekStart: start.toISOString(),
-    totalMinutesStudied: week.reduce((sum, s) => sum + (s.actualDuration ?? 0), 0),
-    totalMinutesPlanned: week.reduce((sum, s) => sum + s.plannedDuration, 0),
-    sessionsCompleted: week.filter((s) => s.outcome === "Completed").length,
-    tasksCompleted: 0,
-  };
-}

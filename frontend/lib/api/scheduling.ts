@@ -13,9 +13,9 @@
  * Two things the backend does not expose yet, handled here rather than in the
  * screens so the seam stays in one place:
  *
- *  - **Effort progress has no endpoint.** `listEffortProgress` and
- *    `getWeeklyProgress` derive their figures from tasks plus accepted
- *    sessions. The arithmetic is SPEC §13's, but it runs in the browser.
+ *  - **Effort progress has no endpoint.** `listEffortProgress` derives its
+ *    figures from tasks plus accepted sessions. The arithmetic is SPEC §13's,
+ *    but it runs in the browser.
  *  - **Adaptive estimation has no endpoint.** `getAdaptiveEstimate` returns
  *    null, so the §15.6 explanation and the §15.4 acknowledgement stay hidden
  *    until the model ships. Returning null rather than a guess keeps the UI
@@ -28,7 +28,6 @@ import {
   toEffortProgress,
   toScheduleProposal,
   toStudySession,
-  toWeeklyProgress,
 } from "./mappers";
 import type {
   WireScheduleProposal,
@@ -36,7 +35,7 @@ import type {
 } from "./wire";
 import type { OutcomeFormData, StudySession } from "@/types/session";
 import type { Schedule, ScheduleProposal, ScheduleRevision } from "@/types/schedule";
-import type { AdaptiveEstimate, EffortProgress, WeeklyProgress } from "@/types/progress";
+import type { AdaptiveEstimate, EffortProgress } from "@/types/progress";
 import type { AcademicTask, Category } from "@/types/task";
 
 /**
@@ -204,9 +203,6 @@ export async function listEffortProgress(
   return toEffortProgress(tasks as AcademicTask[], sessions);
 }
 
-export async function getWeeklyProgress(signal?: AbortSignal): Promise<WeeklyProgress> {
-  return toWeeklyProgress(await listSessions(signal));
-}
 
 // ─── Adaptive estimation (not implemented server-side) ──────────
 // The parameters are kept so the signature matches what the real endpoint
