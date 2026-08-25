@@ -8,6 +8,7 @@ from sqlalchemy import select
 from studyflow.database import Base, Database
 from studyflow.database.models import AcademicTask, StudentAccount, TaskDeadlineHistory
 from studyflow.database.models import StudySession as SessionRow
+from studyflow.database.models import StudySessionOutcome as OutcomeRow
 from studyflow.tasks.repositories import (
     SqlAlchemyAcademicTaskRepository,
     SqlAlchemyTaskDeadlineSessionInvalidator,
@@ -96,7 +97,19 @@ async def test_earlier_deadline_invalidates_only_future_sessions_that_cross_it()
         assert updated is not None and updated.deadline_at == new_deadline
         async with database.transaction() as session:
             remaining_ids = set(await session.scalars(select(SessionRow.id)))
-        assert remaining_ids == {valid_id}
+            invalidated = await session.get(SessionRow, invalid_id)
+            outcome = await session.get(OutcomeRow, invalid_id)
+        assert remaining_ids == {valid_id, invalid_id}
+        assert invalidated is not None
+        assert invalidated.invalidated_at is not None
+        assert invalidated.invalidated_at.replace(tzinfo=UTC) == now
+        assert invalidated.invalidation_reason == "deadline"
+        assert outcome is not None
+        assert (outcome.kind, outcome.remaining_minutes, outcome.rescheduled_at) == (
+            "delayed",
+            60,
+            None,
+        )
     finally:
         await database.stop()
 

@@ -158,6 +158,7 @@ class SqlAlchemyScheduleProposalRepository:
                     .where(
                         SessionRow.account_id == account_id,
                         SessionRow.proposal_id.is_(None),
+                        SessionRow.invalidated_at.is_(None),
                         SessionRow.starts_at <= now_utc,
                     )
                     .order_by(SessionRow.ends_at, SessionRow.id)
@@ -187,6 +188,7 @@ class SqlAlchemyScheduleProposalRepository:
                 .where(
                     SessionRow.account_id == account_id,
                     SessionRow.proposal_id.is_(None),
+                    SessionRow.invalidated_at.is_(None),
                     SessionRow.starts_at > now_utc,
                 )
                 .execution_options(synchronize_session=False)

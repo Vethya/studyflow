@@ -11,6 +11,7 @@ from studyflow.accounts.repositories import SqlAlchemyStudyPreferencesRepository
 from studyflow.availability.repositories import (
     NoFutureSessions,
     SqlAlchemyAvailabilityWindowRepository,
+    SqlAlchemyFutureSessionInvalidator,
     SqlAlchemyUnavailablePeriodRepository,
 )
 from studyflow.availability.unavailable import UnavailablePeriodService
@@ -172,6 +173,41 @@ async def test_recovery_counts_missed_and_future_work_once_and_leaves_active_sch
             )
         assert active_ids == {harness.missed_session_id, harness.future_session_id}
         assert snapshot_work == 120
+    finally:
+        await harness.database.stop()
+
+
+@pytest.mark.anyio
+async def test_recovery_includes_invalidated_future_work_once() -> None:
+    harness = await _harness(deadline=NOW + timedelta(days=1))
+    try:
+        async with harness.database.transaction() as session:
+            invalidated = await SqlAlchemyFutureSessionInvalidator(
+                clock=lambda: NOW
+            ).remove_conflicting_future_sessions(
+                session,
+                harness.account_id,
+                NOW + timedelta(hours=2),
+                NOW + timedelta(hours=5),
+            )
+        assert invalidated == [harness.future_session_id]
+
+        proposal = await harness.recovery.propose(
+            harness.account_id,
+            harness.missed_session_id,
+        )
+
+        assert proposal is not None
+        assert proposal.allocations[0].required_minutes == 120
+        assert proposal.allocations[0].scheduled_minutes == 120
+        async with harness.database.transaction() as session:
+            invalidated_session = await session.get(SessionRow, harness.future_session_id)
+            invalidated_outcome = await session.get(OutcomeRow, harness.future_session_id)
+        assert invalidated_session is not None
+        assert invalidated_session.invalidated_at is not None
+        assert invalidated_session.invalidated_at.replace(tzinfo=UTC) == NOW
+        assert invalidated_outcome is not None
+        assert invalidated_outcome.remaining_minutes == 60
     finally:
         await harness.database.stop()
 

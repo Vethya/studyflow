@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from studyflow.auth.repositories import SessionTransactions
 from studyflow.database.models import AcademicTask, TaskDeadlineHistory
 from studyflow.database.models import StudySession as SessionRow
+from studyflow.database.models import StudySessionOutcome as OutcomeRow
 from studyflow.tasks.service import (
     AcademicTaskRecord,
     EstimateFrozenError,
@@ -82,6 +83,7 @@ class SqlAlchemyTaskDeadlineSessionInvalidator:
                     SessionRow.account_id == account_id,
                     SessionRow.task_id == task_id,
                     SessionRow.proposal_id.is_(None),
+                    SessionRow.invalidated_at.is_(None),
                     SessionRow.starts_at > now,
                     SessionRow.ends_at > deadline_at,
                 )
@@ -91,7 +93,18 @@ class SqlAlchemyTaskDeadlineSessionInvalidator:
         )
         invalidated_ids = [row.id for row in rows]
         for row in rows:
-            await session.delete(row)
+            row.invalidated_at = now
+            row.invalidation_reason = "deadline"
+            session.add(
+                OutcomeRow(
+                    session_id=row.id,
+                    kind="delayed",
+                    actual_minutes=0,
+                    remaining_minutes=row.planned_duration_minutes,
+                    recorded_at=now,
+                    rescheduled_at=None,
+                )
+            )
         return invalidated_ids
 
 
