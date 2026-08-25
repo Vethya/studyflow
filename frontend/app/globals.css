@@ -256,12 +256,20 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Small caps label used for eyebrows and column headers. */
+  /*
+   * The small label used for form fields, column headings and section
+   * kickers.
+   *
+   * This was uppercase monospace with wide tracking. As a decorative kicker
+   * that was fine; as the label on an input it was not — "DEADLINE" in a
+   * condensed data face is markedly slower to read than "Deadline", and the
+   * same class was doing both jobs. Sentence case in the body face, with
+   * weight rather than tracking carrying the emphasis.
+   */
   .eyebrow {
-    font-family: var(--font-data), ui-monospace, monospace;
-    font-size: 0.6875rem;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.4;
     color: var(--muted-foreground);
   }
 }

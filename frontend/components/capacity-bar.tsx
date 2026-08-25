@@ -53,7 +53,7 @@ export function CapacityBar({ available, committed, className }: CapacityBarProp
             style={{
               width: `${filled}%`,
               // Diagonal hatching when the work does not fit, so the state is
-              // legible without relying on hue (SPEC §19.5).
+              // legible without relying on hue.
               backgroundImage: overcommitted
                 ? "repeating-linear-gradient(135deg, color-mix(in oklch, var(--deficit) 22%, transparent) 0 5px, transparent 5px 10px)"
                 : undefined,
@@ -94,13 +94,19 @@ export function CapacityBar({ available, committed, className }: CapacityBarProp
         )}
       </div>
 
-      {/* Legend. The numbers are the message, so they are set in the data face. */}
-      <div className="flex items-baseline justify-between gap-4 font-mono text-xs">
-        <span className="text-muted-foreground">
-          <span className="text-foreground">{formatDuration(committed)}</span> of work
+      {/* The two quantities being compared, named in plain words. */}
+      <div className="flex items-baseline justify-between gap-4 text-xs text-muted-foreground">
+        <span>
+          <span className="font-medium tabular-nums text-foreground">
+            {formatDuration(committed)}
+          </span>{" "}
+          of work to do
         </span>
-        <span className="text-muted-foreground">
-          <span className="text-foreground">{formatDuration(available)}</span> free
+        <span>
+          <span className="font-medium tabular-nums text-foreground">
+            {formatDuration(available)}
+          </span>{" "}
+          of study time
         </span>
       </div>
     </div>
