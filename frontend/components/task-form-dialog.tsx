@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -25,8 +25,10 @@ import { AlertCircle, Loader2 } from "lucide-react";
 import { CATEGORIES, PRIORITIES } from "@/types/task";
 import type { AcademicTask, Category, Priority, TaskFormData } from "@/types/task";
 import { isoToLocalInput, localInputToIso, nowLocalInput } from "@/lib/datetime";
-import { ApiError, tasks as tasksApi } from "@/lib/api";
+import { ApiError, tasks as tasksApi, scheduling } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
+import { AdaptiveEstimateNote, LargeAdjustmentDialog } from "@/components/adaptive-estimate";
+import type { AdaptiveEstimate } from "@/types/progress";
 
 interface TaskFormDialogProps {
   open: boolean;
@@ -48,6 +50,14 @@ const EMPTY = {
 
 export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDialogProps) {
   const [form, setForm] = useState(EMPTY);
+  /**
+   * SPEC §15.4 / §15.6: the student's own history may suggest a very different
+   * duration. The explanation is always shown; the acknowledgment dialog only
+   * blocks the first time a category swings beyond 2× or below 0.5×.
+   */
+  const [estimate, setEstimate] = useState<AdaptiveEstimate | null>(null);
+  const [useAdaptive, setUseAdaptive] = useState(false);
+  const [ackOpen, setAckOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -82,9 +92,49 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
     setSession({ open: false });
   }
 
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    const minutes = Number(form.originalEstimate);
+
+    // Resolved rather than branched, so no state is set synchronously here —
+    // doing that inside an effect body causes cascading renders.
+    const request =
+      minutes > 0
+        ? scheduling.getAdaptiveEstimate(form.category, minutes, controller.signal)
+        : Promise.resolve(null);
+
+    request
+      .then((next) => {
+        if (controller.signal.aborted) return;
+        setEstimate(next);
+        // Default to the suggestion once qualified, unless it still needs
+        // acknowledging — SPEC §15.1 makes it the default, not a silent swap.
+        setUseAdaptive(next !== null && !next.needsAcknowledgment);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setEstimate(null);
+      });
+
+    return () => controller.abort();
+  }, [open, form.category, form.originalEstimate]);
+
+  /** The duration actually sent for scheduling (SPEC §15.1). */
+  function plannedMinutes(): number {
+    const original = Number(form.originalEstimate);
+    return estimate && useAdaptive ? estimate.adaptiveEstimate : original;
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+
+    // Ask before using a first-time large adjustment (SPEC §15.4).
+    if (estimate?.needsAcknowledgment) {
+      setAckOpen(true);
+      return;
+    }
+
     setIsSaving(true);
 
     const payload: TaskFormData = {
@@ -92,7 +142,7 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
       category: form.category,
       priority: form.priority,
       deadline: localInputToIso(form.deadline),
-      originalEstimate: Number(form.originalEstimate),
+      originalEstimate: plannedMinutes(),
       course: form.course || undefined,
       notes: form.notes || undefined,
     };
@@ -240,6 +290,17 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
             />
           </div>
 
+          {estimate && (
+            <AdaptiveEstimateNote
+              estimate={{ ...estimate, plannedDuration: plannedMinutes() }}
+              onChoose={
+                estimate.needsAcknowledgment
+                  ? undefined
+                  : (which) => setUseAdaptive(which === "adaptive")
+              }
+            />
+          )}
+
           <DialogFooter>
             <Button
               type="button"
@@ -256,6 +317,18 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
           </DialogFooter>
         </form>
       </DialogContent>
+
+      <LargeAdjustmentDialog
+        estimate={estimate}
+        open={ackOpen}
+        onOpenChange={setAckOpen}
+        onDecided={(which) => {
+          setUseAdaptive(which === "adaptive");
+          setEstimate((current) =>
+            current ? { ...current, needsAcknowledgment: false } : current,
+          );
+        }}
+      />
     </Dialog>
   );
 }
