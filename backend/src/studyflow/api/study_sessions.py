@@ -1,10 +1,10 @@
 """Accepted study-session and immutable outcome endpoints."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Literal, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel
 
 from studyflow.api.account import AccountError, require_csrf_session, require_session
@@ -23,6 +23,7 @@ from studyflow.scheduling.outcomes import (
     ProposedSessionOutcomeError,
     SessionOutcomeKind,
     StudySessionDetails,
+    StudySessionFilters,
     StudySessionOutcomeRecord,
     StudySessions,
 )
@@ -94,6 +95,42 @@ def _session_response(details: StudySessionDetails) -> StudySessionResponse:
         planned_duration_minutes=session.planned_duration_minutes,
         outcome=_outcome_response(details.outcome) if details.outcome is not None else None,
     )
+
+
+@router.get(
+    "",
+    response_model=list[StudySessionResponse],
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": StudySessionError},
+    },
+)
+async def list_study_sessions(
+    principal: Annotated[SessionPrincipal, Depends(require_session)],
+    sessions: Annotated[StudySessions, Depends(get_study_sessions)],
+    starts_from: Annotated[datetime | None, Query(alias="from")] = None,
+    starts_to: Annotated[datetime | None, Query(alias="to")] = None,
+    task_id: UUID | None = None,
+) -> list[StudySessionResponse]:
+    for boundary in (starts_from, starts_to):
+        if boundary is not None and boundary.tzinfo is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Study session time filters must include a UTC offset",
+            )
+    if starts_from is not None and starts_to is not None and starts_from >= starts_to:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="from must be earlier than to",
+        )
+    filters = StudySessionFilters(
+        starts_from=starts_from.astimezone(UTC) if starts_from is not None else None,
+        starts_to=starts_to.astimezone(UTC) if starts_to is not None else None,
+        task_id=task_id,
+    )
+    return [
+        _session_response(details) for details in await sessions.list(principal.account_id, filters)
+    ]
 
 
 @router.get(

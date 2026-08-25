@@ -32,7 +32,18 @@ class StudySessionDetails:
     outcome: StudySessionOutcomeRecord | None
 
 
+@dataclass(frozen=True, slots=True)
+class StudySessionFilters:
+    starts_from: datetime | None = None
+    starts_to: datetime | None = None
+    task_id: UUID | None = None
+
+
 class StudySessionOutcomeRepository(Protocol):
+    async def list(
+        self, account_id: UUID, filters: StudySessionFilters
+    ) -> list[StudySessionDetails]: ...
+
     async def get(self, account_id: UUID, session_id: UUID) -> StudySessionDetails | None: ...
 
     async def record_missed(
@@ -41,6 +52,10 @@ class StudySessionOutcomeRepository(Protocol):
 
 
 class StudySessions(Protocol):
+    async def list(
+        self, account_id: UUID, filters: StudySessionFilters
+    ) -> list[StudySessionDetails]: ...
+
     async def get(self, account_id: UUID, session_id: UUID) -> StudySessionDetails | None: ...
 
     async def record_missed(
@@ -69,6 +84,11 @@ class StudySessionService:
     ) -> None:
         self._repository = repository
         self._clock = clock
+
+    async def list(
+        self, account_id: UUID, filters: StudySessionFilters
+    ) -> list[StudySessionDetails]:
+        return await self._repository.list(account_id, filters)
 
     async def get(self, account_id: UUID, session_id: UUID) -> StudySessionDetails | None:
         return await self._repository.get(account_id, session_id)
