@@ -1,7 +1,7 @@
 """Track unresolved outcomes covered by recovery proposals.
 
-Revision ID: 20260729_13
-Revises: 20260729_12
+Revision ID: 20260729_14
+Revises: 20260729_13
 Create Date: 2026-08-24
 """
 
@@ -10,8 +10,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260729_13"
-down_revision: str | Sequence[str] | None = "20260729_12"
+revision: str = "20260729_14"
+down_revision: str | Sequence[str] | None = "20260729_13"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
