@@ -295,6 +295,7 @@ def create_app(
     resolved_schedule_proposals = schedule_proposals or SqlAlchemyScheduleProposalRepository(
         transactions
     )
+    resolved_recovery_snapshots = SqlAlchemyRecoverySnapshotRepository(transactions)
     resolved_schedule_generation = schedule_generation or ScheduleGenerationService(
         resolved_academic_tasks,
         resolved_availability_windows,
@@ -308,6 +309,7 @@ def create_app(
         resolved_unavailable_periods,
         resolved_account_preferences,
         resolved_schedule_proposals,
+        resolved_recovery_snapshots,
     )
     resolved_study_sessions = study_sessions or StudySessionService(
         SqlAlchemyStudySessionOutcomeRepository(transactions)
@@ -317,7 +319,7 @@ def create_app(
         resolved_availability_windows,
         resolved_unavailable_periods,
         resolved_account_preferences,
-        SqlAlchemyRecoverySnapshotRepository(transactions),
+        resolved_recovery_snapshots,
         resolved_schedule_proposals,
     )
     application.state.settings = resolved_settings

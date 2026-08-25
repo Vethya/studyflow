@@ -124,6 +124,18 @@ class RecoveryTaskWork(Base):
     unfinished_minutes: Mapped[int] = mapped_column(Integer)
 
 
+class RecoverySnapshotOutcome(Base):
+    __tablename__ = "recovery_snapshot_outcomes"
+
+    proposal_id: Mapped[UUID] = mapped_column(
+        ForeignKey("schedule_recovery_snapshots.proposal_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("study_session_outcomes.session_id", ondelete="CASCADE"), primary_key=True
+    )
+
+
 class ProposalTaskAllocation(Base):
     __tablename__ = "proposal_task_allocations"
     __table_args__ = (

@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
@@ -71,13 +72,17 @@ class RepositoryStub:
 
 
 def _service(
-    preferences: StudyPreferences, fingerprint: str
+    preferences: StudyPreferences,
+    fingerprint: str,
+    *,
+    kind: ProposalKind = ProposalKind.GENERATION,
+    clock: Callable[[], datetime] = lambda: datetime(2026, 8, 25, tzinfo=UTC),
 ) -> tuple[ScheduleAcceptanceService, RepositoryStub]:
     proposal = ScheduleProposalRecord(
         uuid4(),
         ACCOUNT_ID,
-        ProposalKind.GENERATION,
-        None,
+        kind,
+        "Manual revision" if kind is ProposalKind.REVISION else None,
         ProposalStatus.FEASIBLE,
         fingerprint,
         datetime(2026, 8, 24, tzinfo=UTC),
@@ -91,7 +96,7 @@ def _service(
         cast(UnavailablePeriods, PeriodsStub()),
         cast(AccountPreferences, PreferencesStub(preferences)),
         cast(ScheduleProposalRepository, repository),
-        clock=lambda: datetime(2026, 8, 25, tzinfo=UTC),
+        clock=clock,
     )
     return service, repository
 
@@ -111,6 +116,33 @@ async def test_accept_recomputes_fingerprint_before_repository_mutation() -> Non
             10,
         )
     ]
+
+
+@pytest.mark.anyio
+async def test_ordinary_revision_without_recovery_snapshot_uses_schedule_fingerprint() -> None:
+    preferences = StudyPreferences("UTC", 60, 10, False)
+    fingerprint = schedule_input_fingerprint([], [], [], preferences)
+    service, repository = _service(preferences, fingerprint, kind=ProposalKind.REVISION)
+
+    assert await service.accept(ACCOUNT_ID, repository.proposal.id) == ()
+    assert len(repository.accept_calls) == 1
+
+
+@pytest.mark.anyio
+async def test_accept_refreshes_clock_immediately_before_repository_mutation() -> None:
+    preferences = StudyPreferences("UTC", 60, 10, False)
+    fingerprint = schedule_input_fingerprint([], [], [], preferences)
+    validation_now = datetime(2026, 8, 25, 10, tzinfo=UTC)
+    mutation_now = datetime(2026, 8, 25, 10, 1, tzinfo=UTC)
+    clock_values = iter((validation_now, mutation_now))
+    service, repository = _service(
+        preferences,
+        fingerprint,
+        clock=lambda: next(clock_values),
+    )
+
+    assert await service.accept(ACCOUNT_ID, repository.proposal.id) == ()
+    assert repository.accept_calls == [(ACCOUNT_ID, repository.proposal.id, mutation_now, 10)]
 
 
 @pytest.mark.anyio

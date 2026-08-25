@@ -9,7 +9,15 @@ from uuid import UUID
 from studyflow.accounts.preferences import AccountPreferences
 from studyflow.availability.unavailable import UnavailablePeriods
 from studyflow.availability.windows import AvailabilityWindows
-from studyflow.scheduling.proposals import ScheduleProposalRepository, StudySessionRecord
+from studyflow.scheduling.proposals import (
+    ScheduleProposalRepository,
+    StudySessionRecord,
+)
+from studyflow.scheduling.recovery import (
+    InvalidRecoveryTriggerError,
+    RecoverySnapshotRepository,
+    recovery_input_fingerprint,
+)
 from studyflow.scheduling.service import schedule_input_fingerprint
 from studyflow.tasks.service import AcademicTasks
 
@@ -34,6 +42,7 @@ class ScheduleAcceptanceService:
         unavailable_periods: UnavailablePeriods,
         preferences: AccountPreferences,
         proposals: ScheduleProposalRepository,
+        recovery_snapshots: RecoverySnapshotRepository | None = None,
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
@@ -42,6 +51,7 @@ class ScheduleAcceptanceService:
         self._unavailable_periods = unavailable_periods
         self._preferences = preferences
         self._proposals = proposals
+        self._recovery_snapshots = recovery_snapshots
         self._clock = clock
 
     async def accept(
@@ -53,18 +63,42 @@ class ScheduleAcceptanceService:
         preferences = await self._preferences.get(account_id)
         if preferences is None:
             return None
+        now = self._clock()
         tasks, windows, unavailable = await asyncio.gather(
             self._tasks.list(account_id),
             self._availability_windows.list_windows(account_id),
             self._unavailable_periods.list_periods(account_id),
         )
-        current_fingerprint = schedule_input_fingerprint(tasks, windows, unavailable, preferences)
+        snapshots = self._recovery_snapshots
+        persisted = await snapshots.get(account_id, proposal_id) if snapshots is not None else None
+        if persisted is not None and snapshots is not None:
+            try:
+                current_snapshot = await snapshots.capture(
+                    account_id,
+                    persisted.missed_session_id,
+                    now,
+                    preferences.minimum_break_minutes,
+                )
+            except InvalidRecoveryTriggerError as error:
+                raise StaleScheduleProposalError(
+                    "Recovery inputs changed; generate a new proposal"
+                ) from error
+            if current_snapshot is None:
+                raise StaleScheduleProposalError("Recovery inputs changed; generate a new proposal")
+            current_fingerprint = recovery_input_fingerprint(
+                tasks, windows, unavailable, preferences, current_snapshot
+            )
+        else:
+            current_fingerprint = schedule_input_fingerprint(
+                tasks, windows, unavailable, preferences
+            )
         if current_fingerprint != proposal.input_fingerprint:
             raise StaleScheduleProposalError("Schedule inputs changed; generate a new proposal")
+        mutation_now = self._clock()
         return await self._proposals.accept(
             account_id,
             proposal_id,
-            self._clock(),
+            mutation_now,
             preferences.minimum_break_minutes,
         )
 
