@@ -15,6 +15,12 @@ from studyflow.scheduling.contracts import (
 )
 from studyflow.scheduling.kernel import solve_feasibility
 from studyflow.scheduling.overload import classify_overload_status, solve_with_overload
+from studyflow.scheduling.splitting import (
+    SessionDraft,
+    SessionSplit,
+    split_task,
+    split_task_sessions,
+)
 
 __all__ = [
     "FeasibilityProblem",
@@ -25,10 +31,14 @@ __all__ = [
     "PlanningDay",
     "ScheduledSession",
     "SessionDemand",
+    "SessionDraft",
+    "SessionSplit",
     "SolverDiagnostics",
     "TaskAllocation",
     "TaskPriority",
     "classify_overload_status",
     "solve_feasibility",
     "solve_with_overload",
+    "split_task",
+    "split_task_sessions",
 ]
