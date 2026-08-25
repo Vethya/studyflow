@@ -2,7 +2,7 @@
 
 from bisect import bisect_right
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import pairwise
 from time import monotonic
 from typing import cast
@@ -1509,14 +1509,22 @@ def solve_with_overload(problem: FeasibilityProblem) -> OverloadResult:
             empty_diagnostics("EMPTY"),
         )
     if not problem.planning_days:
-        return OverloadResult(
-            KernelStatus.TECHNICAL_FAILURE,
-            (),
-            (),
-            empty_diagnostics("DAY_DOMAIN_REQUIRED"),
-            "Local planning-day metadata is required for schedule policy",
+        fallback_candidate_intervals = tuple(
+            interval
+            for session in problem.sessions
+            for interval in candidate_start_intervals(session, problem.planning_start_minute)
         )
-
+        if fallback_candidate_intervals:
+            problem = replace(
+                problem,
+                planning_days=(
+                    PlanningDay(
+                        0,
+                        min(first for first, _ in fallback_candidate_intervals),
+                        max(last for _, last in fallback_candidate_intervals) + 1,
+                    ),
+                ),
+            )
     solve_deadline = monotonic() + float(problem.max_solve_seconds)
     try:
         tasks = _task_demands(problem, solve_deadline)
