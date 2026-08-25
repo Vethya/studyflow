@@ -701,6 +701,37 @@
       ]
     },
     {
+      "name": "Schedule Proposals",
+      "description": "Authenticated generation and preview of inactive schedule proposals.",
+      "item": [
+        {
+          "name": "Generate Schedule Proposal",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }
+            ],
+            "url": { "raw": "{{base_url}}/api/v1/schedule-proposals", "host": ["{{base_url}}"], "path": ["api", "v1", "schedule-proposals"] },
+            "description": "Generates and stores an inactive proposal from the authenticated student's current tasks and availability."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 201', () => pm.response.to.have.status(201));"] } }]
+        },
+        {
+          "name": "Get Current Schedule Proposal",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/schedule-proposals/current", "host": ["{{base_url}}"], "path": ["api", "v1", "schedule-proposals", "current"] },
+            "description": "Returns the authenticated student's current inactive proposal with sessions, unscheduled work, and overload details."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        }
+      ]
+    },
+    {
       "name": "Availability",
       "description": "Authenticated recurring weekly availability in the account timezone.",
       "item": [
