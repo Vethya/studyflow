@@ -165,11 +165,11 @@ async def test_generate_maps_solver_output_and_preserves_exact_deadline() -> Non
             TaskAllocation(
                 str(TASK_ID),
                 start_minute + 1_000,
+                90,
                 60,
                 30,
-                30,
                 120,
-                45,
+                60,
                 30,
             ),
         ),
