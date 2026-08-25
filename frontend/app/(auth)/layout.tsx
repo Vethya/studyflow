@@ -1,84 +1,59 @@
+import Link from "next/link";
+import { GraduationCap } from "lucide-react";
+
+/**
+ * The shell every sign-in, sign-up and recovery screen sits in.
+ *
+ * It used to be a two-column split with a dark marketing panel down the left:
+ * a headline, a paragraph and three feature bullets, all repeating what the
+ * landing page already says to someone who has plainly already decided to use
+ * the product. It pushed the form — the only thing on the page anybody came
+ * for — into a narrow column on the right.
+ *
+ * Now the form is centred and alone, on the same sky the landing page opens
+ * with, so arriving here feels like the same product rather than a different
+ * site. The gradient, the outer padding and the rounded corners are lifted
+ * from that hero deliberately.
+ */
+const SKY = "linear-gradient(180deg, #779bc1 0%, #9abfda 48%, #cbdcec 80%, #e4ecf3 100%)";
+
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen grid lg:grid-cols-2">
-      {/* Left — brand panel */}
-      <div className="hidden lg:flex flex-col relative overflow-hidden bg-zinc-950">
-        {/* Subtle grid */}
-        <div
-          className="absolute inset-0 opacity-[0.07]"
-          style={{
-            backgroundImage: `radial-gradient(circle at 1px 1px, white 1px, transparent 0)`,
-            backgroundSize: "28px 28px",
-          }}
-        />
-        {/* One warm bloom, on the deficit hue the product reserves for
-            "this does not fit" — the problem the page is selling a fix for. */}
-        <div className="absolute bottom-1/3 left-1/4 h-80 w-80 rounded-full bg-deficit/20 blur-3xl" />
-
-        {/* Content */}
-        <div className="relative z-10 flex flex-col h-full p-10">
-          {/* Logo */}
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 backdrop-blur-sm">
-              <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 14l9-5-9-5-9 5 9 5z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
-              </svg>
-            </div>
-            <span className="font-semibold text-white text-lg tracking-tight">StudyFlow</span>
-          </div>
-
-          {/* Hero */}
-          <div className="flex-1 flex flex-col justify-center gap-8">
-            <div className="space-y-3">
-              <h1 className="font-display text-3xl font-bold leading-tight text-white">
-                Find out it doesn&apos;t fit<br />
-                <span className="text-deficit">while you can still</span><br />
-                do something about it.
-              </h1>
-              <p className="max-w-xs text-sm leading-relaxed text-zinc-400">
-                StudyFlow weighs the coursework you owe against the study hours you
-                actually have, and tells you plainly when the two do not add up.
-              </p>
-            </div>
-
-            {/* Feature list */}
-            <div className="space-y-3">
-              {[
-                { title: "Your real hours", desc: "Set the weekly windows you are free, and block out the weeks you are not" },
-                { title: "Every deadline", desc: "Track coursework with estimates, priorities and due dates" },
-                { title: "One honest number", desc: "See how far over — or under — your capacity you are" },
-              ].map((f) => (
-                <div key={f.title} className="flex items-start gap-3">
-                  <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/10">
-                    <div className="h-1.5 w-1.5 rounded-full bg-white/70" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-white">{f.title}</p>
-                    <p className="text-xs text-zinc-400">{f.desc}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <p className="text-xs text-zinc-600">© 2026 StudyFlow. Built for students.</p>
+    <div className="min-h-svh bg-white p-2 md:p-3">
+      <div
+        className="relative flex min-h-[calc(100svh-1rem)] flex-col items-center justify-center overflow-hidden rounded-[20px] px-4 py-10 md:min-h-[calc(100svh-1.5rem)] md:rounded-[28px]"
+        style={{ background: SKY }}
+      >
+        {/* Static, not animated: this is a backdrop for a form, and a moving
+            one would pull the eye away from the field being filled in. */}
+        <div aria-hidden className="pointer-events-none absolute inset-0">
+          {Array.from({ length: 15 }).map((_, i) => (
+            <span
+              key={i}
+              className="absolute size-1 rounded-full bg-white/30"
+              style={{ left: `${5 + i * 6.3}%`, top: `${10 + ((i * 17) % 75)}%` }}
+            />
+          ))}
         </div>
-      </div>
 
-      {/* Right — auth form */}
-      <div className="flex items-center justify-center p-6 bg-background">
-        <div className="w-full max-w-sm">
-          {/* Mobile logo */}
-          <div className="lg:hidden flex items-center gap-2 mb-8">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-foreground">
-              <svg className="h-4 w-4 text-background" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 14l9-5-9-5-9 5 9 5z" />
-              </svg>
-            </div>
-            <span className="font-semibold text-base">StudyFlow</span>
+        <div className="relative z-10 flex w-full max-w-sm flex-col items-center">
+          <Link
+            href="/"
+            className="mb-6 flex items-center gap-2.5 rounded-lg outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+          >
+            <span className="flex size-8 items-center justify-center rounded-lg bg-white/20 backdrop-blur-sm">
+              <GraduationCap className="size-5 text-white" />
+            </span>
+            <span className="font-display text-lg font-bold tracking-tight text-white">
+              StudyFlow
+            </span>
+          </Link>
+
+          <div className="w-full rounded-2xl bg-white p-6 shadow-[rgba(16,55,132,0.10)_0px_10px_40px_0px] sm:p-8">
+            {children}
           </div>
-          {children}
+
+          <p className="mt-6 text-xs text-white/70">© 2026 StudyFlow. Built for students.</p>
         </div>
       </div>
     </div>

@@ -49,8 +49,8 @@ export default function GoogleErrorPage({
   return (
     <div className="space-y-6">
       <div className="flex flex-col items-center text-center space-y-4 py-4">
-        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-red-100">
-          <AlertCircle className="h-7 w-7 text-red-600" />
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-deficit-soft">
+          <AlertCircle className="h-7 w-7 text-deficit" />
         </div>
         <div className="space-y-1.5">
           <h1 className="text-xl font-bold tracking-tight">{title}</h1>

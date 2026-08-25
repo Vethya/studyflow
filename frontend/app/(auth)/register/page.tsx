@@ -66,8 +66,8 @@ export default function RegisterPage() {
     return (
       <div className="space-y-6">
         <div className="flex flex-col items-center text-center space-y-4 py-6">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100">
-            <CheckCircle2 className="h-7 w-7 text-emerald-600" />
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-surplus-soft">
+            <CheckCircle2 className="h-7 w-7 text-surplus" />
           </div>
           <div className="space-y-1">
             <h1 className="text-xl font-bold tracking-tight">Check your inbox</h1>

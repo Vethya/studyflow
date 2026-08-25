@@ -31,11 +31,11 @@ function getPasswordStrength(pw: string): { level: number; label: string; color:
   if (/[0-9]/.test(pw)) score++;
   if (/[^A-Za-z0-9]/.test(pw)) score++;
 
-  if (score <= 1) return { level: 1, label: "Weak",   color: "bg-red-500" };
-  if (score <= 2) return { level: 2, label: "Fair",   color: "bg-amber-500" };
+  if (score <= 1) return { level: 1, label: "Weak",   color: "bg-deficit" };
+  if (score <= 2) return { level: 2, label: "Fair",   color: "bg-deficit/60" };
   if (score <= 3) return { level: 3, label: "Good",   color: "bg-yellow-500" };
-  if (score === 4) return { level: 4, label: "Strong", color: "bg-emerald-500" };
-  return                { level: 5, label: "Great",  color: "bg-emerald-600" };
+  if (score === 4) return { level: 4, label: "Strong", color: "bg-surplus" };
+  return                { level: 5, label: "Great",  color: "bg-surplus" };
 }
 
 export default function VerifyEmailPage() {
@@ -96,12 +96,12 @@ function AwaitingEmail() {
     <div className="space-y-6">
       <div className="flex flex-col items-center text-center space-y-4 py-4">
         <div className="relative">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-100">
-            <Mail className="h-8 w-8 text-indigo-600" />
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
+            <Mail className="h-8 w-8 text-foreground" />
           </div>
           <span className="absolute -top-1 -right-1 flex h-4 w-4">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
-            <span className="relative inline-flex h-4 w-4 rounded-full bg-indigo-500 border-2 border-background" />
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-foreground/40 opacity-75" />
+            <span className="relative inline-flex h-4 w-4 rounded-full bg-foreground border-2 border-background" />
           </span>
         </div>
 
@@ -311,7 +311,7 @@ function CompleteRegistration({ token }: { token: string }) {
                   />
                 ))}
               </div>
-              <p className={cn("text-[11px] font-medium", strength.level <= 2 ? "text-red-500" : "text-emerald-600")}>
+              <p className={cn("text-[11px] font-medium", strength.level <= 2 ? "text-deficit" : "text-surplus")}>
                 {strength.label} password
               </p>
             </div>
