@@ -36,9 +36,7 @@ def test_blueprint_deploys_each_environment_from_its_own_branch() -> None:
         "studyflow-api-staging",
         "studyflow-api-dev",
     }
-    assert {
-        name: service_config["branch"] for name, service_config in service_configs.items()
-    } == {
+    assert {name: service_config["branch"] for name, service_config in service_configs.items()} == {
         "studyflow-api": "master",
         "studyflow-api-staging": "staging",
         "studyflow-api-dev": "dev",
