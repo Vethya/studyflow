@@ -16,14 +16,42 @@ def load_blueprint() -> dict[str, Any]:
     )
 
 
-def service() -> dict[str, Any]:
-    services = load_blueprint()["services"]
-    assert len(services) == 1
-    return cast(dict[str, Any], services[0])
+def services() -> list[dict[str, Any]]:
+    return [cast(dict[str, Any], service_config) for service_config in load_blueprint()["services"]]
+
+
+def service(name: str = "studyflow-api") -> dict[str, Any]:
+    return next(service_config for service_config in services() if service_config["name"] == name)
 
 
 def environment(service_config: dict[str, Any]) -> dict[str, str | None]:
     return {entry["key"]: entry.get("value") for entry in service_config["envVars"]}
+
+
+def test_blueprint_deploys_each_environment_from_its_own_branch() -> None:
+    service_configs = {service_config["name"]: service_config for service_config in services()}
+
+    assert set(service_configs) == {
+        "studyflow-api",
+        "studyflow-api-staging",
+        "studyflow-api-dev",
+    }
+    assert {
+        name: service_config["branch"] for name, service_config in service_configs.items()
+    } == {
+        "studyflow-api": "master",
+        "studyflow-api-staging": "staging",
+        "studyflow-api-dev": "dev",
+    }
+    environment_by_service = {
+        name: environment(service_config)["STUDYFLOW_ENVIRONMENT"]
+        for name, service_config in service_configs.items()
+    }
+    assert environment_by_service == {
+        "studyflow-api": "production",
+        "studyflow-api-staging": "development",
+        "studyflow-api-dev": "development",
+    }
 
 
 def test_blueprint_deploys_the_backend_docker_image_on_the_free_plan() -> None:
@@ -86,7 +114,7 @@ def test_blueprint_requires_production_tls_for_email_delivery() -> None:
 
 
 def test_blueprint_allows_local_frontend_development_origins() -> None:
-    variables = environment(service())
+    variables = environment(service("studyflow-api-dev"))
     origins = (variables["STUDYFLOW_CORS_ORIGINS"] or "").split(",")
 
     assert "http://localhost:5173" in origins
