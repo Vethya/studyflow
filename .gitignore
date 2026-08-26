@@ -19,3 +19,10 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
+
+# Local agent/tooling configuration
+.claude/settings.local.json
+.codex/
+
+# Machine-specific Compose overrides (see the header in the file itself)
+compose.override.yaml

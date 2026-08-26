@@ -1,0 +1,8 @@
+{
+  "name": "StudyFlow — Screens builder",
+  "id": "studyflow-screens-builder",
+  "api": "1.0.0",
+  "main": "code.js",
+  "editorType": ["figma"],
+  "networkAccess": { "allowedDomains": ["none"] }
+}
