@@ -57,7 +57,10 @@ def test_backend_image_is_locked_and_runs_as_non_root() -> None:
     assert dockerfile.count("@sha256:") == 2
     assert "uv sync --locked --no-dev" in dockerfile
     assert "USER studyflow" in dockerfile
-    assert 'CMD [".venv/bin/uvicorn"' in dockerfile
+    assert (
+        'CMD ["/bin/bash", "-c", ".venv/bin/alembic upgrade head '
+        "&& exec .venv/bin/uvicorn" in dockerfile
+    )
     assert 'FORWARDED_ALLOW_IPS="*"' not in dockerfile
     assert 'CMD ["uv", "run"' not in dockerfile
     assert "chown -R" not in dockerfile
