@@ -21,10 +21,10 @@ URL, and TLS for email delivery.
 
 | Variable | Required in production | Set by | Notes |
 | --- | --- | --- | --- |
-| `STUDYFLOW_ENVIRONMENT` | yes | `render.yaml` (`production`; `development` for staging/dev) | Enables production validators |
+| `STUDYFLOW_ENVIRONMENT` | yes | `render.yaml` (`production` for every hosted service) | Enables production validators and secure cookies |
 | `FORWARDED_ALLOW_IPS` | yes | `render.yaml` (`0.0.0.0/0`) | Lets Uvicorn trust Render's proxy headers |
 | `STUDYFLOW_DATABASE_URL` | yes | You (secret) | Neon **pooled** URL, converted; see below |
-| `STUDYFLOW_PUBLIC_APP_URL` | yes | `render.yaml` (production; configure staging/dev in Render) | Frontend origin; verification links point here |
+| `STUDYFLOW_PUBLIC_APP_URL` | yes | `render.yaml` (`https://studyflow.vercel.app`) | Shared frontend origin; verification links point here |
 | `STUDYFLOW_SMTP_HOST` | yes | `render.yaml` (`smtp.resend.com`) | |
 | `STUDYFLOW_SMTP_PORT` | yes | `render.yaml` (`587`) | |
 | `STUDYFLOW_SMTP_USERNAME` | yes | `render.yaml` (`resend`) | Literal username for Resend's relay |
@@ -74,9 +74,12 @@ URL, and TLS for email delivery.
    especially separate Neon databases. `sync: false` values for newly added services may need to
    be entered manually after syncing an existing Blueprint:
    - `STUDYFLOW_DATABASE_URL` (converted Neon URL from step 1)
-   - `STUDYFLOW_PUBLIC_APP_URL` and `STUDYFLOW_CORS_ORIGINS` (the matching frontend environment)
+   - `STUDYFLOW_CORS_ORIGINS`, if the service accepts direct browser calls from another origin
    - `STUDYFLOW_SMTP_PASSWORD` and `STUDYFLOW_EMAIL_FROM_ADDRESS`
    - all three Google OIDC variables together, if Google Sign-In is enabled
+   All hosted services use production mode so cookies retain their `Secure` attribute and
+   `__Host-` prefix. The shared frontend currently proxies to the dev service, so authentication
+   flows for staging and production remain inactive until each gets a matching frontend deployment.
 4. Note the production service URL (for example `https://studyflow-api.onrender.com`). If Google
    Sign-In will be used, register
    `https://studyflow.vercel.app/api/v1/auth/google/callback` in the Google Cloud console,

@@ -47,9 +47,17 @@ def test_blueprint_deploys_each_environment_from_its_own_branch() -> None:
     }
     assert environment_by_service == {
         "studyflow-api": "production",
-        "studyflow-api-staging": "development",
-        "studyflow-api-dev": "development",
+        "studyflow-api-staging": "production",
+        "studyflow-api-dev": "production",
     }
+
+
+def test_blueprint_uses_the_shared_frontend_for_authentication_links() -> None:
+    public_app_urls = {
+        environment(service_config)["STUDYFLOW_PUBLIC_APP_URL"] for service_config in services()
+    }
+
+    assert public_app_urls == {"https://studyflow.vercel.app"}
 
 
 def test_blueprint_deploys_the_backend_docker_image_on_the_free_plan() -> None:
@@ -111,12 +119,11 @@ def test_blueprint_requires_production_tls_for_email_delivery() -> None:
     assert variables["STUDYFLOW_SMTP_START_TLS"] == "true"
 
 
-def test_blueprint_allows_local_frontend_development_origins() -> None:
+def test_blueprint_allows_the_shared_frontend_to_call_the_dev_service() -> None:
     variables = environment(service("studyflow-api-dev"))
     origins = (variables["STUDYFLOW_CORS_ORIGINS"] or "").split(",")
 
-    assert "http://localhost:5173" in origins
-    assert "http://localhost:3000" in origins
+    assert origins == ["https://studyflow.vercel.app"]
 
 
 def test_blueprint_does_not_expose_a_render_postgres_instance() -> None:

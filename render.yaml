@@ -50,13 +50,13 @@ services:
     healthCheckPath: /api/v1/ready
     envVars:
       - key: STUDYFLOW_ENVIRONMENT
-        value: development
+        value: production
       - key: FORWARDED_ALLOW_IPS
         value: 0.0.0.0/0
       - key: STUDYFLOW_DATABASE_URL
         sync: false
       - key: STUDYFLOW_PUBLIC_APP_URL
-        sync: false
+        value: https://studyflow.vercel.app
       - key: STUDYFLOW_CORS_ORIGINS
         sync: false
       - key: STUDYFLOW_SMTP_HOST
@@ -89,7 +89,7 @@ services:
     healthCheckPath: /api/v1/ready
     envVars:
       - key: STUDYFLOW_ENVIRONMENT
-        value: development
+        value: production
       - key: FORWARDED_ALLOW_IPS
         value: 0.0.0.0/0
       - key: STUDYFLOW_DATABASE_URL
@@ -97,7 +97,7 @@ services:
       - key: STUDYFLOW_PUBLIC_APP_URL
         value: https://studyflow.vercel.app
       - key: STUDYFLOW_CORS_ORIGINS
-        value: http://localhost:5173,http://localhost:3000
+        value: https://studyflow.vercel.app
       - key: STUDYFLOW_SMTP_HOST
         value: smtp.resend.com
       - key: STUDYFLOW_SMTP_PORT
