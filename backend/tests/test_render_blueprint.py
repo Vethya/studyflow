@@ -7,6 +7,7 @@ import yaml
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
 BLUEPRINT_PATH = REPOSITORY_ROOT / "render.yaml"
+DOCKERFILE_PATH = REPOSITORY_ROOT / "backend" / "Dockerfile"
 
 
 def load_blueprint() -> dict[str, Any]:
@@ -72,11 +73,16 @@ def test_blueprint_deploys_the_backend_docker_image_on_the_free_plan() -> None:
 
 
 def test_blueprint_applies_migrations_before_the_server_starts() -> None:
-    command = service()["dockerCommand"]
+    dockerfile = DOCKERFILE_PATH.read_text()
 
-    assert "alembic upgrade head" in command
-    assert command.index("alembic upgrade head") < command.index("uvicorn")
-    assert "--host 0.0.0.0" in command
+    assert "alembic upgrade head" in dockerfile
+    assert dockerfile.index("alembic upgrade head") < dockerfile.index("uvicorn")
+    assert "--host 0.0.0.0" in dockerfile
+    assert "exec .venv/bin/uvicorn" in dockerfile
+
+
+def test_blueprint_uses_the_dockerfile_start_command() -> None:
+    assert all("dockerCommand" not in service_config for service_config in services())
 
 
 def test_blueprint_does_not_rely_on_paid_plan_features() -> None:

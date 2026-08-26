@@ -67,9 +67,10 @@ URL, and TLS for email delivery.
    - `studyflow-api-staging` from `staging`
    - `studyflow-api-dev` from `dev`
    Each service uses Docker, the free plan, a health check, and its own environment variables.
-   The start command applies migrations (`alembic upgrade head`) before launching Uvicorn because
-   pre-deploy commands require a paid plan. `alembic upgrade head` is idempotent, so the extra run
-   on every cold start costs only seconds.
+   The Dockerfile `CMD` applies migrations (`alembic upgrade head`) before launching Uvicorn because
+   pre-deploy commands require a paid plan. The Blueprint leaves `dockerCommand` unset so Render
+   uses that `CMD` without reparsing its shell quoting. `alembic upgrade head` is idempotent, so the
+   extra run on every cold start costs only seconds.
 3. Keep the existing production secret values. Configure separate values for staging and dev,
    especially separate Neon databases. `sync: false` values for newly added services may need to
    be entered manually after syncing an existing Blueprint:
