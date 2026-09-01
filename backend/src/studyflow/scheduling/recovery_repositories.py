@@ -252,9 +252,7 @@ class SqlAlchemyTaskRecoveryProposalInvalidator:
                 .with_for_update()
             )
         )
-        proposal_ids = tuple(
-            recovery_proposal_ids | session_proposal_ids | allocation_proposal_ids
-        )
+        proposal_ids = tuple(recovery_proposal_ids | session_proposal_ids | allocation_proposal_ids)
         if not proposal_ids:
             return
         await session.execute(delete(WorkRow).where(WorkRow.proposal_id.in_(proposal_ids)))
