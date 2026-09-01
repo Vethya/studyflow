@@ -300,6 +300,19 @@ class SqlAlchemyAcademicTaskRepository:
                 return False
             if row.estimate_frozen_at is None:
                 raise TaskMustBeStartedError
+            await self._recovery_invalidator.invalidate_for_task(
+                session,
+                account_id,
+                row.id,
+            )
+            await session.execute(
+                delete(SessionRow).where(
+                    SessionRow.account_id == account_id,
+                    SessionRow.task_id == row.id,
+                    SessionRow.proposal_id.is_(None),
+                    SessionRow.starts_at > now,
+                )
+            )
             row.completed_at = row.completed_at or now
             row.finished_early_at = row.finished_early_at or now
         return True

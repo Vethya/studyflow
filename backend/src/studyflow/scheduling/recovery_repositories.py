@@ -217,7 +217,7 @@ class SqlAlchemyTaskRecoveryProposalInvalidator:
         account_id: UUID,
         task_id: UUID,
     ) -> None:
-        proposal_ids = tuple(
+        recovery_proposal_ids = set(
             await session.scalars(
                 select(SnapshotRow.proposal_id)
                 .join(WorkRow, WorkRow.proposal_id == SnapshotRow.proposal_id)
@@ -227,6 +227,33 @@ class SqlAlchemyTaskRecoveryProposalInvalidator:
                 )
                 .with_for_update()
             )
+        )
+        session_proposal_ids = {
+            proposal_id
+            for proposal_id in await session.scalars(
+                select(SessionRow.proposal_id)
+                .where(
+                    SessionRow.account_id == account_id,
+                    SessionRow.task_id == task_id,
+                    SessionRow.proposal_id.is_not(None),
+                )
+                .with_for_update()
+            )
+            if proposal_id is not None
+        }
+        allocation_proposal_ids = set(
+            await session.scalars(
+                select(AllocationRow.proposal_id)
+                .join(ProposalRow, ProposalRow.id == AllocationRow.proposal_id)
+                .where(
+                    ProposalRow.account_id == account_id,
+                    AllocationRow.task_id == task_id,
+                )
+                .with_for_update()
+            )
+        )
+        proposal_ids = tuple(
+            recovery_proposal_ids | session_proposal_ids | allocation_proposal_ids
         )
         if not proposal_ids:
             return
