@@ -38,6 +38,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute(
+        "UPDATE academic_tasks SET finished_early_at = completed_at "
+        "WHERE finished_early_at IS NULL AND completed_at IS NOT NULL"
+    )
     op.drop_constraint(
         op.f("ck_academic_tasks_completion_requires_start"),
         "academic_tasks",
