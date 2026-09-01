@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.repositories import SessionTransactions
@@ -147,6 +147,7 @@ class SqlAlchemyAcademicTaskRepository:
         async with self._database.transaction() as session:
             filters = filters or TaskFilters()
             now = self._clock()
+            await self._freeze_started_estimates(session, account_id, now)
             conditions = [AcademicTask.account_id == account_id]
             if filters.course is not None:
                 conditions.append(AcademicTask.course == filters.course)
@@ -200,6 +201,7 @@ class SqlAlchemyAcademicTaskRepository:
 
     async def get(self, account_id: UUID, task_id: UUID) -> AcademicTaskRecord | None:
         async with self._database.transaction() as session:
+            await self._freeze_started_estimates(session, account_id, self._clock())
             row = await session.scalar(
                 select(AcademicTask).where(
                     AcademicTask.id == task_id, AcademicTask.account_id == account_id
@@ -211,6 +213,7 @@ class SqlAlchemyAcademicTaskRepository:
         self, account_id: UUID, task_id: UUID, task: NewAcademicTask, now: datetime
     ) -> AcademicTaskRecord | None:
         async with self._database.transaction() as session:
+            await self._freeze_started_estimates(session, account_id, now)
             row = await session.scalar(
                 select(AcademicTask)
                 .where(AcademicTask.id == task_id, AcademicTask.account_id == account_id)
@@ -291,6 +294,7 @@ class SqlAlchemyAcademicTaskRepository:
 
     async def finish_early(self, account_id: UUID, task_id: UUID, now: datetime) -> bool:
         async with self._database.transaction() as session:
+            await self._freeze_started_estimates(session, account_id, now)
             row = await session.scalar(
                 select(AcademicTask)
                 .where(AcademicTask.id == task_id, AcademicTask.account_id == account_id)
@@ -316,6 +320,26 @@ class SqlAlchemyAcademicTaskRepository:
             row.completed_at = row.completed_at or now
             row.finished_early_at = row.finished_early_at or now
         return True
+
+    @staticmethod
+    async def _freeze_started_estimates(
+        session: AsyncSession, account_id: UUID, now: datetime
+    ) -> None:
+        started_task_ids = select(SessionRow.task_id).where(
+            SessionRow.account_id == account_id,
+            SessionRow.proposal_id.is_(None),
+            SessionRow.invalidated_at.is_(None),
+            SessionRow.starts_at <= now,
+        )
+        await session.execute(
+            update(AcademicTask)
+            .where(
+                AcademicTask.account_id == account_id,
+                AcademicTask.estimate_frozen_at.is_(None),
+                AcademicTask.id.in_(started_task_ids),
+            )
+            .values(estimate_frozen_at=now)
+        )
 
     @staticmethod
     def _aware(value: datetime) -> datetime:

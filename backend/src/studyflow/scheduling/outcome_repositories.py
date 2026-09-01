@@ -133,8 +133,7 @@ class SqlAlchemyStudySessionOutcomeRepository:
             )
             session.add(outcome)
             await session.flush()
-            if kind in (SessionOutcomeKind.COMPLETED, SessionOutcomeKind.DELAYED):
-                task.estimate_frozen_at = task.estimate_frozen_at or self._aware(row.starts_at)
+            task.estimate_frozen_at = task.estimate_frozen_at or self._aware(row.starts_at)
             if kind is SessionOutcomeKind.COMPLETED and not await self._has_unfinished_work(
                 session, account_id, row.task_id
             ):
