@@ -312,7 +312,10 @@ def create_app(
         resolved_recovery_snapshots,
     )
     resolved_study_sessions = study_sessions or StudySessionService(
-        SqlAlchemyStudySessionOutcomeRepository(transactions)
+        SqlAlchemyStudySessionOutcomeRepository(
+            transactions,
+            SqlAlchemyTaskRecoveryProposalInvalidator(),
+        )
     )
     resolved_schedule_recovery = schedule_recovery or ScheduleRecoveryService(
         resolved_academic_tasks,

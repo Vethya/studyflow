@@ -1,6 +1,7 @@
 """SQLAlchemy persistence for immutable study-session outcomes."""
 
 from datetime import UTC, datetime
+from typing import Protocol
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -23,9 +24,33 @@ from studyflow.scheduling.outcomes import (
 from studyflow.scheduling.proposals import StudySessionRecord
 
 
+class TaskProposalInvalidator(Protocol):
+    async def invalidate_for_task(
+        self,
+        session: AsyncSession,
+        account_id: UUID,
+        task_id: UUID,
+    ) -> None: ...
+
+
+class NoTaskProposalInvalidator:
+    async def invalidate_for_task(
+        self,
+        session: AsyncSession,
+        account_id: UUID,
+        task_id: UUID,
+    ) -> None:
+        return None
+
+
 class SqlAlchemyStudySessionOutcomeRepository:
-    def __init__(self, database: SessionTransactions) -> None:
+    def __init__(
+        self,
+        database: SessionTransactions,
+        proposal_invalidator: TaskProposalInvalidator | None = None,
+    ) -> None:
         self._database = database
+        self._proposal_invalidator = proposal_invalidator or NoTaskProposalInvalidator()
 
     async def list(
         self, account_id: UUID, filters: StudySessionFilters
@@ -138,6 +163,11 @@ class SqlAlchemyStudySessionOutcomeRepository:
                 session, account_id, row.task_id
             ):
                 task.completed_at = task.completed_at or now_utc
+                await self._proposal_invalidator.invalidate_for_task(
+                    session,
+                    account_id,
+                    row.task_id,
+                )
             return self._outcome_record(outcome)
 
     async def task_actual_minutes(self, account_id: UUID, task_id: UUID) -> int:
