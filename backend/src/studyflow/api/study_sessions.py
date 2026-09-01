@@ -135,7 +135,19 @@ def _session_response(details: StudySessionDetails) -> StudySessionResponse:
     response_model=list[StudySessionResponse],
     responses={
         status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
-        status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": StudySessionError},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "description": "Invalid study-session filters",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "oneOf": [
+                            {"$ref": "#/components/schemas/StudySessionError"},
+                            {"$ref": "#/components/schemas/HTTPValidationError"},
+                        ]
+                    }
+                }
+            },
+        },
     },
 )
 async def list_study_sessions(
@@ -194,7 +206,19 @@ async def get_study_session(
         status.HTTP_403_FORBIDDEN: {"model": AccountError},
         status.HTTP_404_NOT_FOUND: {"model": StudySessionError},
         status.HTTP_409_CONFLICT: {"model": StudySessionError},
-        status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": StudySessionError},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "description": "Invalid outcome fields or minutes",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "oneOf": [
+                            {"$ref": "#/components/schemas/StudySessionError"},
+                            {"$ref": "#/components/schemas/HTTPValidationError"},
+                        ]
+                    }
+                }
+            },
+        },
         status.HTTP_503_SERVICE_UNAVAILABLE: {"model": StudySessionError},
     },
 )
