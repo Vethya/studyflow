@@ -29,6 +29,8 @@ from studyflow.scheduling.kernel import solve_feasibility
 from studyflow.scheduling.outcomes import (
     DuplicateSessionOutcomeError,
     FutureSessionOutcomeError,
+    InvalidSessionOutcomeError,
+    LargeActualDurationConfirmationRequired,
     ProposedSessionOutcomeError,
     SessionOutcomeKind,
     StudySessionDetails,
@@ -86,7 +88,9 @@ __all__ = [
     "FeasibilityResult",
     "FutureSessionOutcomeError",
     "InvalidRecoveryTriggerError",
+    "InvalidSessionOutcomeError",
     "KernelStatus",
+    "LargeActualDurationConfirmationRequired",
     "MinuteWindow",
     "NewProposedSession",
     "NewScheduleProposal",

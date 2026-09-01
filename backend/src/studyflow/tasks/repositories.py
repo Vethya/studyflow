@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.repositories import SessionTransactions
@@ -159,10 +159,16 @@ class SqlAlchemyAcademicTaskRepository:
             if filters.deadline_to is not None:
                 conditions.append(AcademicTask.deadline_at <= filters.deadline_to)
             if filters.status is TaskStatus.COMPLETED:
-                conditions.append(AcademicTask.finished_early_at.is_not(None))
+                conditions.append(
+                    or_(
+                        AcademicTask.completed_at.is_not(None),
+                        AcademicTask.finished_early_at.is_not(None),
+                    )
+                )
             elif filters.status is TaskStatus.OVERDUE:
                 conditions.extend(
                     [
+                        AcademicTask.completed_at.is_(None),
                         AcademicTask.finished_early_at.is_(None),
                         AcademicTask.deadline_at < now,
                     ]
@@ -170,6 +176,7 @@ class SqlAlchemyAcademicTaskRepository:
             elif filters.status is TaskStatus.IN_PROGRESS:
                 conditions.extend(
                     [
+                        AcademicTask.completed_at.is_(None),
                         AcademicTask.finished_early_at.is_(None),
                         AcademicTask.deadline_at >= now,
                         AcademicTask.estimate_frozen_at.is_not(None),
@@ -178,6 +185,7 @@ class SqlAlchemyAcademicTaskRepository:
             elif filters.status is TaskStatus.NOT_STARTED:
                 conditions.extend(
                     [
+                        AcademicTask.completed_at.is_(None),
                         AcademicTask.finished_early_at.is_(None),
                         AcademicTask.deadline_at >= now,
                         AcademicTask.estimate_frozen_at.is_(None),
@@ -292,6 +300,7 @@ class SqlAlchemyAcademicTaskRepository:
                 return False
             if row.estimate_frozen_at is None:
                 raise TaskMustBeStartedError
+            row.completed_at = row.completed_at or now
             row.finished_early_at = row.finished_early_at or now
         return True
 
@@ -301,7 +310,7 @@ class SqlAlchemyAcademicTaskRepository:
 
     def _to_record(self, row: AcademicTask, now: datetime | None = None) -> AcademicTaskRecord:
         now = now or self._clock()
-        if row.finished_early_at is not None:
+        if row.completed_at is not None or row.finished_early_at is not None:
             task_status = TaskStatus.COMPLETED
         elif self._aware(row.deadline_at) < now:
             task_status = TaskStatus.OVERDUE
