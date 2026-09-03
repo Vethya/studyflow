@@ -23,6 +23,7 @@ htmlcov/
 # Local agent/tooling configuration
 .claude/settings.local.json
 .codex/
+.worktrees/
 
 # Machine-specific Compose overrides (see the header in the file itself)
 compose.override.yaml
