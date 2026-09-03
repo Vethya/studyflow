@@ -1,5 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { toWireOutcome } from "./outcome-contract";
+import { toWireOutcome, withLargeActualConfirmation } from "./outcome-contract";
+
+describe("withLargeActualConfirmation", () => {
+  it("confirms a large entry without changing its selected outcome or minutes", () => {
+    const data = {
+      outcome: "Delayed" as const,
+      actualMinutes: 75,
+      revisedRemainingMinutes: 30,
+    };
+
+    expect(withLargeActualConfirmation(data)).toEqual({
+      outcome: "Delayed",
+      actualMinutes: 75,
+      revisedRemainingMinutes: 30,
+      largeActualConfirmed: true,
+    });
+    expect(data).toEqual({
+      outcome: "Delayed",
+      actualMinutes: 75,
+      revisedRemainingMinutes: 30,
+    });
+  });
+});
 
 describe("toWireOutcome", () => {
   it("maps Completed outcomes with the retry confirmation flag", () => {

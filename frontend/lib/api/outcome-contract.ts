@@ -14,6 +14,10 @@ export type WireSessionOutcomeRequest =
     }
   | { outcome: "missed" };
 
+export function withLargeActualConfirmation(data: OutcomeFormData): OutcomeFormData {
+  return { ...data, largeActualConfirmed: true };
+}
+
 export function toWireOutcome(
   data: OutcomeFormData,
   largeActualConfirmed: boolean,
