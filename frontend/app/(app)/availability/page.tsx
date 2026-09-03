@@ -541,6 +541,8 @@ export default function AvailabilityPage() {
 
       <SchedulePreview
         proposal={proposal}
+        availabilityWindows={allWindows}
+        unavailablePeriods={allPeriods}
         open={previewOpen}
         onOpenChange={setPreviewOpen}
         onAccepted={() => {

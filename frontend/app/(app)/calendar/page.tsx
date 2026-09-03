@@ -22,7 +22,14 @@ import {
 import { cn } from "@/lib/utils";
 import { DAY_NAMES_SHORT, formatDuration, CATEGORY_CONFIG } from "@/lib/constants";
 import { describeDeadline, formatClock } from "@/lib/datetime";
-import { dayKey, expandWindows, startOfDay, subtractPeriods, totalMinutes } from "@/lib/capacity";
+import {
+  dayKey,
+  expandUnavailablePeriods,
+  expandWindows,
+  startOfDay,
+  subtractPeriods,
+  totalMinutes,
+} from "@/lib/capacity";
 import {
   ScheduleTechnicalFailure,
   availability as availabilityApi,
@@ -104,7 +111,9 @@ export default function CalendarPage() {
   // Hours span the student's windows *and* any session outside them, so a
   // session can never be scheduled off the visible grid.
   const hourRange = useMemo(() => {
-    if (allWindows.length === 0 && sessions.length === 0) return DEFAULT_RANGE;
+    if (allWindows.length === 0 && allPeriods.length === 0 && sessions.length === 0) {
+      return DEFAULT_RANGE;
+    }
     let min = 24;
     let max = 0;
     for (const w of allWindows) {
@@ -117,19 +126,22 @@ export default function CalendarPage() {
       min = Math.min(min, new Date(session.startTime).getHours());
       max = Math.max(max, new Date(session.endTime).getHours() + 1);
     }
+    for (const period of allPeriods) {
+      min = Math.min(min, new Date(period.startDate).getHours());
+      max = Math.max(max, new Date(period.endDate).getHours() + 1);
+    }
     if (min > max) return DEFAULT_RANGE;
     return { start: Math.max(0, min - 1), end: Math.min(24, Math.max(max + 1, min + 6)) };
-  }, [allWindows, sessions]);
+  }, [allWindows, allPeriods, sessions]);
 
   const freeIntervals = useMemo(
     () => subtractPeriods(expandWindows(allWindows, rangeStart, rangeEnd), allPeriods),
     [allWindows, allPeriods, rangeStart, rangeEnd],
   );
-  const rawIntervals = useMemo(
-    () => expandWindows(allWindows, rangeStart, rangeEnd),
-    [allWindows, rangeStart, rangeEnd],
+  const blockedIntervals = useMemo(
+    () => expandUnavailablePeriods(allPeriods, rangeStart, rangeEnd),
+    [allPeriods, rangeStart, rangeEnd],
   );
-
   const columns: GridColumn[] = useMemo(() => {
     const todayKey = dayKey(new Date());
     return days.map((day) => ({
@@ -162,13 +174,14 @@ export default function CalendarPage() {
             start: minutesSinceMidnight(start),
             end: minutesSinceMidnight(end) === 0 ? 1440 : minutesSinceMidnight(end),
             variant,
+            title: variant === "blocked" ? "Blocked time" : "Free to study",
           });
         }
       });
     };
 
-    pushCapacity(rawIntervals, "blocked", "blocked");
     pushCapacity(freeIntervals, "available", "free");
+    pushCapacity(blockedIntervals, "blocked", "blocked");
 
     for (const session of sessions) {
       const start = new Date(session.startTime);
@@ -190,7 +203,7 @@ export default function CalendarPage() {
     }
 
     return out;
-  }, [rawIntervals, freeIntervals, sessions, days]);
+  }, [freeIntervals, blockedIntervals, sessions, days]);
 
   const deadlinesByDay = useMemo(() => {
     const map = new Map<string, AcademicTask[]>();
@@ -238,14 +251,14 @@ export default function CalendarPage() {
 
   const weekSummary = useMemo(() => {
     const free = totalMinutes(freeIntervals);
-    const blocked = Math.max(0, totalMinutes(rawIntervals) - free);
+    const blocked = totalMinutes(blockedIntervals);
     const visible = new Set(days.map(dayKey));
     const scheduled = sessions
       .filter((session) => visible.has(dayKey(new Date(session.startTime))))
       .reduce((sum, session) => sum + session.plannedDuration, 0);
     const due = days.reduce((sum, day) => sum + (deadlinesByDay.get(dayKey(day))?.length ?? 0), 0);
     return { free, blocked, scheduled, due };
-  }, [freeIntervals, rawIntervals, sessions, days, deadlinesByDay]);
+  }, [freeIntervals, blockedIntervals, sessions, days, deadlinesByDay]);
 
   const now = new Date();
   const nowMarker = days.some((day) => dayKey(day) === dayKey(now))
@@ -614,6 +627,8 @@ export default function CalendarPage() {
 
       <SchedulePreview
         proposal={proposal}
+        availabilityWindows={allWindows}
+        unavailablePeriods={allPeriods}
         open={previewOpen}
         onOpenChange={setPreviewOpen}
         onAccepted={() => {
