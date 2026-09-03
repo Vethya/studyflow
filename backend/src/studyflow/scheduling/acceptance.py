@@ -69,6 +69,16 @@ class ScheduleAcceptanceService:
             self._availability_windows.list_windows(account_id),
             self._unavailable_periods.list_periods(account_id),
         )
+        if proposal.scenario is not None:
+            task_by_id = {task.id: task for task in tasks}
+            if any(
+                session.task_id not in task_by_id
+                or session.ends_at > task_by_id[session.task_id].deadline_at
+                for session in proposal.sessions
+            ):
+                raise StaleScheduleProposalError(
+                    "Scenario proposal exceeds a task's current deadline; generate a new proposal"
+                )
         snapshots = self._recovery_snapshots
         persisted = await snapshots.get(account_id, proposal_id) if snapshots is not None else None
         if persisted is not None and snapshots is not None:
@@ -90,7 +100,7 @@ class ScheduleAcceptanceService:
             )
         else:
             current_fingerprint = schedule_input_fingerprint(
-                tasks, windows, unavailable, preferences
+                tasks, windows, unavailable, preferences, scenario=proposal.scenario
             )
         if current_fingerprint != proposal.input_fingerprint:
             raise StaleScheduleProposalError("Schedule inputs changed; generate a new proposal")

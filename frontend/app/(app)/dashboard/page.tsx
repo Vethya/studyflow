@@ -470,6 +470,8 @@ export default function DashboardPage() {
 
       <SchedulePreview
         proposal={proposal}
+        availabilityWindows={allWindows}
+        unavailablePeriods={allPeriods}
         open={previewOpen}
         onOpenChange={setPreviewOpen}
         onAccepted={() => {

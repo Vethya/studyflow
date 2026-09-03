@@ -109,6 +109,48 @@ export function subtractPeriods(
   return remaining;
 }
 
+/** Expand dated unavailable periods into day-sized intervals for a calendar grid. */
+export function expandUnavailablePeriods(
+  periods: UnavailablePeriod[],
+  from: Date,
+  to: Date,
+): Interval[] {
+  const intervals: Interval[] = [];
+
+  for (const period of periods) {
+    const periodStart = new Date(period.startDate);
+    const periodEnd = new Date(period.endDate);
+    const start = periodStart > from ? periodStart : from;
+    const end = periodEnd < to ? periodEnd : to;
+    if (end <= start) continue;
+
+    for (
+      let day = startOfDay(start);
+      day < end;
+      day = new Date(day.getTime() + DAY)
+    ) {
+      const dayEnd = new Date(day.getTime() + DAY);
+      const clippedStart = start > day ? start : day;
+      const clippedEnd = end < dayEnd ? end : dayEnd;
+      if (clippedEnd > clippedStart) {
+        intervals.push({ start: clippedStart, end: clippedEnd });
+      }
+    }
+  }
+
+  const sorted = intervals.sort((a, b) => a.start.getTime() - b.start.getTime());
+  const merged: Interval[] = [];
+  for (const interval of sorted) {
+    const previous = merged[merged.length - 1];
+    if (previous && interval.start <= previous.end) {
+      previous.end = previous.end > interval.end ? previous.end : interval.end;
+    } else {
+      merged.push({ ...interval });
+    }
+  }
+  return merged;
+}
+
 /** Minutes genuinely free for study across `[from, to)`. */
 export function availableMinutes(
   windows: AvailabilityWindow[],

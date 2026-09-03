@@ -26,6 +26,7 @@ from studyflow.scheduling.proposals import (
     StudySessionRecord,
     TaskAllocationRecord,
 )
+from studyflow.scheduling.scenarios import ScheduleScenario
 
 
 def _locked_proposal_for_account(account_id: UUID) -> Select[tuple[ProposalRow]]:
@@ -71,6 +72,7 @@ class SqlAlchemyScheduleProposalRepository:
                 revision_reason=proposal.revision_reason,
                 status=proposal.status.value,
                 input_fingerprint=proposal.input_fingerprint,
+                scenario=proposal.scenario.as_payload() if proposal.scenario is not None else None,
             )
             session.add(proposal_row)
             await session.flush()
@@ -304,5 +306,10 @@ class SqlAlchemyScheduleProposalRepository:
                     shortfall_minutes=item.shortfall_minutes,
                 )
                 for item in allocations
+            ),
+            scenario=(
+                ScheduleScenario.from_payload(proposal.scenario)
+                if proposal.scenario is not None
+                else None
             ),
         )

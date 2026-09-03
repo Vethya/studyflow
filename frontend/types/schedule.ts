@@ -33,6 +33,22 @@ export interface OverloadWarning {
   relevantUnavailablePeriods: string[];
 }
 
+export interface ScheduleScenario {
+  temporaryAvailability: {
+    startsAt: string;
+    endsAt: string;
+  }[];
+  temporaryBlockedPeriods: {
+    startsAt: string;
+    endsAt: string;
+    reason?: string;
+  }[];
+  deadlineOverrides: {
+    taskId: string;
+    deadlineAt: string;
+  }[];
+}
+
 /**
  * An inactive proposal (SPEC §11.1). Generation never replaces the active
  * schedule; the student accepts or rejects the whole thing (SPEC §11.2).
@@ -45,6 +61,8 @@ export interface ScheduleProposal {
   unscheduledWork: UnscheduledWork[];
   overloadWarnings: OverloadWarning[];
   createdAt: string;
+  /** Hypothetical inputs used to produce this proposal, when applicable. */
+  scenario?: ScheduleScenario;
 }
 
 /**

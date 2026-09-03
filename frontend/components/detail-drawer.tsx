@@ -28,6 +28,7 @@ export function DetailDrawer({
   footer,
   children,
   className,
+  size = "default",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -36,6 +37,7 @@ export function DetailDrawer({
   footer?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
+  size?: "default" | "wide";
 }) {
   const isMobile = useIsMobile();
 
@@ -43,11 +45,10 @@ export function DetailDrawer({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side={isMobile ? "bottom" : "right"}
+        size={size}
         className={cn(
           "gap-0 p-0",
-          isMobile
-            ? "max-h-[85vh] rounded-t-xl"
-            : "w-full sm:max-w-md md:sm:max-w-lg",
+          isMobile && "max-h-[85vh] rounded-t-xl",
           className,
         )}
       >
