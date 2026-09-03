@@ -7,7 +7,7 @@ import type {
 } from "@/types";
 import type { ScheduleProposal } from "@/types/schedule";
 
-/** The Phase 1 tool names. Keep these stable once agents can discover them. */
+/** Keep these stable once agents can discover them. */
 export const WEBMCP_TOOL_NAMES = {
   getPlanState: "studyflow_get_plan_state",
   addTask: "studyflow_add_task",
@@ -64,6 +64,7 @@ export interface PlanCapacity {
 export interface PlanState {
   as_of: string;
   timezone: string;
+  planning_preferences: PlanningPreferences;
   setup_status: PlanSetupStatus;
   capacity: PlanCapacity;
   tasks: AcademicTask[];
@@ -72,6 +73,13 @@ export interface PlanState {
   active_schedule: Schedule | null;
   pending_proposal: ScheduleProposal | null;
   progress: EffortProgress[];
+}
+
+export interface PlanningPreferences {
+  timezone: string;
+  preferred_session_length_minutes: number;
+  minimum_break_minutes: number;
+  availability_confirmation_required: boolean;
 }
 
 export interface WebMcpResultMeta {
@@ -108,6 +116,7 @@ export interface RecordMissedResult {
 
 export interface StudyTimeUpdateResult {
   timezone_confirmed: boolean;
+  planning_preferences: PlanningPreferences | null;
   recurring_windows: AvailabilityWindow[] | null;
   added_blocked_periods: UnavailablePeriod[];
   updated_blocked_periods: UnavailablePeriod[];
@@ -115,6 +124,11 @@ export interface StudyTimeUpdateResult {
   invalidated_future_session_ids: string[];
 }
 
+export type TaskOperation = "edit" | "delete" | "start" | "finish_early";
+
 export interface UpdateTaskResult {
-  task: AcademicTask;
+  operation: TaskOperation;
+  task_id: string;
+  task: AcademicTask | null;
+  deleted: boolean;
 }

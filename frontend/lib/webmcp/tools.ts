@@ -6,8 +6,10 @@ import { CATEGORIES, PRIORITIES } from "@/types";
 import type { UnavailablePeriodDraft, WindowDraft } from "@/lib/api/availability";
 import type { AcademicTask, Category, Priority, TaskFormData } from "@/types/task";
 import type {
+  PlanningPreferences,
   ScenarioOverrides,
   StudyTimeUpdateResult,
+  TaskOperation,
   UpdateTaskResult,
   WebMcpResult,
 } from "./contracts";
@@ -173,6 +175,53 @@ function blockedPeriodChanges(input: InputObject): BlockedPeriodChanges | null {
   return { add, update, remove };
 }
 
+function planningPreferencesInput(input: InputObject): Parameters<typeof account.updatePreferences>[0] | undefined {
+  if (input.planning_preferences === undefined) return undefined;
+  const preferences = inputObject(input.planning_preferences);
+  const preferredSessionLength = preferences.preferred_session_length_minutes;
+  const minimumBreak = preferences.minimum_break_minutes;
+  if (
+    typeof preferredSessionLength !== "number" ||
+    !Number.isInteger(preferredSessionLength) ||
+    preferredSessionLength < 10 ||
+    preferredSessionLength > 240
+  ) {
+    throw new Error("preferred_session_length_minutes must be an integer from 10 to 240.");
+  }
+  if (
+    typeof minimumBreak !== "number" ||
+    !Number.isInteger(minimumBreak) ||
+    minimumBreak < 0 ||
+    minimumBreak > 120
+  ) {
+    throw new Error("minimum_break_minutes must be an integer from 0 to 120.");
+  }
+  return {
+    timezone: requiredString(preferences, "timezone"),
+    preferredSessionLength,
+    minimumBreak,
+  };
+}
+
+function taskOperationInput(input: InputObject): TaskOperation {
+  const operation = input.operation;
+  if (
+    operation !== "edit" &&
+    operation !== "delete" &&
+    operation !== "start" &&
+    operation !== "finish_early"
+  ) {
+    throw new Error("operation must be edit, delete, start, or finish_early.");
+  }
+  return operation;
+}
+
+function requireConfirmation(input: InputObject, operation: "delete" | "finish_early"): void {
+  if (input.confirmed !== true) {
+    throw new Error(`${operation} requires confirmed: true.`);
+  }
+}
+
 async function applyStudyTimeChanges(
   input: unknown,
   signal: AbortSignal,
@@ -182,12 +231,22 @@ async function applyStudyTimeChanges(
   if (shouldConfirmTimezone && record.confirm_timezone !== true) {
     throw new Error("confirm_timezone must be true when provided.");
   }
+  const planningPreferences = planningPreferencesInput(record);
   const recurringWindows = recurringWindowInputs(record);
   const blockedChanges = blockedPeriodChanges(record);
-  if (!shouldConfirmTimezone && recurringWindows === undefined && blockedChanges === null) {
+  if (
+    !shouldConfirmTimezone &&
+    planningPreferences === undefined &&
+    recurringWindows === undefined &&
+    blockedChanges === null
+  ) {
     throw new Error("Provide at least one study-time change.");
   }
 
+  const savedPreferences =
+    planningPreferences === undefined
+      ? null
+      : await account.updatePreferences(planningPreferences, signal);
   if (shouldConfirmTimezone) await availability.confirmTimezone(signal);
 
   const savedWindows =
@@ -222,6 +281,7 @@ async function applyStudyTimeChanges(
 
   return {
     timezone_confirmed: shouldConfirmTimezone,
+    planning_preferences: savedPreferences,
     recurring_windows: savedWindows,
     added_blocked_periods: addedBlockedPeriods,
     updated_blocked_periods: updatedBlockedPeriods,
@@ -322,6 +382,13 @@ export function createStudyFlowTools(): WebMcpTool[] {
               committed_minutes: capacity.committed,
               balance_minutes: capacity.balance,
             },
+            planning_preferences: {
+              timezone: preferences.timezone,
+              preferred_session_length_minutes: preferences.preferred_session_length_minutes,
+              minimum_break_minutes: preferences.minimum_break_minutes,
+              availability_confirmation_required:
+                preferences.availability_confirmation_required,
+            } satisfies PlanningPreferences,
             tasks: allTasks,
             availability_windows: windows,
             unavailable_periods: periods,
@@ -353,7 +420,7 @@ export function createStudyFlowTools(): WebMcpTool[] {
       name: WEBMCP_TOOL_NAMES.updateStudyTime,
       title: "Update Study Time",
       description:
-        "Update the authenticated student's timezone confirmation, recurring weekly study windows, and one-off blocked periods. This changes scheduling inputs only; it never generates or activates a study schedule. Recurring availability is replaced as a complete weekly pattern, and removing a blocked period requires explicit confirmation.",
+        "Update the authenticated student's planning preferences, timezone confirmation, recurring weekly study windows, and one-off blocked periods. This changes scheduling inputs only; it never generates or activates a study schedule. Planning preferences are a full replacement, recurring availability is a complete weekly replacement, and removing a blocked period requires explicit confirmation.",
       inputSchema: updateStudyTimeSchema,
       annotations: writeUntrusted,
       execute: async (input, options) => {
@@ -372,22 +439,49 @@ export function createStudyFlowTools(): WebMcpTool[] {
     },
     {
       name: WEBMCP_TOOL_NAMES.updateTask,
-      title: "Update Academic Task",
+      title: "Manage Academic Task",
       description:
-        "Update an existing academic task. This is a full replacement of its editable fields and does not silently regenerate or activate a study schedule. The original estimate cannot change after work starts.",
+        "Manage one existing academic task. Use edit to replace all editable fields, or use start, finish_early, or delete for lifecycle actions. Delete and finish_early require explicit confirmation. These actions never silently generate or activate a new schedule.",
       inputSchema: updateTaskSchema,
       annotations: writeUntrusted,
       execute: async (input, options) => {
         const record = inputObject(input);
-        const task = await tasks.updateTask(
-          requiredString(record, "task_id"),
-          taskForm(record),
-          signalFor(options),
-        );
+        const taskId = requiredString(record, "task_id");
+        const operation = taskOperationInput(record);
+        const signal = signalFor(options);
+        if (operation === "edit") {
+          const task = await tasks.updateTask(taskId, taskForm(record), signal);
+          notifyStudyFlowDataChanged();
+          return result<UpdateTaskResult>(
+            { operation, task_id: taskId, task, deleted: false },
+            { active_schedule_changed: false, requires_user_review: true, persisted: true },
+          );
+        }
+        if (operation === "start") {
+          await tasks.startTask(taskId, signal);
+          const task = await tasks.getTask(taskId, signal);
+          notifyStudyFlowDataChanged();
+          return result<UpdateTaskResult>(
+            { operation, task_id: taskId, task, deleted: false },
+            { active_schedule_changed: false, requires_user_review: false, persisted: true },
+          );
+        }
+        if (operation === "finish_early") {
+          requireConfirmation(record, operation);
+          await tasks.finishTaskEarly(taskId, signal);
+          const task = await tasks.getTask(taskId, signal);
+          notifyStudyFlowDataChanged();
+          return result<UpdateTaskResult>(
+            { operation, task_id: taskId, task, deleted: false },
+            { active_schedule_changed: true, requires_user_review: true, persisted: true },
+          );
+        }
+        requireConfirmation(record, operation);
+        await tasks.deleteTask(taskId, signal);
         notifyStudyFlowDataChanged();
         return result<UpdateTaskResult>(
-          { task },
-          { active_schedule_changed: false, requires_user_review: false, persisted: true },
+          { operation, task_id: taskId, task: null, deleted: true },
+          { active_schedule_changed: true, requires_user_review: true, persisted: true },
         );
       },
     },

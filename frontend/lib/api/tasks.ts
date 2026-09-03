@@ -86,19 +86,20 @@ export async function updateTask(
 }
 
 /** Moves the task to In Progress and freezes its original estimate. */
-export function startTask(taskId: string): Promise<void> {
-  return apiVoid(`/tasks/${taskId}/start`, { method: "POST" });
+export function startTask(taskId: string, signal?: AbortSignal): Promise<void> {
+  return apiVoid(`/tasks/${taskId}/start`, { method: "POST", signal });
 }
 
 /** Only valid for a task that has already been started. */
-export function finishTaskEarly(taskId: string): Promise<void> {
+export function finishTaskEarly(taskId: string, signal?: AbortSignal): Promise<void> {
   return apiVoid(`/tasks/${taskId}/finish-early`, {
     method: "POST",
     body: { confirmed: true },
+    signal,
   });
 }
 
 /** Requires explicit confirmation; the backend rejects the call without it. */
-export function deleteTask(taskId: string): Promise<void> {
-  return apiVoid(`/tasks/${taskId}?confirmed=true`, { method: "DELETE" });
+export function deleteTask(taskId: string, signal?: AbortSignal): Promise<void> {
+  return apiVoid(`/tasks/${taskId}?confirmed=true`, { method: "DELETE", signal });
 }

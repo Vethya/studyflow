@@ -76,6 +76,8 @@ Input:
 Output includes:
 
 - account timezone and `setup_status`;
+- planning preferences, including session length, minimum break, and timezone
+  confirmation state;
 - open tasks with remaining effort and deadlines;
 - recurring availability and unavailable periods;
 - active sessions and their outcomes;
@@ -110,8 +112,13 @@ deadlines.
 ### `studyflow_update_study_time`
 
 Updates one or more scheduling inputs in a single authenticated action. The
-operations are applied in this order: timezone confirmation, complete recurring
-availability replacement, blocked-period additions, updates, and removals.
+operations are applied in this order: planning preferences, timezone
+confirmation, complete recurring availability replacement, blocked-period
+additions, updates, and removals.
+
+Planning preferences are a full replacement because that is how the backend
+endpoint works. Read `studyflow_get_plan_state` first and preserve values the
+student did not ask to change.
 
 Recurring availability uses weekday names and local `HH:mm` times. Supplying
 `recurring_availability` always replaces the full weekly pattern, including
@@ -122,6 +129,11 @@ Example:
 
 ```json
 {
+  "planning_preferences": {
+    "timezone": "Asia/Phnom_Penh",
+    "preferred_session_length_minutes": 60,
+    "minimum_break_minutes": 10
+  },
   "confirm_timezone": true,
   "recurring_availability": {
     "replace_all": true,
@@ -144,20 +156,21 @@ Example:
 }
 ```
 
-The result returns the saved windows and changed periods. If blocked-period
-changes invalidate future sessions, `invalidated_future_session_ids` is
-populated and the result requires a new draft for student review.
+The result returns saved planning preferences, windows, and changed periods.
+If blocked-period changes invalidate future sessions, the result includes
+`invalidated_future_session_ids` and requires a new draft for student review.
 
 ### `studyflow_update_task`
 
-Full-replaces an existing task's editable fields. It requires the task ID and
-the same fields as `studyflow_add_task`, so an agent should read plan state
-first and preserve fields the student did not ask to change.
+Manages an existing task through one explicit operation. The tool supports
+editing all fields, starting a task, finishing a started task early, and
+deleting a task. Deletion and finishing early require `confirmed: true`.
 
-Example:
+Edit example:
 
 ```json
 {
+  "operation": "edit",
   "task_id": "00000000-0000-0000-0000-000000000000",
   "title": "Prepare biology exam notes",
   "category": "Exam Preparation",
@@ -169,9 +182,38 @@ Example:
 }
 ```
 
-Updating a task does not silently regenerate or activate a schedule. If the
-change affects the plan, the agent should draft a new proposal and ask the
-student to review it.
+Start example:
+
+```json
+{
+  "operation": "start",
+  "task_id": "00000000-0000-0000-0000-000000000000"
+}
+```
+
+Finish-early example:
+
+```json
+{
+  "operation": "finish_early",
+  "task_id": "00000000-0000-0000-0000-000000000000",
+  "confirmed": true
+}
+```
+
+Delete example:
+
+```json
+{
+  "operation": "delete",
+  "task_id": "00000000-0000-0000-0000-000000000000",
+  "confirmed": true
+}
+```
+
+Task edits do not silently regenerate or activate a schedule. Since deleting or
+finishing early removes future sessions, and edits can change feasibility, the
+agent should draft a new proposal when the result says review is required.
 
 ### `studyflow_simulate_plan`
 

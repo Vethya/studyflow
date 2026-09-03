@@ -146,6 +146,70 @@ const blockedPeriodRemovalSchema: JsonSchema = {
   required: ["period_id", "confirmed"],
 };
 
+const taskFields: Record<string, JsonSchema> = {
+  title: { type: "string", minLength: 1, maxLength: 200 },
+  category: {
+    type: "string",
+    enum: ["Assignment", "Reading", "Exam Preparation", "Project", "Research/Writing", "Other"],
+  },
+  priority: { type: "string", enum: ["Low", "Medium", "High"] },
+  course: { type: ["string", "null"], maxLength: 100 },
+  notes: { type: ["string", "null"], maxLength: 2000 },
+  deadline_at: dateTime,
+  original_estimate_minutes: { type: "integer", minimum: 1, maximum: 100_000 },
+};
+
+const taskEditSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    operation: { const: "edit" },
+    task_id: { type: "string", format: "uuid" },
+    ...taskFields,
+  },
+  required: [
+    "operation",
+    "task_id",
+    "title",
+    "category",
+    "priority",
+    "deadline_at",
+    "original_estimate_minutes",
+  ],
+};
+
+const taskDeleteSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    operation: { const: "delete" },
+    task_id: { type: "string", format: "uuid" },
+    confirmed: { const: true },
+  },
+  required: ["operation", "task_id", "confirmed"],
+};
+
+const taskStartSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    operation: { const: "start" },
+    task_id: { type: "string", format: "uuid" },
+  },
+  required: ["operation", "task_id"],
+};
+
+const taskFinishEarlySchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    operation: { const: "finish_early" },
+    task_id: { type: "string", format: "uuid" },
+    confirmed: { const: true },
+  },
+  required: ["operation", "task_id", "confirmed"],
+};
+
 export const updateStudyTimeSchema: JsonSchema = {
   type: "object",
   additionalProperties: false,
@@ -153,6 +217,33 @@ export const updateStudyTimeSchema: JsonSchema = {
     confirm_timezone: {
       const: true,
       description: "Confirm the timezone detected by StudyFlow for this account.",
+    },
+    planning_preferences: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        timezone: {
+          type: "string",
+          minLength: 1,
+          maxLength: 64,
+          description: "A valid IANA timezone such as Asia/Phnom_Penh.",
+        },
+        preferred_session_length_minutes: {
+          type: "integer",
+          minimum: 10,
+          maximum: 240,
+        },
+        minimum_break_minutes: {
+          type: "integer",
+          minimum: 0,
+          maximum: 120,
+        },
+      },
+      required: [
+        "timezone",
+        "preferred_session_length_minutes",
+        "minimum_break_minutes",
+      ],
     },
     recurring_availability: {
       type: "object",
@@ -182,35 +273,16 @@ export const updateStudyTimeSchema: JsonSchema = {
   },
   anyOf: [
     { required: ["confirm_timezone"] },
+    { required: ["planning_preferences"] },
     { required: ["recurring_availability"] },
     { required: ["blocked_periods"] },
   ],
 };
 
 export const updateTaskSchema: JsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    task_id: { type: "string", format: "uuid" },
-    title: { type: "string", minLength: 1, maxLength: 200 },
-    category: {
-      type: "string",
-      enum: ["Assignment", "Reading", "Exam Preparation", "Project", "Research/Writing", "Other"],
-    },
-    priority: { type: "string", enum: ["Low", "Medium", "High"] },
-    course: { type: ["string", "null"], maxLength: 100 },
-    notes: { type: ["string", "null"], maxLength: 2000 },
-    deadline_at: dateTime,
-    original_estimate_minutes: { type: "integer", minimum: 1, maximum: 100_000 },
-  },
-  required: [
-    "task_id",
-    "title",
-    "category",
-    "priority",
-    "deadline_at",
-    "original_estimate_minutes",
-  ],
+  oneOf: [taskEditSchema, taskDeleteSchema, taskStartSchema, taskFinishEarlySchema],
+  description:
+    "Manage one academic task. Use edit for full field replacement, or use a lifecycle operation with only the fields it requires.",
 };
 
 export const scenarioInputSchema: JsonSchema = {
