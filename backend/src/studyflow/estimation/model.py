@@ -9,6 +9,9 @@ from uuid import UUID
 
 from studyflow.tasks.service import TaskCategory
 
+MIN_PREDICTED_MINUTES = 1
+MAX_PREDICTED_MINUTES = 2_147_483_647
+
 
 @dataclass(frozen=True, slots=True)
 class HistoryRecord:
@@ -73,7 +76,8 @@ def median_correction(
     correction_factor = Decimal(correction_ratio.numerator) / Decimal(
         correction_ratio.denominator
     )
-    predicted_minutes = _round_half_up(Fraction(original_minutes) * correction_ratio)
+    rounded_minutes = _round_half_up(Fraction(original_minutes) * correction_ratio)
+    predicted_minutes = min(max(rounded_minutes, MIN_PREDICTED_MINUTES), MAX_PREDICTED_MINUTES)
     return CorrectionPrediction(
         predicted_minutes=predicted_minutes,
         correction_factor=correction_factor,
