@@ -34,6 +34,7 @@ import { SchedulePreview } from "@/components/schedule-preview";
 import { AdaptiveEstimateNote } from "@/components/adaptive-estimate";
 import { SectionHeader } from "@/components/page-kit";
 import { formatClock } from "@/lib/datetime";
+import { notifyStudyFlowDataChanged } from "@/lib/data-events";
 import { DAY_NAMES_SHORT } from "@/lib/constants";
 import type { AcademicTask } from "@/types/task";
 import type { StudySession } from "@/types/session";
@@ -320,12 +321,11 @@ export default function TaskDetailPage({
         open={outcomeSession !== null}
         onOpenChange={(next) => !next && setOutcomeSession(null)}
         onRecorded={(result) => {
-          schedule.reload();
-          reload();
           if (result.revision) {
             setProposal(result.revision);
             setPreviewOpen(true);
           }
+          notifyStudyFlowDataChanged();
         }}
       />
 
