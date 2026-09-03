@@ -79,6 +79,7 @@ def _subtract(
 
 def _apply_scenario_calendar(
     base_windows: Sequence[MinuteWindow],
+    persisted_blocked_periods: Sequence[tuple[int, int]],
     temporary_availability: Sequence[ScenarioAvailabilityWindow],
     temporary_blocked_periods: Sequence[ScenarioBlockedPeriod],
     *,
@@ -94,7 +95,7 @@ def _apply_scenario_calendar(
         if start < end:
             available.append((start, end))
 
-    blocked: list[tuple[int, int]] = []
+    blocked: list[tuple[int, int]] = list(persisted_blocked_periods)
     for period in temporary_blocked_periods:
         start, _ = _minute_bounds(period.starts_at)
         _, end = _minute_bounds(period.ends_at)
@@ -184,6 +185,7 @@ def assemble_schedule_problem(
 
         concrete_windows = _apply_scenario_calendar(
             calendar.windows.materialize(),
+            calendar.windows.blocked,
             temporary_availability,
             temporary_blocked_periods,
             planning_start_minute=planning_start_minute,
