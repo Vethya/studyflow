@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from studyflow.database import Base, Database
 from studyflow.database.models import (
@@ -310,5 +310,156 @@ async def test_task_repository_rejects_unavailable_adaptive_and_preserves_frozen
             created.planned_source,
             created.planned_duration_minutes,
         )
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_unstarted_original_estimate_edit_stays_constraint_valid_during_capture() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    account_id = uuid4()
+    now = datetime.now(UTC)
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            session.add(
+                StudentAccount(
+                    id=account_id,
+                    email="student@example.com",
+                    name="Student",
+                    password_hash="$argon2id$hash",
+                    email_verified_at=now,
+                    timezone="UTC",
+                )
+            )
+        predictions = SqlAlchemyAdaptivePredictionRepository(database)
+        repository = SqlAlchemyAcademicTaskRepository(
+            database,
+            estimator=AdaptiveEstimator(predictions),
+            prediction_repository=predictions,
+        )
+        created = await repository.create(
+            account_id,
+            NewAcademicTask(
+                "Original task",
+                TaskCategory.READING,
+                TaskPriority.MEDIUM,
+                None,
+                None,
+                now + timedelta(days=1),
+                60,
+                PlannedDurationSource.ORIGINAL,
+            ),
+        )
+
+        updated = await repository.update(
+            account_id,
+            created.id,
+            NewAcademicTask(
+                "Original task",
+                TaskCategory.READING,
+                TaskPriority.MEDIUM,
+                None,
+                None,
+                now + timedelta(days=1),
+                75,
+                PlannedDurationSource.ORIGINAL,
+            ),
+            now,
+        )
+
+        assert updated is not None
+        assert (
+            updated.original_estimate_minutes,
+            updated.adaptive_estimate_minutes,
+            updated.planned_source,
+            updated.planned_duration_minutes,
+        ) == (75, None, PlannedDurationSource.ORIGINAL, 75)
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_unqualified_recapture_removes_the_prior_prediction_snapshot() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    account_id = uuid4()
+    now = datetime.now(UTC)
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            session.add(
+                StudentAccount(
+                    id=account_id,
+                    email="student@example.com",
+                    name="Student",
+                    password_hash="$argon2id$hash",
+                    email_verified_at=now,
+                    timezone="UTC",
+                )
+            )
+        estimator = await _qualify_and_acknowledge(database, account_id)
+        predictions = SqlAlchemyAdaptivePredictionRepository(database)
+        repository = SqlAlchemyAcademicTaskRepository(
+            database, estimator=estimator, prediction_repository=predictions
+        )
+        created = await repository.create(
+            account_id,
+            NewAcademicTask(
+                "Adaptive task",
+                TaskCategory.READING,
+                TaskPriority.MEDIUM,
+                None,
+                None,
+                now + timedelta(days=1),
+                60,
+            ),
+        )
+        async with database.transaction() as session:
+            history_id = await session.scalar(
+                select(AcademicTask.id)
+                .where(
+                    AcademicTask.account_id == account_id,
+                    AcademicTask.completed_at.is_not(None),
+                )
+                .limit(1)
+            )
+            assert history_id is not None
+            await session.execute(
+                delete(AdaptiveEstimationPrediction).where(
+                    AdaptiveEstimationPrediction.task_id == history_id
+                )
+            )
+            await session.execute(delete(AcademicTask).where(AcademicTask.id == history_id))
+
+        updated = await repository.update(
+            account_id,
+            created.id,
+            NewAcademicTask(
+                "Project task",
+                TaskCategory.PROJECT,
+                TaskPriority.MEDIUM,
+                None,
+                None,
+                now + timedelta(days=1),
+                60,
+            ),
+            now,
+        )
+        async with database.transaction() as session:
+            prediction = await session.get(AdaptiveEstimationPrediction, created.id)
+
+        assert updated is not None
+        assert (
+            updated.adaptive_estimate_minutes,
+            updated.planned_source,
+            updated.planned_duration_minutes,
+        ) == (None, PlannedDurationSource.ORIGINAL, 60)
+        assert prediction is None
     finally:
         await database.stop()

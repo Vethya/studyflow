@@ -84,6 +84,8 @@ class AdaptiveEstimator:
             raise AdaptiveEstimateUnavailableError
 
         if prediction is None:
+            if replace and not await prediction_repository.remove_prediction(account_id, task_id):
+                raise AdaptivePredictionCaptureError
             return self._with_planned_source(preview, selected_source)
         save = (
             prediction_repository.replace_prediction

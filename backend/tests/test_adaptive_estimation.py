@@ -307,6 +307,9 @@ class InMemoryAdaptivePredictionRepository(AdaptivePredictionRepository):
     ) -> bool:
         return True
 
+    async def remove_prediction(self, account_id: UUID, task_id: UUID) -> bool:
+        return True
+
     async def acknowledgment(self, account_id: UUID, category: TaskCategory) -> Decimal | None:
         return self.acknowledgments.get(category)
 
