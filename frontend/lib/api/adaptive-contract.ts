@@ -28,6 +28,28 @@ export function resolveEstimateSelection(
 }
 
 /**
+ * Resolves a preview without rewriting a source the student already chose for
+ * an existing task. Only a fresh or deliberately changed estimate input may
+ * accept the preview's qualified, acknowledged default.
+ */
+export function resolvePreviewSelection(
+  originalEstimate: number,
+  estimate: AdaptiveEstimate | null,
+  currentPlannedSource: "Original" | "Adaptive",
+  applyPreviewDefault: boolean,
+): { originalEstimate: number; plannedSource: "Original" | "Adaptive" } {
+  if (!applyPreviewDefault) {
+    return { originalEstimate, plannedSource: currentPlannedSource };
+  }
+
+  return resolveEstimateSelection(
+    originalEstimate,
+    estimate,
+    estimate && !estimate.needsAcknowledgment ? "adaptive" : "original",
+  );
+}
+
+/**
  * Converts a student-safe adaptive preview into the explanation shape the UI
  * needs. An unavailable or incomplete preview deliberately stays hidden.
  */

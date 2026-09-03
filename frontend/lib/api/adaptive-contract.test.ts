@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { apiJson, apiVoid } from "./client";
-import { resolveEstimateSelection, toAdaptiveEstimate } from "./adaptive-contract";
+import {
+  resolveEstimateSelection,
+  resolvePreviewSelection,
+  toAdaptiveEstimate,
+} from "./adaptive-contract";
 import { toAcademicTask } from "./mappers";
 import { acknowledgeAdjustment, getAdaptiveEstimate } from "./scheduling";
 import { createTask } from "./tasks";
@@ -118,6 +122,27 @@ describe("adaptive API contract", () => {
 
   it("keeps the entered original minutes when Adaptive is selected", () => {
     expect(resolveEstimateSelection(60, toAdaptiveEstimate(preview), "adaptive")).toEqual({
+      originalEstimate: 60,
+      plannedSource: "Adaptive",
+    });
+  });
+
+  it("keeps a persisted Original source when a qualified preview would default to Adaptive", () => {
+    expect(
+      resolvePreviewSelection(
+        60,
+        toAdaptiveEstimate({ ...preview, acknowledgment_required: false }),
+        "Original",
+        false,
+      ),
+    ).toEqual({
+      originalEstimate: 60,
+      plannedSource: "Original",
+    });
+  });
+
+  it("keeps a persisted Adaptive source when a preview would default to Original", () => {
+    expect(resolvePreviewSelection(60, toAdaptiveEstimate(preview), "Adaptive", false)).toEqual({
       originalEstimate: 60,
       plannedSource: "Adaptive",
     });

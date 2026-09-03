@@ -28,7 +28,7 @@ import { isoToLocalInput, localInputToIso, nowLocalInput } from "@/lib/datetime"
 import { ApiError, tasks as tasksApi, scheduling } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
 import { AdaptiveEstimateNote, LargeAdjustmentDialog } from "@/components/adaptive-estimate";
-import { resolveEstimateSelection } from "@/lib/api/adaptive-contract";
+import { resolveEstimateSelection, resolvePreviewSelection } from "@/lib/api/adaptive-contract";
 import type { AdaptiveEstimate } from "@/types/progress";
 
 interface TaskFormDialogProps {
@@ -65,6 +65,8 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
    * blocks the first time a category swings beyond 2× or below 0.5×.
    */
   const [estimate, setEstimate] = useState<AdaptiveEstimate | null>(null);
+  /** Whether the current category/original pair may adopt a preview default. */
+  const [applyPreviewDefault, setApplyPreviewDefault] = useState(true);
   const [ackOpen, setAckOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -83,6 +85,8 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
   if (open && (session.open !== open || session.task !== task)) {
     setSession({ open, task });
     setError(null);
+    setEstimate(null);
+    setApplyPreviewDefault(!task);
     setForm(
       task
         ? {
@@ -117,14 +121,15 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
       .then((next) => {
         if (controller.signal.aborted) return;
         setEstimate(next);
-        // A fresh qualified, acknowledged preview defaults to Adaptive. An
-        // unavailable or unacknowledged preview always keeps Original.
+        // Existing tasks keep their explicit source. A fresh or deliberately
+        // changed category/original pair may adopt the safe preview default.
         setForm((current) => ({
           ...current,
-          ...resolveEstimateSelection(
+          ...resolvePreviewSelection(
             current.originalEstimate,
             next,
-            next && !next.needsAcknowledgment ? "adaptive" : "original",
+            current.plannedSource,
+            applyPreviewDefault,
           ),
         }));
       })
@@ -133,20 +138,33 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
           setEstimate(null);
           setForm((current) => ({
             ...current,
-            ...resolveEstimateSelection(current.originalEstimate, null, "adaptive"),
+            ...resolvePreviewSelection(
+              current.originalEstimate,
+              null,
+              current.plannedSource,
+              applyPreviewDefault,
+            ),
           }));
         }
       });
 
     return () => controller.abort();
-  }, [open, form.category, form.originalEstimate]);
+  }, [open, form.category, form.originalEstimate, applyPreviewDefault]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
 
     // Ask before using a first-time large adjustment (SPEC §15.4).
-    if (estimate?.needsAcknowledgment) {
+    const adaptivePreviewMatchesForm =
+      estimate?.category === form.category &&
+      estimate.originalEstimate === Number(form.originalEstimate);
+    if (form.plannedSource === "Adaptive" && !adaptivePreviewMatchesForm) {
+      setError("Adaptive planning is still being checked. Try again in a moment.");
+      return;
+    }
+
+    if (form.plannedSource === "Adaptive" && estimate?.needsAcknowledgment) {
       setAckOpen(true);
       return;
     }
@@ -221,6 +239,7 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
                 onValueChange={(v) => {
                   if (!v) return;
                   setEstimate(null);
+                  setApplyPreviewDefault(true);
                   setForm({ ...form, category: v as Category, plannedSource: "Original" });
                 }}
               >
@@ -278,6 +297,7 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
                 value={form.originalEstimate}
                 onChange={(e) => {
                   setEstimate(null);
+                  setApplyPreviewDefault(true);
                   setForm({
                     ...form,
                     originalEstimate: Number(e.target.value),
@@ -331,11 +351,13 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
               onChoose={
                 estimate.needsAcknowledgment
                   ? undefined
-                  : (which) =>
+                  : (which) => {
+                      setApplyPreviewDefault(false);
                       setForm((current) => ({
                         ...current,
                         ...resolveEstimateSelection(current.originalEstimate, estimate, which),
-                      }))
+                      }));
+                    }
               }
             />
           )}
@@ -362,6 +384,7 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
         open={ackOpen}
         onOpenChange={setAckOpen}
         onDecided={(which) => {
+          setApplyPreviewDefault(false);
           setEstimate((current) =>
             current ? { ...current, needsAcknowledgment: false } : current,
           );
