@@ -6,7 +6,13 @@ import pytest
 from sqlalchemy import select
 
 from studyflow.database import Base, Database
-from studyflow.database.models import AcademicTask, StudentAccount
+from studyflow.database.models import (
+    AcademicTask,
+    StudentAccount,
+)
+from studyflow.database.models import (
+    AdaptiveEstimationPrediction as PredictionRow,
+)
 from studyflow.database.models import StudySession as SessionRow
 from studyflow.database.models import StudySessionOutcome as OutcomeRow
 from studyflow.estimation import CorrectionPrediction
@@ -269,6 +275,76 @@ async def test_predictions_are_account_scoped_and_only_replaceable_before_freeze
         assert [(item.adaptive_minutes, item.actual_minutes) for item in evaluations] == [
             (150, None)
         ]
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_save_prediction_rejects_frozen_and_completed_tasks() -> None:
+    database, owner_id, _ = await _database()
+    try:
+        frozen_task = _task(owner_id, estimate_frozen_at=NOW)
+        completed_task = _task(
+            owner_id,
+            completed_at=NOW,
+            estimate_frozen_at=NOW - timedelta(hours=1),
+        )
+        async with database.transaction() as session:
+            session.add_all([frozen_task, completed_task])
+        repository = SqlAlchemyAdaptivePredictionRepository(database)
+
+        assert not await repository.save_prediction(
+            owner_id,
+            frozen_task.id,
+            _prediction(),
+            exposed=False,
+        )
+        assert not await repository.save_prediction(
+            owner_id,
+            completed_task.id,
+            _prediction(),
+            exposed=False,
+        )
+
+        async with database.transaction() as session:
+            assert list(await session.scalars(select(PredictionRow))) == []
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_replace_prediction_preserves_a_schema_valid_foreign_account_row() -> None:
+    database, owner_id, other_id = await _database()
+    try:
+        task = _task(owner_id)
+        foreign_prediction = PredictionRow(
+            task_id=task.id,
+            account_id=other_id,
+            category=task.category,
+            original_minutes=100,
+            predicted_minutes=125,
+            correction_factor=Decimal("1.25"),
+            history_scope="overall",
+            history_count=5,
+            exposed=False,
+        )
+        async with database.transaction() as session:
+            session.add_all([task, foreign_prediction])
+        repository = SqlAlchemyAdaptivePredictionRepository(database)
+
+        assert not await repository.replace_prediction(
+            owner_id,
+            task.id,
+            _prediction(minutes=150, factor=Decimal("1.5")),
+            exposed=True,
+        )
+
+        async with database.transaction() as session:
+            stored = await session.get(PredictionRow, task.id)
+            assert stored is not None
+            assert stored.account_id == other_id
+            assert stored.predicted_minutes == 125
+            assert stored.exposed is False
     finally:
         await database.stop()
 
