@@ -20,6 +20,8 @@ export type WireTaskPriority = "low" | "medium" | "high";
 
 export type WireTaskStatus = "not_started" | "in_progress" | "completed" | "overdue";
 
+export type WirePlannedSource = "original" | "adaptive";
+
 // ─── Authentication (api/auth.py) ────────────────────────────────
 export interface WireAuthenticatedAccount {
   id: string;
@@ -78,6 +80,8 @@ export interface WireAcademicTask {
   notes: string | null;
   deadline_at: string;
   original_estimate_minutes: number;
+  adaptive_estimate_minutes: number | null;
+  planned_source: WirePlannedSource;
   planned_duration_minutes: number;
   created_at: string;
   updated_at: string;
@@ -92,6 +96,21 @@ export interface WireAcademicTaskRequest {
   notes: string | null;
   deadline_at: string;
   original_estimate_minutes: number;
+  planned_source?: WirePlannedSource;
+}
+
+// ─── Adaptive estimates (api/adaptive_estimates.py) ─────────────
+export interface WireAdaptiveEstimatePreview {
+  category: WireTaskCategory;
+  original_minutes: number;
+  adaptive_minutes: number | null;
+  planned_minutes: number;
+  correction_factor: number | null;
+  history_scope: "overall" | "category" | null;
+  history_count: number | null;
+  available: boolean;
+  planned_source: WirePlannedSource;
+  acknowledgment_required: boolean;
 }
 
 // ─── Availability (api/availability.py) ──────────────────────────

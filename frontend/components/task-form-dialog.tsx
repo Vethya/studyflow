@@ -142,7 +142,10 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
       category: form.category,
       priority: form.priority,
       deadline: localInputToIso(form.deadline),
-      originalEstimate: plannedMinutes(),
+      // Preserve what the student entered. The selected source tells the
+      // backend whether its adaptive snapshot should drive planning.
+      originalEstimate: Number(form.originalEstimate),
+      plannedSource: estimate && useAdaptive ? "Adaptive" : "Original",
       course: form.course || undefined,
       notes: form.notes || undefined,
     };

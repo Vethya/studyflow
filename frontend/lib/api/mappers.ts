@@ -88,6 +88,8 @@ export function toAcademicTask(wire: WireAcademicTask): AcademicTask {
     status: STATUS_FROM_WIRE[wire.status],
     deadline: wire.deadline_at,
     originalEstimate: wire.original_estimate_minutes,
+    adaptiveEstimate: wire.adaptive_estimate_minutes ?? undefined,
+    plannedSource: wire.planned_source === "adaptive" ? "Adaptive" : "Original",
     plannedDuration: wire.planned_duration_minutes,
     actualDuration: 0,
     remainingDuration: wire.planned_duration_minutes,
