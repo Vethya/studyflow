@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { apiJson, apiVoid } from "./client";
-import { toAdaptiveEstimate } from "./adaptive-contract";
+import { resolveEstimateSelection, toAdaptiveEstimate } from "./adaptive-contract";
 import { toAcademicTask } from "./mappers";
 import { acknowledgeAdjustment, getAdaptiveEstimate } from "./scheduling";
 import { createTask } from "./tasks";
@@ -113,6 +113,13 @@ describe("adaptive API contract", () => {
       adaptiveEstimate: 90,
       plannedSource: "Adaptive",
       plannedDuration: 90,
+    });
+  });
+
+  it("keeps the entered original minutes when Adaptive is selected", () => {
+    expect(resolveEstimateSelection(60, toAdaptiveEstimate(preview), "adaptive")).toEqual({
+      originalEstimate: 60,
+      plannedSource: "Adaptive",
     });
   });
 
