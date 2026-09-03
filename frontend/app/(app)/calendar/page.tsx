@@ -49,13 +49,18 @@ import type { AcademicTask } from "@/types/task";
 import type { StudySession } from "@/types/session";
 import type { ScheduleProposal } from "@/types/schedule";
 
-const DAY_MS = 86_400_000;
 const DEFAULT_RANGE = { start: 8, end: 22 };
 
 function weekStart(date: Date): Date {
   const day = startOfDay(date);
   day.setDate(day.getDate() - ((day.getDay() + 6) % 7));
   return day;
+}
+
+function addCalendarDays(date: Date, days: number): Date {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
 }
 
 const minutesSinceMidnight = (date: Date) => date.getHours() * 60 + date.getMinutes();
@@ -102,16 +107,28 @@ export default function CalendarPage() {
   const days = useMemo(() => {
     if (isMobile) return [startOfDay(anchor)];
     const start = weekStart(anchor);
-    return Array.from({ length: 7 }, (_, i) => new Date(start.getTime() + i * DAY_MS));
+    return Array.from({ length: 7 }, (_, i) => addCalendarDays(start, i));
   }, [anchor, isMobile]);
 
   const rangeStart = days[0];
-  const rangeEnd = useMemo(() => new Date(days[days.length - 1].getTime() + DAY_MS), [days]);
+  const rangeEnd = useMemo(
+    () => addCalendarDays(days[days.length - 1], 1),
+    [days],
+  );
 
-  // Hours span the student's windows *and* any session outside them, so a
-  // session can never be scheduled off the visible grid.
+  const freeIntervals = useMemo(
+    () => subtractPeriods(expandWindows(allWindows, rangeStart, rangeEnd), allPeriods),
+    [allWindows, allPeriods, rangeStart, rangeEnd],
+  );
+  const blockedIntervals = useMemo(
+    () => expandUnavailablePeriods(allPeriods, rangeStart, rangeEnd),
+    [allPeriods, rangeStart, rangeEnd],
+  );
+
+  // Use clipped periods so historical and far-future blocks cannot stretch
+  // the visible grid outside the displayed date range.
   const hourRange = useMemo(() => {
-    if (allWindows.length === 0 && allPeriods.length === 0 && sessions.length === 0) {
+    if (allWindows.length === 0 && blockedIntervals.length === 0 && sessions.length === 0) {
       return DEFAULT_RANGE;
     }
     let min = 24;
@@ -126,22 +143,13 @@ export default function CalendarPage() {
       min = Math.min(min, new Date(session.startTime).getHours());
       max = Math.max(max, new Date(session.endTime).getHours() + 1);
     }
-    for (const period of allPeriods) {
-      min = Math.min(min, new Date(period.startDate).getHours());
-      max = Math.max(max, new Date(period.endDate).getHours() + 1);
+    for (const interval of blockedIntervals) {
+      min = Math.min(min, interval.start.getHours());
+      max = Math.max(max, interval.end.getHours() + 1);
     }
     if (min > max) return DEFAULT_RANGE;
     return { start: Math.max(0, min - 1), end: Math.min(24, Math.max(max + 1, min + 6)) };
-  }, [allWindows, allPeriods, sessions]);
-
-  const freeIntervals = useMemo(
-    () => subtractPeriods(expandWindows(allWindows, rangeStart, rangeEnd), allPeriods),
-    [allWindows, allPeriods, rangeStart, rangeEnd],
-  );
-  const blockedIntervals = useMemo(
-    () => expandUnavailablePeriods(allPeriods, rangeStart, rangeEnd),
-    [allPeriods, rangeStart, rangeEnd],
-  );
+  }, [allWindows, blockedIntervals, sessions]);
   const columns: GridColumn[] = useMemo(() => {
     const todayKey = dayKey(new Date());
     return days.map((day) => ({
@@ -164,7 +172,7 @@ export default function CalendarPage() {
       intervals.forEach((interval, index) => {
         for (const day of days) {
           const dayStart = startOfDay(day);
-          const dayEnd = new Date(dayStart.getTime() + DAY_MS);
+          const dayEnd = addCalendarDays(dayStart, 1);
           const start = interval.start < dayStart ? dayStart : interval.start;
           const end = interval.end > dayEnd ? dayEnd : interval.end;
           if (end <= start) continue;
@@ -219,7 +227,7 @@ export default function CalendarPage() {
 
   const agenda = useMemo(() => {
     const from = startOfDay(new Date());
-    const to = new Date(from.getTime() + 14 * DAY_MS);
+    const to = addCalendarDays(from, 14);
     return allTasks
       .filter((task) => task.status !== "Completed")
       .filter((task) => {
@@ -270,7 +278,7 @@ export default function CalendarPage() {
     : `${days[0].toLocaleDateString(undefined, { day: "numeric", month: "short" })} – ${days[6].toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`;
 
   const shift = (direction: number) =>
-    setAnchor(new Date(anchor.getTime() + direction * (isMobile ? DAY_MS : 7 * DAY_MS)));
+    setAnchor(addCalendarDays(anchor, direction * (isMobile ? 1 : 7)));
 
   /** Whether the view is already showing today (mobile) or this week. */
   const isCurrentPeriod = isMobile

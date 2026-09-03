@@ -131,4 +131,5 @@ export interface UpdateTaskResult {
   task_id: string;
   task: AcademicTask | null;
   deleted: boolean;
+  invalidated_future_session_ids: string[];
 }

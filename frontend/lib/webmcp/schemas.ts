@@ -293,6 +293,11 @@ export const scenarioInputSchema: JsonSchema = {
   },
 };
 
+export const simulatePlanInputSchema: JsonSchema = {
+  ...scenarioInputSchema,
+  required: ["scenario"],
+};
+
 export const proposalIdSchema: JsonSchema = {
   type: "object",
   additionalProperties: false,

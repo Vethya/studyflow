@@ -20,6 +20,7 @@ import {
   proposalIdSchema,
   scenarioInputSchema,
   sessionIdSchema,
+  simulatePlanInputSchema,
   updateStudyTimeSchema,
   updateTaskSchema,
 } from "./schemas";
@@ -254,6 +255,14 @@ async function applyStudyTimeChanges(
   );
 }
 
+function hasSchedulingInputChanges(input: InputObject): boolean {
+  return (
+    input.planning_preferences !== undefined ||
+    input.recurring_availability !== undefined ||
+    input.blocked_periods !== undefined
+  );
+}
+
 function setupStatus(
   allTasks: AcademicTask[],
   windows: Awaited<ReturnType<typeof availability.listWindows>>,
@@ -388,14 +397,15 @@ export function createStudyFlowTools(): WebMcpTool[] {
       inputSchema: updateStudyTimeSchema,
       annotations: writeUntrusted,
       execute: async (input, options) => {
-        const changes = await applyStudyTimeChanges(input, signalFor(options));
+        const record = inputObject(input);
+        const changes = await applyStudyTimeChanges(record, signalFor(options));
         notifyStudyFlowDataChanged();
         const activeScheduleChanged = changes.invalidated_future_session_ids.length > 0;
         return result(
           changes,
           {
             active_schedule_changed: activeScheduleChanged,
-            requires_user_review: activeScheduleChanged,
+            requires_user_review: activeScheduleChanged || hasSchedulingInputChanges(record),
             persisted: true,
           },
         );
@@ -414,11 +424,29 @@ export function createStudyFlowTools(): WebMcpTool[] {
         const operation = taskOperationInput(record);
         const signal = signalFor(options);
         if (operation === "edit") {
+          const scheduleBefore = await scheduling.getActiveSchedule(signal);
           const task = await tasks.updateTask(taskId, taskForm(record), signal);
+          const scheduleAfter = await scheduling.getActiveSchedule(signal);
+          const afterSessionIds = new Set(
+            (scheduleAfter?.sessions ?? []).map((session) => session.id),
+          );
+          const invalidatedFutureSessionIds = (scheduleBefore?.sessions ?? [])
+            .map((session) => session.id)
+            .filter((sessionId) => !afterSessionIds.has(sessionId));
           notifyStudyFlowDataChanged();
           return result<UpdateTaskResult>(
-            { operation, task_id: taskId, task, deleted: false },
-            { active_schedule_changed: false, requires_user_review: true, persisted: true },
+            {
+              operation,
+              task_id: taskId,
+              task,
+              deleted: false,
+              invalidated_future_session_ids: invalidatedFutureSessionIds,
+            },
+            {
+              active_schedule_changed: invalidatedFutureSessionIds.length > 0,
+              requires_user_review: true,
+              persisted: true,
+            },
           );
         }
         if (operation === "start") {
@@ -426,7 +454,7 @@ export function createStudyFlowTools(): WebMcpTool[] {
           const task = await tasks.getTask(taskId, signal);
           notifyStudyFlowDataChanged();
           return result<UpdateTaskResult>(
-            { operation, task_id: taskId, task, deleted: false },
+            { operation, task_id: taskId, task, deleted: false, invalidated_future_session_ids: [] },
             { active_schedule_changed: false, requires_user_review: false, persisted: true },
           );
         }
@@ -436,7 +464,7 @@ export function createStudyFlowTools(): WebMcpTool[] {
           const task = await tasks.getTask(taskId, signal);
           notifyStudyFlowDataChanged();
           return result<UpdateTaskResult>(
-            { operation, task_id: taskId, task, deleted: false },
+            { operation, task_id: taskId, task, deleted: false, invalidated_future_session_ids: [] },
             { active_schedule_changed: true, requires_user_review: true, persisted: true },
           );
         }
@@ -444,7 +472,7 @@ export function createStudyFlowTools(): WebMcpTool[] {
         await tasks.deleteTask(taskId, signal);
         notifyStudyFlowDataChanged();
         return result<UpdateTaskResult>(
-          { operation, task_id: taskId, task: null, deleted: true },
+          { operation, task_id: taskId, task: null, deleted: true, invalidated_future_session_ids: [] },
           { active_schedule_changed: true, requires_user_review: true, persisted: true },
         );
       },
@@ -454,7 +482,7 @@ export function createStudyFlowTools(): WebMcpTool[] {
       title: "Simulate Study Plan",
       description:
         "Compare a hypothetical study plan using one-off availability, one-off blocked periods, or hypothetical deadlines. Never persists data or changes the active schedule.",
-      inputSchema: scenarioInputSchema,
+      inputSchema: simulatePlanInputSchema,
       annotations: readOnlyUntrusted,
       execute: async (input, options) => {
         const scenario = scenarioInput(input, true) ?? {};

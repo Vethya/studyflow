@@ -7,7 +7,7 @@ import type { AcademicTask, Category, Priority, TaskStatus } from "@/types/task"
 import type { AvailabilityWindow, UnavailablePeriod } from "@/types/availability";
 import type { StudentAccount } from "@/types/user";
 import type { SessionOutcome, StudySession } from "@/types/session";
-import type { ScheduleProposal } from "@/types/schedule";
+import type { ScheduleProposal, ScheduleScenario } from "@/types/schedule";
 import type { EffortProgress } from "@/types/progress";
 import type {
   WireAcademicTask,
@@ -207,6 +207,25 @@ function toProposedSession(wire: WireProposedSession): StudySession {
   };
 }
 
+function toScheduleScenario(wire: WireScheduleProposal["scenario"]): ScheduleScenario | undefined {
+  if (!wire) return undefined;
+  return {
+    temporaryAvailability: wire.temporary_availability.map((item) => ({
+      startsAt: item.starts_at,
+      endsAt: item.ends_at,
+    })),
+    temporaryBlockedPeriods: wire.temporary_blocked_periods.map((item) => ({
+      startsAt: item.starts_at,
+      endsAt: item.ends_at,
+      ...(item.reason ? { reason: item.reason } : {}),
+    })),
+    deadlineOverrides: wire.deadline_overrides.map((item) => ({
+      taskId: item.task_id,
+      deadlineAt: item.deadline_at,
+    })),
+  };
+}
+
 export function toScheduleProposal(wire: WireScheduleProposal): ScheduleProposal {
   const periods = wire.overload_warning?.relevant_unavailable_periods ?? [];
 
@@ -243,6 +262,7 @@ export function toScheduleProposal(wire: WireScheduleProposal): ScheduleProposal
         ),
       })),
     createdAt: wire.created_at,
+    scenario: toScheduleScenario(wire.scenario),
   };
 }
 
@@ -269,4 +289,3 @@ export function toEffortProgress(
     };
   });
 }
-

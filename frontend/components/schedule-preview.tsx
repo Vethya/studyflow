@@ -14,10 +14,9 @@ import { expandUnavailablePeriods, expandWindows, subtractPeriods } from "@/lib/
 import { describeError } from "@/hooks/use-api";
 import { GridLegend, WeekGrid, type GridBlock, type GridColumn } from "@/components/week-grid";
 import type { AvailabilityWindow, UnavailablePeriod } from "@/types/availability";
-import type { ScheduleProposal } from "@/types/schedule";
+import type { ScheduleProposal, ScheduleScenario } from "@/types/schedule";
 import type { StudySession } from "@/types/session";
 
-const DAY_MS = 86_400_000;
 const DEFAULT_RANGE = { start: 8, end: 22 };
 
 function dayKey(date: Date): string {
@@ -34,12 +33,18 @@ function startOfWeek(date: Date): Date {
   return start;
 }
 
+function addCalendarDays(date: Date, days: number): Date {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
 function minutesSinceMidnight(date: Date): number {
   return date.getHours() * 60 + date.getMinutes();
 }
 
 function formatWeekRange(start: Date): string {
-  const end = new Date(start.getTime() + 6 * DAY_MS);
+  const end = addCalendarDays(start, 6);
   const startLabel = start.toLocaleDateString(undefined, { day: "numeric", month: "short" });
   const endLabel = end.toLocaleDateString(undefined, {
     day: "numeric",
@@ -47,6 +52,21 @@ function formatWeekRange(start: Date): string {
     year: "numeric",
   });
   return `${startLabel} – ${endLabel}`;
+}
+
+function describeScenario(scenario: ScheduleScenario): string | null {
+  const assumptions = [
+    scenario.temporaryAvailability.length > 0
+      ? `${scenario.temporaryAvailability.length} temporary study window${scenario.temporaryAvailability.length === 1 ? "" : "s"}`
+      : null,
+    scenario.temporaryBlockedPeriods.length > 0
+      ? `${scenario.temporaryBlockedPeriods.length} temporary block${scenario.temporaryBlockedPeriods.length === 1 ? "" : "s"}`
+      : null,
+    scenario.deadlineOverrides.length > 0
+      ? `${scenario.deadlineOverrides.length} hypothetical deadline${scenario.deadlineOverrides.length === 1 ? "" : "s"}`
+      : null,
+  ].filter((assumption): assumption is string => assumption !== null);
+  return assumptions.length > 0 ? assumptions.join(" · ") : null;
 }
 
 /**
@@ -83,6 +103,7 @@ export function SchedulePreview({
     .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 
   const totalMinutes = upcoming.reduce((sum, session) => sum + session.plannedDuration, 0);
+  const scenarioDescription = proposal.scenario ? describeScenario(proposal.scenario) : null;
 
   async function run(action: "accept" | "reject") {
     setBusy(action);
@@ -137,6 +158,12 @@ export function SchedulePreview({
         {proposal.reason && (
           <Callout tone="info" title="Why this changed">
             {proposal.reason}
+          </Callout>
+        )}
+
+        {scenarioDescription && (
+          <Callout tone="info" title="Based on temporary assumptions">
+            {scenarioDescription}
           </Callout>
         )}
 
@@ -207,11 +234,11 @@ function ProposalCalendar({
   const [anchor, setAnchor] = React.useState(firstWeek);
 
   const days = React.useMemo(
-    () => Array.from({ length: 7 }, (_, index) => new Date(anchor.getTime() + index * DAY_MS)),
+    () => Array.from({ length: 7 }, (_, index) => addCalendarDays(anchor, index)),
     [anchor],
   );
   const rangeEnd = React.useMemo(
-    () => new Date(anchor.getTime() + 7 * DAY_MS),
+    () => addCalendarDays(anchor, 7),
     [anchor],
   );
   const visibleDays = React.useMemo(() => new Set(days.map(dayKey)), [days]);
@@ -277,7 +304,7 @@ function ProposalCalendar({
         intervals.forEach((interval, index) => {
           for (const day of days) {
             const dayStart = new Date(day);
-            const dayEnd = new Date(dayStart.getTime() + DAY_MS);
+            const dayEnd = addCalendarDays(dayStart, 1);
             const start = interval.start < dayStart ? dayStart : interval.start;
             const end = interval.end > dayEnd ? dayEnd : interval.end;
             if (end <= start) continue;
@@ -333,7 +360,7 @@ function ProposalCalendar({
             variant="ghost"
             size="icon-sm"
             className="rounded-e-none"
-            onClick={() => setAnchor(new Date(anchor.getTime() - 7 * DAY_MS))}
+            onClick={() => setAnchor(addCalendarDays(anchor, -7))}
             disabled={!canGoBack}
             aria-label="Previous week"
           >
@@ -343,7 +370,7 @@ function ProposalCalendar({
             variant="ghost"
             size="icon-sm"
             className="rounded-s-none"
-            onClick={() => setAnchor(new Date(anchor.getTime() + 7 * DAY_MS))}
+            onClick={() => setAnchor(addCalendarDays(anchor, 7))}
             disabled={!canGoForward}
             aria-label="Next week"
           >
