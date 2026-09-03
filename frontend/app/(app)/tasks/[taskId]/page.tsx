@@ -31,7 +31,7 @@ import { TaskFormDialog } from "@/components/task-form-dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { RecordOutcomeDialog } from "@/components/record-outcome-dialog";
 import { SchedulePreview } from "@/components/schedule-preview";
-import { AdaptiveEstimateNote } from "@/components/adaptive-estimate";
+import { PersistedEstimateNote } from "@/components/adaptive-estimate";
 import { SectionHeader } from "@/components/page-kit";
 import { formatClock } from "@/lib/datetime";
 import { applyRecordedOutcome } from "@/lib/outcome-ui";
@@ -64,16 +64,6 @@ export default function TaskDetailPage({
 
   const loadSchedule = useCallback((signal: AbortSignal) => scheduling.getActiveSchedule(signal), []);
   const schedule = useApi(loadSchedule);
-  const loadEstimate = useCallback(
-    (signal: AbortSignal) =>
-      task
-        ? scheduling.getAdaptiveEstimate(task.category, task.originalEstimate, signal)
-        : Promise.resolve(null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [task?.category, task?.originalEstimate],
-  );
-  const estimate = useApi(loadEstimate);
-
   /** Every session belonging to this task, newest first (SPEC §17.4). */
   const taskSessions = (schedule.data?.sessions ?? [])
     .filter((session) => session.taskId === taskId)
@@ -237,7 +227,13 @@ export default function TaskDetailPage({
 
           <Fact label="Original estimate">{formatDuration(task.originalEstimate)}</Fact>
 
-          <Fact label="Planned duration">{formatDuration(task.plannedDuration)}</Fact>
+          {task.adaptiveEstimate !== undefined && (
+            <Fact label="Adaptive estimate">{formatDuration(task.adaptiveEstimate)}</Fact>
+          )}
+
+          <Fact label={`Planned duration · ${task.plannedSource}`}>
+            {formatDuration(task.plannedDuration)}
+          </Fact>
 
           <Fact label="Remaining">{formatDuration(task.remainingDuration)}</Fact>
 
@@ -274,8 +270,15 @@ export default function TaskDetailPage({
         </Callout>
       )}
 
-      {/* ── Adaptive estimate (SPEC §15.6) ─────────────────── */}
-      {estimate.data && <AdaptiveEstimateNote estimate={estimate.data} />}
+      {/* ── Saved adaptive estimate (SPEC §15.6) ───────────── */}
+      {task.adaptiveEstimate !== undefined && (
+        <PersistedEstimateNote
+          originalEstimate={task.originalEstimate}
+          adaptiveEstimate={task.adaptiveEstimate}
+          plannedDuration={task.plannedDuration}
+          plannedSource={task.plannedSource}
+        />
+      )}
 
       {/* ── Session history (SPEC §17.4) ───────────────────── */}
       <section>

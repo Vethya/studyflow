@@ -81,6 +81,37 @@ export function AdaptiveEstimateNote({
   );
 }
 
+/**
+ * Explains the immutable estimate snapshot saved with a task. Unlike a live
+ * preview, it deliberately avoids history counts and other model diagnostics.
+ */
+export function PersistedEstimateNote({
+  originalEstimate,
+  adaptiveEstimate,
+  plannedDuration,
+  plannedSource,
+}: {
+  originalEstimate: number;
+  adaptiveEstimate: number;
+  plannedDuration: number;
+  plannedSource: "Original" | "Adaptive";
+}) {
+  const usingAdaptive = plannedSource === "Adaptive";
+
+  return (
+    <Callout tone="info" icon={Sparkles} title="Your saved task plan">
+      <p>
+        Your estimate was <strong className="font-medium text-foreground">{formatDuration(originalEstimate)}</strong>.
+        {" "}StudyFlow suggested <strong className="font-medium text-foreground">{formatDuration(adaptiveEstimate)}</strong>,
+        {" "}and you chose to schedule with {usingAdaptive ? "the suggestion" : "your estimate"}.
+      </p>
+      <p className="mt-2 text-xs">
+        Planned duration: <strong className="font-medium text-foreground">{formatDuration(plannedDuration)}</strong>.
+      </p>
+    </Callout>
+  );
+}
+
 function Choice({
   label,
   active,

@@ -12,6 +12,22 @@ const CATEGORY_FROM_WIRE: Record<WireTaskCategory, Category> = {
 };
 
 /**
+ * Keeps a student's original estimate separate from the source chosen for
+ * planning. The backend resolves the matching adaptive snapshot; the form
+ * must never replace the student's entered minutes with that suggestion.
+ */
+export function resolveEstimateSelection(
+  originalEstimate: number,
+  estimate: AdaptiveEstimate | null,
+  choice: "original" | "adaptive",
+): { originalEstimate: number; plannedSource: "Original" | "Adaptive" } {
+  return {
+    originalEstimate,
+    plannedSource: choice === "adaptive" && estimate ? "Adaptive" : "Original",
+  };
+}
+
+/**
  * Converts a student-safe adaptive preview into the explanation shape the UI
  * needs. An unavailable or incomplete preview deliberately stays hidden.
  */
