@@ -6,6 +6,12 @@ const dateTime: JsonSchema = {
   description: "An ISO-8601 datetime with an explicit timezone offset.",
 };
 
+const clockTime: JsonSchema = {
+  type: "string",
+  pattern: "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+  description: "A local clock time in 24-hour HH:mm format.",
+};
+
 const scenarioAvailabilityItem: JsonSchema = {
   type: "object",
   additionalProperties: false,
@@ -91,6 +97,120 @@ export const addTaskSchema: JsonSchema = {
     original_estimate_minutes: { type: "integer", minimum: 1, maximum: 100_000 },
   },
   required: ["title", "category", "priority", "deadline_at", "original_estimate_minutes"],
+};
+
+const recurringWindowSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    day: {
+      type: "string",
+      enum: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+    },
+    start_time: clockTime,
+    end_time: clockTime,
+  },
+  required: ["day", "start_time", "end_time"],
+};
+
+const blockedPeriodDraftSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    starts_at: dateTime,
+    ends_at: dateTime,
+    reason: { type: ["string", "null"], maxLength: 200 },
+  },
+  required: ["starts_at", "ends_at"],
+};
+
+const blockedPeriodUpdateSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    period_id: { type: "string", format: "uuid" },
+    starts_at: dateTime,
+    ends_at: dateTime,
+    reason: { type: ["string", "null"], maxLength: 200 },
+  },
+  required: ["period_id", "starts_at", "ends_at"],
+};
+
+const blockedPeriodRemovalSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    period_id: { type: "string", format: "uuid" },
+    confirmed: { const: true },
+  },
+  required: ["period_id", "confirmed"],
+};
+
+export const updateStudyTimeSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    confirm_timezone: {
+      const: true,
+      description: "Confirm the timezone detected by StudyFlow for this account.",
+    },
+    recurring_availability: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        replace_all: {
+          const: true,
+          description: "Required because this replaces the complete weekly pattern.",
+        },
+        windows: {
+          type: "array",
+          maxItems: 100,
+          items: recurringWindowSchema,
+        },
+      },
+      required: ["replace_all", "windows"],
+    },
+    blocked_periods: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        add: { type: "array", maxItems: 64, items: blockedPeriodDraftSchema },
+        update: { type: "array", maxItems: 64, items: blockedPeriodUpdateSchema },
+        remove: { type: "array", maxItems: 64, items: blockedPeriodRemovalSchema },
+      },
+    },
+  },
+  anyOf: [
+    { required: ["confirm_timezone"] },
+    { required: ["recurring_availability"] },
+    { required: ["blocked_periods"] },
+  ],
+};
+
+export const updateTaskSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    task_id: { type: "string", format: "uuid" },
+    title: { type: "string", minLength: 1, maxLength: 200 },
+    category: {
+      type: "string",
+      enum: ["Assignment", "Reading", "Exam Preparation", "Project", "Research/Writing", "Other"],
+    },
+    priority: { type: "string", enum: ["Low", "Medium", "High"] },
+    course: { type: ["string", "null"], maxLength: 100 },
+    notes: { type: ["string", "null"], maxLength: 2000 },
+    deadline_at: dateTime,
+    original_estimate_minutes: { type: "integer", minimum: 1, maximum: 100_000 },
+  },
+  required: [
+    "task_id",
+    "title",
+    "category",
+    "priority",
+    "deadline_at",
+    "original_estimate_minutes",
+  ],
 };
 
 export const scenarioInputSchema: JsonSchema = {

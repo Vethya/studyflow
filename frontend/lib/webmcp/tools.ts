@@ -3,8 +3,14 @@ import { assessCapacity } from "@/lib/capacity";
 import { notifyStudyFlowDataChanged } from "@/lib/data-events";
 import { toEffortProgress } from "@/lib/api/mappers";
 import { CATEGORIES, PRIORITIES } from "@/types";
+import type { UnavailablePeriodDraft, WindowDraft } from "@/lib/api/availability";
 import type { AcademicTask, Category, Priority, TaskFormData } from "@/types/task";
-import type { ScenarioOverrides, WebMcpResult } from "./contracts";
+import type {
+  ScenarioOverrides,
+  StudyTimeUpdateResult,
+  UpdateTaskResult,
+  WebMcpResult,
+} from "./contracts";
 import { WEBMCP_TOOL_NAMES } from "./contracts";
 import {
   addTaskSchema,
@@ -12,6 +18,8 @@ import {
   proposalIdSchema,
   scenarioInputSchema,
   sessionIdSchema,
+  updateStudyTimeSchema,
+  updateTaskSchema,
 } from "./schemas";
 import type { WebMcpTool } from "./types";
 import { signalFor } from "./types";
@@ -63,6 +71,163 @@ function scenarioInput(input: unknown, required: boolean): ScenarioOverrides | u
 
 function idInput(input: unknown, name: "proposal_id" | "session_id"): string {
   return requiredString(inputObject(input), name);
+}
+
+const WEEKDAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+] as const;
+type WeekdayName = (typeof WEEKDAYS)[number];
+const CLOCK_TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+
+function clockTimeInput(value: unknown, name: string): string {
+  if (typeof value !== "string" || !CLOCK_TIME.test(value)) {
+    throw new Error(`${name} must be a 24-hour HH:mm time.`);
+  }
+  return value;
+}
+
+function weekdayInput(value: unknown): number {
+  if (typeof value !== "string" || !WEEKDAYS.includes(value as WeekdayName)) {
+    throw new Error("day must be a weekday name such as Monday.");
+  }
+  return WEEKDAYS.indexOf(value as WeekdayName);
+}
+
+function optionalReason(input: InputObject): string | undefined {
+  const value = input.reason;
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") throw new Error("reason must be a string or null.");
+  return value.trim() || undefined;
+}
+
+function arrayInput(input: InputObject, name: string): unknown[] {
+  const value = input[name];
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error(`${name} must be an array.`);
+  return value;
+}
+
+function recurringWindowInputs(input: InputObject): WindowDraft[] | undefined {
+  if (input.recurring_availability === undefined) return undefined;
+  const availabilityInput = inputObject(input.recurring_availability);
+  if (availabilityInput.replace_all !== true) {
+    throw new Error("recurring_availability.replace_all must be true.");
+  }
+  return arrayInput(availabilityInput, "windows").map((item, index) => {
+    const window = inputObject(item);
+    return {
+      dayOfWeek: weekdayInput(window.day),
+      startTime: clockTimeInput(window.start_time, `windows[${index}].start_time`),
+      endTime: clockTimeInput(window.end_time, `windows[${index}].end_time`),
+    };
+  });
+}
+
+interface BlockedPeriodUpdate {
+  periodId: string;
+  draft: UnavailablePeriodDraft;
+}
+
+interface BlockedPeriodChanges {
+  add: UnavailablePeriodDraft[];
+  update: BlockedPeriodUpdate[];
+  remove: string[];
+}
+
+function blockedPeriodDraft(input: unknown): UnavailablePeriodDraft {
+  const period = inputObject(input);
+  return {
+    startsAt: requiredString(period, "starts_at"),
+    endsAt: requiredString(period, "ends_at"),
+    reason: optionalReason(period),
+  };
+}
+
+function blockedPeriodChanges(input: InputObject): BlockedPeriodChanges | null {
+  if (input.blocked_periods === undefined) return null;
+  const changesInput = inputObject(input.blocked_periods);
+  const add = arrayInput(changesInput, "add").map(blockedPeriodDraft);
+  const update = arrayInput(changesInput, "update").map((item) => {
+    const period = inputObject(item);
+    return {
+      periodId: requiredString(period, "period_id"),
+      draft: blockedPeriodDraft(period),
+    };
+  });
+  const remove = arrayInput(changesInput, "remove").map((item) => {
+    const period = inputObject(item);
+    if (period.confirmed !== true) {
+      throw new Error("Removing a blocked period requires confirmed: true.");
+    }
+    return requiredString(period, "period_id");
+  });
+  if (add.length + update.length + remove.length === 0) {
+    throw new Error("blocked_periods must include at least one add, update, or remove.");
+  }
+  return { add, update, remove };
+}
+
+async function applyStudyTimeChanges(
+  input: unknown,
+  signal: AbortSignal,
+): Promise<StudyTimeUpdateResult> {
+  const record = inputObject(input);
+  const shouldConfirmTimezone = record.confirm_timezone !== undefined;
+  if (shouldConfirmTimezone && record.confirm_timezone !== true) {
+    throw new Error("confirm_timezone must be true when provided.");
+  }
+  const recurringWindows = recurringWindowInputs(record);
+  const blockedChanges = blockedPeriodChanges(record);
+  if (!shouldConfirmTimezone && recurringWindows === undefined && blockedChanges === null) {
+    throw new Error("Provide at least one study-time change.");
+  }
+
+  if (shouldConfirmTimezone) await availability.confirmTimezone(signal);
+
+  const savedWindows =
+    recurringWindows === undefined
+      ? null
+      : await availability.replaceWindows(recurringWindows, signal);
+  const addedBlockedPeriods = [] as StudyTimeUpdateResult["added_blocked_periods"];
+  const updatedBlockedPeriods = [] as StudyTimeUpdateResult["updated_blocked_periods"];
+  const removedBlockedPeriodIds: string[] = [];
+  const invalidatedFutureSessionIds: string[] = [];
+
+  if (blockedChanges !== null) {
+    for (const draft of blockedChanges.add) {
+      const change = await availability.createUnavailablePeriod(draft, signal);
+      addedBlockedPeriods.push(change.period);
+      invalidatedFutureSessionIds.push(...change.invalidatedFutureSessionIds);
+    }
+    for (const changeInput of blockedChanges.update) {
+      const change = await availability.updateUnavailablePeriod(
+        changeInput.periodId,
+        changeInput.draft,
+        signal,
+      );
+      updatedBlockedPeriods.push(change.period);
+      invalidatedFutureSessionIds.push(...change.invalidatedFutureSessionIds);
+    }
+    for (const periodId of blockedChanges.remove) {
+      await availability.deleteUnavailablePeriod(periodId, signal);
+      removedBlockedPeriodIds.push(periodId);
+    }
+  }
+
+  return {
+    timezone_confirmed: shouldConfirmTimezone,
+    recurring_windows: savedWindows,
+    added_blocked_periods: addedBlockedPeriods,
+    updated_blocked_periods: updatedBlockedPeriods,
+    removed_blocked_period_ids: removedBlockedPeriodIds,
+    invalidated_future_session_ids: [...new Set(invalidatedFutureSessionIds)],
+  };
 }
 
 function setupStatus(
@@ -179,6 +344,48 @@ export function createStudyFlowTools(): WebMcpTool[] {
         const task = await tasks.createTask(taskForm(input), signalFor(options));
         notifyStudyFlowDataChanged();
         return result(
+          { task },
+          { active_schedule_changed: false, requires_user_review: false, persisted: true },
+        );
+      },
+    },
+    {
+      name: WEBMCP_TOOL_NAMES.updateStudyTime,
+      title: "Update Study Time",
+      description:
+        "Update the authenticated student's timezone confirmation, recurring weekly study windows, and one-off blocked periods. This changes scheduling inputs only; it never generates or activates a study schedule. Recurring availability is replaced as a complete weekly pattern, and removing a blocked period requires explicit confirmation.",
+      inputSchema: updateStudyTimeSchema,
+      annotations: writeUntrusted,
+      execute: async (input, options) => {
+        const changes = await applyStudyTimeChanges(input, signalFor(options));
+        notifyStudyFlowDataChanged();
+        const activeScheduleChanged = changes.invalidated_future_session_ids.length > 0;
+        return result(
+          changes,
+          {
+            active_schedule_changed: activeScheduleChanged,
+            requires_user_review: activeScheduleChanged,
+            persisted: true,
+          },
+        );
+      },
+    },
+    {
+      name: WEBMCP_TOOL_NAMES.updateTask,
+      title: "Update Academic Task",
+      description:
+        "Update an existing academic task. This is a full replacement of its editable fields and does not silently regenerate or activate a study schedule. The original estimate cannot change after work starts.",
+      inputSchema: updateTaskSchema,
+      annotations: writeUntrusted,
+      execute: async (input, options) => {
+        const record = inputObject(input);
+        const task = await tasks.updateTask(
+          requiredString(record, "task_id"),
+          taskForm(record),
+          signalFor(options),
+        );
+        notifyStudyFlowDataChanged();
+        return result<UpdateTaskResult>(
           { task },
           { active_schedule_changed: false, requires_user_review: false, persisted: true },
         );

@@ -1,13 +1,14 @@
 # StudyFlow WebMCP workflow
 
 Phase 1 defines the first complete agent workflow. Phase 2 provides the backend
-scenario engine and endpoints. Phase 3 now registers that workflow in the
-authenticated browser page through the WebMCP imperative API.
+scenario engine and endpoints. Phase 3 registers that workflow in the
+authenticated browser page through the WebMCP imperative API. The current
+workflow exposes nine tools, including grouped study-time setup and task edits.
 
 ## Phase 3 browser integration
 
 When the authenticated app shell mounts, StudyFlow checks for
-`document.modelContext` and registers the seven tools below. Registration is
+`document.modelContext` and registers the nine tools below. Registration is
 scoped to the shell lifetime and is cancelled on logout/unmount. Browsers that
 do not expose WebMCP simply continue to work as a normal StudyFlow app.
 
@@ -49,9 +50,12 @@ The agent helps a student recover a realistic study plan:
 5. Let the student accept or reject the proposal.
 6. Record a missed session and present the resulting recovery proposal.
 
-Recurring availability is configured through the normal StudyFlow interface.
-WebMCP reads it as planning context. There is no availability-setting tool in
-the first workflow.
+The agent can configure the student's study-time inputs through one grouped
+tool. It can confirm the detected timezone, replace the complete recurring
+weekly availability pattern, and add, update, or explicitly confirm removal of
+one-off blocked periods. These changes never generate or activate a schedule;
+if existing future sessions are invalidated, the tool reports that the agent
+should draft a replacement plan for review.
 
 ## Tool catalog
 
@@ -102,6 +106,72 @@ Input:
 
 The backend remains the source of truth for validation and timezone-aware
 deadlines.
+
+### `studyflow_update_study_time`
+
+Updates one or more scheduling inputs in a single authenticated action. The
+operations are applied in this order: timezone confirmation, complete recurring
+availability replacement, blocked-period additions, updates, and removals.
+
+Recurring availability uses weekday names and local `HH:mm` times. Supplying
+`recurring_availability` always replaces the full weekly pattern, including
+with an empty `windows` array. Blocked-period removals require
+`confirmed: true` for every period.
+
+Example:
+
+```json
+{
+  "confirm_timezone": true,
+  "recurring_availability": {
+    "replace_all": true,
+    "windows": [
+      { "day": "Monday", "start_time": "18:00", "end_time": "20:00" },
+      { "day": "Wednesday", "start_time": "18:00", "end_time": "20:00" }
+    ]
+  },
+  "blocked_periods": {
+    "add": [
+      {
+        "starts_at": "2026-09-12T09:00:00+07:00",
+        "ends_at": "2026-09-12T17:00:00+07:00",
+        "reason": "Family event"
+      }
+    ],
+    "update": [],
+    "remove": []
+  }
+}
+```
+
+The result returns the saved windows and changed periods. If blocked-period
+changes invalidate future sessions, `invalidated_future_session_ids` is
+populated and the result requires a new draft for student review.
+
+### `studyflow_update_task`
+
+Full-replaces an existing task's editable fields. It requires the task ID and
+the same fields as `studyflow_add_task`, so an agent should read plan state
+first and preserve fields the student did not ask to change.
+
+Example:
+
+```json
+{
+  "task_id": "00000000-0000-0000-0000-000000000000",
+  "title": "Prepare biology exam notes",
+  "category": "Exam Preparation",
+  "priority": "High",
+  "course": "Biology 201",
+  "notes": "Review chapters 4 through 8",
+  "deadline_at": "2026-09-11T23:59:00+07:00",
+  "original_estimate_minutes": 210
+}
+```
+
+Updating a task does not silently regenerate or activate a schedule. If the
+change affects the plan, the agent should draft a new proposal and ask the
+student to review it.
 
 ### `studyflow_simulate_plan`
 

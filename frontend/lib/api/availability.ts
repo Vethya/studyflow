@@ -25,7 +25,10 @@ export interface WindowDraft {
  * create or delete. Overlapping windows on the same day are merged server-side,
  * so the returned list may be shorter than what was sent. Maximum 100 windows.
  */
-export async function replaceWindows(windows: WindowDraft[]): Promise<AvailabilityWindow[]> {
+export async function replaceWindows(
+  windows: WindowDraft[],
+  signal?: AbortSignal,
+): Promise<AvailabilityWindow[]> {
   const wire = await apiJson<WireAvailabilityWindow[]>("/availability/windows", {
     method: "PUT",
     body: {
@@ -35,6 +38,7 @@ export async function replaceWindows(windows: WindowDraft[]): Promise<Availabili
         end_time: window.endTime,
       })),
     },
+    signal,
   });
   return wire.map(toAvailabilityWindow);
 }
@@ -43,10 +47,11 @@ export async function replaceWindows(windows: WindowDraft[]): Promise<Availabili
  * Acknowledges the detected timezone. Required once when
  * `availability_confirmation_required` is set on the study preferences.
  */
-export function confirmTimezone(): Promise<void> {
+export function confirmTimezone(signal?: AbortSignal): Promise<void> {
   return apiVoid("/availability/confirm-timezone", {
     method: "POST",
     body: { confirmed: true },
+    signal,
   });
 }
 
@@ -92,11 +97,13 @@ function toDraftBody(draft: UnavailablePeriodDraft) {
 
 export async function createUnavailablePeriod(
   draft: UnavailablePeriodDraft,
+  signal?: AbortSignal,
 ): Promise<UnavailablePeriodChange> {
   return toChange(
     await apiJson<WireUnavailablePeriodChange>("/availability/unavailable-periods", {
       method: "POST",
       body: toDraftBody(draft),
+      signal,
     }),
   );
 }
@@ -104,18 +111,23 @@ export async function createUnavailablePeriod(
 export async function updateUnavailablePeriod(
   periodId: string,
   draft: UnavailablePeriodDraft,
+  signal?: AbortSignal,
 ): Promise<UnavailablePeriodChange> {
   return toChange(
     await apiJson<WireUnavailablePeriodChange>(
       `/availability/unavailable-periods/${periodId}`,
-      { method: "PUT", body: toDraftBody(draft) },
+      { method: "PUT", body: toDraftBody(draft), signal },
     ),
   );
 }
 
 /** Requires explicit confirmation; the backend rejects the call without it. */
-export function deleteUnavailablePeriod(periodId: string): Promise<void> {
+export function deleteUnavailablePeriod(
+  periodId: string,
+  signal?: AbortSignal,
+): Promise<void> {
   return apiVoid(`/availability/unavailable-periods/${periodId}?confirmed=true`, {
     method: "DELETE",
+    signal,
   });
 }

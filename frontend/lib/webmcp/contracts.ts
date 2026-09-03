@@ -16,6 +16,8 @@ export const WEBMCP_TOOL_NAMES = {
   acceptPlan: "studyflow_accept_plan",
   rejectPlan: "studyflow_reject_plan",
   recordMissed: "studyflow_record_missed",
+  updateStudyTime: "studyflow_update_study_time",
+  updateTask: "studyflow_update_task",
 } as const;
 
 export type WebMcpToolName = (typeof WEBMCP_TOOL_NAMES)[keyof typeof WEBMCP_TOOL_NAMES];
@@ -102,4 +104,17 @@ export interface RejectPlanResult {
 export interface RecordMissedResult {
   session_id: string;
   recovery_proposal: ScheduleProposal | null;
+}
+
+export interface StudyTimeUpdateResult {
+  timezone_confirmed: boolean;
+  recurring_windows: AvailabilityWindow[] | null;
+  added_blocked_periods: UnavailablePeriod[];
+  updated_blocked_periods: UnavailablePeriod[];
+  removed_blocked_period_ids: string[];
+  invalidated_future_session_ids: string[];
+}
+
+export interface UpdateTaskResult {
+  task: AcademicTask;
 }

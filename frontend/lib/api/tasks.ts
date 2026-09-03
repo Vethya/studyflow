@@ -72,10 +72,15 @@ export async function createTask(
  * A full replacement, not a patch: every field must be supplied. Changing
  * `originalEstimate` after the task has been started fails with 409.
  */
-export async function updateTask(taskId: string, form: TaskFormData): Promise<AcademicTask> {
+export async function updateTask(
+  taskId: string,
+  form: TaskFormData,
+  signal?: AbortSignal,
+): Promise<AcademicTask> {
   const wire = await apiJson<WireAcademicTask>(`/tasks/${taskId}`, {
     method: "PUT",
     body: toWireTask(form),
+    signal,
   });
   return toAcademicTask(wire);
 }
