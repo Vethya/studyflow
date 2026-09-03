@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import case, func, select
+from sqlalchemy import Select, case, func, select
 
 from studyflow.auth.repositories import SessionTransactions
 from studyflow.database.models import AcademicTask, StudentAccount
@@ -15,6 +15,36 @@ from studyflow.database.models import StudySession as SessionRow
 from studyflow.database.models import StudySessionOutcome as OutcomeRow
 from studyflow.estimation.model import CorrectionPrediction, HistoryRecord, PredictionEvaluation
 from studyflow.tasks.service import TaskCategory
+
+
+def _evaluation_statement(
+    account_id: UUID,
+) -> Select[tuple[PredictionRow, datetime | None, int]]:
+    """Select prediction evaluations with PostgreSQL-valid deterministic ordering."""
+    confirmed_minutes = func.coalesce(
+        func.sum(
+            case(
+                (OutcomeRow.kind.in_(("completed", "delayed")), OutcomeRow.actual_minutes),
+                else_=0,
+            )
+        ),
+        0,
+    ).label("actual_duration")
+    return (
+        select(PredictionRow, AcademicTask.completed_at, confirmed_minutes)
+        .join(AcademicTask, AcademicTask.id == PredictionRow.task_id)
+        .outerjoin(
+            SessionRow,
+            (SessionRow.task_id == AcademicTask.id) & (SessionRow.account_id == account_id),
+        )
+        .outerjoin(OutcomeRow, OutcomeRow.session_id == SessionRow.id)
+        .where(
+            PredictionRow.account_id == account_id,
+            AcademicTask.account_id == account_id,
+        )
+        .group_by(PredictionRow.task_id, AcademicTask.completed_at, AcademicTask.id)
+        .order_by(AcademicTask.completed_at, AcademicTask.id)
+    )
 
 
 class AdaptivePredictionRepository(Protocol):
@@ -95,31 +125,8 @@ class SqlAlchemyAdaptivePredictionRepository:
             ]
 
     async def evaluations(self, account_id: UUID) -> list[PredictionEvaluation]:
-        confirmed_minutes = func.coalesce(
-            func.sum(
-                case(
-                    (OutcomeRow.kind.in_(("completed", "delayed")), OutcomeRow.actual_minutes),
-                    else_=0,
-                )
-            ),
-            0,
-        ).label("actual_duration")
         async with self._database.transaction() as session:
-            rows = await session.execute(
-                select(PredictionRow, AcademicTask.completed_at, confirmed_minutes)
-                .join(AcademicTask, AcademicTask.id == PredictionRow.task_id)
-                .outerjoin(
-                    SessionRow,
-                    (SessionRow.task_id == AcademicTask.id) & (SessionRow.account_id == account_id),
-                )
-                .outerjoin(OutcomeRow, OutcomeRow.session_id == SessionRow.id)
-                .where(
-                    PredictionRow.account_id == account_id,
-                    AcademicTask.account_id == account_id,
-                )
-                .group_by(PredictionRow.task_id, AcademicTask.completed_at)
-                .order_by(AcademicTask.completed_at, AcademicTask.id)
-            )
+            rows = await session.execute(_evaluation_statement(account_id))
             evaluations: list[PredictionEvaluation] = []
             for prediction, completed_at, actual_duration in rows:
                 actual_minutes = int(actual_duration)

@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.dialects import postgresql
 
 from studyflow.database import Base, Database
 from studyflow.database.models import (
@@ -16,7 +17,10 @@ from studyflow.database.models import (
 from studyflow.database.models import StudySession as SessionRow
 from studyflow.database.models import StudySessionOutcome as OutcomeRow
 from studyflow.estimation import CorrectionPrediction
-from studyflow.estimation.repositories import SqlAlchemyAdaptivePredictionRepository
+from studyflow.estimation.repositories import (
+    SqlAlchemyAdaptivePredictionRepository,
+    _evaluation_statement,
+)
 from studyflow.tasks.service import TaskCategory
 
 NOW = datetime(2026, 9, 3, 12, tzinfo=UTC)
@@ -126,6 +130,18 @@ def _prediction(
         history_scope=scope,  # type: ignore[arg-type]
         history_count=history_count,
     )
+
+
+def test_evaluations_postgresql_groups_the_deterministic_task_id_order_key() -> None:
+    statement = _evaluation_statement(uuid4())
+
+    compiled = str(statement.compile(dialect=postgresql.dialect()))  # type: ignore[no-untyped-call]
+
+    assert (
+        "GROUP BY adaptive_estimation_predictions.task_id, academic_tasks.completed_at, "
+        "academic_tasks.id" in compiled
+    )
+    assert "ORDER BY academic_tasks.completed_at, academic_tasks.id" in compiled
 
 
 @pytest.mark.anyio
