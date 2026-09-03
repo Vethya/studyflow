@@ -286,6 +286,7 @@ class SqlAlchemyAcademicTaskRepository:
             row.deadline_at = task.deadline_at
             row.original_estimate_minutes = task.original_estimate_minutes
             if row.estimate_frozen_at is None:
+                self._apply_snapshot(row, task.original_estimate_minutes, None)
                 preview = await self._capture_estimate(
                     session,
                     account_id,

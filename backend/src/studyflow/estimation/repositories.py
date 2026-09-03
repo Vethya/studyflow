@@ -71,6 +71,8 @@ class AdaptivePredictionRepository(Protocol):
         exposed: bool,
     ) -> bool: ...
 
+    async def remove_prediction(self, account_id: UUID, task_id: UUID) -> bool: ...
+
     async def acknowledgment(self, account_id: UUID, category: TaskCategory) -> Decimal | None: ...
 
     async def acknowledge(
@@ -205,6 +207,25 @@ class SqlAlchemyAdaptivePredictionRepository:
                 await session.delete(existing)
                 await session.flush()
             session.add(self._prediction_row(task, prediction, exposed))
+            return True
+
+    async def remove_prediction(self, account_id: UUID, task_id: UUID) -> bool:
+        async with self._database.transaction() as session:
+            account = await session.get(StudentAccount, account_id, with_for_update=True)
+            if account is None:
+                return False
+            task = await session.scalar(
+                select(AcademicTask)
+                .where(AcademicTask.id == task_id, AcademicTask.account_id == account_id)
+                .with_for_update()
+            )
+            if task is None or task.estimate_frozen_at is not None or task.completed_at is not None:
+                return False
+            existing = await session.get(PredictionRow, task_id, with_for_update=True)
+            if existing is not None:
+                if existing.account_id != account_id:
+                    return False
+                await session.delete(existing)
             return True
 
     async def acknowledgment(self, account_id: UUID, category: TaskCategory) -> Decimal | None:
@@ -348,6 +369,24 @@ class SessionAdaptivePredictionRepository:
         exposed: bool,
     ) -> bool:
         return await self._store_prediction(account_id, task_id, prediction, exposed, replace=True)
+
+    async def remove_prediction(self, account_id: UUID, task_id: UUID) -> bool:
+        account = await self._session.get(StudentAccount, account_id)
+        if account is None:
+            return False
+        task = await self._session.scalar(
+            select(AcademicTask)
+            .where(AcademicTask.id == task_id, AcademicTask.account_id == account_id)
+            .with_for_update()
+        )
+        if task is None or task.estimate_frozen_at is not None or task.completed_at is not None:
+            return False
+        existing = await self._session.get(PredictionRow, task_id, with_for_update=True)
+        if existing is not None:
+            if existing.account_id != account_id:
+                return False
+            await self._session.delete(existing)
+        return True
 
     async def _store_prediction(
         self,
