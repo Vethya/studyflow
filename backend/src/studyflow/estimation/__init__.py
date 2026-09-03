@@ -7,8 +7,20 @@ from studyflow.estimation.model import (
     median_correction,
     qualifies,
 )
+from studyflow.estimation.repositories import AdaptivePredictionRepository
+from studyflow.estimation.service import (
+    AdaptiveEstimatePreview,
+    AdaptiveEstimateUnavailableError,
+    AdaptiveEstimator,
+    AdaptivePredictionCaptureError,
+)
 
 __all__ = [
+    "AdaptiveEstimatePreview",
+    "AdaptiveEstimateUnavailableError",
+    "AdaptiveEstimator",
+    "AdaptivePredictionCaptureError",
+    "AdaptivePredictionRepository",
     "CorrectionPrediction",
     "HistoryRecord",
     "PredictionEvaluation",
