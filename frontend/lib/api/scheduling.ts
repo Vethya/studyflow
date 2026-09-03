@@ -10,29 +10,28 @@
  *   POST   /schedule-proposals/{id}/accept
  *   POST   /schedule-proposals/{id}/reject
  *
- * Two things the backend does not expose yet, handled here rather than in the
+ * One thing the backend does not expose yet, handled here rather than in the
  * screens so the seam stays in one place:
  *
  *  - **Effort progress has no endpoint.** `listEffortProgress` derives its
  *    figures from tasks plus accepted sessions. The arithmetic is SPEC §13's,
  *    but it runs in the browser.
- *  - **Adaptive estimation has no endpoint.** `getAdaptiveEstimate` returns
- *    null, so the §15.6 explanation and the §15.4 acknowledgement stay hidden
- *    until the model ships. Returning null rather than a guess keeps the UI
- *    honest — it simply does not claim to know anything about your history.
  */
 
 import { apiJson, apiVoid, ApiError, buildQuery } from "./client";
 import { toWireOutcome } from "./outcome-contract";
+import { toAdaptiveEstimate } from "./adaptive-contract";
 import { listTasks } from "./tasks";
 import {
   toEffortProgress,
   toScheduleProposal,
   toStudySession,
+  toWireCategory,
 } from "./mappers";
 import type {
   WireScheduleProposal,
   WireScheduleScenario,
+  WireAdaptiveEstimatePreview,
   WireSessionOutcomeRecordingResponse,
   WireScheduleSimulation,
   WireStudySession,
@@ -251,19 +250,26 @@ export async function listEffortProgress(
 }
 
 
-// ─── Adaptive estimation (not implemented server-side) ──────────
-// The parameters are kept so the signature matches what the real endpoint
-// will need; nothing reads them until it exists.
-/* eslint-disable @typescript-eslint/no-unused-vars */
+// ─── Adaptive estimation ────────────────────────────────────────
 export async function getAdaptiveEstimate(
-  _category: Category,
-  _originalEstimate: number,
-  _signal?: AbortSignal,
+  category: Category,
+  originalEstimate: number,
+  signal?: AbortSignal,
 ): Promise<AdaptiveEstimate | null> {
-  return null;
+  const wire = await apiJson<WireAdaptiveEstimatePreview>(
+    `/adaptive-estimates/preview${buildQuery({
+      category: toWireCategory(category),
+      original_minutes: originalEstimate,
+    })}`,
+    { signal },
+  );
+  return toAdaptiveEstimate(wire);
 }
 
-export async function acknowledgeAdjustment(_category: Category): Promise<void> {
-  // No-op until the estimation model ships.
+export function acknowledgeAdjustment(category: Category, signal?: AbortSignal): Promise<void> {
+  return apiVoid("/adaptive-estimates/acknowledgments", {
+    method: "POST",
+    body: { category: toWireCategory(category) },
+    signal,
+  });
 }
-/* eslint-enable @typescript-eslint/no-unused-vars */

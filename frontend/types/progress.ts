@@ -32,6 +32,8 @@ export interface AdaptiveEstimate {
   adaptiveEstimate: number;
   /** The value that will actually be scheduled. */
   plannedDuration: number;
+  /** The original or adaptive estimate currently selected for scheduling. */
+  plannedSource: "Original" | "Adaptive";
   /** `adaptiveEstimate / originalEstimate`. */
   factor: number;
   /** How many completed tasks the correction is drawn from. */

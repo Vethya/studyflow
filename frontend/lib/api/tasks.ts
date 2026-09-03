@@ -8,7 +8,7 @@ import {
   toWireStatus,
 } from "./mappers";
 import type { AcademicTask, Category, Priority, TaskFormData, TaskStatus } from "@/types/task";
-import type { WireAcademicTask } from "./wire";
+import type { WireAcademicTask, WireAcademicTaskRequest, WirePlannedSource } from "./wire";
 
 export interface TaskFilters {
   course?: string;
@@ -44,7 +44,7 @@ export async function getTask(taskId: string, signal?: AbortSignal): Promise<Aca
  * `deadline` must carry an explicit UTC offset — a bare local datetime such as
  * the one an `<input type="datetime-local">` produces is rejected with 422.
  */
-function toWireTask(form: TaskFormData) {
+function toWireTask(form: TaskFormData): WireAcademicTaskRequest {
   return {
     title: form.title.trim(),
     category: toWireCategory(form.category),
@@ -53,6 +53,9 @@ function toWireTask(form: TaskFormData) {
     notes: form.notes?.trim() || null,
     deadline_at: form.deadline,
     original_estimate_minutes: form.originalEstimate,
+    ...(form.plannedSource
+      ? { planned_source: form.plannedSource.toLowerCase() as WirePlannedSource }
+      : {}),
   };
 }
 
