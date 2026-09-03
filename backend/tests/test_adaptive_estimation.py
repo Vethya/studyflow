@@ -143,6 +143,45 @@ def test_median_correction_keeps_uncapped_factors() -> None:
     assert prediction.predicted_minutes == 240
 
 
+def test_median_correction_clamps_a_zero_minute_rounding_to_one() -> None:
+    history = [
+        HistoryRecord(
+            task_id=UUID(int=index + 1),
+            category=TaskCategory.OTHER,
+            original_minutes=1_000,
+            actual_minutes=1,
+            completed_at=NOW + timedelta(minutes=index),
+        )
+        for index in range(5)
+    ]
+
+    prediction = median_correction(history, TaskCategory.OTHER, 1)
+
+    assert prediction is not None
+    assert prediction.correction_factor == Decimal("0.001")
+    assert prediction.predicted_minutes == 1
+
+
+def test_median_correction_clamps_overflow_without_capping_the_factor() -> None:
+    overflow_minutes = 2_147_483_648
+    history = [
+        HistoryRecord(
+            task_id=UUID(int=index + 1),
+            category=TaskCategory.OTHER,
+            original_minutes=1,
+            actual_minutes=overflow_minutes,
+            completed_at=NOW + timedelta(minutes=index),
+        )
+        for index in range(5)
+    ]
+
+    prediction = median_correction(history, TaskCategory.OTHER, 1)
+
+    assert prediction is not None
+    assert prediction.correction_factor == Decimal(overflow_minutes)
+    assert prediction.predicted_minutes == 2_147_483_647
+
+
 def test_median_correction_orders_completion_ties_by_task_id() -> None:
     history = [
         HistoryRecord(UUID(int=1), TaskCategory.OTHER, 100, 1_000, NOW),
