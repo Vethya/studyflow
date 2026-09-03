@@ -6,6 +6,8 @@ from enum import StrEnum
 from typing import Protocol
 from uuid import UUID
 
+from studyflow.scheduling.scenarios import ScheduleScenario
+
 
 class ProposalKind(StrEnum):
     GENERATION = "generation"
@@ -89,6 +91,7 @@ class NewScheduleProposal:
     input_fingerprint: str
     sessions: tuple[NewProposedSession, ...]
     allocations: tuple[NewTaskAllocation, ...]
+    scenario: ScheduleScenario | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.kind, ProposalKind):
@@ -157,6 +160,7 @@ class ScheduleProposalRecord:
     created_at: datetime
     sessions: tuple[StudySessionRecord, ...]
     allocations: tuple[TaskAllocationRecord, ...]
+    scenario: ScheduleScenario | None = None
 
 
 class ScheduleProposalRepository(Protocol):

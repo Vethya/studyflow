@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -44,6 +45,7 @@ class ScheduleProposal(Base):
     revision_reason: Mapped[str | None] = mapped_column(String(500))
     status: Mapped[str] = mapped_column(String(16))
     input_fingerprint: Mapped[str] = mapped_column(String(64))
+    scenario: Mapped[dict[str, object] | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

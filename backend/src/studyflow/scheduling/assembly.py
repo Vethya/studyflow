@@ -14,6 +14,7 @@ from studyflow.scheduling.contracts import (
     SessionDemand,
     TaskPriority,
 )
+from studyflow.scheduling.scenarios import ScenarioAvailabilityWindow, ScenarioBlockedPeriod
 from studyflow.scheduling.splitting import split_task_sessions
 from studyflow.tasks.service import AcademicTaskRecord, TaskStatus
 
@@ -46,6 +47,68 @@ def _minute_bounds(value: datetime) -> tuple[int, int]:
     return floor, floor + bool(remainder)
 
 
+def _merge_intervals(intervals: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:
+    merged: list[list[int]] = []
+    for start, end in sorted(intervals):
+        if end <= start:
+            continue
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return [(start, end) for start, end in merged]
+
+
+def _subtract(
+    available: Sequence[tuple[int, int]], blocked: Sequence[tuple[int, int]]
+) -> list[tuple[int, int]]:
+    remaining = list(available)
+    for blocked_start, blocked_end in blocked:
+        fragments: list[tuple[int, int]] = []
+        for available_start, available_end in remaining:
+            if blocked_end <= available_start or blocked_start >= available_end:
+                fragments.append((available_start, available_end))
+                continue
+            if available_start < blocked_start:
+                fragments.append((available_start, blocked_start))
+            if blocked_end < available_end:
+                fragments.append((blocked_end, available_end))
+        remaining = fragments
+    return remaining
+
+
+def _apply_scenario_calendar(
+    base_windows: Sequence[MinuteWindow],
+    temporary_availability: Sequence[ScenarioAvailabilityWindow],
+    temporary_blocked_periods: Sequence[ScenarioBlockedPeriod],
+    *,
+    planning_start_minute: int,
+    horizon_end_minute: int,
+) -> tuple[MinuteWindow, ...]:
+    available: list[tuple[int, int]] = [(window.start, window.end) for window in base_windows]
+    for window in temporary_availability:
+        start, _ = _minute_bounds(window.starts_at)
+        _, end = _minute_bounds(window.ends_at)
+        start = max(start, planning_start_minute)
+        end = min(end, horizon_end_minute)
+        if start < end:
+            available.append((start, end))
+
+    blocked: list[tuple[int, int]] = []
+    for period in temporary_blocked_periods:
+        start, _ = _minute_bounds(period.starts_at)
+        _, end = _minute_bounds(period.ends_at)
+        start = max(start, planning_start_minute)
+        end = min(end, horizon_end_minute)
+        if start < end:
+            blocked.append((start, end))
+
+    return tuple(
+        MinuteWindow(start, end)
+        for start, end in _subtract(_merge_intervals(available), _merge_intervals(blocked))
+    )
+
+
 def _eligible_tasks(
     tasks: Sequence[AcademicTaskRecord], planning_start_utc: datetime
 ) -> tuple[AcademicTaskRecord, ...]:
@@ -66,6 +129,8 @@ def assemble_schedule_problem(
     preferences: StudyPreferences,
     *,
     planning_start: datetime,
+    temporary_availability: Sequence[ScenarioAvailabilityWindow] = (),
+    temporary_blocked_periods: Sequence[ScenarioBlockedPeriod] = (),
     max_solve_seconds: float = 4.0,
 ) -> FeasibilityProblem:
     """Build one in-memory scheduling problem from current account data."""
@@ -117,7 +182,17 @@ def assemble_schedule_problem(
                 f"Schedule cannot exceed {MAX_ASSEMBLED_WINDOWS} availability windows"
             )
 
-        concrete_windows = calendar.windows.materialize()
+        concrete_windows = _apply_scenario_calendar(
+            calendar.windows.materialize(),
+            temporary_availability,
+            temporary_blocked_periods,
+            planning_start_minute=planning_start_minute,
+            horizon_end_minute=horizon_end_minute,
+        )
+        if len(concrete_windows) > MAX_ASSEMBLED_WINDOWS:
+            raise SchedulingInputTooLargeError(
+                f"Schedule cannot exceed {MAX_ASSEMBLED_WINDOWS} availability windows"
+            )
         planning_days = (
             calendar.planning_days.materialize()
             if calendar.planning_days.day_count <= MAX_FAIRNESS_PLANNING_DAYS

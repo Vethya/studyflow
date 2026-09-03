@@ -64,6 +64,13 @@ from studyflow.scheduling.recovery import (
     ScheduleRecoveryService,
     recovery_input_fingerprint,
 )
+from studyflow.scheduling.scenarios import (
+    ScenarioAvailabilityWindow,
+    ScenarioBlockedPeriod,
+    ScenarioDeadlineOverride,
+    ScenarioValidationError,
+    ScheduleScenario,
+)
 from studyflow.scheduling.service import (
     ScheduleGeneration,
     ScheduleGenerationFailedError,
@@ -103,6 +110,10 @@ __all__ = [
     "RecoverySnapshot",
     "RecoverySnapshotRepository",
     "RecoveryTaskWork",
+    "ScenarioAvailabilityWindow",
+    "ScenarioBlockedPeriod",
+    "ScenarioDeadlineOverride",
+    "ScenarioValidationError",
     "ScheduleAcceptance",
     "ScheduleAcceptanceService",
     "ScheduleGeneration",
@@ -112,6 +123,7 @@ __all__ = [
     "ScheduleProposalRepository",
     "ScheduleRecovery",
     "ScheduleRecoveryService",
+    "ScheduleScenario",
     "ScheduledSession",
     "SchedulingInputError",
     "SchedulingInputTooLargeError",

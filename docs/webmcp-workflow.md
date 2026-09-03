@@ -1,8 +1,26 @@
 # StudyFlow WebMCP workflow
 
-Phase 1 defines the first complete agent workflow. Later phases implement the
-backend simulation endpoint and the browser registration layer against this
-contract.
+Phase 1 defines the first complete agent workflow. Phase 2 now provides the
+backend scenario engine and endpoints. The browser registration layer is still
+the next phase.
+
+## Phase 2 backend surface
+
+The scenario engine is intentionally account-scoped and uses the same session
+and CSRF protections as the existing scheduling mutations:
+
+- `POST /api/v1/schedule-proposals/simulate` runs a scenario in memory and
+  returns `persisted: false`.
+- `POST /api/v1/schedule-proposals` accepts the same optional `scenario` body
+  and persists the result as an inactive proposal.
+- `GET /api/v1/schedule-proposals/current` returns the normalized scenario on a
+  draft proposal.
+
+Temporary availability and blocked periods are concrete one-off UTC intervals;
+they never modify recurring availability. Deadline overrides apply only to the
+solver run. If a student accepts a draft, the backend still verifies that every
+session fits the task's real current deadline, and any change to the underlying
+account inputs makes the proposal stale.
 
 ## Product workflow
 
