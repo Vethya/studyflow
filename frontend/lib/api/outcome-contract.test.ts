@@ -33,6 +33,6 @@ describe("toWireOutcome", () => {
   it("rejects Delayed outcomes without revised remaining minutes", () => {
     expect(() =>
       toWireOutcome({ outcome: "Delayed", actualMinutes: 30 }, false),
-    ).toThrow("Delayed outcomes require revised remaining minutes");
+    ).toThrow("Delayed outcomes require remaining minutes");
   });
 });

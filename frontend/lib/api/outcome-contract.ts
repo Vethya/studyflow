@@ -27,7 +27,7 @@ export function toWireOutcome(
       };
     case "Delayed":
       if (data.revisedRemainingMinutes === undefined) {
-        throw new Error("Delayed outcomes require revised remaining minutes");
+        throw new Error("Delayed outcomes require remaining minutes");
       }
       return {
         outcome: "delayed",
