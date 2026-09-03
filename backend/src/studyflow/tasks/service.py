@@ -23,6 +23,11 @@ class TaskPriority(StrEnum):
     HIGH = "high"
 
 
+class PlannedDurationSource(StrEnum):
+    ORIGINAL = "original"
+    ADAPTIVE = "adaptive"
+
+
 class InvalidTaskDeadlineError(ValueError):
     """Raised when a task deadline is not a future absolute instant."""
 
@@ -51,6 +56,7 @@ class NewAcademicTask:
     notes: str | None
     deadline_at: datetime
     original_estimate_minutes: int
+    planned_source: PlannedDurationSource | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +84,8 @@ class AcademicTaskRecord:
     created_at: datetime
     updated_at: datetime
     status: TaskStatus = TaskStatus.NOT_STARTED
+    adaptive_estimate_minutes: int | None = None
+    planned_source: PlannedDurationSource = PlannedDurationSource.ORIGINAL
 
 
 class AcademicTaskRepository(Protocol):
