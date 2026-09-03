@@ -53,9 +53,9 @@ const OPTIONS: {
  *               (SPEC §12.3).
  *   Missed    — nothing worked; the full planned work stands.
  *
- * Delayed and Missed outcomes can produce a proposed Schedule Revision. The
- * nullable response is handed to the caller so it can show a preview only
- * when the backend created one (SPEC §14.1).
+ * A Missed outcome can produce a proposed Schedule Revision. Every outcome
+ * returns the same nullable revision field, which callers preview only when
+ * the backend actually created a recovery proposal (SPEC §14.1).
  */
 export function RecordOutcomeDialog({
   session,
