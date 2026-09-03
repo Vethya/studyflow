@@ -117,6 +117,24 @@ def test_median_correction_rounds_predicted_minutes_half_up() -> None:
     assert prediction.predicted_minutes == 92
 
 
+def test_median_correction_preserves_exact_half_up_rounding_for_repeating_ratios() -> None:
+    history = [
+        HistoryRecord(
+            task_id=UUID(int=index + 1),
+            category=TaskCategory.OTHER,
+            original_minutes=28,
+            actual_minutes=1,
+            completed_at=NOW + timedelta(minutes=index),
+        )
+        for index in range(5)
+    ]
+
+    prediction = median_correction(history, TaskCategory.OTHER, 14)
+
+    assert prediction is not None
+    assert prediction.predicted_minutes == 1
+
+
 def test_median_correction_keeps_uncapped_factors() -> None:
     prediction = median_correction(_history([Decimal("4")] * 5), TaskCategory.OTHER, 60)
 
@@ -148,6 +166,18 @@ def test_median_correction_orders_completion_ties_by_task_id() -> None:
 def test_qualification_activates_with_five_predictions_at_ten_percent_mae_improvement() -> None:
     predictions = [
         _evaluation(index, adaptive_minutes=101, actual_minutes=110) for index in range(5)
+    ]
+
+    assert qualifies(predictions)
+
+
+def test_qualification_activates_at_exact_ten_percent_with_repeating_maes() -> None:
+    predictions = [
+        *[
+            _evaluation(index, original_minutes=900, adaptive_minutes=910, actual_minutes=1_000)
+            for index in range(5)
+        ],
+        _evaluation(5, original_minutes=880, adaptive_minutes=892, actual_minutes=1_000),
     ]
 
     assert qualifies(predictions)

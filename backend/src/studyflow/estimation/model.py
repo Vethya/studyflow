@@ -2,7 +2,8 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
+from fractions import Fraction
 from typing import Literal
 from uuid import UUID
 
@@ -62,18 +63,17 @@ def median_correction(
 
     latest = sorted(applicable, key=lambda record: (record.completed_at, record.task_id))[-20:]
     ratios = sorted(
-        Decimal(record.actual_minutes) / Decimal(record.original_minutes) for record in latest
+        Fraction(record.actual_minutes, record.original_minutes) for record in latest
     )
     midpoint = len(ratios) // 2
     if len(ratios) % 2:
-        correction_factor = ratios[midpoint]
+        correction_ratio = ratios[midpoint]
     else:
-        correction_factor = (ratios[midpoint - 1] + ratios[midpoint]) / Decimal(2)
-    predicted_minutes = int(
-        (Decimal(original_minutes) * correction_factor).quantize(
-            Decimal("1"), rounding=ROUND_HALF_UP
-        )
+        correction_ratio = (ratios[midpoint - 1] + ratios[midpoint]) / 2
+    correction_factor = Decimal(correction_ratio.numerator) / Decimal(
+        correction_ratio.denominator
     )
+    predicted_minutes = _round_half_up(Fraction(original_minutes) * correction_ratio)
     return CorrectionPrediction(
         predicted_minutes=predicted_minutes,
         correction_factor=correction_factor,
@@ -98,17 +98,23 @@ def qualifies(predictions: list[PredictionEvaluation]) -> bool:
         completed,
         key=lambda prediction: (prediction.completed_at, prediction.task_id),
     )[-10:]
-    original_errors: list[Decimal] = []
-    adaptive_errors: list[Decimal] = []
+    original_error_total = 0
+    adaptive_error_total = 0
     for prediction in selected:
         actual_minutes = prediction.actual_minutes
         if actual_minutes is None:
             continue
-        original_errors.append(Decimal(abs(prediction.original_minutes - actual_minutes)))
-        adaptive_errors.append(Decimal(abs(prediction.adaptive_minutes - actual_minutes)))
+        original_error_total += abs(prediction.original_minutes - actual_minutes)
+        adaptive_error_total += abs(prediction.adaptive_minutes - actual_minutes)
 
-    original_mae = sum(original_errors, Decimal("0")) / Decimal(len(original_errors))
-    if original_mae == 0:
+    if original_error_total == 0:
         return False
-    adaptive_mae = sum(adaptive_errors, Decimal("0")) / Decimal(len(adaptive_errors))
-    return adaptive_mae <= original_mae * Decimal("0.90")
+    return Decimal(adaptive_error_total) <= Decimal(original_error_total) * Decimal("0.90")
+
+
+def _round_half_up(value: Fraction) -> int:
+    """Round a rational value to whole minutes with exact half-up semantics."""
+    numerator = abs(value.numerator)
+    denominator = value.denominator
+    rounded = (2 * numerator + denominator) // (2 * denominator)
+    return rounded if value >= 0 else -rounded
