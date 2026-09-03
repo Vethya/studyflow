@@ -5,7 +5,7 @@ from typing import Annotated, Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from studyflow.api.account import AccountError, require_csrf_session, require_session
 from studyflow.api.schedule_proposals import (
@@ -18,8 +18,10 @@ from studyflow.auth.session_authentication import SessionPrincipal
 from studyflow.availability.unavailable import UnavailablePeriods
 from studyflow.scheduling.assembly import SchedulingInputError, SchedulingInputTooLargeError
 from studyflow.scheduling.outcomes import (
+    MAX_DURATION_MINUTES,
     DuplicateSessionOutcomeError,
     FutureSessionOutcomeError,
+    InvalidSessionOutcomeError,
     ProposedSessionOutcomeError,
     SessionOutcomeKind,
     StudySessionDetails,
@@ -52,14 +54,45 @@ class StudySessionResponse(BaseModel):
     outcome: SessionOutcomeResponse | None
 
 
-class RecordSessionOutcomeRequest(BaseModel):
+PositiveMinutes = Annotated[
+    int,
+    Field(gt=0, le=MAX_DURATION_MINUTES, strict=True),
+]
+
+
+class CompletedSessionOutcomeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: Literal["completed"]
+    actual_minutes: PositiveMinutes
+    large_actual_confirmed: bool = False
+
+
+class DelayedSessionOutcomeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: Literal["delayed"]
+    actual_minutes: PositiveMinutes
+    remaining_minutes: PositiveMinutes | None = None
+    large_actual_confirmed: bool = False
+
+
+class MissedSessionOutcomeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     outcome: Literal["missed"]
 
 
-class MissedSessionRecoveryResponse(BaseModel):
+RecordSessionOutcomeRequest = Annotated[
+    CompletedSessionOutcomeRequest | DelayedSessionOutcomeRequest | MissedSessionOutcomeRequest,
+    Field(discriminator="outcome"),
+]
+
+
+class SessionOutcomeRecordingResponse(BaseModel):
     session: StudySessionResponse
     outcome: SessionOutcomeResponse
-    revision: ScheduleProposalResponse
+    revision: ScheduleProposalResponse | None
 
 
 class StudySessionError(BaseModel):
@@ -102,7 +135,19 @@ def _session_response(details: StudySessionDetails) -> StudySessionResponse:
     response_model=list[StudySessionResponse],
     responses={
         status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
-        status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": StudySessionError},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "description": "Invalid study-session filters",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "oneOf": [
+                            {"$ref": "#/components/schemas/StudySessionError"},
+                            {"$ref": "#/components/schemas/HTTPValidationError"},
+                        ]
+                    }
+                }
+            },
+        },
     },
 )
 async def list_study_sessions(
@@ -155,13 +200,25 @@ async def get_study_session(
 @router.post(
     "/{session_id}/outcomes",
     status_code=status.HTTP_201_CREATED,
-    response_model=MissedSessionRecoveryResponse,
+    response_model=SessionOutcomeRecordingResponse,
     responses={
         status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
         status.HTTP_403_FORBIDDEN: {"model": AccountError},
         status.HTTP_404_NOT_FOUND: {"model": StudySessionError},
         status.HTTP_409_CONFLICT: {"model": StudySessionError},
-        status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": StudySessionError},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "description": "Invalid outcome fields or minutes",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "oneOf": [
+                            {"$ref": "#/components/schemas/StudySessionError"},
+                            {"$ref": "#/components/schemas/HTTPValidationError"},
+                        ]
+                    }
+                }
+            },
+        },
         status.HTTP_503_SERVICE_UNAVAILABLE: {"model": StudySessionError},
     },
 )
@@ -174,23 +231,42 @@ async def record_study_session_outcome(
     recovery: Annotated[ScheduleRecovery, Depends(get_schedule_recovery)],
     tasks: Annotated[AcademicTasks, Depends(get_academic_tasks)],
     unavailable: Annotated[UnavailablePeriods, Depends(get_unavailable_periods)],
-) -> MissedSessionRecoveryResponse:
-    del body  # The request model intentionally permits only the PR9 `missed` outcome.
+) -> SessionOutcomeRecordingResponse:
     outcome: StudySessionOutcomeRecord | None
     try:
-        details = await sessions.get(principal.account_id, session_id)
-        existing = details.outcome if details is not None else None
-        if (
-            existing is not None
-            and existing.kind is SessionOutcomeKind.MISSED
-            and existing.remaining_minutes > 0
-            and existing.rescheduled_at is None
-        ):
-            outcome = existing
-        elif existing is not None:
-            raise DuplicateSessionOutcomeError("The study session already has an outcome")
+        if isinstance(body, CompletedSessionOutcomeRequest):
+            outcome = await sessions.record_completed(
+                principal.account_id,
+                session_id,
+                body.actual_minutes,
+                large_actual_confirmed=body.large_actual_confirmed,
+            )
+        elif isinstance(body, DelayedSessionOutcomeRequest):
+            outcome = await sessions.record_delayed(
+                principal.account_id,
+                session_id,
+                body.actual_minutes,
+                body.remaining_minutes,
+                large_actual_confirmed=body.large_actual_confirmed,
+            )
         else:
-            outcome = await sessions.record_missed(principal.account_id, session_id)
+            details = await sessions.get(principal.account_id, session_id)
+            existing = details.outcome if details is not None else None
+            if (
+                existing is not None
+                and existing.kind is SessionOutcomeKind.MISSED
+                and existing.remaining_minutes > 0
+                and existing.rescheduled_at is None
+            ):
+                outcome = existing
+            elif existing is not None:
+                raise DuplicateSessionOutcomeError("The study session already has an outcome")
+            else:
+                outcome = await sessions.record_missed(principal.account_id, session_id)
+    except InvalidSessionOutcomeError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
     except (
         ProposedSessionOutcomeError,
         FutureSessionOutcomeError,
@@ -199,6 +275,18 @@ async def record_study_session_outcome(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     if outcome is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Study session not found")
+    if not isinstance(body, MissedSessionOutcomeRequest):
+        details = await sessions.get(principal.account_id, session_id)
+        if details is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Study session not found"
+            )
+        response.headers["Location"] = f"/api/v1/study-sessions/{session_id}"
+        return SessionOutcomeRecordingResponse(
+            session=_session_response(details),
+            outcome=_outcome_response(outcome),
+            revision=None,
+        )
     try:
         revision = await recovery.propose(principal.account_id, session_id)
     except SchedulingInputTooLargeError as error:
@@ -220,7 +308,7 @@ async def record_study_session_outcome(
     if details is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Study session not found")
     response.headers["Location"] = "/api/v1/schedule-proposals/current"
-    return MissedSessionRecoveryResponse(
+    return SessionOutcomeRecordingResponse(
         session=_session_response(details),
         outcome=_outcome_response(outcome),
         revision=await schedule_proposal_response(
