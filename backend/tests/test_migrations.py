@@ -78,7 +78,7 @@ def test_alembic_migration_graph_has_a_single_head() -> None:
 
     scripts = ScriptDirectory.from_config(configuration)
 
-    assert scripts.get_heads() == ["20260903_16"]
+    assert scripts.get_heads() == ["20260903_17"]
 
 
 def test_migrations_share_application_metadata() -> None:

@@ -1,9 +1,20 @@
 """Academic Task persistence models."""
 
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from studyflow.database.base import Base
@@ -78,3 +89,51 @@ class TaskDeadlineHistory(Base):
     previous_deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     new_deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AdaptiveEstimationPrediction(Base):
+    """An immutable correction prediction captured before a task begins."""
+
+    __tablename__ = "adaptive_estimation_predictions"
+    __table_args__ = (
+        CheckConstraint("original_minutes > 0 AND predicted_minutes > 0", name="positive_minutes"),
+        CheckConstraint("correction_factor > 0", name="positive_factor"),
+        CheckConstraint("history_scope IN ('overall', 'category')", name="history_scope"),
+        CheckConstraint("history_count > 0", name="positive_history_count"),
+    )
+
+    task_id: Mapped[UUID] = mapped_column(
+        ForeignKey("academic_tasks.id", ondelete="CASCADE"), primary_key=True
+    )
+    account_id: Mapped[UUID] = mapped_column(
+        ForeignKey("student_accounts.id", ondelete="CASCADE"), index=True
+    )
+    category: Mapped[str] = mapped_column(String(32), index=True)
+    original_minutes: Mapped[int] = mapped_column(Integer)
+    predicted_minutes: Mapped[int] = mapped_column(Integer)
+    correction_factor: Mapped[Decimal] = mapped_column(Numeric)
+    history_scope: Mapped[str] = mapped_column(String(16))
+    history_count: Mapped[int] = mapped_column(Integer)
+    exposed: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AdaptiveEstimationAcknowledgment(Base):
+    """The latest acknowledged large correction for one account and category."""
+
+    __tablename__ = "adaptive_estimation_acknowledgments"
+    __table_args__ = (
+        CheckConstraint(
+            "category IN ('assignment', 'reading', 'exam_preparation', "
+            "'project', 'research_writing', 'other')",
+            name="category",
+        ),
+        CheckConstraint("correction_factor > 0", name="positive_factor"),
+    )
+
+    account_id: Mapped[UUID] = mapped_column(
+        ForeignKey("student_accounts.id", ondelete="CASCADE"), primary_key=True
+    )
+    category: Mapped[str] = mapped_column(String(32), primary_key=True)
+    correction_factor: Mapped[Decimal] = mapped_column(Numeric)
+    acknowledged_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
