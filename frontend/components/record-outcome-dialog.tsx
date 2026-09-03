@@ -18,6 +18,7 @@ import { Callout } from "@/components/ui/callout";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { formatDuration } from "@/lib/constants";
 import { formatClock } from "@/lib/datetime";
+import { isPositiveWholeMinute, outcomeSuccessCopy } from "@/lib/outcome-ui";
 import { cn } from "@/lib/utils";
 import { scheduling } from "@/lib/api";
 import { withLargeActualConfirmation } from "@/lib/api/outcome-contract";
@@ -52,8 +53,9 @@ const OPTIONS: {
  *               (SPEC §12.3).
  *   Missed    — nothing worked; the full planned work stands.
  *
- * Saving Delayed or Missed produces a proposed Schedule Revision, which the
- * caller is handed so it can show the preview (SPEC §14.1).
+ * Delayed and Missed outcomes can produce a proposed Schedule Revision. The
+ * nullable response is handed to the caller so it can show a preview only
+ * when the backend created one (SPEC §14.1).
  */
 export function RecordOutcomeDialog({
   session,
@@ -93,16 +95,16 @@ export function RecordOutcomeDialog({
   }
 
   const workedNumber = Number(worked);
-  const hasWorked = worked.trim() !== "" && Number.isFinite(workedNumber);
+  const hasWorked = isPositiveWholeMinute(worked);
 
   // SPEC §12.3's default, recomputed until the student edits it themselves.
   const defaultRemaining = Math.max(0, planned - (hasWorked ? workedNumber : 0));
   const remainingValue = remainingTouched ? remaining : String(defaultRemaining || "");
   const remainingNumber = Number(remainingValue);
 
-  const workedInvalid = outcome !== "Missed" && (!hasWorked || workedNumber <= 0);
+  const workedInvalid = outcome !== "Missed" && !hasWorked;
   const remainingInvalid =
-    outcome === "Delayed" && (!Number.isFinite(remainingNumber) || remainingNumber <= 0);
+    outcome === "Delayed" && !isPositiveWholeMinute(remainingValue);
   const canSave = !workedInvalid && !remainingInvalid && !isSaving;
 
   /** An entry far above what was planned is more often a typo than a marathon. */
@@ -123,12 +125,7 @@ export function RecordOutcomeDialog({
         session.id,
         largeActualConfirmed ? withLargeActualConfirmation(data) : data,
       );
-      const message = outcome === "Completed"
-        ? "Session recorded as finished"
-        : result.revision
-          ? "Recorded — StudyFlow has a new plan for you to review"
-          : "Session progress recorded";
-      toast.success(message);
+      toast.success(outcomeSuccessCopy(outcome, result.revision));
       onRecorded(result);
       onOpenChange(false);
     } catch (cause) {
@@ -209,13 +206,16 @@ export function RecordOutcomeDialog({
                     type="number"
                     inputMode="numeric"
                     min={1}
+                    step={1}
                     max={1440}
                     value={worked}
                     onChange={(event) => setWorked(event.target.value)}
                     aria-invalid={workedInvalid || undefined}
                   />
                   {workedInvalid && (
-                    <p className="text-xs text-deficit">Enter more than 0 minutes.</p>
+                    <p className="text-xs text-deficit">
+                      Enter a whole number of minutes greater than 0.
+                    </p>
                   )}
                 </div>
 
@@ -229,6 +229,7 @@ export function RecordOutcomeDialog({
                       type="number"
                       inputMode="numeric"
                       min={1}
+                      step={1}
                       max={10_000}
                       value={remainingValue}
                       onChange={(event) => {
@@ -243,7 +244,9 @@ export function RecordOutcomeDialog({
                         : "Our guess — change it if you know better."}
                     </p>
                     {remainingInvalid && (
-                      <p className="text-xs text-deficit">Enter more than 0 minutes.</p>
+                      <p className="text-xs text-deficit">
+                        Enter a whole number of minutes greater than 0.
+                      </p>
                     )}
                   </div>
                 )}

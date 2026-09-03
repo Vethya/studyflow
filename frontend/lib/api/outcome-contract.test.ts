@@ -25,11 +25,14 @@ describe("withLargeActualConfirmation", () => {
 
 describe("toWireOutcome", () => {
   it("maps Completed outcomes with the retry confirmation flag", () => {
-    expect(toWireOutcome({ outcome: "Completed", actualMinutes: 75 }, true)).toEqual({
+    const selected = { outcome: "Completed" as const, actualMinutes: 75 };
+
+    expect(toWireOutcome(withLargeActualConfirmation(selected), true)).toEqual({
       outcome: "completed",
       actual_minutes: 75,
       large_actual_confirmed: true,
     });
+    expect(selected).toEqual({ outcome: "Completed", actualMinutes: 75 });
   });
 
   it("maps Delayed outcomes with revised remaining minutes", () => {

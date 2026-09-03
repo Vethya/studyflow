@@ -22,7 +22,7 @@ import {
 import { cn } from "@/lib/utils";
 import { DAY_NAMES_SHORT, formatDuration, CATEGORY_CONFIG } from "@/lib/constants";
 import { describeDeadline, formatClock } from "@/lib/datetime";
-import { notifyStudyFlowDataChanged } from "@/lib/data-events";
+import { applyRecordedOutcome } from "@/lib/outcome-ui";
 import {
   dayKey,
   expandUnavailablePeriods,
@@ -623,13 +623,9 @@ export default function CalendarPage() {
         session={outcomeSession}
         open={outcomeSession !== null}
         onOpenChange={(next) => !next && setOutcomeSession(null)}
-        onRecorded={(result) => {
-          if (result.revision) {
-            setProposal(result.revision);
-            setPreviewOpen(true);
-          }
-          notifyStudyFlowDataChanged();
-        }}
+        onRecorded={(result) =>
+          applyRecordedOutcome(result, { setProposal, setPreviewOpen })
+        }
       />
 
       <SchedulePreview
