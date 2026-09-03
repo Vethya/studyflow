@@ -88,6 +88,8 @@ from studyflow.availability.unavailable import (
 )
 from studyflow.availability.windows import AvailabilityWindows, AvailabilityWindowService
 from studyflow.database import Database, DatabaseRuntime
+from studyflow.estimation import AdaptiveEstimator
+from studyflow.estimation.repositories import SqlAlchemyAdaptivePredictionRepository
 from studyflow.scheduling.acceptance import ScheduleAcceptance, ScheduleAcceptanceService
 from studyflow.scheduling.outcome_repositories import SqlAlchemyStudySessionOutcomeRepository
 from studyflow.scheduling.outcomes import StudySessions, StudySessionService
@@ -278,11 +280,14 @@ def create_app(
     resolved_account_preferences = account_preferences or StudyPreferencesService(
         SqlAlchemyStudyPreferencesRepository(transactions)
     )
+    adaptive_predictions = SqlAlchemyAdaptivePredictionRepository(transactions)
     resolved_academic_tasks = academic_tasks or AcademicTaskService(
         SqlAlchemyAcademicTaskRepository(
             transactions,
             SqlAlchemyTaskDeadlineSessionInvalidator(),
             recovery_invalidator=SqlAlchemyTaskRecoveryProposalInvalidator(),
+            estimator=AdaptiveEstimator(adaptive_predictions),
+            prediction_repository=adaptive_predictions,
         )
     )
     resolved_availability_windows = availability_windows or AvailabilityWindowService(

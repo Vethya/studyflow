@@ -9,6 +9,7 @@ from studyflow.tasks.service import (
     AcademicTaskService,
     InvalidTaskDeadlineError,
     NewAcademicTask,
+    PlannedDurationSource,
     TaskCategory,
     TaskFilters,
     TaskMustBeStartedError,
@@ -96,3 +97,18 @@ async def test_task_service_preserves_the_must_start_lifecycle_error() -> None:
 
     with pytest.raises(TaskMustBeStartedError):
         await service.finish_early(uuid4(), uuid4())
+
+
+def test_new_task_leaves_source_selection_to_the_server_by_default() -> None:
+    task = NewAcademicTask(
+        title="Read chapter 4",
+        category=TaskCategory.READING,
+        priority=TaskPriority.MEDIUM,
+        course=None,
+        notes=None,
+        deadline_at=datetime(2026, 7, 30, 12, tzinfo=UTC),
+        original_estimate_minutes=90,
+    )
+
+    assert task.planned_source is None
+    assert PlannedDurationSource.ORIGINAL.value == "original"

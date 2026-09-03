@@ -9,12 +9,14 @@ from pydantic import BaseModel, Field, field_validator
 
 from studyflow.api.account import AccountError, require_csrf_session, require_session
 from studyflow.auth.session_authentication import SessionPrincipal
+from studyflow.estimation import AdaptiveEstimateUnavailableError
 from studyflow.tasks.service import (
     AcademicTaskRecord,
     AcademicTasks,
     EstimateFrozenError,
     InvalidTaskDeadlineError,
     NewAcademicTask,
+    PlannedDurationSource,
     TaskCategory,
     TaskFilters,
     TaskMustBeStartedError,
@@ -42,6 +44,7 @@ class AcademicTaskRequest(BaseModel):
         Field(description="RFC 3339 timestamp with an explicit UTC offset"),
     ]
     original_estimate_minutes: Annotated[int, Field(gt=0, le=2_147_483_647)]
+    planned_source: PlannedDurationSource | None = None
 
     @field_validator("title")
     @classmethod
@@ -73,6 +76,8 @@ class AcademicTaskResponse(BaseModel):
     notes: str | None
     deadline_at: datetime
     original_estimate_minutes: int
+    adaptive_estimate_minutes: int | None
+    planned_source: PlannedDurationSource
     planned_duration_minutes: int
     created_at: datetime
     updated_at: datetime
@@ -101,6 +106,8 @@ def _response(task: AcademicTaskRecord) -> AcademicTaskResponse:
         notes=task.notes,
         deadline_at=task.deadline_at,
         original_estimate_minutes=task.original_estimate_minutes,
+        adaptive_estimate_minutes=task.adaptive_estimate_minutes,
+        planned_source=task.planned_source,
         planned_duration_minutes=task.planned_duration_minutes,
         created_at=task.created_at,
         updated_at=task.updated_at,
@@ -146,12 +153,18 @@ async def create_task(
                 notes=payload.notes,
                 deadline_at=payload.deadline_at,
                 original_estimate_minutes=payload.original_estimate_minutes,
+                planned_source=payload.planned_source,
             ),
         )
     except InvalidTaskDeadlineError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Deadline must be a future absolute date and time",
+        ) from error
+    except AdaptiveEstimateUnavailableError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Adaptive estimate is unavailable",
         ) from error
     return _response(task)
 
@@ -268,6 +281,7 @@ async def update_task(
                 notes=payload.notes,
                 deadline_at=payload.deadline_at,
                 original_estimate_minutes=payload.original_estimate_minutes,
+                planned_source=payload.planned_source,
             ),
         )
     except InvalidTaskDeadlineError as error:
@@ -279,6 +293,11 @@ async def update_task(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Original estimate is frozen after work starts",
+        ) from error
+    except AdaptiveEstimateUnavailableError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Adaptive estimate is unavailable",
         ) from error
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")

@@ -56,7 +56,9 @@ class AdaptiveEstimator:
         self, account_id: UUID, category: TaskCategory, original_minutes: int
     ) -> AdaptiveEstimatePreview:
         """Return a non-persisting, student-safe view of the current estimate."""
-        preview, _ = await self._evaluate(account_id, category, original_minutes)
+        preview, _ = await self._evaluate(
+            account_id, category, original_minutes, self._repository
+        )
         return preview
 
     async def capture_for_task(
@@ -67,9 +69,14 @@ class AdaptiveEstimator:
         original_minutes: int,
         *,
         planned_source: PlannedSource | None = None,
+        repository: AdaptivePredictionRepository | None = None,
+        replace: bool = False,
     ) -> AdaptiveEstimatePreview:
         """Persist one pre-task prediction and return the allowed planned source."""
-        preview, prediction = await self._evaluate(account_id, category, original_minutes)
+        prediction_repository = repository or self._repository
+        preview, prediction = await self._evaluate(
+            account_id, category, original_minutes, prediction_repository
+        )
         selected_source = planned_source or preview.planned_source
         if selected_source == "adaptive" and (
             not preview.available or preview.acknowledgment_required
@@ -78,12 +85,12 @@ class AdaptiveEstimator:
 
         if prediction is None:
             return self._with_planned_source(preview, selected_source)
-        if not await self._repository.save_prediction(
-            account_id,
-            task_id,
-            prediction,
-            exposed=preview.available,
-        ):
+        save = (
+            prediction_repository.replace_prediction
+            if replace
+            else prediction_repository.save_prediction
+        )
+        if not await save(account_id, task_id, prediction, exposed=preview.available):
             raise AdaptivePredictionCaptureError
         return self._with_planned_source(preview, selected_source)
 
@@ -105,13 +112,14 @@ class AdaptiveEstimator:
         account_id: UUID,
         category: TaskCategory,
         original_minutes: int,
+        repository: AdaptivePredictionRepository,
     ) -> tuple[AdaptiveEstimatePreview, CorrectionPrediction | None]:
-        history = await self._repository.history(account_id)
+        history = await repository.history(account_id)
         prediction = median_correction(history, category, original_minutes)
-        if prediction is None or not qualifies(await self._repository.evaluations(account_id)):
+        if prediction is None or not qualifies(await repository.evaluations(account_id)):
             return self._unavailable_preview(category, original_minutes), prediction
 
-        acknowledged_factor = await self._repository.acknowledgment(account_id, category)
+        acknowledged_factor = await repository.acknowledgment(account_id, category)
         acknowledgment_required = self._acknowledgment_required(
             prediction.correction_factor, acknowledged_factor
         )
