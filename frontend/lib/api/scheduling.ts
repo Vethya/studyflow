@@ -31,8 +31,11 @@ import {
 } from "./mappers";
 import type {
   WireScheduleProposal,
+  WireScheduleScenario,
+  WireScheduleSimulation,
   WireStudySession,
 } from "./wire";
+import type { ScenarioOverrides, SimulatePlanResult } from "@/lib/webmcp/contracts";
 import type { OutcomeFormData, StudySession } from "@/types/session";
 import type { Schedule, ScheduleProposal, ScheduleRevision } from "@/types/schedule";
 import type { AdaptiveEstimate, EffortProgress } from "@/types/progress";
@@ -113,14 +116,59 @@ export async function getActiveSchedule(signal?: AbortSignal): Promise<Schedule 
 }
 
 // ─── Proposals ──────────────────────────────────────────────────
-export async function generateProposal(): Promise<ScheduleProposal> {
+function toScenario(wire: WireScheduleScenario): ScenarioOverrides {
+  return {
+    temporary_availability: wire.temporary_availability.map((item) => ({
+      starts_at: item.starts_at,
+      ends_at: item.ends_at,
+    })),
+    temporary_blocked_periods: wire.temporary_blocked_periods.map((item) => ({
+      starts_at: item.starts_at,
+      ends_at: item.ends_at,
+      ...(item.reason ? { reason: item.reason } : {}),
+    })),
+    deadline_overrides: wire.deadline_overrides.map((item) => ({
+      task_id: item.task_id,
+      deadline_at: item.deadline_at,
+    })),
+  };
+}
+
+export async function generateProposal(
+  scenario?: ScenarioOverrides,
+  signal?: AbortSignal,
+): Promise<ScheduleProposal> {
   try {
     const wire = await apiJson<WireScheduleProposal>("/schedule-proposals", {
       method: "POST",
+      body: scenario === undefined ? undefined : { scenario },
+      signal,
     });
     return toScheduleProposal(wire);
   } catch (cause) {
     // 503 is the labelled technical failure; everything else keeps its meaning.
+    if (cause instanceof ApiError && cause.status === 503) {
+      throw new ScheduleTechnicalFailure(cause.message);
+    }
+    throw cause;
+  }
+}
+
+export async function simulatePlan(
+  scenario: ScenarioOverrides,
+  signal?: AbortSignal,
+): Promise<SimulatePlanResult> {
+  try {
+    const wire = await apiJson<WireScheduleSimulation>("/schedule-proposals/simulate", {
+      method: "POST",
+      body: { scenario },
+      signal,
+    });
+    return {
+      scenario: wire.proposal.scenario ? toScenario(wire.proposal.scenario) : scenario,
+      proposal: toScheduleProposal(wire.proposal),
+    };
+  } catch (cause) {
     if (cause instanceof ApiError && cause.status === 503) {
       throw new ScheduleTechnicalFailure(cause.message);
     }
@@ -144,8 +192,11 @@ export async function getPendingRevision(
   }
 }
 
-export async function acceptProposal(proposalId: string): Promise<Schedule> {
-  await apiVoid(`/schedule-proposals/${proposalId}/accept`, { method: "POST" });
+export async function acceptProposal(
+  proposalId: string,
+  signal?: AbortSignal,
+): Promise<Schedule> {
+  await apiVoid(`/schedule-proposals/${proposalId}/accept`, { method: "POST", signal });
   // The accept response carries only the sessions it just activated; re-read
   // so the caller gets the full accepted set with outcomes attached.
   return (await getActiveSchedule()) ?? {
@@ -156,8 +207,8 @@ export async function acceptProposal(proposalId: string): Promise<Schedule> {
   };
 }
 
-export function rejectProposal(proposalId: string): Promise<void> {
-  return apiVoid(`/schedule-proposals/${proposalId}/reject`, { method: "POST" });
+export function rejectProposal(proposalId: string, signal?: AbortSignal): Promise<void> {
+  return apiVoid(`/schedule-proposals/${proposalId}/reject`, { method: "POST", signal });
 }
 
 // ─── Outcomes ───────────────────────────────────────────────────
@@ -171,6 +222,7 @@ export function rejectProposal(proposalId: string): Promise<void> {
 export async function recordOutcome(
   sessionId: string,
   data: OutcomeFormData,
+  signal?: AbortSignal,
 ): Promise<OutcomeResult> {
   if (data.outcome !== "Missed") {
     throw new OutcomeNotSupportedError(data.outcome);
@@ -182,9 +234,10 @@ export async function recordOutcome(
   }>(`/study-sessions/${sessionId}/outcomes`, {
     method: "POST",
     body: { outcome: "missed" },
+    signal,
   });
 
-  const titles = await taskTitles();
+  const titles = await taskTitles(signal);
   const revision = recovery.revision ? toScheduleProposal(recovery.revision) : null;
   return {
     session: toStudySession(recovery.session, titles),

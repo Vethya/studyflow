@@ -5,7 +5,7 @@ from typing import Annotated, Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from studyflow.api.account import AccountError, require_csrf_session, require_session
 from studyflow.auth.session_authentication import SessionPrincipal
@@ -25,6 +25,13 @@ from studyflow.scheduling.proposals import (
     ScheduleProposalRecord,
     ScheduleProposalRepository,
     TaskAllocationRecord,
+)
+from studyflow.scheduling.scenarios import (
+    ScenarioAvailabilityWindow,
+    ScenarioBlockedPeriod,
+    ScenarioDeadlineOverride,
+    ScenarioValidationError,
+    ScheduleScenario,
 )
 from studyflow.scheduling.service import (
     ScheduleGeneration,
@@ -78,6 +85,86 @@ class OverloadWarningResponse(BaseModel):
     remedies: list[Literal["extend_deadline", "add_availability"]]
 
 
+class ScenarioAvailabilityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    starts_at: datetime
+    ends_at: datetime
+
+
+class ScenarioBlockedPeriodRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    starts_at: datetime
+    ends_at: datetime
+    reason: str | None = Field(default=None, max_length=200)
+
+
+class ScenarioDeadlineOverrideRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: UUID
+    deadline_at: datetime
+
+
+class ScheduleScenarioRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    temporary_availability: list[ScenarioAvailabilityRequest] = Field(
+        default_factory=list, max_length=32
+    )
+    temporary_blocked_periods: list[ScenarioBlockedPeriodRequest] = Field(
+        default_factory=list, max_length=32
+    )
+    deadline_overrides: list[ScenarioDeadlineOverrideRequest] = Field(
+        default_factory=list, max_length=64
+    )
+
+    def to_domain(self) -> ScheduleScenario:
+        return ScheduleScenario(
+            temporary_availability=tuple(
+                ScenarioAvailabilityWindow(item.starts_at, item.ends_at)
+                for item in self.temporary_availability
+            ),
+            temporary_blocked_periods=tuple(
+                ScenarioBlockedPeriod(item.starts_at, item.ends_at, item.reason)
+                for item in self.temporary_blocked_periods
+            ),
+            deadline_overrides=tuple(
+                ScenarioDeadlineOverride(item.task_id, item.deadline_at)
+                for item in self.deadline_overrides
+            ),
+        ).normalized()
+
+
+class ScheduleProposalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scenario: ScheduleScenarioRequest | None = None
+
+
+class ScenarioAvailabilityResponse(BaseModel):
+    starts_at: datetime
+    ends_at: datetime
+
+
+class ScenarioBlockedPeriodResponse(BaseModel):
+    starts_at: datetime
+    ends_at: datetime
+    reason: str | None
+
+
+class ScenarioDeadlineOverrideResponse(BaseModel):
+    task_id: UUID
+    deadline_at: datetime
+
+
+class ScheduleScenarioResponse(BaseModel):
+    temporary_availability: list[ScenarioAvailabilityResponse]
+    temporary_blocked_periods: list[ScenarioBlockedPeriodResponse]
+    deadline_overrides: list[ScenarioDeadlineOverrideResponse]
+
+
 class ScheduleProposalResponse(BaseModel):
     id: UUID
     kind: ProposalKind
@@ -88,6 +175,14 @@ class ScheduleProposalResponse(BaseModel):
     task_allocations: list[TaskAllocationResponse]
     unscheduled_work: list[UnscheduledWorkResponse]
     overload_warning: OverloadWarningResponse | None
+    scenario: ScheduleScenarioResponse | None = None
+
+
+class ScheduleSimulationResponse(BaseModel):
+    proposal: ScheduleProposalResponse
+    active_schedule_changed: Literal[False] = False
+    requires_user_review: Literal[False] = False
+    persisted: Literal[False] = False
 
 
 class ScheduleProposalError(BaseModel):
@@ -208,7 +303,49 @@ def _response(
         task_allocations=allocations,
         unscheduled_work=unscheduled,
         overload_warning=warning,
+        scenario=(
+            ScheduleScenarioResponse(
+                temporary_availability=[
+                    ScenarioAvailabilityResponse(starts_at=item.starts_at, ends_at=item.ends_at)
+                    for item in proposal.scenario.temporary_availability
+                ],
+                temporary_blocked_periods=[
+                    ScenarioBlockedPeriodResponse(
+                        starts_at=item.starts_at,
+                        ends_at=item.ends_at,
+                        reason=item.reason,
+                    )
+                    for item in proposal.scenario.temporary_blocked_periods
+                ],
+                deadline_overrides=[
+                    ScenarioDeadlineOverrideResponse(
+                        task_id=item.task_id, deadline_at=item.deadline_at
+                    )
+                    for item in proposal.scenario.deadline_overrides
+                ],
+            )
+            if proposal.scenario is not None
+            else None
+        ),
     )
+
+
+def _scenario_from_request(
+    payload: ScheduleProposalRequest | None, *, required: bool = False
+) -> ScheduleScenario | None:
+    if payload is None or payload.scenario is None:
+        if required:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="A scenario is required for simulation",
+            )
+        return None
+    try:
+        return payload.scenario.to_domain()
+    except ScenarioValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
 
 
 async def schedule_proposal_response(
@@ -244,11 +381,17 @@ async def generate_schedule_proposal(
     generation: Annotated[ScheduleGeneration, Depends(get_schedule_generation)],
     tasks: Annotated[AcademicTasks, Depends(get_academic_tasks)],
     unavailable: Annotated[UnavailablePeriods, Depends(get_unavailable_periods)],
+    payload: ScheduleProposalRequest | None = None,
 ) -> ScheduleProposalResponse:
+    scenario = _scenario_from_request(payload)
     try:
-        proposal = await generation.generate(principal.account_id)
+        proposal = await generation.generate(principal.account_id, scenario=scenario)
     except AvailabilityTimezoneConfirmationRequiredError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    except ScenarioValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
     except SchedulingInputTooLargeError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
@@ -264,6 +407,60 @@ async def generate_schedule_proposal(
     if proposal is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
     return await schedule_proposal_response(proposal, principal.account_id, tasks, unavailable)
+
+
+@router.post(
+    "/simulate",
+    response_model=ScheduleSimulationResponse,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
+        status.HTTP_403_FORBIDDEN: {"model": AccountError},
+        status.HTTP_404_NOT_FOUND: {"model": ScheduleProposalError},
+        status.HTTP_409_CONFLICT: {"model": ScheduleProposalError},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": ScheduleProposalError},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ScheduleProposalError},
+    },
+)
+async def simulate_schedule(
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    generation: Annotated[ScheduleGeneration, Depends(get_schedule_generation)],
+    tasks: Annotated[AcademicTasks, Depends(get_academic_tasks)],
+    unavailable: Annotated[UnavailablePeriods, Depends(get_unavailable_periods)],
+    payload: ScheduleProposalRequest | None = None,
+) -> ScheduleSimulationResponse:
+    scenario = _scenario_from_request(payload, required=True)
+    if scenario is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="A scenario is required for simulation",
+        )
+    try:
+        proposal = await generation.simulate(principal.account_id, scenario)
+    except AvailabilityTimezoneConfirmationRequiredError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    except ScenarioValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+    except SchedulingInputTooLargeError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+    except SchedulingInputError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+    except ScheduleGenerationFailedError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)
+        ) from error
+    if proposal is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    return ScheduleSimulationResponse(
+        proposal=await schedule_proposal_response(
+            proposal, principal.account_id, tasks, unavailable
+        )
+    )
 
 
 @router.get(

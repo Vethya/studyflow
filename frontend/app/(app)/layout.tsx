@@ -7,6 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { Loader2 } from "lucide-react";
 import { useSession } from "@/hooks/use-session";
+import { startStudyFlowWebMcp } from "@/lib/webmcp/register";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -20,6 +21,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       router.replace(`/login?next=${encodeURIComponent(pathname)}`);
     }
   }, [status, pathname, router]);
+
+  useEffect(() => {
+    if (status !== "authenticated") return;
+    const registration = startStudyFlowWebMcp();
+    if (registration === null) return;
+    void registration.ready.catch(() => registration.dispose());
+    return registration.dispose;
+  }, [status]);
 
   if (status !== "authenticated") {
     return (

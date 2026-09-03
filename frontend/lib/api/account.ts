@@ -28,7 +28,10 @@ export interface PreferencesInput {
  * The backend requires all three fields on every update, so callers must send
  * the current values for anything they are not changing.
  */
-export function updatePreferences(input: PreferencesInput): Promise<WireStudyPreferences> {
+export function updatePreferences(
+  input: PreferencesInput,
+  signal?: AbortSignal,
+): Promise<WireStudyPreferences> {
   return apiJson<WireStudyPreferences>("/account/preferences", {
     method: "PATCH",
     body: {
@@ -36,6 +39,7 @@ export function updatePreferences(input: PreferencesInput): Promise<WireStudyPre
       preferred_session_length_minutes: input.preferredSessionLength,
       minimum_break_minutes: input.minimumBreak,
     },
+    signal,
   });
 }
 

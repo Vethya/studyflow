@@ -4,9 +4,10 @@ import asyncio
 import hashlib
 import json
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from studyflow.accounts.preferences import AccountPreferences, StudyPreferences
 from studyflow.availability.unavailable import UnavailablePeriod, UnavailablePeriods
@@ -22,7 +23,10 @@ from studyflow.scheduling.proposals import (
     ProposalStatus,
     ScheduleProposalRecord,
     ScheduleProposalRepository,
+    StudySessionRecord,
+    TaskAllocationRecord,
 )
+from studyflow.scheduling.scenarios import ScenarioValidationError, ScheduleScenario
 from studyflow.tasks.service import AcademicTaskRecord, AcademicTasks
 
 _UTC_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
@@ -39,6 +43,11 @@ class ScheduleGeneration(Protocol):
         *,
         kind: ProposalKind = ProposalKind.GENERATION,
         revision_reason: str | None = None,
+        scenario: ScheduleScenario | None = None,
+    ) -> ScheduleProposalRecord | None: ...
+
+    async def simulate(
+        self, account_id: UUID, scenario: ScheduleScenario
     ) -> ScheduleProposalRecord | None: ...
 
 
@@ -53,6 +62,8 @@ def schedule_input_fingerprint(
     availability_windows: Sequence[AvailabilityWindow],
     unavailable_periods: Sequence[UnavailablePeriod],
     preferences: StudyPreferences,
+    *,
+    scenario: ScheduleScenario | None = None,
 ) -> str:
     """Hash the canonical schedule-affecting account input."""
 
@@ -90,6 +101,8 @@ def schedule_input_fingerprint(
         "unavailable": unavailable_values,
         "version": 1,
     }
+    if scenario is not None and not scenario.is_empty:
+        payload["scenario"] = scenario.as_payload()
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
 
@@ -124,6 +137,29 @@ class ScheduleGenerationService:
         *,
         kind: ProposalKind = ProposalKind.GENERATION,
         revision_reason: str | None = None,
+        scenario: ScheduleScenario | None = None,
+    ) -> ScheduleProposalRecord | None:
+        return await self._run(
+            account_id,
+            kind=kind,
+            revision_reason=revision_reason,
+            scenario=scenario,
+            persist=True,
+        )
+
+    async def simulate(
+        self, account_id: UUID, scenario: ScheduleScenario
+    ) -> ScheduleProposalRecord | None:
+        return await self._run(account_id, scenario=scenario, persist=False)
+
+    async def _run(
+        self,
+        account_id: UUID,
+        *,
+        kind: ProposalKind = ProposalKind.GENERATION,
+        revision_reason: str | None = None,
+        scenario: ScheduleScenario | None = None,
+        persist: bool,
     ) -> ScheduleProposalRecord | None:
         preferences = await self._preferences.get(account_id)
         if preferences is None:
@@ -133,23 +169,101 @@ class ScheduleGenerationService:
             self._availability_windows.list_windows(account_id),
             self._unavailable_periods.list_periods(account_id),
         )
-        fingerprint = schedule_input_fingerprint(tasks, windows, unavailable, preferences)
-        problem = assemble_schedule_problem(
+        normalized_scenario = (scenario or ScheduleScenario()).normalized()
+        planning_start = self._clock()
+        effective_tasks = self._apply_deadline_overrides(tasks, normalized_scenario, planning_start)
+        fingerprint = schedule_input_fingerprint(
             tasks,
             windows,
             unavailable,
             preferences,
-            planning_start=self._clock(),
+            scenario=normalized_scenario if not normalized_scenario.is_empty else None,
+        )
+        problem = assemble_schedule_problem(
+            effective_tasks,
+            windows,
+            unavailable,
+            preferences,
+            planning_start=planning_start,
+            temporary_availability=normalized_scenario.temporary_availability,
+            temporary_blocked_periods=normalized_scenario.temporary_blocked_periods,
         )
         result = await asyncio.to_thread(self._solver, problem)
-        proposal = self._proposal_draft(
+        draft = self._proposal_draft(
             result,
-            tasks,
+            effective_tasks,
             kind=kind,
             revision_reason=revision_reason,
             fingerprint=fingerprint,
+            scenario=normalized_scenario if not normalized_scenario.is_empty else None,
         )
-        return await self._proposals.replace(account_id, proposal)
+        if persist:
+            return await self._proposals.replace(account_id, draft)
+        return self._preview_record(account_id, draft, self._clock())
+
+    @staticmethod
+    def _apply_deadline_overrides(
+        tasks: Sequence[AcademicTaskRecord],
+        scenario: ScheduleScenario,
+        planning_start: datetime,
+    ) -> tuple[AcademicTaskRecord, ...]:
+        task_by_id = {task.id: task for task in tasks}
+        overrides = {item.task_id: item.deadline_at for item in scenario.deadline_overrides}
+        unknown = sorted(set(overrides) - set(task_by_id))
+        if unknown:
+            raise ScenarioValidationError(f"Scenario contains unknown task id {unknown[0]}")
+        for task_id, deadline_at in overrides.items():
+            if deadline_at <= planning_start.astimezone(UTC):
+                raise ScenarioValidationError(
+                    f"Deadline override for task {task_id} must be in the future"
+                )
+        return tuple(
+            replace(task, deadline_at=overrides.get(task.id, task.deadline_at)) for task in tasks
+        )
+
+    @staticmethod
+    def _preview_record(
+        account_id: UUID, proposal: NewScheduleProposal, created_at: datetime
+    ) -> ScheduleProposalRecord:
+        proposal_id = uuid4()
+        sessions = tuple(
+            StudySessionRecord(
+                id=uuid4(),
+                account_id=account_id,
+                task_id=item.task_id,
+                proposal_id=proposal_id,
+                starts_at=item.starts_at,
+                ends_at=item.ends_at,
+                planned_duration_minutes=item.planned_duration_minutes,
+            )
+            for item in proposal.sessions
+        )
+        allocations = tuple(
+            TaskAllocationRecord(
+                proposal_id=proposal_id,
+                task_id=item.task_id,
+                deadline_at=item.deadline_at,
+                required_minutes=item.required_minutes,
+                scheduled_minutes=item.scheduled_minutes,
+                unscheduled_minutes=item.unscheduled_minutes,
+                raw_calendar_capacity_minutes=item.raw_calendar_capacity_minutes,
+                available_minutes_before_deadline=item.available_minutes_before_deadline,
+                shortfall_minutes=item.shortfall_minutes,
+            )
+            for item in proposal.allocations
+        )
+        return ScheduleProposalRecord(
+            id=proposal_id,
+            account_id=account_id,
+            kind=proposal.kind,
+            revision_reason=proposal.revision_reason,
+            status=proposal.status,
+            input_fingerprint=proposal.input_fingerprint,
+            created_at=created_at.astimezone(UTC),
+            sessions=sessions,
+            allocations=allocations,
+            scenario=proposal.scenario,
+        )
 
     @staticmethod
     def _proposal_draft(
@@ -159,6 +273,7 @@ class ScheduleGenerationService:
         kind: ProposalKind,
         revision_reason: str | None,
         fingerprint: str,
+        scenario: ScheduleScenario | None = None,
     ) -> NewScheduleProposal:
         if result.status is KernelStatus.FEASIBLE:
             status = ProposalStatus.FEASIBLE
@@ -213,4 +328,5 @@ class ScheduleGenerationService:
             input_fingerprint=fingerprint,
             sessions=sessions,
             allocations=allocations,
+            scenario=scenario,
         )

@@ -121,6 +121,16 @@ export interface WireUnavailablePeriodChange {
   invalidated_future_session_ids: string[];
 }
 
+export interface WireStudyTimeUpdate {
+  timezone_confirmed: boolean;
+  planning_preferences: WireStudyPreferences | null;
+  recurring_windows: WireAvailabilityWindow[] | null;
+  added_blocked_periods: WireUnavailablePeriod[];
+  updated_blocked_periods: WireUnavailablePeriod[];
+  removed_blocked_period_ids: string[];
+  invalidated_future_session_ids: string[];
+}
+
 // ─── Study sessions and scheduling ──────────────────────────────
 // `backend/src/studyflow/api/study_sessions.py` and
 // `backend/src/studyflow/api/schedule_proposals.py`.
@@ -202,6 +212,30 @@ export interface WireScheduleProposal {
   task_allocations: WireTaskAllocation[];
   unscheduled_work: WireUnscheduledWork[];
   overload_warning: WireOverloadWarning | null;
+  scenario: WireScheduleScenario | null;
+}
+
+export interface WireScheduleScenario {
+  temporary_availability: {
+    starts_at: string;
+    ends_at: string;
+  }[];
+  temporary_blocked_periods: {
+    starts_at: string;
+    ends_at: string;
+    reason: string | null;
+  }[];
+  deadline_overrides: {
+    task_id: string;
+    deadline_at: string;
+  }[];
+}
+
+export interface WireScheduleSimulation {
+  proposal: WireScheduleProposal;
+  active_schedule_changed: false;
+  requires_user_review: false;
+  persisted: false;
 }
 
 export interface WireAcceptedSchedule {
