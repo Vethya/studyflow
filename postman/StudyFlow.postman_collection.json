@@ -812,6 +812,18 @@
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
         },
         {
+          "name": "Update Study Time",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"planning_preferences\": {\n    \"timezone\": \"Asia/Phnom_Penh\",\n    \"preferred_session_length_minutes\": 60,\n    \"minimum_break_minutes\": 10\n  },\n  \"recurring_availability\": {\n    \"replace_all\": true,\n    \"windows\": [\n      {\"weekday\": 0, \"start_time\": \"18:00\", \"end_time\": \"22:00\"}\n    ]\n  }\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/availability/study-time", "host": ["{{base_url}}"], "path": ["api", "v1", "availability", "study-time"] },
+            "description": "Atomically applies grouped study preferences and recurring availability changes in one transaction. Blocked-period adds, updates, removals, and timezone confirmation can be included in the same request."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
           "name": "List Unavailable Periods",
           "request": {
             "method": "GET",

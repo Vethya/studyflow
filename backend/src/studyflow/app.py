@@ -81,6 +81,7 @@ from studyflow.availability.repositories import (
     SqlAlchemyFutureSessionInvalidator,
     SqlAlchemyUnavailablePeriodRepository,
 )
+from studyflow.availability.study_time import StudyTimeUpdates, StudyTimeUpdateService
 from studyflow.availability.unavailable import (
     UnavailablePeriods,
     UnavailablePeriodService,
@@ -155,6 +156,7 @@ def create_app(
     oidc_start_rate_limiter: OIDCStartRateLimit | None = None,
     oidc_account_linking: OIDCAccountLinking | None = None,
     oidc_link_rate_limiter: OIDCLinkRateLimit | None = None,
+    study_time_updates: StudyTimeUpdates | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     resolved_database = database or Database(resolved_settings.database_url.get_secret_value())
@@ -286,11 +288,16 @@ def create_app(
     resolved_availability_windows = availability_windows or AvailabilityWindowService(
         SqlAlchemyAvailabilityWindowRepository(transactions)
     )
+    future_session_invalidator = SqlAlchemyFutureSessionInvalidator()
     resolved_unavailable_periods = unavailable_periods or UnavailablePeriodService(
         SqlAlchemyUnavailablePeriodRepository(
             transactions,
-            SqlAlchemyFutureSessionInvalidator(),
+            future_session_invalidator,
         )
+    )
+    resolved_study_time_updates = study_time_updates or StudyTimeUpdateService(
+        transactions,
+        future_session_invalidator,
     )
     resolved_schedule_proposals = schedule_proposals or SqlAlchemyScheduleProposalRepository(
         transactions
@@ -378,6 +385,7 @@ def create_app(
     application.state.academic_tasks = resolved_academic_tasks
     application.state.availability_windows = resolved_availability_windows
     application.state.unavailable_periods = resolved_unavailable_periods
+    application.state.study_time_updates = resolved_study_time_updates
     application.state.schedule_generation = resolved_schedule_generation
     application.state.schedule_proposals = resolved_schedule_proposals
     application.state.schedule_acceptance = resolved_schedule_acceptance

@@ -243,51 +243,15 @@ async function applyStudyTimeChanges(
     throw new Error("Provide at least one study-time change.");
   }
 
-  const savedPreferences =
-    planningPreferences === undefined
-      ? null
-      : await account.updatePreferences(planningPreferences, signal);
-  if (shouldConfirmTimezone) await availability.confirmTimezone(signal);
-
-  const savedWindows =
-    recurringWindows === undefined
-      ? null
-      : await availability.replaceWindows(recurringWindows, signal);
-  const addedBlockedPeriods = [] as StudyTimeUpdateResult["added_blocked_periods"];
-  const updatedBlockedPeriods = [] as StudyTimeUpdateResult["updated_blocked_periods"];
-  const removedBlockedPeriodIds: string[] = [];
-  const invalidatedFutureSessionIds: string[] = [];
-
-  if (blockedChanges !== null) {
-    for (const draft of blockedChanges.add) {
-      const change = await availability.createUnavailablePeriod(draft, signal);
-      addedBlockedPeriods.push(change.period);
-      invalidatedFutureSessionIds.push(...change.invalidatedFutureSessionIds);
-    }
-    for (const changeInput of blockedChanges.update) {
-      const change = await availability.updateUnavailablePeriod(
-        changeInput.periodId,
-        changeInput.draft,
-        signal,
-      );
-      updatedBlockedPeriods.push(change.period);
-      invalidatedFutureSessionIds.push(...change.invalidatedFutureSessionIds);
-    }
-    for (const periodId of blockedChanges.remove) {
-      await availability.deleteUnavailablePeriod(periodId, signal);
-      removedBlockedPeriodIds.push(periodId);
-    }
-  }
-
-  return {
-    timezone_confirmed: shouldConfirmTimezone,
-    planning_preferences: savedPreferences,
-    recurring_windows: savedWindows,
-    added_blocked_periods: addedBlockedPeriods,
-    updated_blocked_periods: updatedBlockedPeriods,
-    removed_blocked_period_ids: removedBlockedPeriodIds,
-    invalidated_future_session_ids: [...new Set(invalidatedFutureSessionIds)],
-  };
+  return availability.updateStudyTime(
+    {
+      confirmTimezone: shouldConfirmTimezone,
+      planningPreferences,
+      recurringWindows,
+      blockedPeriods: blockedChanges ?? undefined,
+    },
+    signal,
+  );
 }
 
 function setupStatus(
