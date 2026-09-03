@@ -157,7 +157,12 @@ class SqlAlchemyAdaptivePredictionRepository:
                 .where(AcademicTask.id == task_id, AcademicTask.account_id == account_id)
                 .with_for_update()
             )
-            if task is None or await session.get(PredictionRow, task_id) is not None:
+            if (
+                task is None
+                or task.estimate_frozen_at is not None
+                or task.completed_at is not None
+                or await session.get(PredictionRow, task_id) is not None
+            ):
                 return False
             session.add(self._prediction_row(task, prediction, exposed))
             return True
@@ -179,9 +184,11 @@ class SqlAlchemyAdaptivePredictionRepository:
                 .where(AcademicTask.id == task_id, AcademicTask.account_id == account_id)
                 .with_for_update()
             )
-            if task is None or task.estimate_frozen_at is not None:
+            if task is None or task.estimate_frozen_at is not None or task.completed_at is not None:
                 return False
             existing = await session.get(PredictionRow, task_id, with_for_update=True)
+            if existing is not None and existing.account_id != account_id:
+                return False
             if existing is not None:
                 await session.delete(existing)
                 await session.flush()
