@@ -56,10 +56,14 @@ function toWireTask(form: TaskFormData) {
   };
 }
 
-export async function createTask(form: TaskFormData): Promise<AcademicTask> {
+export async function createTask(
+  form: TaskFormData,
+  signal?: AbortSignal,
+): Promise<AcademicTask> {
   const wire = await apiJson<WireAcademicTask>("/tasks", {
     method: "POST",
     body: toWireTask(form),
+    signal,
   });
   return toAcademicTask(wire);
 }

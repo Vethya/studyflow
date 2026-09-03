@@ -3,9 +3,9 @@ import type {
   AvailabilityWindow,
   EffortProgress,
   Schedule,
-  ScheduleProposal,
   UnavailablePeriod,
 } from "@/types";
+import type { ScheduleProposal } from "@/types/schedule";
 
 /** The Phase 1 tool names. Keep these stable once agents can discover them. */
 export const WEBMCP_TOOL_NAMES = {
@@ -101,5 +101,5 @@ export interface RejectPlanResult {
 
 export interface RecordMissedResult {
   session_id: string;
-  recovery_proposal: ScheduleProposal;
+  recovery_proposal: ScheduleProposal | null;
 }

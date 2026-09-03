@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
+import { STUDYFLOW_DATA_CHANGED_EVENT } from "@/lib/data-events";
 
 interface State<T> {
   data: T | null;
@@ -57,6 +58,18 @@ export function useApi<T>(
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nonce, loader, ...deps]);
+
+  // WebMCP mutations happen outside React event handlers. Refresh mounted
+  // resources after those calls so the visible app stays in sync with the
+  // authenticated session the agent just changed.
+  useEffect(() => {
+    const onDataChanged = () => {
+      setState((previous) => ({ ...previous, error: null, isLoading: true }));
+      setNonce((value) => value + 1);
+    };
+    window.addEventListener(STUDYFLOW_DATA_CHANGED_EVENT, onDataChanged);
+    return () => window.removeEventListener(STUDYFLOW_DATA_CHANGED_EVENT, onDataChanged);
+  }, []);
 
   const reload = useCallback(() => {
     setState((previous) => ({ ...previous, error: null, isLoading: true }));

@@ -1,8 +1,24 @@
 # StudyFlow WebMCP workflow
 
-Phase 1 defines the first complete agent workflow. Phase 2 now provides the
-backend scenario engine and endpoints. The browser registration layer is still
-the next phase.
+Phase 1 defines the first complete agent workflow. Phase 2 provides the backend
+scenario engine and endpoints. Phase 3 now registers that workflow in the
+authenticated browser page through the WebMCP imperative API.
+
+## Phase 3 browser integration
+
+When the authenticated app shell mounts, StudyFlow checks for
+`document.modelContext` and registers the seven tools below. Registration is
+scoped to the shell lifetime and is cancelled on logout/unmount. Browsers that
+do not expose WebMCP simply continue to work as a normal StudyFlow app.
+
+The tool handlers call the existing same-origin API client, which sends the
+browser's server-managed session cookie and CSRF token. There is deliberately
+no login tool and no credential passed to an agent. Mutations dispatch a small
+`studyflow:data-changed` event so mounted React resources refresh after an
+agent action.
+
+The Next.js app also sends `Permissions-Policy: tools=(self)` so the intended
+WebMCP exposure is explicit in deployed environments.
 
 ## Phase 2 backend surface
 
@@ -165,8 +181,9 @@ schedule unchanged.
 ### `studyflow_record_missed`
 
 Records one past session as missed through the existing recovery workflow. The
-result includes the recorded session and the new recovery proposal. The active
-schedule remains unchanged until the student accepts that proposal.
+result includes the recorded session and, when one can be generated, the new
+recovery proposal. The active schedule remains unchanged until the student
+accepts that proposal.
 
 ## Demo fixture
 
