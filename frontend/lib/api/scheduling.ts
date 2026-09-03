@@ -4,7 +4,7 @@
  * Backed by the real API as of the `dev` merge:
  *   GET    /study-sessions                      accepted sessions
  *   GET    /study-sessions/{id}
- *   POST   /study-sessions/{id}/outcomes        currently "missed" only
+ *   POST   /study-sessions/{id}/outcomes        records completed, delayed, or missed
  *   POST   /schedule-proposals                  generate (inactive proposal)
  *   GET    /schedule-proposals/current          pending proposal, or 404
  *   POST   /schedule-proposals/{id}/accept
