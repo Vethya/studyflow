@@ -73,6 +73,14 @@ def test_alembic_uses_the_canonical_migrations_directory() -> None:
     assert Path(scripts.dir).resolve() == BACKEND_ROOT / "migrations"
 
 
+def test_alembic_migration_graph_has_a_single_head() -> None:
+    configuration = Config(ALEMBIC_CONFIG)
+
+    scripts = ScriptDirectory.from_config(configuration)
+
+    assert scripts.get_heads() == ["20260903_17"]
+
+
 def test_migrations_share_application_metadata() -> None:
     assert target_metadata is Base.metadata
 
