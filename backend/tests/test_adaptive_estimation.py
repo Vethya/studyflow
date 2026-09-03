@@ -1,8 +1,15 @@
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
+import pytest
+
 from studyflow.estimation import (
+    AdaptiveEstimateUnavailableError,
+    AdaptiveEstimator,
+    AdaptivePredictionRepository,
+    CorrectionPrediction,
     HistoryRecord,
     PredictionEvaluation,
     median_correction,
@@ -264,3 +271,197 @@ def test_qualification_dequalifies_after_recent_predictions_lose_advantage() -> 
     ]
 
     assert not qualifies(predictions)
+
+
+@dataclass
+class InMemoryAdaptivePredictionRepository(AdaptivePredictionRepository):
+    history_records: list[HistoryRecord] = field(default_factory=list)
+    prediction_evaluations: list[PredictionEvaluation] = field(default_factory=list)
+    saved_predictions: list[tuple[UUID, CorrectionPrediction, bool]] = field(default_factory=list)
+    acknowledgments: dict[TaskCategory, Decimal] = field(default_factory=dict)
+
+    async def history(self, account_id: UUID) -> list[HistoryRecord]:
+        return self.history_records
+
+    async def evaluations(self, account_id: UUID) -> list[PredictionEvaluation]:
+        return self.prediction_evaluations
+
+    async def save_prediction(
+        self,
+        account_id: UUID,
+        task_id: UUID,
+        prediction: CorrectionPrediction,
+        *,
+        exposed: bool,
+    ) -> bool:
+        self.saved_predictions.append((task_id, prediction, exposed))
+        return True
+
+    async def replace_prediction(
+        self,
+        account_id: UUID,
+        task_id: UUID,
+        prediction: CorrectionPrediction,
+        *,
+        exposed: bool,
+    ) -> bool:
+        return True
+
+    async def acknowledgment(self, account_id: UUID, category: TaskCategory) -> Decimal | None:
+        return self.acknowledgments.get(category)
+
+    async def acknowledge(
+        self,
+        account_id: UUID,
+        category: TaskCategory,
+        correction_factor: Decimal,
+        acknowledged_at: datetime,
+    ) -> bool:
+        self.acknowledgments[category] = correction_factor
+        return True
+
+
+@pytest.mark.anyio
+async def test_capture_starts_shadow_predictions_with_the_sixth_task() -> None:
+    repository = InMemoryAdaptivePredictionRepository(
+        history_records=_history([Decimal("1.5")] * 5)
+    )
+    estimator = AdaptiveEstimator(repository, clock=lambda: NOW)
+    account_id, task_id = UUID(int=100), UUID(int=101)
+
+    preview = await estimator.preview(account_id, TaskCategory.OTHER, 60)
+    captured = await estimator.capture_for_task(account_id, task_id, TaskCategory.OTHER, 60)
+
+    assert preview.available is False
+    assert preview.adaptive_minutes is None
+    assert repository.saved_predictions == [
+        (
+            task_id,
+            CorrectionPrediction(90, Decimal("1.5"), "category", 5),
+            False,
+        )
+    ]
+    assert captured.adaptive_minutes is None
+    assert captured.planned_source == "original"
+
+
+@pytest.mark.anyio
+async def test_preview_exposes_qualified_category_estimate_and_defaults_to_adaptive() -> None:
+    repository = InMemoryAdaptivePredictionRepository(
+        history_records=_history([Decimal("1.5")] * 5, category=TaskCategory.READING),
+        prediction_evaluations=[
+            _evaluation(index, adaptive_minutes=101, actual_minutes=110) for index in range(5)
+        ],
+    )
+    estimator = AdaptiveEstimator(repository, clock=lambda: NOW)
+
+    preview = await estimator.preview(UUID(int=100), TaskCategory.READING, 60)
+
+    assert preview.available is True
+    assert preview.adaptive_minutes == 90
+    assert preview.correction_factor == Decimal("1.5")
+    assert preview.history_scope == "category"
+    assert preview.history_count == 5
+    assert preview.acknowledgment_required is False
+    assert preview.planned_source == "adaptive"
+
+
+@pytest.mark.anyio
+async def test_preview_exposes_qualified_overall_estimate_when_category_history_is_sparse() -> None:
+    repository = InMemoryAdaptivePredictionRepository(
+        history_records=[
+            *_history([Decimal("1.5")] * 5),
+            *_history([Decimal("1.5")] * 4, category=TaskCategory.READING),
+        ],
+        prediction_evaluations=[
+            _evaluation(index, adaptive_minutes=101, actual_minutes=110) for index in range(5)
+        ],
+    )
+    estimator = AdaptiveEstimator(repository, clock=lambda: NOW)
+
+    preview = await estimator.preview(UUID(int=100), TaskCategory.READING, 60)
+
+    assert preview.available is True
+    assert preview.history_scope == "overall"
+    assert preview.history_count == 9
+
+
+@pytest.mark.anyio
+async def test_capture_honors_original_override_for_a_qualified_estimate() -> None:
+    repository = InMemoryAdaptivePredictionRepository(
+        history_records=_history([Decimal("1.5")] * 5),
+        prediction_evaluations=[
+            _evaluation(index, adaptive_minutes=101, actual_minutes=110) for index in range(5)
+        ],
+    )
+    estimator = AdaptiveEstimator(repository, clock=lambda: NOW)
+
+    captured = await estimator.capture_for_task(
+        UUID(int=100),
+        UUID(int=101),
+        TaskCategory.OTHER,
+        60,
+        planned_source="original",
+    )
+
+    assert captured.adaptive_minutes == 90
+    assert captured.planned_source == "original"
+    assert repository.saved_predictions[0][2] is True
+
+
+@pytest.mark.anyio
+async def test_capture_rejects_adaptive_selection_when_an_estimate_is_unavailable() -> None:
+    estimator = AdaptiveEstimator(InMemoryAdaptivePredictionRepository(), clock=lambda: NOW)
+
+    with pytest.raises(AdaptiveEstimateUnavailableError):
+        await estimator.capture_for_task(
+            UUID(int=100),
+            UUID(int=101),
+            TaskCategory.OTHER,
+            60,
+            planned_source="adaptive",
+        )
+
+
+@pytest.mark.anyio
+async def test_large_factor_requires_first_acknowledgment_then_defaults_to_adaptive() -> None:
+    repository = InMemoryAdaptivePredictionRepository(
+        history_records=_history([Decimal("2.5")] * 5),
+        prediction_evaluations=[
+            _evaluation(index, adaptive_minutes=101, actual_minutes=110) for index in range(5)
+        ],
+    )
+    estimator = AdaptiveEstimator(repository, clock=lambda: NOW)
+    account_id = UUID(int=100)
+
+    before = await estimator.preview(account_id, TaskCategory.OTHER, 60)
+    assert before.acknowledgment_required is True
+    assert before.planned_source == "original"
+
+    assert await estimator.acknowledge(account_id, TaskCategory.OTHER)
+    after = await estimator.preview(account_id, TaskCategory.OTHER, 60)
+
+    assert repository.acknowledgments[TaskCategory.OTHER] == Decimal("2.5")
+    assert after.acknowledgment_required is False
+    assert after.planned_source == "adaptive"
+
+
+@pytest.mark.anyio
+async def test_large_factor_repompts_after_a_twenty_five_percent_relative_change() -> None:
+    repository = InMemoryAdaptivePredictionRepository(
+        history_records=_history([Decimal("2")] * 5),
+        prediction_evaluations=[
+            _evaluation(index, adaptive_minutes=101, actual_minutes=110) for index in range(5)
+        ],
+        acknowledgments={TaskCategory.OTHER: Decimal("2")},
+    )
+    estimator = AdaptiveEstimator(repository, clock=lambda: NOW)
+    account_id = UUID(int=100)
+
+    repository.history_records = _history([Decimal("2.49")] * 5)
+    below_threshold = await estimator.preview(account_id, TaskCategory.OTHER, 60)
+    repository.history_records = _history([Decimal("2.5")] * 5)
+    at_threshold = await estimator.preview(account_id, TaskCategory.OTHER, 60)
+
+    assert below_threshold.acknowledgment_required is False
+    assert at_threshold.acknowledgment_required is True
