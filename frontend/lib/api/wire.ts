@@ -247,3 +247,9 @@ export interface WireMissedSessionRecovery {
   outcome: WireSessionOutcome;
   revision: WireScheduleProposal;
 }
+
+export interface WireSessionOutcomeRecordingResponse {
+  session: WireStudySession;
+  outcome: WireSessionOutcome;
+  revision: WireScheduleProposal | null;
+}
