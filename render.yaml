@@ -1,12 +1,12 @@
 services:
   - type: web
     name: studyflow-api
+    branch: master
     runtime: docker
     plan: free
     region: singapore
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
-    dockerCommand: /bin/bash -c ".venv/bin/alembic upgrade head && .venv/bin/uvicorn studyflow.app:app --host 0.0.0.0 --port 8000"
     healthCheckPath: /api/v1/ready
     envVars:
       - key: STUDYFLOW_ENVIRONMENT
@@ -18,7 +18,83 @@ services:
       - key: STUDYFLOW_PUBLIC_APP_URL
         value: https://studyflow.vercel.app
       - key: STUDYFLOW_CORS_ORIGINS
-        value: http://localhost:5173,http://localhost:3000
+        sync: false
+      - key: STUDYFLOW_SMTP_HOST
+        value: smtp.resend.com
+      - key: STUDYFLOW_SMTP_PORT
+        value: "587"
+      - key: STUDYFLOW_SMTP_USERNAME
+        value: resend
+      - key: STUDYFLOW_SMTP_PASSWORD
+        sync: false
+      - key: STUDYFLOW_SMTP_START_TLS
+        value: "true"
+      - key: STUDYFLOW_EMAIL_FROM_ADDRESS
+        sync: false
+      - key: STUDYFLOW_GOOGLE_OIDC_CLIENT_ID
+        sync: false
+      - key: STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET
+        sync: false
+      - key: STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI
+        sync: false
+  - type: web
+    name: studyflow-api-staging
+    branch: staging
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /api/v1/ready
+    envVars:
+      - key: STUDYFLOW_ENVIRONMENT
+        value: production
+      - key: FORWARDED_ALLOW_IPS
+        value: 0.0.0.0/0
+      - key: STUDYFLOW_DATABASE_URL
+        sync: false
+      - key: STUDYFLOW_PUBLIC_APP_URL
+        value: https://studyflow.vercel.app
+      - key: STUDYFLOW_CORS_ORIGINS
+        sync: false
+      - key: STUDYFLOW_SMTP_HOST
+        value: smtp.resend.com
+      - key: STUDYFLOW_SMTP_PORT
+        value: "587"
+      - key: STUDYFLOW_SMTP_USERNAME
+        value: resend
+      - key: STUDYFLOW_SMTP_PASSWORD
+        sync: false
+      - key: STUDYFLOW_SMTP_START_TLS
+        value: "true"
+      - key: STUDYFLOW_EMAIL_FROM_ADDRESS
+        sync: false
+      - key: STUDYFLOW_GOOGLE_OIDC_CLIENT_ID
+        sync: false
+      - key: STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET
+        sync: false
+      - key: STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI
+        sync: false
+  - type: web
+    name: studyflow-api-dev
+    branch: dev
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /api/v1/ready
+    envVars:
+      - key: STUDYFLOW_ENVIRONMENT
+        value: production
+      - key: FORWARDED_ALLOW_IPS
+        value: 0.0.0.0/0
+      - key: STUDYFLOW_DATABASE_URL
+        sync: false
+      - key: STUDYFLOW_PUBLIC_APP_URL
+        value: https://studyflow.vercel.app
+      - key: STUDYFLOW_CORS_ORIGINS
+        value: https://studyflow.vercel.app
       - key: STUDYFLOW_SMTP_HOST
         value: smtp.resend.com
       - key: STUDYFLOW_SMTP_PORT

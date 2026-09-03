@@ -149,6 +149,23 @@ def test_account_authentication_schema_is_in_the_upgrade_path() -> None:
     assert "CREATE TABLE unavailable_periods" in result.stdout
     assert "CREATE TABLE authentication_oidc_states" in result.stdout
     assert "CREATE TABLE authentication_oidc_link_challenges" in result.stdout
+    assert "CREATE TABLE schedule_proposals" in result.stdout
+    assert "CREATE TABLE study_sessions" in result.stdout
+    assert "CREATE TABLE proposal_task_allocations" in result.stdout
+    assert "CREATE TABLE study_session_outcomes" in result.stdout
+    assert "CREATE TABLE schedule_recovery_snapshots" in result.stdout
+    assert "CREATE TABLE recovery_task_work" in result.stdout
+    assert "ADD COLUMN invalidated_at TIMESTAMP WITH TIME ZONE" in result.stdout
+    assert "ADD COLUMN invalidation_reason VARCHAR(16)" in result.stdout
+    assert "CONSTRAINT ck_study_sessions_invalidation_state CHECK" in result.stdout
+    assert (
+        "FOREIGN KEY(missed_session_id) REFERENCES study_session_outcomes (session_id) "
+        "ON DELETE CASCADE"
+    ) in result.stdout
+    assert "CREATE TABLE recovery_snapshot_outcomes" in result.stdout
+    assert (
+        "FOREIGN KEY(session_id) REFERENCES study_session_outcomes (session_id) ON DELETE CASCADE"
+    ) in result.stdout
     for constraint_name in (
         "ck_academic_tasks_category",
         "ck_academic_tasks_priority",

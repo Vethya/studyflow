@@ -21,17 +21,17 @@ URL, and TLS for email delivery.
 
 | Variable | Required in production | Set by | Notes |
 | --- | --- | --- | --- |
-| `STUDYFLOW_ENVIRONMENT` | yes | `render.yaml` (`production`) | Enables production validators |
+| `STUDYFLOW_ENVIRONMENT` | yes | `render.yaml` (`production` for every hosted service) | Enables production validators and secure cookies |
 | `FORWARDED_ALLOW_IPS` | yes | `render.yaml` (`0.0.0.0/0`) | Lets Uvicorn trust Render's proxy headers |
 | `STUDYFLOW_DATABASE_URL` | yes | You (secret) | Neon **pooled** URL, converted; see below |
-| `STUDYFLOW_PUBLIC_APP_URL` | yes | `render.yaml` | Frontend origin; verification links point here |
+| `STUDYFLOW_PUBLIC_APP_URL` | yes | `render.yaml` (`https://studyflow.vercel.app`) | Shared frontend origin; verification links point here |
 | `STUDYFLOW_SMTP_HOST` | yes | `render.yaml` (`smtp.resend.com`) | |
 | `STUDYFLOW_SMTP_PORT` | yes | `render.yaml` (`587`) | |
 | `STUDYFLOW_SMTP_USERNAME` | yes | `render.yaml` (`resend`) | Literal username for Resend's relay |
 | `STUDYFLOW_SMTP_PASSWORD` | yes | You (secret) | Resend API key |
 | `STUDYFLOW_SMTP_START_TLS` | yes | `render.yaml` (`true`) | Production requires TLS delivery |
 | `STUDYFLOW_EMAIL_FROM_ADDRESS` | yes | You (secret) | Must be an address on a Resend-verified domain |
-| `STUDYFLOW_CORS_ORIGINS` | no | `render.yaml` | Comma-separated origins for local frontend development only |
+| `STUDYFLOW_CORS_ORIGINS` | no | `render.yaml` (per service) | Comma-separated origins for direct frontend calls; the production proxy normally avoids this |
 | `STUDYFLOW_GOOGLE_OIDC_CLIENT_ID` | no | You (secret) | All three OIDC values configure together |
 | `STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET` | no | You (secret) | |
 | `STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI` | no | You (secret) | Paste `https://<frontend-origin>/api/v1/auth/google/callback`; must be HTTPS and must go through the frontend proxy |
@@ -63,16 +63,25 @@ URL, and TLS for email delivery.
 
 1. Push this repository to GitHub and connect the Render workspace.
 2. Create a **Blueprint** deployment from the repository root so `render.yaml` applies:
-   runtime Docker, free instance, health check, and fixed environment variables are all
-   provisioned automatically. The start command applies migrations (`alembic upgrade head`)
-   before launching Uvicorn because pre-deploy commands require a paid plan.
-   `alembic upgrade head` is idempotent, so the extra run on every cold start costs only
-   seconds.
-3. Fill the prompted secrets when asked:
+   - `studyflow-api` from `master` (production; this name intentionally matches the existing service)
+   - `studyflow-api-staging` from `staging`
+   - `studyflow-api-dev` from `dev`
+   Each service uses Docker, the free plan, a health check, and its own environment variables.
+   The Dockerfile `CMD` applies migrations (`alembic upgrade head`) before launching Uvicorn because
+   pre-deploy commands require a paid plan. The Blueprint leaves `dockerCommand` unset so Render
+   uses that `CMD` without reparsing its shell quoting. `alembic upgrade head` is idempotent, so the
+   extra run on every cold start costs only seconds.
+3. Keep the existing production secret values. Configure separate values for staging and dev,
+   especially separate Neon databases. `sync: false` values for newly added services may need to
+   be entered manually after syncing an existing Blueprint:
    - `STUDYFLOW_DATABASE_URL` (converted Neon URL from step 1)
-   - `STUDYFLOW_SMTP_PASSWORD` (Resend API key)
-   - `STUDYFLOW_EMAIL_FROM_ADDRESS` (from step 2)
-4. Note the service URL (for example `https://studyflow-api.onrender.com`). If Google
+   - `STUDYFLOW_CORS_ORIGINS`, if the service accepts direct browser calls from another origin
+   - `STUDYFLOW_SMTP_PASSWORD` and `STUDYFLOW_EMAIL_FROM_ADDRESS`
+   - all three Google OIDC variables together, if Google Sign-In is enabled
+   All hosted services use production mode so cookies retain their `Secure` attribute and
+   `__Host-` prefix. The shared frontend currently proxies to the dev service, so authentication
+   flows for staging and production remain inactive until each gets a matching frontend deployment.
+4. Note the production service URL (for example `https://studyflow-api.onrender.com`). If Google
    Sign-In will be used, register
    `https://studyflow.vercel.app/api/v1/auth/google/callback` in the Google Cloud console,
    then fill all three OIDC variables together — leaving any one blank while the others are

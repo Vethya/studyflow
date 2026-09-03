@@ -91,3 +91,25 @@ def test_academic_task_requests_generate_a_future_deadline() -> None:
     assert "{{task_deadline_at}}" in update_task["request"]["body"]["raw"]
     assert "Date.parse(pm.collectionVariables.get('task_deadline_at'))" in create_test_script
     assert "pm.expect(deadline).to.be.above(Date.now())" in create_test_script
+
+
+def test_schedule_acceptance_populates_the_study_session_id() -> None:
+    collection = load_json(COLLECTION_PATH)
+    scheduling = find_item(collection["item"], "Scheduling")
+    acceptance = find_item(scheduling["item"], "Accept Schedule Proposal")
+
+    test_script = "\n".join(acceptance["event"][0]["script"]["exec"])
+
+    assert "pm.response.json().sessions" in test_script
+    assert "pm.collectionVariables.set('session_id', sessions[0].id)" in test_script
+
+
+def test_study_session_list_populates_the_study_session_id() -> None:
+    collection = load_json(COLLECTION_PATH)
+    scheduling = find_item(collection["item"], "Scheduling")
+    session_list = find_item(scheduling["item"], "List Study Sessions")
+
+    test_script = "\n".join(session_list["event"][0]["script"]["exec"])
+
+    assert "pm.response.json()" in test_script
+    assert "pm.collectionVariables.set('session_id', sessions[0].id)" in test_script
