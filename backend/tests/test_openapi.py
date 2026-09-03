@@ -212,3 +212,33 @@ def test_openapi_documents_study_session_list_filters() -> None:
     assert parameters["to"]["required"] is False
     assert parameters["task_id"]["required"] is False
     assert set(operation["responses"]) >= {"200", "401", "422"}
+
+
+def test_openapi_documents_student_safe_adaptive_estimate_operations() -> None:
+    schema = create_app().openapi()
+    preview = schema["paths"]["/api/v1/adaptive-estimates/preview"]["get"]
+    acknowledgment = schema["paths"]["/api/v1/adaptive-estimates/acknowledgments"]["post"]
+    parameters = {parameter["name"]: parameter for parameter in preview["parameters"]}
+
+    assert set(parameters) == {"category", "original_minutes"}
+    assert parameters["original_minutes"]["schema"] == {
+        "type": "integer",
+        "maximum": 2_147_483_647,
+        "exclusiveMinimum": 0,
+        "title": "Original Minutes",
+    }
+    assert set(preview["responses"]) >= {"200", "401", "422"}
+    assert set(acknowledgment["responses"]) >= {"204", "401", "403", "422"}
+    preview_schema = schema["components"]["schemas"]["AdaptiveEstimatePreviewResponse"]
+    assert set(preview_schema["properties"]) == {
+        "category",
+        "original_minutes",
+        "adaptive_minutes",
+        "planned_minutes",
+        "correction_factor",
+        "history_scope",
+        "history_count",
+        "available",
+        "planned_source",
+        "acknowledgment_required",
+    }

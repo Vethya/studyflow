@@ -595,6 +595,54 @@
       ]
     },
     {
+      "name": "Adaptive Estimates",
+      "description": "Preview the authenticated student's evidence-gated estimate and acknowledge a large adjustment. Preview never exposes accuracy metrics or historical prediction rows.",
+      "item": [
+        {
+          "name": "Preview Adaptive Estimate",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/adaptive-estimates/preview?category=reading&original_minutes=90",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "adaptive-estimates", "preview"],
+              "query": [
+                { "key": "category", "value": "reading" },
+                { "key": "original_minutes", "value": "90" }
+              ]
+            },
+            "description": "Returns only the student-safe current estimate, its source history count and scope, and whether an acknowledgment is required. It never includes MAE or hidden prediction records."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) pm.expect(pm.response.json()).to.include.keys('category', 'original_minutes', 'adaptive_minutes', 'planned_minutes', 'available', 'planned_source', 'acknowledgment_required');"] } }]
+        },
+        {
+          "name": "Acknowledge Adaptive Estimate",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"reading\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/adaptive-estimates/acknowledgments",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "adaptive-estimates", "acknowledgments"]
+            },
+            "description": "Acknowledges the server-calculated current correction for one category. The request intentionally contains no factor and requires the session-bound CSRF token."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
+        }
+      ]
+    },
+    {
       "name": "Academic Tasks",
       "description": "Authenticated, student-owned academic work.",
       "event": [

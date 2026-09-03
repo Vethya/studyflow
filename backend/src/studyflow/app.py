@@ -147,6 +147,7 @@ def create_app(
     account_passwords: AccountPasswords | None = None,
     account_password_change_rate_limiter: AccountPasswordChangeRateLimit | None = None,
     academic_tasks: AcademicTasks | None = None,
+    adaptive_estimator: AdaptiveEstimator | None = None,
     availability_windows: AvailabilityWindows | None = None,
     unavailable_periods: UnavailablePeriods | None = None,
     schedule_generation: ScheduleGeneration | None = None,
@@ -281,12 +282,13 @@ def create_app(
         SqlAlchemyStudyPreferencesRepository(transactions)
     )
     adaptive_predictions = SqlAlchemyAdaptivePredictionRepository(transactions)
+    resolved_adaptive_estimator = adaptive_estimator or AdaptiveEstimator(adaptive_predictions)
     resolved_academic_tasks = academic_tasks or AcademicTaskService(
         SqlAlchemyAcademicTaskRepository(
             transactions,
             SqlAlchemyTaskDeadlineSessionInvalidator(),
             recovery_invalidator=SqlAlchemyTaskRecoveryProposalInvalidator(),
-            estimator=AdaptiveEstimator(adaptive_predictions),
+            estimator=resolved_adaptive_estimator,
             prediction_repository=adaptive_predictions,
         )
     )
@@ -391,6 +393,7 @@ def create_app(
         or DatabaseAccountPasswordChangeRateLimiter(transactions)
     )
     application.state.academic_tasks = resolved_academic_tasks
+    application.state.adaptive_estimator = resolved_adaptive_estimator
     application.state.availability_windows = resolved_availability_windows
     application.state.unavailable_periods = resolved_unavailable_periods
     application.state.study_time_updates = resolved_study_time_updates
