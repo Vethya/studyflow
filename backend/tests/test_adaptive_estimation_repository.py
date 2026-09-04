@@ -18,6 +18,7 @@ from studyflow.database.models import StudySession as SessionRow
 from studyflow.database.models import StudySessionOutcome as OutcomeRow
 from studyflow.estimation import CorrectionPrediction
 from studyflow.estimation.repositories import (
+    AdaptivePredictionRepository,
     SqlAlchemyAdaptivePredictionRepository,
     _evaluation_statement,
 )
@@ -177,6 +178,90 @@ async def test_history_is_account_scoped_orders_completion_ties_and_keeps_full_h
         ]
         assert len(history) == 25
         assert all(record.actual_minutes != 999 for record in history)
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("session_bound", [False, True])
+async def test_prediction_removal_and_replacement_enforce_owner_and_freeze_boundaries(
+    session_bound: bool,
+) -> None:
+    database, owner_id, other_id = await _database()
+    try:
+        task = _task(owner_id)
+        frozen = _task(owner_id, estimate_frozen_at=NOW)
+        completed = _task(owner_id, completed_at=NOW, estimate_frozen_at=NOW)
+        foreign = _task(owner_id)
+        async with database.transaction() as session:
+            session.add_all([task, frozen, completed, foreign])
+            session.add(
+                PredictionRow(
+                    task_id=foreign.id,
+                    account_id=other_id,
+                    category="other",
+                    original_minutes=100,
+                    predicted_minutes=125,
+                    correction_factor=Decimal("1.25"),
+                    history_scope="overall",
+                    history_count=5,
+                    exposed=False,
+                )
+            )
+
+        async def exercise(repository: AdaptivePredictionRepository) -> None:
+            missing_owner = uuid4()
+            assert not await repository.save_prediction(
+                missing_owner, task.id, _prediction(), exposed=False
+            )
+            assert not await repository.replace_prediction(
+                missing_owner, task.id, _prediction(), exposed=False
+            )
+            assert not await repository.remove_prediction(missing_owner, task.id)
+            assert not await repository.acknowledge(
+                missing_owner, TaskCategory.OTHER, Decimal("2.5"), NOW
+            )
+            for task_id in (uuid4(), frozen.id, completed.id):
+                assert not await repository.remove_prediction(owner_id, task_id)
+                assert not await repository.replace_prediction(
+                    owner_id, task_id, _prediction(), exposed=False
+                )
+            assert not await repository.remove_prediction(other_id, task.id)
+            assert not await repository.remove_prediction(owner_id, foreign.id)
+            assert not await repository.replace_prediction(
+                owner_id, foreign.id, _prediction(), exposed=True
+            )
+            assert await repository.remove_prediction(owner_id, task.id)
+            assert await repository.save_prediction(owner_id, task.id, _prediction(), exposed=False)
+            assert not await repository.save_prediction(
+                owner_id, task.id, _prediction(), exposed=True
+            )
+            assert await repository.replace_prediction(
+                owner_id, task.id, _prediction(minutes=150), exposed=True
+            )
+            evaluations = await repository.evaluations(owner_id)
+            assert [(item.adaptive_minutes, item.actual_minutes) for item in evaluations] == [
+                (150, None)
+            ]
+            assert await repository.remove_prediction(owner_id, task.id)
+            assert await repository.evaluations(owner_id) == []
+            assert await repository.acknowledgment(owner_id, TaskCategory.OTHER) is None
+            assert await repository.acknowledge(owner_id, TaskCategory.OTHER, Decimal("2.5"), NOW)
+            assert await repository.acknowledge(owner_id, TaskCategory.OTHER, Decimal("3"), NOW)
+            assert await repository.acknowledgment(owner_id, TaskCategory.OTHER) == Decimal("3")
+
+        repository = SqlAlchemyAdaptivePredictionRepository(database)
+        if session_bound:
+            async with database.transaction() as session:
+                await exercise(repository.with_session(session))
+        else:
+            await exercise(repository)
+        async with database.transaction() as session:
+            preserved = await session.get(PredictionRow, foreign.id)
+            assert preserved is not None
+            assert preserved.account_id == other_id
+            assert preserved.predicted_minutes == 125
+            assert await session.get(PredictionRow, task.id) is None
     finally:
         await database.stop()
 
