@@ -90,6 +90,7 @@ export function toAcademicTask(wire: WireAcademicTask): AcademicTask {
     originalEstimate: wire.original_estimate_minutes,
     adaptiveEstimate: wire.adaptive_estimate_minutes ?? undefined,
     plannedSource: wire.planned_source === "adaptive" ? "Adaptive" : "Original",
+    estimateFrozen: wire.estimate_frozen ?? false,
     plannedDuration: wire.planned_duration_minutes,
     actualDuration: 0,
     remainingDuration: wire.planned_duration_minutes,

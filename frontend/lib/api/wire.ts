@@ -83,6 +83,7 @@ export interface WireAcademicTask {
   adaptive_estimate_minutes: number | null;
   planned_source: WirePlannedSource;
   planned_duration_minutes: number;
+  estimate_frozen?: boolean;
   created_at: string;
   updated_at: string;
   status: WireTaskStatus;

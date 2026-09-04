@@ -144,6 +144,10 @@ async def test_task_repository_scopes_create_list_and_get_to_owner() -> None:
         )
 
         assert [task.id for task in await repository.list(account_id)] == [created.id, later.id]
+        assert created.estimate_frozen is False
+        await repository.mark_started(account_id, created.id, datetime.now(UTC))
+        frozen = await repository.get(account_id, created.id)
+        assert frozen is not None and frozen.estimate_frozen is True
         assert [
             task.id
             for task in await repository.list(
@@ -282,6 +286,9 @@ async def test_task_repository_rejects_unavailable_adaptive_and_preserves_frozen
             ),
         )
         assert await repository.mark_started(account_id, created.id, now)
+        # Later loss of eligible history cannot invalidate this saved snapshot.
+        async with database.transaction() as session:
+            await session.execute(delete(OutcomeRow))
         updated = await repository.update(
             account_id,
             created.id,
@@ -293,6 +300,7 @@ async def test_task_repository_rejects_unavailable_adaptive_and_preserves_frozen
                 None,
                 now + timedelta(days=3),
                 60,
+                PlannedDurationSource.ADAPTIVE,
             ),
             now,
         )

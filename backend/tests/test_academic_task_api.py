@@ -77,6 +77,8 @@ class TasksStub:
         self, account_id: UUID, task_id: UUID, task: NewAcademicTask
     ) -> AcademicTaskRecord | None:
         self.updates.append((account_id, task_id, task))
+        if self.adaptive_unavailable:
+            raise AdaptiveEstimateUnavailableError
         if self.update_failure == "frozen":
             raise EstimateFrozenError
         if self.update_failure == "missing":
@@ -165,6 +167,7 @@ async def test_task_create_exposes_adaptive_snapshot_and_forwards_original_overr
     adaptive_record = replace(
         task_record(),
         adaptive_estimate_minutes=135,
+        estimate_frozen=True,
         planned_source=PlannedDurationSource.ADAPTIVE,
         planned_duration_minutes=135,
     )
@@ -189,12 +192,14 @@ async def test_task_create_exposes_adaptive_snapshot_and_forwards_original_overr
 
     assert response.status_code == 201
     assert response.json()["adaptive_estimate_minutes"] == 135
+    assert response.json()["estimate_frozen"] is True
     assert response.json()["planned_source"] == "adaptive"
     assert tasks.creates[0][1].planned_source is PlannedDurationSource.ORIGINAL
 
 
 @pytest.mark.anyio
-async def test_task_create_rejects_an_unavailable_adaptive_selection() -> None:
+@pytest.mark.parametrize("method", ["post", "put"])
+async def test_task_create_rejects_an_unavailable_adaptive_selection(method: str) -> None:
     app = create_app(
         session_authentication=AuthenticationStub(),
         academic_tasks=TasksStub([task_record()], adaptive_unavailable=True),
@@ -204,8 +209,9 @@ async def test_task_create_rejects_an_unavailable_adaptive_selection() -> None:
         base_url="https://test",
         cookies={"studyflow_session": "session-token"},
     ) as client:
-        response = await client.post(
-            "/api/v1/tasks",
+        response = await client.request(
+            method,
+            "/api/v1/tasks" + (f"/{TASK_ID}" if method == "put" else ""),
             headers={"X-CSRF-Token": "csrf-token"},
             json={
                 "title": "Read chapter 4",
@@ -216,8 +222,9 @@ async def test_task_create_rejects_an_unavailable_adaptive_selection() -> None:
             },
         )
 
-    assert response.status_code == 422
-    assert response.json() == {"detail": "Adaptive estimate is unavailable"}
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "adaptive_estimate_conflict"
+    assert "refresh" in response.json()["detail"]["message"].lower()
 
 
 @pytest.mark.anyio

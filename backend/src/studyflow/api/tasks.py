@@ -79,6 +79,7 @@ class AcademicTaskResponse(BaseModel):
     adaptive_estimate_minutes: int | None
     planned_source: PlannedDurationSource
     planned_duration_minutes: int
+    estimate_frozen: bool
     created_at: datetime
     updated_at: datetime
     status: TaskStatus
@@ -90,6 +91,18 @@ class FinishEarlyRequest(BaseModel):
 
 class TaskError(BaseModel):
     detail: str
+
+
+class AdaptiveConflictDetail(BaseModel):
+    code: Literal["adaptive_estimate_conflict"] = "adaptive_estimate_conflict"
+    message: str = (
+        "Adaptive planning changed. Refresh the estimate, then choose Original "
+        "or acknowledge the updated suggestion before retrying."
+    )
+
+
+class TaskConflict(BaseModel):
+    detail: str | AdaptiveConflictDetail
 
 
 def get_academic_tasks(request: Request) -> AcademicTasks:
@@ -109,6 +122,7 @@ def _response(task: AcademicTaskRecord) -> AcademicTaskResponse:
         adaptive_estimate_minutes=task.adaptive_estimate_minutes,
         planned_source=task.planned_source,
         planned_duration_minutes=task.planned_duration_minutes,
+        estimate_frozen=task.estimate_frozen,
         created_at=task.created_at,
         updated_at=task.updated_at,
         status=task.status,
@@ -120,6 +134,7 @@ def _response(task: AcademicTaskRecord) -> AcademicTaskResponse:
     status_code=status.HTTP_201_CREATED,
     response_model=AcademicTaskResponse,
     responses={
+        status.HTTP_409_CONFLICT: {"model": TaskConflict},
         status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
         status.HTTP_403_FORBIDDEN: {"model": AccountError},
         status.HTTP_422_UNPROCESSABLE_CONTENT: {
@@ -163,8 +178,8 @@ async def create_task(
         ) from error
     except AdaptiveEstimateUnavailableError as error:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Adaptive estimate is unavailable",
+            status_code=status.HTTP_409_CONFLICT,
+            detail=AdaptiveConflictDetail().model_dump(),
         ) from error
     return _response(task)
 
@@ -247,7 +262,7 @@ async def get_task(
         status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
         status.HTTP_403_FORBIDDEN: {"model": AccountError},
         status.HTTP_404_NOT_FOUND: {"model": TaskError},
-        status.HTTP_409_CONFLICT: {"model": TaskError},
+        status.HTTP_409_CONFLICT: {"model": TaskConflict},
         status.HTTP_422_UNPROCESSABLE_CONTENT: {
             "description": "Invalid task fields or deadline",
             "content": {
@@ -296,8 +311,8 @@ async def update_task(
         ) from error
     except AdaptiveEstimateUnavailableError as error:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Adaptive estimate is unavailable",
+            status_code=status.HTTP_409_CONFLICT,
+            detail=AdaptiveConflictDetail().model_dump(),
         ) from error
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")

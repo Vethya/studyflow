@@ -459,4 +459,5 @@ class SqlAlchemyAcademicTaskRepository:
             status=task_status,
             adaptive_estimate_minutes=row.adaptive_estimate_minutes,
             planned_source=PlannedDurationSource(row.planned_source),
+            estimate_frozen=row.estimate_frozen_at is not None,
         )

@@ -86,6 +86,7 @@ class AcademicTaskRecord:
     status: TaskStatus = TaskStatus.NOT_STARTED
     adaptive_estimate_minutes: int | None = None
     planned_source: PlannedDurationSource = PlannedDurationSource.ORIGINAL
+    estimate_frozen: bool = False
 
 
 class AcademicTaskRepository(Protocol):
