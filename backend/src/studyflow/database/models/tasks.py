@@ -39,7 +39,8 @@ class AcademicTask(Base):
         CheckConstraint("course IS NULL OR length(course) <= 100", name="course_length"),
         CheckConstraint("notes IS NULL OR length(notes) <= 2000", name="notes_length"),
         CheckConstraint(
-            "finished_early_at IS NULL OR estimate_frozen_at IS NOT NULL",
+            "(finished_early_at IS NULL AND completed_at IS NULL) OR "
+            "estimate_frozen_at IS NOT NULL",
             name="completion_requires_start",
         ),
     )
@@ -59,6 +60,7 @@ class AcademicTask(Base):
     planned_source: Mapped[str] = mapped_column(String(16), server_default="original")
     planned_duration_minutes: Mapped[int] = mapped_column(Integer)
     estimate_frozen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_early_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

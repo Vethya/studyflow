@@ -303,12 +303,19 @@ def create_app(
         transactions
     )
     resolved_recovery_snapshots = SqlAlchemyRecoverySnapshotRepository(transactions)
+    resolved_study_sessions = study_sessions or StudySessionService(
+        SqlAlchemyStudySessionOutcomeRepository(
+            transactions,
+            SqlAlchemyTaskRecoveryProposalInvalidator(),
+        )
+    )
     resolved_schedule_generation = schedule_generation or ScheduleGenerationService(
         resolved_academic_tasks,
         resolved_availability_windows,
         resolved_unavailable_periods,
         resolved_account_preferences,
         resolved_schedule_proposals,
+        study_sessions=resolved_study_sessions,
     )
     resolved_schedule_acceptance = schedule_acceptance or ScheduleAcceptanceService(
         resolved_academic_tasks,
@@ -317,9 +324,7 @@ def create_app(
         resolved_account_preferences,
         resolved_schedule_proposals,
         resolved_recovery_snapshots,
-    )
-    resolved_study_sessions = study_sessions or StudySessionService(
-        SqlAlchemyStudySessionOutcomeRepository(transactions)
+        study_sessions=resolved_study_sessions,
     )
     resolved_schedule_recovery = schedule_recovery or ScheduleRecoveryService(
         resolved_academic_tasks,

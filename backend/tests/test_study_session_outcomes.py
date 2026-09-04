@@ -19,6 +19,8 @@ from studyflow.scheduling.outcome_repositories import SqlAlchemyStudySessionOutc
 from studyflow.scheduling.outcomes import (
     DuplicateSessionOutcomeError,
     FutureSessionOutcomeError,
+    InvalidSessionOutcomeError,
+    LargeActualDurationConfirmationRequired,
     ProposedSessionOutcomeError,
     SessionOutcomeKind,
     StudySessionDetails,
@@ -179,6 +181,232 @@ async def test_missed_outcome_rejects_future_and_proposed_sessions() -> None:
             await service.record_missed(account_id, future_id)
         with pytest.raises(ProposedSessionOutcomeError):
             await service.record_missed(account_id, proposed_id)
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_completed_and_delayed_outcomes_record_actual_work_and_remaining_work() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        account_id, task_id = uuid4(), uuid4()
+        completed_id, delayed_id = uuid4(), uuid4()
+        async with database.transaction() as db_session:
+            await db_session.run_sync(lambda sync: Base.metadata.create_all(sync.connection()))
+            db_session.add_all(
+                [
+                    StudentAccount(
+                        id=account_id,
+                        email="student@example.com",
+                        name="Student",
+                        password_hash="$argon2id$hash",
+                        email_verified_at=NOW,
+                        timezone="UTC",
+                    ),
+                    AcademicTask(
+                        id=task_id,
+                        account_id=account_id,
+                        title="Essay",
+                        category="assignment",
+                        deadline_at=NOW + timedelta(days=1),
+                        original_estimate_minutes=120,
+                        planned_duration_minutes=120,
+                    ),
+                    SessionRow(
+                        id=completed_id,
+                        account_id=account_id,
+                        task_id=task_id,
+                        proposal_id=None,
+                        starts_at=NOW - timedelta(hours=4),
+                        ends_at=NOW - timedelta(hours=3),
+                        planned_duration_minutes=60,
+                    ),
+                    SessionRow(
+                        id=delayed_id,
+                        account_id=account_id,
+                        task_id=task_id,
+                        proposal_id=None,
+                        starts_at=NOW - timedelta(hours=2),
+                        ends_at=NOW - timedelta(hours=1),
+                        planned_duration_minutes=60,
+                    ),
+                ]
+            )
+        service = StudySessionService(
+            SqlAlchemyStudySessionOutcomeRepository(database), clock=lambda: NOW
+        )
+
+        completed = await service.record_completed(account_id, completed_id, actual_minutes=75)
+        delayed = await service.record_delayed(
+            account_id,
+            delayed_id,
+            actual_minutes=40,
+            remaining_minutes=35,
+        )
+
+        assert completed is not None
+        assert (completed.kind, completed.actual_minutes, completed.remaining_minutes) == (
+            SessionOutcomeKind.COMPLETED,
+            75,
+            0,
+        )
+        assert delayed is not None
+        assert (delayed.kind, delayed.actual_minutes, delayed.remaining_minutes) == (
+            SessionOutcomeKind.DELAYED,
+            40,
+            35,
+        )
+        assert await service.task_actual_minutes(account_id, task_id) == 115
+        assert await service.task_actual_minutes(uuid4(), task_id) == 0
+        async with database.transaction() as db_session:
+            task = await db_session.get(AcademicTask, task_id)
+        assert task is not None
+        assert task.completed_at is None
+        assert task.estimate_frozen_at is not None
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_delayed_defaults_remaining_and_completed_marks_the_task_complete() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        account_id = uuid4()
+        delayed_task_id, completed_task_id = uuid4(), uuid4()
+        delayed_id, completed_id = uuid4(), uuid4()
+        async with database.transaction() as db_session:
+            await db_session.run_sync(lambda sync: Base.metadata.create_all(sync.connection()))
+            db_session.add(
+                StudentAccount(
+                    id=account_id,
+                    email="student@example.com",
+                    name="Student",
+                    password_hash="$argon2id$hash",
+                    email_verified_at=NOW,
+                    timezone="UTC",
+                )
+            )
+            for task_id, title in (
+                (delayed_task_id, "Reading"),
+                (completed_task_id, "Essay"),
+            ):
+                db_session.add(
+                    AcademicTask(
+                        id=task_id,
+                        account_id=account_id,
+                        title=title,
+                        category="assignment",
+                        deadline_at=NOW + timedelta(days=1),
+                        original_estimate_minutes=60,
+                        planned_duration_minutes=60,
+                    )
+                )
+            db_session.add_all(
+                [
+                    SessionRow(
+                        id=delayed_id,
+                        account_id=account_id,
+                        task_id=delayed_task_id,
+                        proposal_id=None,
+                        starts_at=NOW - timedelta(hours=4),
+                        ends_at=NOW - timedelta(hours=3),
+                        planned_duration_minutes=60,
+                    ),
+                    SessionRow(
+                        id=completed_id,
+                        account_id=account_id,
+                        task_id=completed_task_id,
+                        proposal_id=None,
+                        starts_at=NOW - timedelta(hours=2),
+                        ends_at=NOW - timedelta(hours=1),
+                        planned_duration_minutes=60,
+                    ),
+                ]
+            )
+        service = StudySessionService(
+            SqlAlchemyStudySessionOutcomeRepository(database), clock=lambda: NOW
+        )
+
+        delayed = await service.record_delayed(account_id, delayed_id, actual_minutes=25)
+        assert delayed is not None and delayed.remaining_minutes == 35
+        with pytest.raises(LargeActualDurationConfirmationRequired):
+            await service.record_completed(account_id, completed_id, actual_minutes=121)
+        completed = await service.record_completed(
+            account_id,
+            completed_id,
+            actual_minutes=121,
+            large_actual_confirmed=True,
+        )
+
+        assert completed is not None and completed.actual_minutes == 121
+        async with database.transaction() as db_session:
+            completed_task = await db_session.get(AcademicTask, completed_task_id)
+        assert completed_task is not None
+        assert completed_task.completed_at is not None
+        assert completed_task.completed_at.replace(tzinfo=UTC) == NOW
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_outcome_validation_rejects_nonpositive_actual_or_remaining_minutes() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        account_id, task_id, session_id = uuid4(), uuid4(), uuid4()
+        async with database.transaction() as db_session:
+            await db_session.run_sync(lambda sync: Base.metadata.create_all(sync.connection()))
+            db_session.add_all(
+                [
+                    StudentAccount(
+                        id=account_id,
+                        email="student@example.com",
+                        name="Student",
+                        password_hash="$argon2id$hash",
+                        email_verified_at=NOW,
+                        timezone="UTC",
+                    ),
+                    AcademicTask(
+                        id=task_id,
+                        account_id=account_id,
+                        title="Essay",
+                        category="assignment",
+                        deadline_at=NOW + timedelta(days=1),
+                        original_estimate_minutes=60,
+                        planned_duration_minutes=60,
+                    ),
+                    SessionRow(
+                        id=session_id,
+                        account_id=account_id,
+                        task_id=task_id,
+                        proposal_id=None,
+                        starts_at=NOW - timedelta(hours=2),
+                        ends_at=NOW - timedelta(hours=1),
+                        planned_duration_minutes=60,
+                    ),
+                ]
+            )
+        service = StudySessionService(
+            SqlAlchemyStudySessionOutcomeRepository(database), clock=lambda: NOW
+        )
+
+        with pytest.raises(InvalidSessionOutcomeError):
+            await service.record_completed(account_id, session_id, actual_minutes=0)
+        with pytest.raises(InvalidSessionOutcomeError):
+            await service.record_delayed(
+                account_id,
+                session_id,
+                actual_minutes=60,
+            )
+        with pytest.raises(InvalidSessionOutcomeError):
+            await service.record_delayed(
+                account_id,
+                session_id,
+                actual_minutes=30,
+                remaining_minutes=0,
+            )
     finally:
         await database.stop()
 

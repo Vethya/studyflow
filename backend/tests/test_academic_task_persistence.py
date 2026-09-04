@@ -27,6 +27,7 @@ def test_academic_task_schema_preserves_owned_planning_inputs() -> None:
         "planned_source",
         "planned_duration_minutes",
         "estimate_frozen_at",
+        "completed_at",
         "finished_early_at",
         "created_at",
         "updated_at",
@@ -51,6 +52,7 @@ def test_academic_task_schema_preserves_owned_planning_inputs() -> None:
     }.issubset(constraints)
     assert cast(DateTime, table.c.deadline_at.type).timezone is True
     assert cast(DateTime, table.c.estimate_frozen_at.type).timezone is True
+    assert cast(DateTime, table.c.completed_at.type).timezone is True
     assert cast(DateTime, table.c.finished_early_at.type).timezone is True
     assert isinstance(table.c.priority.server_default, DefaultClause)
     assert isinstance(table.c.planned_source.server_default, DefaultClause)

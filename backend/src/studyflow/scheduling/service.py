@@ -14,6 +14,7 @@ from studyflow.availability.unavailable import UnavailablePeriod, UnavailablePer
 from studyflow.availability.windows import AvailabilityWindow, AvailabilityWindows
 from studyflow.scheduling.assembly import assemble_schedule_problem
 from studyflow.scheduling.contracts import FeasibilityProblem, KernelStatus, OverloadResult
+from studyflow.scheduling.outcomes import StudySessions
 from studyflow.scheduling.overload import solve_with_overload
 from studyflow.scheduling.proposals import (
     NewProposedSession,
@@ -111,6 +112,20 @@ def _minute_datetime(value: int) -> datetime:
     return _UTC_EPOCH + timedelta(minutes=value)
 
 
+async def tasks_for_schedule(
+    account_id: UUID,
+    tasks: Sequence[AcademicTaskRecord],
+    study_sessions: StudySessions,
+) -> tuple[AcademicTaskRecord, ...]:
+    """Adjust task demand using work already represented by recorded outcomes."""
+    adjustments = await study_sessions.task_schedule_adjustments(account_id)
+    return tuple(
+        replace(task, planned_duration_minutes=remaining_minutes)
+        for task in tasks
+        if (remaining_minutes := task.planned_duration_minutes - adjustments.get(task.id, 0)) > 0
+    )
+
+
 class ScheduleGenerationService:
     def __init__(
         self,
@@ -120,6 +135,7 @@ class ScheduleGenerationService:
         preferences: AccountPreferences,
         proposals: ScheduleProposalRepository,
         *,
+        study_sessions: StudySessions | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         solver: Callable[[FeasibilityProblem], OverloadResult] = solve_with_overload,
     ) -> None:
@@ -128,6 +144,7 @@ class ScheduleGenerationService:
         self._unavailable_periods = unavailable_periods
         self._preferences = preferences
         self._proposals = proposals
+        self._study_sessions = study_sessions
         self._clock = clock
         self._solver = solver
 
@@ -164,11 +181,14 @@ class ScheduleGenerationService:
         preferences = await self._preferences.get(account_id)
         if preferences is None:
             return None
-        tasks, windows, unavailable = await asyncio.gather(
+        raw_tasks, windows, unavailable = await asyncio.gather(
             self._tasks.list(account_id),
             self._availability_windows.list_windows(account_id),
             self._unavailable_periods.list_periods(account_id),
         )
+        tasks: Sequence[AcademicTaskRecord] = raw_tasks
+        if self._study_sessions is not None:
+            tasks = await tasks_for_schedule(account_id, tasks, self._study_sessions)
         normalized_scenario = (scenario or ScheduleScenario()).normalized()
         planning_start = self._clock()
         effective_tasks = self._apply_deadline_overrides(tasks, normalized_scenario, planning_start)

@@ -38,7 +38,9 @@ from studyflow.scheduling.service import (
 )
 from studyflow.tasks.service import AcademicTaskRecord, AcademicTasks, TaskStatus
 
-MISSED_REVISION_REASON = "Missed study session"
+RECOVERY_REVISION_REASON = "Study session recovery"
+# Kept as a compatibility alias for callers that imported the old constant.
+MISSED_REVISION_REASON = RECOVERY_REVISION_REASON
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,7 +226,7 @@ class ScheduleRecoveryService:
             result,
             recovery_tasks,
             kind=ProposalKind.REVISION,
-            revision_reason=MISSED_REVISION_REASON,
+            revision_reason=RECOVERY_REVISION_REASON,
             fingerprint=fingerprint,
         )
         proposal = await self._proposals.replace(account_id, draft)
