@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { apiJson, apiVoid } from "./client";
 import {
+  resolveEstimateChoiceAction,
   resolveEstimateSelection,
   resolvePreviewSelection,
   toAdaptiveEstimate,
@@ -145,6 +146,18 @@ describe("adaptive API contract", () => {
     expect(resolvePreviewSelection(60, toAdaptiveEstimate(preview), "Adaptive", false)).toEqual({
       originalEstimate: 60,
       plannedSource: "Adaptive",
+    });
+  });
+
+  it("routes a first large suggested choice through acknowledgment while Original stays selectable", () => {
+    const largeAdjustment = toAdaptiveEstimate(preview);
+
+    expect(resolveEstimateChoiceAction(60, largeAdjustment, "original")).toEqual({
+      type: "select",
+      selection: { originalEstimate: 60, plannedSource: "Original" },
+    });
+    expect(resolveEstimateChoiceAction(60, largeAdjustment, "adaptive")).toEqual({
+      type: "acknowledge",
     });
   });
 

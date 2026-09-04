@@ -28,7 +28,11 @@ import { isoToLocalInput, localInputToIso, nowLocalInput } from "@/lib/datetime"
 import { ApiError, tasks as tasksApi, scheduling } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
 import { AdaptiveEstimateNote, LargeAdjustmentDialog } from "@/components/adaptive-estimate";
-import { resolveEstimateSelection, resolvePreviewSelection } from "@/lib/api/adaptive-contract";
+import {
+  resolveEstimateChoiceAction,
+  resolveEstimateSelection,
+  resolvePreviewSelection,
+} from "@/lib/api/adaptive-contract";
 import type { AdaptiveEstimate } from "@/types/progress";
 
 interface TaskFormDialogProps {
@@ -150,6 +154,17 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
 
     return () => controller.abort();
   }, [open, form.category, form.originalEstimate, applyPreviewDefault]);
+
+  function chooseEstimate(which: "original" | "adaptive") {
+    const action = resolveEstimateChoiceAction(form.originalEstimate, estimate, which);
+    if (action.type === "acknowledge") {
+      setAckOpen(true);
+      return;
+    }
+
+    setApplyPreviewDefault(false);
+    setForm((current) => ({ ...current, ...action.selection }));
+  }
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -348,17 +363,7 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
                     : Number(form.originalEstimate),
                 plannedSource: form.plannedSource,
               }}
-              onChoose={
-                estimate.needsAcknowledgment
-                  ? undefined
-                  : (which) => {
-                      setApplyPreviewDefault(false);
-                      setForm((current) => ({
-                        ...current,
-                        ...resolveEstimateSelection(current.originalEstimate, estimate, which),
-                      }));
-                    }
-              }
+              onChoose={chooseEstimate}
             />
           )}
 
