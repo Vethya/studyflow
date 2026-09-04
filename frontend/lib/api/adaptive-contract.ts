@@ -90,13 +90,18 @@ export function toAdaptiveEstimate(
     return null;
   }
 
+  const factor = Number(wire.correction_factor);
+  if (!Number.isFinite(factor) || factor <= 0) {
+    return null;
+  }
+
   return {
     category: CATEGORY_FROM_WIRE[wire.category],
     originalEstimate: wire.original_minutes,
     adaptiveEstimate: wire.adaptive_minutes,
     plannedDuration: wire.planned_minutes,
     plannedSource: wire.planned_source === "adaptive" ? "Adaptive" : "Original",
-    factor: wire.correction_factor,
+    factor,
     basedOnTasks: wire.history_count,
     isCategorySpecific: wire.history_scope === "category",
     needsAcknowledgment: wire.acknowledgment_required,
