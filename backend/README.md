@@ -133,6 +133,18 @@ after a relative change of at least 25%. Task writes atomically save the predict
 original/adaptive/planned fields. Planned minutes come from the selected source; frozen task
 estimates cannot be replaced. Unavailable previews expose no hidden adaptive value.
 
+Task responses include `estimate_frozen`, derived from the persisted snapshot lock rather than
+task status (an Overdue task may be frozen or editable). Frozen forms display their saved plan
+read-only and permit unrelated edits with unchanged original minutes and planned source,
+independent of live qualification or a newly required acknowledgment.
+
+Task POST/PUT rejects stale, unqualified, or unacknowledged Adaptive selection with HTTP 409:
+`{"detail":{"code":"adaptive_estimate_conflict","message":"..."}}`. The message directs the
+student to refresh and choose Original or acknowledge the updated suggestion. The form retains
+entered fields, refreshes the preview, and selects Original safely while the student reviews
+the updated choices. Frozen-estimate conflicts remain 409 with their existing string detail;
+ordinary validation errors remain 422. All adaptive minutes are still recomputed server-side.
+
 Focused tests: `uv run pytest tests/test_adaptive_estimation.py
 tests/test_adaptive_estimation_repository.py tests/test_adaptive_estimate_api.py` (one command).
 The full coverage gate remains `uv run pytest --cov=studyflow --cov-branch`, with the configured

@@ -673,7 +673,7 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": { "raw": "{{base_url}}/api/v1/tasks", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks"] },
-            "description": "Creates a task owned by the authenticated student. Planned duration initially equals the original estimate."
+            "description": "Creates an owned task with server-computed adaptive minutes. Optional planned_source selects original or adaptive. Returns estimate_frozen with the saved snapshot. Stale/unavailable/unacknowledged Adaptive selection returns 409 detail {code: adaptive_estimate_conflict, message: actionable refresh/retry guidance}; refresh the preview before retrying."
           },
           "response": [],
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 201', () => pm.response.to.have.status(201));", "pm.test('generated task deadline is a valid future instant', () => {", "  const deadline = Date.parse(pm.collectionVariables.get('task_deadline_at'));", "  pm.expect(Number.isNaN(deadline)).to.be.false;", "  pm.expect(deadline).to.be.above(Date.now());", "});", "if (pm.response.code === 201) pm.collectionVariables.set('task_id', pm.response.json().id);"] } }]
@@ -707,7 +707,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
             "body": { "mode": "raw", "raw": "{\n  \"title\": \"Updated task\",\n  \"category\": \"assignment\",\n  \"priority\": \"high\",\n  \"deadline_at\": \"{{task_deadline_at}}\",\n  \"original_estimate_minutes\": 120\n}", "options": { "raw": { "language": "json" } } },
             "url": { "raw": "{{base_url}}/api/v1/tasks/{{task_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks", "{{task_id}}"] },
-            "description": "Replaces editable fields, preserves deadline history, and rejects estimate changes after work starts."
+            "description": "Replaces editable fields and preserves deadline history. estimate_frozen reports the persisted lock independently of task status. Unrelated edits preserve frozen original/adaptive/planned fields without live qualification or acknowledgment. Frozen estimate changes return 409 string detail; stale/unavailable/unacknowledged Adaptive selection returns 409 detail {code: adaptive_estimate_conflict, message: refresh/retry guidance}."
           },
           "response": [],
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
