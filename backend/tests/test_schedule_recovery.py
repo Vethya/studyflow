@@ -1,10 +1,11 @@
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 
 from studyflow.accounts.preferences import StudyPreferencesService
 from studyflow.accounts.repositories import SqlAlchemyStudyPreferencesRepository
@@ -41,6 +42,7 @@ from studyflow.scheduling.outcome_repositories import SqlAlchemyStudySessionOutc
 from studyflow.scheduling.outcomes import StudySessionService
 from studyflow.scheduling.overload import solve_with_overload
 from studyflow.scheduling.recovery import MISSED_REVISION_REASON, ScheduleRecoveryService
+from studyflow.scheduling.recovery import RecoveryTaskWork as SnapshotTaskWork
 from studyflow.scheduling.recovery_repositories import (
     SqlAlchemyRecoverySnapshotRepository,
     SqlAlchemyTaskRecoveryProposalInvalidator,
@@ -197,6 +199,50 @@ async def test_recovery_counts_missed_and_future_work_once_and_leaves_active_sch
             )
         assert active_ids == {harness.missed_session_id, harness.future_session_id}
         assert snapshot_work == 120
+    finally:
+        await harness.database.stop()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("invalid_child", [False, True])
+async def test_snapshot_parent_and_children_persist_atomically_with_foreign_keys(
+    invalid_child: bool,
+) -> None:
+    harness = await _harness(deadline=NOW + timedelta(days=1))
+    try:
+        repository = SqlAlchemyRecoverySnapshotRepository(harness.database)
+        snapshot = await repository.capture(harness.account_id, harness.missed_session_id, NOW, 0)
+        assert snapshot is not None
+        proposal_id = uuid4()
+        async with harness.database.transaction() as session:
+            await session.execute(text("PRAGMA foreign_keys = ON"))
+            assert await session.scalar(text("PRAGMA foreign_keys")) == 1
+            session.add(
+                ScheduleProposal(
+                    id=proposal_id,
+                    account_id=harness.account_id,
+                    kind="revision",
+                    status="feasible",
+                    revision_reason="Missed study session",
+                    input_fingerprint="a" * 64,
+                )
+            )
+        if invalid_child:
+            snapshot = replace(snapshot, unfinished_work=(SnapshotTaskWork(uuid4(), 60),))
+            with pytest.raises(IntegrityError):
+                await repository.save(harness.account_id, proposal_id, snapshot)
+            assert await repository.get(harness.account_id, proposal_id) is None
+            async with harness.database.transaction() as session:
+                assert await session.get(ScheduleProposal, proposal_id) is not None
+                assert await session.scalar(select(func.count()).select_from(RecoveryTaskWork)) == 0
+        else:
+            assert not await repository.save(uuid4(), proposal_id, snapshot)
+            assert await repository.save(harness.account_id, proposal_id, snapshot)
+            stored = await repository.get(harness.account_id, proposal_id)
+            assert stored is not None
+            assert stored.unfinished_work == (SnapshotTaskWork(harness.task_id, 120),)
+            assert stored.unresolved_outcome_ids == (harness.missed_session_id,)
+            assert await repository.get(uuid4(), proposal_id) is None
     finally:
         await harness.database.stop()
 

@@ -135,6 +135,9 @@ class SqlAlchemyRecoverySnapshotRepository:
                     captured_at=snapshot.captured_at,
                 )
             )
+            # These mappings have no ORM relationships to order parent/child inserts.
+            # Flush the parent first, retaining the same transaction for rollback.
+            await session.flush()
             session.add_all(
                 WorkRow(
                     proposal_id=proposal_id,
