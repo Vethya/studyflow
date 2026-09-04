@@ -28,7 +28,7 @@ const preview = {
   original_minutes: 60,
   adaptive_minutes: 90,
   planned_minutes: 90,
-  correction_factor: 1.5,
+  correction_factor: "1.5",
   history_scope: "category" as const,
   history_count: 6,
   available: true,
@@ -102,6 +102,22 @@ describe("adaptive API contract", () => {
       { signal: undefined },
     );
   });
+
+  it("converts the API decimal string before the dialog formats its factor", async () => {
+    vi.mocked(apiJson).mockResolvedValue({ ...preview, correction_factor: "2.5000" });
+
+    const estimate = await getAdaptiveEstimate("Assignment", 60);
+
+    expect(estimate?.factor).toBe(2.5);
+    expect(estimate?.factor.toFixed(1)).toBe("2.5");
+  });
+
+  it.each(["", " ", "invalid", "NaN", "Infinity", "0", "-1"])(
+    "hides a malformed or nonpositive correction factor: %s",
+    (correction_factor) => {
+      expect(toAdaptiveEstimate({ ...preview, correction_factor })).toBeNull();
+    },
+  );
 
   it("posts the selected category acknowledgement", async () => {
     await acknowledgeAdjustment("Research/Writing");

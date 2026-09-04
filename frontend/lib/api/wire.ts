@@ -105,7 +105,8 @@ export interface WireAdaptiveEstimatePreview {
   original_minutes: number;
   adaptive_minutes: number | null;
   planned_minutes: number;
-  correction_factor: number | null;
+  /** FastAPI serializes Decimal response values as JSON strings. */
+  correction_factor: string | null;
   history_scope: "overall" | "category" | null;
   history_count: number | null;
   available: boolean;
