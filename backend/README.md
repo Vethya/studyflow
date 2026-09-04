@@ -96,5 +96,44 @@ uv run alembic revision --autogenerate -m "describe the schema change"
 uv run alembic upgrade head --sql
 ```
 
-The first domain schema PR will add the first revision. CI commands will be added by its dedicated
-infrastructure PR.
+Verify there is exactly one migration head with `uv run alembic heads`. Use a disposable local
+PostgreSQL database to verify a fresh `upgrade head`, `downgrade -1`, and re-upgrade; never run
+destructive migration checks on shared data. From the repository root also run
+`docker compose config --quiet`.
+
+On native Windows, psycopg's async driver requires a selector event loop. If the normal Alembic
+command fails with the Proactor-loop incompatibility, the following launcher changes only the
+process event-loop policy (use the same launcher for downgrade):
+
+```powershell
+uv run python -c "import asyncio; asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy()); from alembic.config import main; main()" upgrade head
+```
+
+## Adaptive estimation API
+
+- `GET /api/v1/adaptive-estimates/preview?category=reading&original_minutes=60` requires a
+  session and returns a non-persisting preview: availability, original/adaptive/planned minutes,
+  selected source, correction factor, history scope/count, and acknowledgment requirement.
+- `POST /api/v1/adaptive-estimates/acknowledgments` requires a session and CSRF token, takes
+  `{"category":"reading"}`, and returns 204 after acknowledging the current qualified factor.
+  An unavailable estimate returns 422; an absent authenticated account returns 401.
+
+Cold start uses Original. Five completed tasks with positive confirmed actual minutes enable
+hidden pre-task predictions. These predictions count toward qualification only after their tasks
+complete; historical completed tasks are not retroactively predicted. At least five evaluations
+are required, and the most recent ten must reduce mean absolute error by at least 10% versus the
+original estimates. A perfect original baseline cannot qualify. Accuracy/error metrics remain
+internal and are omitted from student-facing responses.
+
+Prediction uses the median actual/original ratio of the latest twenty eligible tasks. It uses
+category history when at least five examples exist, otherwise overall history. Qualified Adaptive
+is the default unless a large adjustment needs acknowledgment; callers may explicitly select
+Original. Factors outside the inclusive 0.5–2.0 interval require acknowledgment and prompt again
+after a relative change of at least 25%. Task writes atomically save the prediction and separate
+original/adaptive/planned fields. Planned minutes come from the selected source; frozen task
+estimates cannot be replaced. Unavailable previews expose no hidden adaptive value.
+
+Focused tests: `uv run pytest tests/test_adaptive_estimation.py
+tests/test_adaptive_estimation_repository.py tests/test_adaptive_estimate_api.py` (one command).
+The full coverage gate remains `uv run pytest --cov=studyflow --cov-branch`, with the configured
+90% minimum.

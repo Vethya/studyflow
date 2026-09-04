@@ -92,9 +92,32 @@ uv run mypy
 Run frontend checks from `frontend/`:
 
 ```bash
+pnpm test
 pnpm lint
 pnpm build
 ```
+
+## Adaptive estimates
+
+New accounts plan with their original estimates. After five completed tasks with positive
+confirmed actual minutes, StudyFlow starts saving hidden predictions for later tasks. A prediction
+is evaluated only after its task is completed; existing completed tasks are never backfilled with
+predictions. Adaptive estimates become available after at least five such evaluations and only
+when the latest ten show at least a 10% reduction in mean absolute error versus original estimates.
+
+The suggestion uses the median actual/original ratio from the latest twenty applicable completed
+tasks. Five examples in the selected category enable category-specific history; otherwise it falls
+back to overall history. Qualified suggestions default to Adaptive, with an Original override.
+Factors below 0.5× or above 2× require acknowledgment before Adaptive can be selected; a relative
+change of at least 25% from the last acknowledged factor prompts again.
+
+Original, adaptive, and planned minutes are separate saved fields: planned minutes equal the
+selected source, not a replacement for the student's original estimate. Estimates freeze when
+work starts. Accuracy metrics remain internal and are not displayed to students.
+
+The authenticated endpoints are `GET /api/v1/adaptive-estimates/preview` (category and
+original_minutes query parameters) and `POST /api/v1/adaptive-estimates/acknowledgments`
+(category JSON body, session plus CSRF protection). See the backend guide for verification details.
 
 The Postman collection is available at `postman/StudyFlow.postman_collection.json`, with local,
 development, and production environments under `postman/environments/`.
