@@ -15,6 +15,32 @@ happened, and proposes controlled schedule revisions when plans change.
 - Capacity and overload explanations when work cannot fit before its deadline
 - Personal adaptive estimates based on previous estimated-versus-actual durations
 
+## WebMCP tools
+
+StudyFlow exposes 9 WebMCP tools from the authenticated app shell. An agent
+can read a student's plan, update tasks and study-time inputs, test hypothetical
+changes, and prepare schedule revisions for student review. Browsers without
+WebMCP continue to work as a normal StudyFlow app.
+
+| Tool | Purpose |
+| --- | --- |
+| `studyflow_get_plan_state` | Read tasks, deadlines, study time, schedules, progress, proposals, and capacity. |
+| `studyflow_add_task` | Create one academic task without changing the active schedule. |
+| `studyflow_update_study_time` | Replace planning preferences or weekly availability, and add, update, or remove blocked periods. |
+| `studyflow_update_task` | Edit, start, finish early, or delete one task. Finishing early and deleting require confirmation. |
+| `studyflow_simulate_plan` | Test temporary availability, blocked periods, or deadlines without persisting changes. |
+| `studyflow_draft_plan` | Create an inactive study-plan proposal for student review. |
+| `studyflow_accept_plan` | Activate one pending proposal after explicit student approval. |
+| `studyflow_reject_plan` | Reject one pending proposal without changing the active schedule. |
+| `studyflow_record_missed` | Record a missed session and return an inactive recovery proposal when one is available. |
+
+A typical agent workflow is to read the current state, update or simulate the
+student's inputs, draft a proposal, and let the student accept or reject it.
+See the [WebMCP workflow guide](docs/webmcp-workflow.md) for input schemas,
+outputs, and safety rules. To try the integration, run StudyFlow locally,
+sign in, and open it in ChatGPT's in-app browser or a Chrome environment with
+WebMCP enabled.
+
 ## Technology
 
 - **Frontend:** Next.js 16, React 19, TypeScript, Tailwind CSS
