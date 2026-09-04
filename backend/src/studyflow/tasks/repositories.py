@@ -246,14 +246,11 @@ class SqlAlchemyAcademicTaskRepository:
             )
             if row is None:
                 return None
-            if (
-                row.estimate_frozen_at is not None
-                and (
-                    row.original_estimate_minutes != task.original_estimate_minutes
-                    or (
-                        task.planned_source is not None
-                        and task.planned_source.value != row.planned_source
-                    )
+            if row.estimate_frozen_at is not None and (
+                row.original_estimate_minutes != task.original_estimate_minutes
+                or (
+                    task.planned_source is not None
+                    and task.planned_source.value != row.planned_source
                 )
             ):
                 raise EstimateFrozenError

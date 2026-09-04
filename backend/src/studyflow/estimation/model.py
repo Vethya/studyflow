@@ -50,9 +50,7 @@ def median_correction(
 ) -> CorrectionPrediction | None:
     """Predict duration from the median of the newest applicable task ratios."""
     eligible = [
-        record
-        for record in history
-        if record.actual_minutes > 0 and record.original_minutes > 0
+        record for record in history if record.actual_minutes > 0 and record.original_minutes > 0
     ]
     category_history = [record for record in eligible if record.category is category]
     if len(category_history) >= 5:
@@ -65,17 +63,13 @@ def median_correction(
         return None
 
     latest = sorted(applicable, key=lambda record: (record.completed_at, record.task_id))[-20:]
-    ratios = sorted(
-        Fraction(record.actual_minutes, record.original_minutes) for record in latest
-    )
+    ratios = sorted(Fraction(record.actual_minutes, record.original_minutes) for record in latest)
     midpoint = len(ratios) // 2
     if len(ratios) % 2:
         correction_ratio = ratios[midpoint]
     else:
         correction_ratio = (ratios[midpoint - 1] + ratios[midpoint]) / 2
-    correction_factor = Decimal(correction_ratio.numerator) / Decimal(
-        correction_ratio.denominator
-    )
+    correction_factor = Decimal(correction_ratio.numerator) / Decimal(correction_ratio.denominator)
     rounded_minutes = _round_half_up(Fraction(original_minutes) * correction_ratio)
     predicted_minutes = min(max(rounded_minutes, MIN_PREDICTED_MINUTES), MAX_PREDICTED_MINUTES)
     return CorrectionPrediction(
