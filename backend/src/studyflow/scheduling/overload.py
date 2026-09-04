@@ -317,17 +317,18 @@ def _has_zero_break_capacity(
     return False
 
 
-def _minimum_break_capacities(
-    tasks: tuple[_TaskInput, ...],
+def _minimum_break_capacity(
+    task: _TaskInput,
     problem: FeasibilityProblem,
     solve_deadline: float,
-) -> dict[str, int]:
-    """Prove every task's break-adjusted capacity in one independent-component solve."""
+) -> int:
+    """Prove one task's break-adjusted capacity within the shared solve budget."""
 
     minimum_break = problem.minimum_break_minutes
+    tasks = (task,)
     capacities = {task.task_id: max(0, len(task.sessions) - 1) * minimum_break for task in tasks}
     if minimum_break == 0:
-        return capacities
+        return capacities[task.task_id]
 
     model = cp_model.CpModel()
     active_by_task: dict[str, cp_model.IntVar] = {}
@@ -429,7 +430,7 @@ def _minimum_break_capacities(
         objective_terms.append(active * (maximum_break_capacity + 1) + task_credit)
 
     if not active_by_task:
-        return capacities
+        return capacities[task.task_id]
 
     model.maximize(cp_model.LinearExpr.sum(objective_terms))
     validation_error = model.validate()
@@ -463,7 +464,17 @@ def _minimum_break_capacities(
             if solver.boolean_value(variable)
         )
         capacities[task_id] -= earned_credit
-    return capacities
+    return capacities[task.task_id]
+
+
+def _minimum_break_capacities(
+    tasks: tuple[_TaskInput, ...],
+    problem: FeasibilityProblem,
+    solve_deadline: float,
+) -> dict[str, int]:
+    """Prove disconnected task capacities separately within one shared deadline."""
+
+    return {task.task_id: _minimum_break_capacity(task, problem, solve_deadline) for task in tasks}
 
 
 def _task_demands(problem: FeasibilityProblem, solve_deadline: float) -> tuple[_TaskDemand, ...]:
