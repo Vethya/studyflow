@@ -56,9 +56,7 @@ class AdaptiveEstimator:
         self, account_id: UUID, category: TaskCategory, original_minutes: int
     ) -> AdaptiveEstimatePreview:
         """Return a non-persisting, student-safe view of the current estimate."""
-        preview, _ = await self._evaluate(
-            account_id, category, original_minutes, self._repository
-        )
+        preview, _ = await self._evaluate(account_id, category, original_minutes, self._repository)
         return preview
 
     async def capture_for_task(

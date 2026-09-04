@@ -24,9 +24,7 @@ from studyflow.tasks.service import (
 )
 
 
-async def _qualify_and_acknowledge(
-    database: Database, account_id: UUID
-) -> AdaptiveEstimator:
+async def _qualify_and_acknowledge(database: Database, account_id: UUID) -> AdaptiveEstimator:
     now = datetime.now(UTC)
     async with database.transaction() as session:
         for index in range(5):
@@ -160,8 +158,9 @@ async def test_task_repository_scopes_create_list_and_get_to_owner() -> None:
 
 
 @pytest.mark.anyio
-async def test_task_repository_snapshots_qualified_adaptive_or_explicit_original_selection(
-) -> None:
+async def test_task_repository_snapshots_qualified_adaptive_or_explicit_original_selection() -> (
+    None
+):
     database = Database("sqlite+aiosqlite:///:memory:")
     await database.start()
     account_id = uuid4()

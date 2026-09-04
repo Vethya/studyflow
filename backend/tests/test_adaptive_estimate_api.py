@@ -86,7 +86,8 @@ async def test_preview_requires_authentication_and_valid_category_and_minutes() 
     estimator = EstimatorStub({ACCOUNT_ID: preview(available=False)})
     app = create_app(session_authentication=AuthenticationStub(), adaptive_estimator=estimator)  # type: ignore[arg-type]
     unauthenticated = create_app(
-        session_authentication=AuthenticationStub(authenticated=False), adaptive_estimator=estimator  # type: ignore[arg-type]
+        session_authentication=AuthenticationStub(authenticated=False),
+        adaptive_estimator=estimator,  # type: ignore[arg-type]
     )
 
     async with AsyncClient(
