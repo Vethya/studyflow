@@ -28,6 +28,30 @@ export function resolveEstimateSelection(
 }
 
 /**
+ * A large first-time adjustment needs acknowledgment only when the student
+ * elects to use Adaptive. Original remains an immediately available choice.
+ */
+export function resolveEstimateChoiceAction(
+  originalEstimate: number,
+  estimate: AdaptiveEstimate | null,
+  choice: "original" | "adaptive",
+):
+  | { type: "acknowledge" }
+  | {
+      type: "select";
+      selection: { originalEstimate: number; plannedSource: "Original" | "Adaptive" };
+    } {
+  if (choice === "adaptive" && estimate?.needsAcknowledgment) {
+    return { type: "acknowledge" };
+  }
+
+  return {
+    type: "select",
+    selection: resolveEstimateSelection(originalEstimate, estimate, choice),
+  };
+}
+
+/**
  * Resolves a preview without rewriting a source the student already chose for
  * an existing task. Only a fresh or deliberately changed estimate input may
  * accept the preview's qualified, acknowledged default.
