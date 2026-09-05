@@ -285,10 +285,10 @@ def create_app(
             recovery_invalidator=SqlAlchemyTaskRecoveryProposalInvalidator(),
         )
     )
-    resolved_availability_windows = availability_windows or AvailabilityWindowService(
-        SqlAlchemyAvailabilityWindowRepository(transactions)
-    )
     future_session_invalidator = SqlAlchemyFutureSessionInvalidator()
+    resolved_availability_windows = availability_windows or AvailabilityWindowService(
+        SqlAlchemyAvailabilityWindowRepository(transactions, future_session_invalidator)
+    )
     resolved_unavailable_periods = unavailable_periods or UnavailablePeriodService(
         SqlAlchemyUnavailablePeriodRepository(
             transactions,
