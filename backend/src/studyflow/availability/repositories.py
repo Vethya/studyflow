@@ -15,7 +15,9 @@ from studyflow.availability.unavailable import (
     UnavailablePeriodDraft,
 )
 from studyflow.availability.windows import (
+    AvailabilityTimezoneConfirmation,
     AvailabilityWindow,
+    AvailabilityWindowChange,
     AvailabilityWindowDraft,
 )
 from studyflow.database.models import AvailabilityWindow as AvailabilityWindowRow
@@ -256,11 +258,11 @@ class SqlAlchemyAvailabilityWindowRepository:
 
     async def replace(
         self, account_id: UUID, windows: list[AvailabilityWindowDraft]
-    ) -> list[AvailabilityWindow]:
+    ) -> AvailabilityWindowChange:
         async with self._database.transaction() as session:
             account = await session.get(StudentAccount, account_id, with_for_update=True)
             if account is None:
-                return []
+                return AvailabilityWindowChange([], [])
             await session.execute(
                 delete(AvailabilityWindowRow).where(AvailabilityWindowRow.account_id == account_id)
             )
@@ -277,16 +279,17 @@ class SqlAlchemyAvailabilityWindowRepository:
             session.add_all(rows)
             await session.flush()
             stored = [self._to_window(row) for row in rows]
-            await self._invalidator.remove_sessions_outside_availability(
+            invalidated = await self._invalidator.remove_sessions_outside_availability(
                 session, account_id, stored
             )
-            return stored
+            return AvailabilityWindowChange(stored, invalidated)
 
-    async def confirm_timezone(self, account_id: UUID) -> bool:
+    async def confirm_timezone(self, account_id: UUID) -> AvailabilityTimezoneConfirmation | None:
         async with self._database.transaction() as session:
             account = await session.get(StudentAccount, account_id, with_for_update=True)
             if account is None:
-                return False
+                return None
+            invalidated: list[UUID] = []
             if not account.availability_timezone_confirmed:
                 windows = [
                     self._to_window(row)
@@ -300,11 +303,11 @@ class SqlAlchemyAvailabilityWindowRepository:
                         )
                     )
                 ]
-                await self._invalidator.remove_sessions_outside_availability(
+                invalidated = await self._invalidator.remove_sessions_outside_availability(
                     session, account_id, windows
                 )
             account.availability_timezone_confirmed = True
-        return True
+        return AvailabilityTimezoneConfirmation(invalidated)
 
     @staticmethod
     def _to_window(row: AvailabilityWindowRow) -> AvailabilityWindow:

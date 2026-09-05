@@ -25,6 +25,17 @@ class AvailabilityWindow:
     crosses_midnight: bool
 
 
+@dataclass(frozen=True, slots=True)
+class AvailabilityWindowChange:
+    windows: list[AvailabilityWindow]
+    invalidated_future_session_ids: list[UUID]
+
+
+@dataclass(frozen=True, slots=True)
+class AvailabilityTimezoneConfirmation:
+    invalidated_future_session_ids: list[UUID]
+
+
 def _minutes(value: time) -> int:
     return value.hour * 60 + value.minute
 
@@ -78,16 +89,20 @@ class AvailabilityWindowRepository(Protocol):
     async def list_windows(self, account_id: UUID) -> list[AvailabilityWindow]: ...
     async def replace(
         self, account_id: UUID, windows: list[AvailabilityWindowDraft]
-    ) -> list[AvailabilityWindow]: ...
-    async def confirm_timezone(self, account_id: UUID) -> bool: ...
+    ) -> AvailabilityWindowChange: ...
+    async def confirm_timezone(
+        self, account_id: UUID
+    ) -> AvailabilityTimezoneConfirmation | None: ...
 
 
 class AvailabilityWindows(Protocol):
     async def list_windows(self, account_id: UUID) -> list[AvailabilityWindow]: ...
     async def replace(
         self, account_id: UUID, windows: list[AvailabilityWindowDraft]
-    ) -> list[AvailabilityWindow]: ...
-    async def confirm_timezone(self, account_id: UUID) -> bool: ...
+    ) -> AvailabilityWindowChange: ...
+    async def confirm_timezone(
+        self, account_id: UUID
+    ) -> AvailabilityTimezoneConfirmation | None: ...
 
 
 class AvailabilityWindowService:
@@ -99,8 +114,8 @@ class AvailabilityWindowService:
 
     async def replace(
         self, account_id: UUID, windows: list[AvailabilityWindowDraft]
-    ) -> list[AvailabilityWindow]:
+    ) -> AvailabilityWindowChange:
         return await self._repository.replace(account_id, merge_windows(windows))
 
-    async def confirm_timezone(self, account_id: UUID) -> bool:
+    async def confirm_timezone(self, account_id: UUID) -> AvailabilityTimezoneConfirmation | None:
         return await self._repository.confirm_timezone(account_id)

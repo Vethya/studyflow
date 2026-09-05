@@ -80,13 +80,16 @@ async def test_availability_repository_replaces_owned_windows_and_confirms_timez
                 ]
             )
         repository = SqlAlchemyAvailabilityWindowRepository(database)
-        stored = await repository.replace(
+        change = await repository.replace(
             account_id, [AvailabilityWindowDraft(0, time(22), time(2))]
         )
 
-        assert stored[0].crosses_midnight is True
+        assert change.windows[0].crosses_midnight is True
+        assert change.invalidated_future_session_ids == []
         assert await repository.list_windows(other_id) == []
-        assert await repository.confirm_timezone(account_id)
+        confirmation = await repository.confirm_timezone(account_id)
+        assert confirmation is not None
+        assert confirmation.invalidated_future_session_ids == []
         async with database.transaction() as session:
             account = await session.get(StudentAccount, account_id)
         assert account is not None and account.availability_timezone_confirmed is True
