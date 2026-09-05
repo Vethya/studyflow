@@ -37,7 +37,7 @@ from studyflow.scheduling.service import (
     ScheduleGeneration,
     ScheduleGenerationFailedError,
 )
-from studyflow.tasks.service import AcademicTaskRecord, AcademicTasks
+from studyflow.tasks.service import AcademicTaskRecord, AcademicTasks, list_task_snapshot
 
 router = APIRouter(prefix="/schedule-proposals", tags=["Schedule Proposals"])
 
@@ -353,8 +353,14 @@ async def schedule_proposal_response(
     account_id: UUID,
     tasks: AcademicTasks,
     unavailable: UnavailablePeriods,
+    *,
+    read_only_tasks: bool = False,
 ) -> ScheduleProposalResponse:
-    task_records = await tasks.list(account_id)
+    task_records = (
+        await list_task_snapshot(tasks, account_id)
+        if read_only_tasks
+        else await tasks.list(account_id)
+    )
     unavailable_periods = (
         await unavailable.list_periods(account_id)
         if proposal.status is ProposalStatus.OVERLOAD
@@ -458,7 +464,11 @@ async def simulate_schedule(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
     return ScheduleSimulationResponse(
         proposal=await schedule_proposal_response(
-            proposal, principal.account_id, tasks, unavailable
+            proposal,
+            principal.account_id,
+            tasks,
+            unavailable,
+            read_only_tasks=True,
         )
     )
 
@@ -477,6 +487,7 @@ async def get_current_schedule_proposal(
     tasks: Annotated[AcademicTasks, Depends(get_academic_tasks)],
     unavailable: Annotated[UnavailablePeriods, Depends(get_unavailable_periods)],
 ) -> ScheduleProposalResponse:
+    await tasks.list(principal.account_id)
     proposal = await proposals.get(principal.account_id)
     if proposal is None:
         raise HTTPException(

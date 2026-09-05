@@ -1,10 +1,11 @@
 """Academic Task create/read application boundary."""
 
+import builtins
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 
@@ -108,6 +109,30 @@ class AcademicTasks(Protocol):
     async def mark_started(self, account_id: UUID, task_id: UUID) -> bool: ...
 
 
+@runtime_checkable
+class AcademicTaskRepositorySnapshots(Protocol):
+    async def list_snapshot(
+        self, account_id: UUID, filters: TaskFilters | None = None
+    ) -> builtins.list[AcademicTaskRecord]: ...
+
+
+@runtime_checkable
+class AcademicTaskSnapshots(Protocol):
+    async def list_snapshot(
+        self, account_id: UUID, filters: TaskFilters | None = None
+    ) -> list[AcademicTaskRecord]: ...
+
+
+async def list_task_snapshot(
+    tasks: AcademicTasks,
+    account_id: UUID,
+    filters: TaskFilters | None = None,
+) -> list[AcademicTaskRecord]:
+    if isinstance(tasks, AcademicTaskSnapshots):
+        return await tasks.list_snapshot(account_id, filters)
+    return await tasks.list(account_id, filters)
+
+
 class AcademicTaskService:
     def __init__(
         self,
@@ -128,6 +153,14 @@ class AcademicTaskService:
         self, account_id: UUID, filters: TaskFilters | None = None
     ) -> list[AcademicTaskRecord]:
         return await self._repository.list(account_id, filters or TaskFilters())
+
+    async def list_snapshot(
+        self, account_id: UUID, filters: TaskFilters | None = None
+    ) -> builtins.list[AcademicTaskRecord]:
+        resolved_filters = filters or TaskFilters()
+        if isinstance(self._repository, AcademicTaskRepositorySnapshots):
+            return await self._repository.list_snapshot(account_id, resolved_filters)
+        return await self._repository.list(account_id, resolved_filters)
 
     async def get(self, account_id: UUID, task_id: UUID) -> AcademicTaskRecord | None:
         return await self._repository.get(account_id, task_id)

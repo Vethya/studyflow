@@ -27,6 +27,7 @@ def test_academic_task_schema_preserves_owned_planning_inputs() -> None:
         "planned_source",
         "planned_duration_minutes",
         "estimate_frozen_at",
+        "overdue_remediated_deadline_at",
         "completed_at",
         "finished_early_at",
         "created_at",
