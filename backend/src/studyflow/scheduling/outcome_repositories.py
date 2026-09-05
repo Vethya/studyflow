@@ -1,6 +1,7 @@
 """SQLAlchemy persistence for immutable study-session outcomes."""
 
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
@@ -34,6 +35,15 @@ class TaskProposalInvalidator(Protocol):
     ) -> None: ...
 
 
+class OverdueTaskRemediator(Protocol):
+    async def remediate_overdue_tasks(
+        self,
+        session: AsyncSession,
+        account_id: UUID,
+        now: datetime,
+    ) -> list[UUID]: ...
+
+
 class NoTaskProposalInvalidator:
     async def invalidate_for_task(
         self,
@@ -44,19 +54,44 @@ class NoTaskProposalInvalidator:
         return None
 
 
+class NoOverdueTaskRemediator:
+    async def remediate_overdue_tasks(
+        self,
+        session: AsyncSession,
+        account_id: UUID,
+        now: datetime,
+    ) -> list[UUID]:
+        return []
+
+
 class SqlAlchemyStudySessionOutcomeRepository:
     def __init__(
         self,
         database: SessionTransactions,
         proposal_invalidator: TaskProposalInvalidator | None = None,
+        *,
+        overdue_remediator: OverdueTaskRemediator | None = None,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._database = database
         self._proposal_invalidator = proposal_invalidator or NoTaskProposalInvalidator()
+        self._overdue_remediator = overdue_remediator or NoOverdueTaskRemediator()
+        self._clock = clock
+
+    async def _reconcile_overdue(
+        self, session: AsyncSession, account_id: UUID, now: datetime
+    ) -> None:
+        overdue_task_ids = await self._overdue_remediator.remediate_overdue_tasks(
+            session, account_id, now
+        )
+        for task_id in overdue_task_ids:
+            await self._proposal_invalidator.invalidate_for_task(session, account_id, task_id)
 
     async def list(
         self, account_id: UUID, filters: StudySessionFilters
     ) -> list[StudySessionDetails]:
         async with self._database.transaction() as session:
+            await self._reconcile_overdue(session, account_id, self._clock())
             statement = (
                 select(SessionRow, OutcomeRow)
                 .outerjoin(OutcomeRow, OutcomeRow.session_id == SessionRow.id)
@@ -83,6 +118,7 @@ class SqlAlchemyStudySessionOutcomeRepository:
 
     async def get(self, account_id: UUID, session_id: UUID) -> StudySessionDetails | None:
         async with self._database.transaction() as session:
+            await self._reconcile_overdue(session, account_id, self._clock())
             row = await session.scalar(
                 select(SessionRow).where(
                     SessionRow.id == session_id,
@@ -110,6 +146,7 @@ class SqlAlchemyStudySessionOutcomeRepository:
         now: datetime,
     ) -> StudySessionOutcomeRecord | None:
         async with self._database.transaction() as session:
+            await self._reconcile_overdue(session, account_id, now)
             account = await session.get(StudentAccount, account_id, with_for_update=True)
             if account is None:
                 return None
@@ -176,6 +213,7 @@ class SqlAlchemyStudySessionOutcomeRepository:
 
     async def task_actual_minutes(self, account_id: UUID, task_id: UUID) -> int:
         async with self._database.transaction() as session:
+            await self._reconcile_overdue(session, account_id, self._clock())
             total = await session.scalar(
                 select(func.coalesce(func.sum(OutcomeRow.actual_minutes), 0))
                 .join(SessionRow, SessionRow.id == OutcomeRow.session_id)
@@ -192,22 +230,33 @@ class SqlAlchemyStudySessionOutcomeRepository:
     async def task_schedule_adjustments(self, account_id: UUID) -> dict[UUID, int]:
         """Return work already represented by recorded outcomes for each task."""
         async with self._database.transaction() as session:
-            rows = await session.execute(
-                select(
-                    SessionRow.task_id,
-                    SessionRow.planned_duration_minutes,
-                    OutcomeRow.remaining_minutes,
-                )
-                .join(OutcomeRow, OutcomeRow.session_id == SessionRow.id)
-                .where(
-                    SessionRow.account_id == account_id,
-                    SessionRow.proposal_id.is_(None),
-                )
+            await self._reconcile_overdue(session, account_id, self._clock())
+            return await self._task_schedule_adjustments(session, account_id)
+
+    async def task_schedule_adjustments_snapshot(self, account_id: UUID) -> dict[UUID, int]:
+        async with self._database.transaction() as session:
+            return await self._task_schedule_adjustments(session, account_id)
+
+    @staticmethod
+    async def _task_schedule_adjustments(
+        session: AsyncSession, account_id: UUID
+    ) -> dict[UUID, int]:
+        rows = await session.execute(
+            select(
+                SessionRow.task_id,
+                SessionRow.planned_duration_minutes,
+                OutcomeRow.remaining_minutes,
             )
-            adjustments: defaultdict[UUID, int] = defaultdict(int)
-            for task_id, planned_minutes, remaining_minutes in rows:
-                adjustments[task_id] += planned_minutes - remaining_minutes
-            return dict(adjustments)
+            .join(OutcomeRow, OutcomeRow.session_id == SessionRow.id)
+            .where(
+                SessionRow.account_id == account_id,
+                SessionRow.proposal_id.is_(None),
+            )
+        )
+        adjustments: defaultdict[UUID, int] = defaultdict(int)
+        for task_id, planned_minutes, remaining_minutes in rows:
+            adjustments[task_id] += planned_minutes - remaining_minutes
+        return dict(adjustments)
 
     @staticmethod
     async def _has_unfinished_work(

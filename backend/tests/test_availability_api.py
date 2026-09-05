@@ -7,7 +7,12 @@ from httpx import ASGITransport, AsyncClient
 
 from studyflow.app import create_app
 from studyflow.auth.session_authentication import SessionPrincipal
-from studyflow.availability.windows import AvailabilityWindow, AvailabilityWindowDraft
+from studyflow.availability.windows import (
+    AvailabilityTimezoneConfirmation,
+    AvailabilityWindow,
+    AvailabilityWindowChange,
+    AvailabilityWindowDraft,
+)
 
 ACCOUNT_ID = UUID("5b15bfef-8c44-45d5-a70e-574beb999fb3")
 
@@ -28,25 +33,27 @@ class AvailabilityStub:
     windows: list[AvailabilityWindow]
     replacements: list[tuple[UUID, list[AvailabilityWindowDraft]]] = field(default_factory=list)
     confirmations: list[UUID] = field(default_factory=list)
+    invalidated_future_session_ids: list[UUID] = field(default_factory=list)
 
     async def list_windows(self, account_id: UUID) -> list[AvailabilityWindow]:
         return self.windows
 
     async def replace(
         self, account_id: UUID, windows: list[AvailabilityWindowDraft]
-    ) -> list[AvailabilityWindow]:
+    ) -> AvailabilityWindowChange:
         self.replacements.append((account_id, windows))
-        return self.windows
+        return AvailabilityWindowChange(self.windows, self.invalidated_future_session_ids)
 
-    async def confirm_timezone(self, account_id: UUID) -> bool:
+    async def confirm_timezone(self, account_id: UUID) -> AvailabilityTimezoneConfirmation:
         self.confirmations.append(account_id)
-        return True
+        return AvailabilityTimezoneConfirmation(self.invalidated_future_session_ids)
 
 
 @pytest.mark.anyio
 async def test_availability_read_replace_and_timezone_confirmation_contract() -> None:
     stored = AvailabilityWindow(uuid4(), 0, time(18), time(22), False)
-    availability = AvailabilityStub([stored])
+    invalidated_id = uuid4()
+    availability = AvailabilityStub([stored], invalidated_future_session_ids=[invalidated_id])
     app = create_app(session_authentication=AuthenticationStub(), availability_windows=availability)
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -67,7 +74,10 @@ async def test_availability_read_replace_and_timezone_confirmation_contract() ->
 
     assert listed.status_code == 200
     assert replaced.status_code == 200
-    assert confirmed.status_code == 204
+    assert replaced.json()["windows"][0]["id"] == str(stored.id)
+    assert replaced.json()["invalidated_future_session_ids"] == [str(invalidated_id)]
+    assert confirmed.status_code == 200
+    assert confirmed.json() == {"invalidated_future_session_ids": [str(invalidated_id)]}
     assert availability.replacements[0][0] == ACCOUNT_ID
     assert availability.confirmations == [ACCOUNT_ID]
 

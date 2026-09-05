@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.accounts.preferences import StudyPreferences
 from studyflow.auth.repositories import SessionTransactions
-from studyflow.availability.repositories import FutureSessionInvalidator
+from studyflow.availability.repositories import StudyTimeSessionInvalidator
 from studyflow.availability.unavailable import (
     PastUnavailablePeriodError,
     UnavailablePeriod,
@@ -75,7 +75,7 @@ class StudyTimeUpdateService:
     def __init__(
         self,
         database: SessionTransactions,
-        invalidator: FutureSessionInvalidator,
+        invalidator: StudyTimeSessionInvalidator,
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
@@ -94,6 +94,8 @@ class StudyTimeUpdateService:
             if account is None:
                 return None
 
+            previous_timezone = account.timezone
+            was_timezone_confirmed = account.availability_timezone_confirmed
             period_rows = await self._period_rows(session, account_id, changes)
             preferences = self._apply_preferences(account, changes)
             recurring_windows = await self._apply_recurring_windows(
@@ -143,6 +145,30 @@ class StudyTimeUpdateService:
                 for period_id in blocked_periods.remove:
                     await session.delete(period_rows[period_id])
                     removed_period_ids.append(period_id)
+
+            timezone_confirmation_transition = changes.confirm_timezone and (
+                not was_timezone_confirmed or account.timezone != previous_timezone
+            )
+            if recurring_windows is not None or timezone_confirmation_transition:
+                windows_for_validation = recurring_windows
+                if windows_for_validation is None:
+                    windows_for_validation = [
+                        self._to_window(row)
+                        for row in await session.scalars(
+                            select(AvailabilityWindowRow)
+                            .where(AvailabilityWindowRow.account_id == account_id)
+                            .order_by(
+                                AvailabilityWindowRow.weekday,
+                                AvailabilityWindowRow.local_start_time,
+                                AvailabilityWindowRow.id,
+                            )
+                        )
+                    ]
+                invalidated_ids.extend(
+                    await self._invalidator.remove_sessions_outside_availability(
+                        session, account_id, windows_for_validation
+                    )
+                )
 
             return StudyTimeUpdateResult(
                 timezone_confirmed=changes.confirm_timezone,
@@ -303,3 +329,13 @@ class StudyTimeUpdateService:
         )
         ends_at = row.ends_at if row.ends_at.tzinfo is not None else row.ends_at.replace(tzinfo=UTC)
         return UnavailablePeriod(row.id, starts_at, ends_at, row.reason)
+
+    @staticmethod
+    def _to_window(row: AvailabilityWindowRow) -> AvailabilityWindow:
+        return AvailabilityWindow(
+            row.id,
+            row.weekday,
+            row.local_start_time,
+            row.local_end_time,
+            row.crosses_midnight,
+        )

@@ -71,6 +71,7 @@ class AcademicTask(Base):
     planned_source: Mapped[str] = mapped_column(String(16), server_default="original")
     planned_duration_minutes: Mapped[int] = mapped_column(Integer)
     estimate_frozen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    overdue_remediated_deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_early_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

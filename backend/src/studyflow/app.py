@@ -281,21 +281,22 @@ def create_app(
     resolved_account_preferences = account_preferences or StudyPreferencesService(
         SqlAlchemyStudyPreferencesRepository(transactions)
     )
+    task_deadline_invalidator = SqlAlchemyTaskDeadlineSessionInvalidator()
     adaptive_predictions = SqlAlchemyAdaptivePredictionRepository(transactions)
     resolved_adaptive_estimator = adaptive_estimator or AdaptiveEstimator(adaptive_predictions)
     resolved_academic_tasks = academic_tasks or AcademicTaskService(
         SqlAlchemyAcademicTaskRepository(
             transactions,
-            SqlAlchemyTaskDeadlineSessionInvalidator(),
+            task_deadline_invalidator,
             recovery_invalidator=SqlAlchemyTaskRecoveryProposalInvalidator(),
             estimator=resolved_adaptive_estimator,
             prediction_repository=adaptive_predictions,
         )
     )
-    resolved_availability_windows = availability_windows or AvailabilityWindowService(
-        SqlAlchemyAvailabilityWindowRepository(transactions)
-    )
     future_session_invalidator = SqlAlchemyFutureSessionInvalidator()
+    resolved_availability_windows = availability_windows or AvailabilityWindowService(
+        SqlAlchemyAvailabilityWindowRepository(transactions, future_session_invalidator)
+    )
     resolved_unavailable_periods = unavailable_periods or UnavailablePeriodService(
         SqlAlchemyUnavailablePeriodRepository(
             transactions,
@@ -314,6 +315,7 @@ def create_app(
         SqlAlchemyStudySessionOutcomeRepository(
             transactions,
             SqlAlchemyTaskRecoveryProposalInvalidator(),
+            overdue_remediator=task_deadline_invalidator,
         )
     )
     resolved_schedule_generation = schedule_generation or ScheduleGenerationService(

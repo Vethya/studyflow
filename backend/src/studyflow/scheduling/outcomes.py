@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from studyflow.scheduling.proposals import StudySessionRecord
@@ -98,6 +98,27 @@ class StudySessions(Protocol):
     async def task_actual_minutes(self, account_id: UUID, task_id: UUID) -> int: ...
 
     async def task_schedule_adjustments(self, account_id: UUID) -> dict[UUID, int]: ...
+
+
+@runtime_checkable
+class StudySessionOutcomeRepositorySnapshots(Protocol):
+    async def task_schedule_adjustments_snapshot(self, account_id: UUID) -> dict[UUID, int]: ...
+
+
+@runtime_checkable
+class StudySessionSnapshots(Protocol):
+    async def task_schedule_adjustments_snapshot(self, account_id: UUID) -> dict[UUID, int]: ...
+
+
+async def read_task_schedule_adjustments(
+    study_sessions: StudySessions,
+    account_id: UUID,
+    *,
+    read_only: bool,
+) -> dict[UUID, int]:
+    if read_only and isinstance(study_sessions, StudySessionSnapshots):
+        return await study_sessions.task_schedule_adjustments_snapshot(account_id)
+    return await study_sessions.task_schedule_adjustments(account_id)
 
 
 class ProposedSessionOutcomeError(ValueError):
@@ -227,4 +248,9 @@ class StudySessionService:
         return await self._repository.task_actual_minutes(account_id, task_id)
 
     async def task_schedule_adjustments(self, account_id: UUID) -> dict[UUID, int]:
+        return await self._repository.task_schedule_adjustments(account_id)
+
+    async def task_schedule_adjustments_snapshot(self, account_id: UUID) -> dict[UUID, int]:
+        if isinstance(self._repository, StudySessionOutcomeRepositorySnapshots):
+            return await self._repository.task_schedule_adjustments_snapshot(account_id)
         return await self._repository.task_schedule_adjustments(account_id)
