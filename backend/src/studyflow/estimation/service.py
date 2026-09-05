@@ -4,10 +4,16 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from fractions import Fraction
 from typing import Literal
 from uuid import UUID
 
-from studyflow.estimation.model import CorrectionPrediction, median_correction, qualifies
+from studyflow.estimation.model import (
+    CorrectionPrediction,
+    HistoryRecord,
+    median_correction,
+    qualifies,
+)
 from studyflow.estimation.repositories import AdaptivePredictionRepository
 from studyflow.tasks.service import TaskCategory
 
@@ -48,6 +54,31 @@ class AdaptiveEligibilityStatus:
     is_qualified: bool
     completed_predictions_count: int
     eligible_history_count: int
+
+
+def _applicable_history(
+    history: list[HistoryRecord], category: TaskCategory
+) -> list[HistoryRecord]:
+    eligible = [
+        record for record in history if record.actual_minutes > 0 and record.original_minutes > 0
+    ]
+    category_history = [record for record in eligible if record.category is category]
+    if len(category_history) >= 5:
+        return category_history
+    return eligible
+
+
+def _median_factor(records: list[HistoryRecord]) -> Decimal | None:
+    if not records:
+        return None
+    latest = sorted(records, key=lambda record: (record.completed_at, record.task_id))[-20:]
+    ratios = sorted(Fraction(record.actual_minutes, record.original_minutes) for record in latest)
+    midpoint = len(ratios) // 2
+    if len(ratios) % 2:
+        correction_ratio = ratios[midpoint]
+    else:
+        correction_ratio = (ratios[midpoint - 1] + ratios[midpoint]) / 2
+    return Decimal(correction_ratio.numerator) / Decimal(correction_ratio.denominator)
 
 
 class AdaptiveEstimator:
@@ -131,24 +162,18 @@ class AdaptiveEstimator:
         evaluations = await repo.evaluations(account_id)
         history = await repo.history(account_id)
         is_qualified = qualifies(evaluations)
-        if not is_qualified:
-            await repo.clear_acknowledgments(account_id)
-        else:
-            for category in TaskCategory:
-                acknowledged_factor = await repo.acknowledgment(account_id, category)
-                if acknowledged_factor is None:
-                    continue
-                prediction = median_correction(history, category, 1)
-                if (
-                    prediction is None
-                    or LARGE_FACTOR_LOWER_BOUND
-                    <= prediction.correction_factor
-                    <= LARGE_FACTOR_UPPER_BOUND
-                    or self._acknowledgment_required(
-                        prediction.correction_factor, acknowledged_factor
-                    )
-                ):
-                    await repo.remove_acknowledgment(account_id, category)
+        for category in TaskCategory:
+            acknowledged_factor = await repo.acknowledgment(account_id, category)
+            if acknowledged_factor is None:
+                continue
+            applicable = _applicable_history(history, category)
+            factor = _median_factor(applicable)
+            if (
+                factor is None
+                or LARGE_FACTOR_LOWER_BOUND <= factor <= LARGE_FACTOR_UPPER_BOUND
+                or self._acknowledgment_required(factor, acknowledged_factor)
+            ):
+                await repo.remove_acknowledgment(account_id, category)
 
         completed_predictions = [
             e

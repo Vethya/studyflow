@@ -480,13 +480,16 @@ async def test_large_factor_repompts_after_a_twenty_five_percent_relative_change
 
 
 @pytest.mark.anyio
-async def test_recalculate_after_deletion_clears_acknowledgments_when_unqualified() -> None:
+async def test_recalculate_preserves_acknowledgments_across_dequalification() -> None:
     repository = InMemoryAdaptivePredictionRepository(
-        history_records=_history([Decimal("2.5")] * 4),  # Only 4 tasks -> unqualified
+        history_records=_history([Decimal("2.5")] * 4),  # Only 4 tasks -> temporarily unqualified
         prediction_evaluations=[
             _evaluation(index, adaptive_minutes=101, actual_minutes=110) for index in range(4)
         ],
-        acknowledgments={TaskCategory.OTHER: Decimal("2.5")},
+        acknowledgments={
+            TaskCategory.OTHER: Decimal("2.5"),  # Unchanged factor -> preserved
+            TaskCategory.READING: Decimal("2.5"),  # No reading history, overall 2.5 -> preserved
+        },
     )
     estimator = AdaptiveEstimator(repository, clock=lambda: NOW)
     account_id = UUID(int=100)
@@ -496,7 +499,21 @@ async def test_recalculate_after_deletion_clears_acknowledgments_when_unqualifie
     assert status.is_qualified is False
     assert status.completed_predictions_count == 4
     assert status.eligible_history_count == 4
-    assert repository.acknowledgments == {}
+    # Unchanged factors are preserved across temporary dequalification
+    assert repository.acknowledgments == {
+        TaskCategory.OTHER: Decimal("2.5"),
+        TaskCategory.READING: Decimal("2.5"),
+    }
+
+    # When 5th task restores qualification with the same factor, acknowledgment is still valid
+    repository.history_records = _history([Decimal("2.5")] * 5)
+    repository.prediction_evaluations = [
+        _evaluation(index, adaptive_minutes=101, actual_minutes=110) for index in range(5)
+    ]
+    preview = await estimator.preview(account_id, TaskCategory.OTHER, 60)
+    assert preview.available is True
+    assert preview.acknowledgment_required is False
+    assert preview.planned_source == "adaptive"
 
 
 @pytest.mark.anyio
