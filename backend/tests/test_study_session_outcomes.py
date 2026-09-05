@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import cast
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -26,8 +26,11 @@ from studyflow.scheduling.outcomes import (
     StudySessionDetails,
     StudySessionFilters,
     StudySessionOutcomeRecord,
+    StudySessionOutcomeRepositorySnapshots,
     StudySessions,
     StudySessionService,
+    StudySessionSnapshots,
+    read_task_schedule_adjustments,
 )
 from studyflow.scheduling.proposals import (
     ProposalKind,
@@ -933,3 +936,93 @@ async def test_recovery_input_too_large_maps_to_documented_422() -> None:
     assert response.status_code == 422
     assert response.json()["detail"] == "Recovery is too large"
     assert "422" in operation["responses"]
+
+
+@pytest.mark.anyio
+async def test_read_task_schedule_adjustments_and_snapshots() -> None:
+    task_id = uuid4()
+    account_id = uuid4()
+
+    class PlainSessionsStub:
+        async def list(
+            self, account_id: UUID, filters: StudySessionFilters
+        ) -> list[StudySessionDetails]:
+            return []
+
+        async def get(self, account_id: UUID, session_id: UUID) -> StudySessionDetails | None:
+            return None
+
+        async def record_completed(
+            self,
+            account_id: UUID,
+            session_id: UUID,
+            actual_minutes: int,
+            *,
+            large_actual_confirmed: bool = False,
+        ) -> StudySessionOutcomeRecord | None:
+            return None
+
+        async def record_delayed(
+            self,
+            account_id: UUID,
+            session_id: UUID,
+            actual_minutes: int,
+            remaining_minutes: int | None = None,
+            *,
+            large_actual_confirmed: bool = False,
+        ) -> StudySessionOutcomeRecord | None:
+            return None
+
+        async def record_missed(
+            self, account_id: UUID, session_id: UUID
+        ) -> StudySessionOutcomeRecord | None:
+            return None
+
+        async def task_actual_minutes(self, account_id: UUID, task_id: UUID) -> int:
+            return 0
+
+        async def task_schedule_adjustments(self, account_id: UUID) -> dict[UUID, int]:
+            return {task_id: 30}
+
+    class SnapshotSessionsStub(PlainSessionsStub, StudySessionSnapshots):
+        async def task_schedule_adjustments_snapshot(self, account_id: UUID) -> dict[UUID, int]:
+            return {task_id: 45}
+
+    # 1. read_task_schedule_adjustments with StudySessionSnapshots and read_only=True
+    snap_stub = SnapshotSessionsStub()
+    res1 = await read_task_schedule_adjustments(
+        cast(StudySessions, snap_stub), account_id, read_only=True
+    )
+    assert res1 == {task_id: 45}
+
+    # 2. read_task_schedule_adjustments with StudySessionSnapshots and read_only=False
+    res2 = await read_task_schedule_adjustments(
+        cast(StudySessions, snap_stub), account_id, read_only=False
+    )
+    assert res2 == {task_id: 30}
+
+    # 3. read_task_schedule_adjustments without StudySessionSnapshots and read_only=True
+    plain_stub = PlainSessionsStub()
+    res3 = await read_task_schedule_adjustments(
+        cast(StudySessions, plain_stub), account_id, read_only=True
+    )
+    assert res3 == {task_id: 30}
+
+    # 4. StudySessionService snapshot delegation
+    class RepoStub:
+        async def task_schedule_adjustments(self, account_id: UUID) -> dict[UUID, int]:
+            return {task_id: 50}
+
+        async def task_actual_minutes(self, account_id: UUID, task_id: UUID) -> int:
+            return 0
+
+    class RepoSnapshotStub(RepoStub, StudySessionOutcomeRepositorySnapshots):
+        async def task_schedule_adjustments_snapshot(self, account_id: UUID) -> dict[UUID, int]:
+            return {task_id: 60}
+
+    service_snap = StudySessionService(cast(Any, RepoSnapshotStub()))
+    assert await service_snap.task_schedule_adjustments_snapshot(account_id) == {task_id: 60}
+
+    service_plain = StudySessionService(cast(Any, RepoStub()))
+    assert await service_plain.task_schedule_adjustments(account_id) == {task_id: 50}
+    assert await service_plain.task_schedule_adjustments_snapshot(account_id) == {task_id: 50}
