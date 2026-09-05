@@ -1,0 +1,105 @@
+"""Tests for NFR-02 dataset seeder and benchmark runner."""
+
+import sys
+from pathlib import Path
+
+import pytest
+from sqlalchemy import select
+
+sys.path.insert(0, str(Path(__file__).parents[1]))
+
+from benchmarks.http_performance import (
+    percentile_95,
+    run_http_benchmark,
+)
+from benchmarks.seed_nfr02 import (
+    BENCHMARK_EMAIL,
+    seed_nfr02_dataset,
+)
+from studyflow.database import Base, Database
+from studyflow.database.models.authentication import StudentAccount
+from studyflow.database.models.availability import AvailabilityWindow, UnavailablePeriod
+from studyflow.database.models.scheduling import ProposalTaskAllocation, StudySession
+from studyflow.database.models.tasks import AcademicTask
+
+
+def test_percentile_95_calculation() -> None:
+    # 20 samples from 0.1 to 2.0
+    samples = [i * 0.1 for i in range(1, 21)]
+    p95 = percentile_95(samples)
+    assert abs(p95 - 1.9) < 1e-5
+
+
+@pytest.mark.anyio
+async def test_run_http_benchmark_fails_on_unreachable_endpoint() -> None:
+    # Point to a closed port / non-existent host
+    exit_code = await run_http_benchmark(
+        base_url="http://127.0.0.1:59999",
+        runs=1,
+    )
+    assert exit_code == 1
+
+
+@pytest.mark.anyio
+async def test_seed_nfr02_dataset_creates_complete_spec_workload() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            account_id = await seed_nfr02_dataset(session)
+            assert account_id is not None
+
+        async with database.transaction() as session:
+            # 1. Exactly 1 account
+            account_stmt = select(StudentAccount).where(StudentAccount.id == account_id)
+            accounts = (await session.execute(account_stmt)).scalars().all()
+            assert len(accounts) == 1
+            assert accounts[0].email == BENCHMARK_EMAIL
+
+            # 2. Weekly Availability Windows (Mon-Fri)
+            window_stmt = select(AvailabilityWindow).where(
+                AvailabilityWindow.account_id == account_id
+            )
+            windows = (await session.execute(window_stmt)).scalars().all()
+            assert len(windows) == 5
+
+            # 3. Exactly 50 Unavailable Periods
+            unavail_stmt = select(UnavailablePeriod).where(
+                UnavailablePeriod.account_id == account_id
+            )
+            unavails = (await session.execute(unavail_stmt)).scalars().all()
+            assert len(unavails) == 50
+
+            # 4. Exactly 50 Active Academic Tasks
+            tasks = (
+                (
+                    await session.execute(
+                        select(AcademicTask).where(AcademicTask.account_id == account_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(tasks) == 50
+
+            # 5. Exactly 250 Scheduled Study Sessions
+            sessions = (
+                (
+                    await session.execute(
+                        select(StudySession).where(StudySession.account_id == account_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(sessions) == 250
+
+            # 6. Allocations for each task
+            allocs = (await session.execute(select(ProposalTaskAllocation))).scalars().all()
+            assert len(allocs) == 50
+    finally:
+        await database.stop()
