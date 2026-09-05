@@ -241,7 +241,7 @@ async def test_deleting_task_drops_qualification_when_sample_falls_below_thresho
 
 
 @pytest.mark.anyio
-async def test_deleting_task_clears_acknowledgments_when_qualification_is_lost() -> None:
+async def test_deleting_task_preserves_acknowledgment_when_factor_unchanged() -> None:
     database = Database("sqlite+aiosqlite:///:memory:")
     await database.start()
     account_id = uuid4()
@@ -274,11 +274,69 @@ async def test_deleting_task_clears_acknowledgments_when_qualification_is_lost()
         assert await estimator.acknowledge(account_id, TaskCategory.ASSIGNMENT)
         assert await predictions.acknowledgment(account_id, TaskCategory.ASSIGNMENT) is not None
 
-        # Delete one completed task so qualification is lost
+        # Delete one completed task so qualification is lost, but factor is still 2.5x
         assert await repository.delete(account_id, task_ids[0])
 
         assert not await estimator.is_qualified(account_id)
-        # Stale acknowledgment must be cleared
+        # Unchanged large factor acknowledgment is preserved across dequalification (§15.4)
+        assert await predictions.acknowledgment(account_id, TaskCategory.ASSIGNMENT) is not None
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_deleting_task_removes_acknowledgment_when_factor_normalizes() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    account_id = uuid4()
+    now = datetime(2026, 9, 5, 12, 0, tzinfo=UTC)
+    try:
+        await _seed_account(database, account_id, now)
+        predictions = SqlAlchemyAdaptivePredictionRepository(database)
+        estimator = AdaptiveEstimator(predictions)
+        repository = SqlAlchemyAcademicTaskRepository(
+            database, estimator=estimator, prediction_repository=predictions
+        )
+
+        # Create 5 tasks in READING with 1.2x (normal) and 5 in ASSIGNMENT with 3.0x (large)
+        reading_ids = []
+        for i in range(5):
+            tid = await _create_completed_task(
+                database,
+                account_id,
+                category=TaskCategory.READING,
+                original_minutes=50,
+                actual_minutes=60,  # 1.2x
+                completed_at=now - timedelta(days=12 - i),
+                predicted_minutes=60,
+            )
+            reading_ids.append(tid)
+
+        assignment_ids = []
+        for i in range(5):
+            tid = await _create_completed_task(
+                database,
+                account_id,
+                category=TaskCategory.ASSIGNMENT,
+                original_minutes=40,
+                actual_minutes=120,  # 3.0x
+                completed_at=now - timedelta(days=6 - i),
+                predicted_minutes=120,
+            )
+            assignment_ids.append(tid)
+
+        assert await estimator.is_qualified(account_id)
+
+        # Acknowledge the large ASSIGNMENT factor
+        assert await estimator.acknowledge(account_id, TaskCategory.ASSIGNMENT)
+        assert await predictions.acknowledgment(account_id, TaskCategory.ASSIGNMENT) is not None
+
+        # Delete all 5 ASSIGNMENT tasks so category history is gone (overall is 1.2x normal)
+        for tid in assignment_ids:
+            assert await repository.delete(account_id, tid)
+
+        # Still qualified from READING tasks, but ASSIGNMENT factor is normalized -> removed
+        assert await estimator.is_qualified(account_id)
         assert await predictions.acknowledgment(account_id, TaskCategory.ASSIGNMENT) is None
     finally:
         await database.stop()
