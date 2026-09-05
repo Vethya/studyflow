@@ -938,6 +938,23 @@
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 201', () => pm.response.to.have.status(201));", "if (pm.response.code === 201) {", "  const body = pm.response.json();", "  pm.test('returns a missed outcome with recovery revision', () => {", "    pm.expect(body).to.have.property('session');", "    pm.expect(body).to.have.property('outcome');", "    pm.expect(body).to.have.property('revision');", "    pm.expect(body.outcome.kind).to.eql('missed');", "    pm.expect(body.revision).to.not.eql(null);", "  });", "}"] } }]
         }
       ]
+    },
+    {
+      "name": "Progress",
+      "description": "Read task-level Effort Progress for the authenticated student.",
+      "item": [
+        {
+          "name": "List Effort Progress",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/progress", "host": ["{{base_url}}"], "path": ["api", "v1", "progress"] },
+            "description": "Returns per-task effort consumed, estimated remaining minutes, progress percentage, session counts, and task status for the authenticated student."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) {", "  const body = pm.response.json();", "  pm.expect(body).to.be.an('array');", "  if (body.length) pm.expect(body[0]).to.include.all.keys('task_id', 'task_title', 'actual_duration_minutes', 'estimated_remaining_minutes', 'effort_percent', 'sessions_completed', 'sessions_upcoming', 'status');", "}"] } }]
+        }
+      ]
     }
   ],
   "variable": [
