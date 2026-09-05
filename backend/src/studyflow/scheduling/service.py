@@ -19,7 +19,7 @@ from studyflow.scheduling.contracts import (
     OverloadResult,
     TaskAllocation,
 )
-from studyflow.scheduling.outcomes import StudySessions
+from studyflow.scheduling.outcomes import StudySessions, read_task_schedule_adjustments
 from studyflow.scheduling.overload import solve_with_overload
 from studyflow.scheduling.proposals import (
     NewProposedSession,
@@ -33,7 +33,12 @@ from studyflow.scheduling.proposals import (
     TaskAllocationRecord,
 )
 from studyflow.scheduling.scenarios import ScenarioValidationError, ScheduleScenario
-from studyflow.tasks.service import AcademicTaskRecord, AcademicTasks, TaskStatus
+from studyflow.tasks.service import (
+    AcademicTaskRecord,
+    AcademicTasks,
+    TaskStatus,
+    list_task_snapshot,
+)
 
 _UTC_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
@@ -121,9 +126,15 @@ async def tasks_for_schedule(
     account_id: UUID,
     tasks: Sequence[AcademicTaskRecord],
     study_sessions: StudySessions,
+    *,
+    read_only: bool = False,
 ) -> tuple[AcademicTaskRecord, ...]:
     """Adjust task demand using work already represented by recorded outcomes."""
-    adjustments = await study_sessions.task_schedule_adjustments(account_id)
+    adjustments = await read_task_schedule_adjustments(
+        study_sessions,
+        account_id,
+        read_only=read_only,
+    )
     return tuple(
         replace(task, planned_duration_minutes=remaining_minutes)
         for task in tasks
@@ -186,14 +197,22 @@ class ScheduleGenerationService:
         preferences = await self._preferences.get(account_id)
         if preferences is None:
             return None
+        task_records = (
+            self._tasks.list(account_id) if persist else list_task_snapshot(self._tasks, account_id)
+        )
         raw_tasks, windows, unavailable = await asyncio.gather(
-            self._tasks.list(account_id),
+            task_records,
             self._availability_windows.list_windows(account_id),
             self._unavailable_periods.list_periods(account_id),
         )
         tasks: Sequence[AcademicTaskRecord] = raw_tasks
         if self._study_sessions is not None:
-            tasks = await tasks_for_schedule(account_id, tasks, self._study_sessions)
+            tasks = await tasks_for_schedule(
+                account_id,
+                tasks,
+                self._study_sessions,
+                read_only=not persist,
+            )
         normalized_scenario = (scenario or ScheduleScenario()).normalized()
         planning_start = self._clock()
         effective_tasks = self._apply_deadline_overrides(tasks, normalized_scenario, planning_start)

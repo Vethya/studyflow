@@ -231,22 +231,32 @@ class SqlAlchemyStudySessionOutcomeRepository:
         """Return work already represented by recorded outcomes for each task."""
         async with self._database.transaction() as session:
             await self._reconcile_overdue(session, account_id, self._clock())
-            rows = await session.execute(
-                select(
-                    SessionRow.task_id,
-                    SessionRow.planned_duration_minutes,
-                    OutcomeRow.remaining_minutes,
-                )
-                .join(OutcomeRow, OutcomeRow.session_id == SessionRow.id)
-                .where(
-                    SessionRow.account_id == account_id,
-                    SessionRow.proposal_id.is_(None),
-                )
+            return await self._task_schedule_adjustments(session, account_id)
+
+    async def task_schedule_adjustments_snapshot(self, account_id: UUID) -> dict[UUID, int]:
+        async with self._database.transaction() as session:
+            return await self._task_schedule_adjustments(session, account_id)
+
+    @staticmethod
+    async def _task_schedule_adjustments(
+        session: AsyncSession, account_id: UUID
+    ) -> dict[UUID, int]:
+        rows = await session.execute(
+            select(
+                SessionRow.task_id,
+                SessionRow.planned_duration_minutes,
+                OutcomeRow.remaining_minutes,
             )
-            adjustments: defaultdict[UUID, int] = defaultdict(int)
-            for task_id, planned_minutes, remaining_minutes in rows:
-                adjustments[task_id] += planned_minutes - remaining_minutes
-            return dict(adjustments)
+            .join(OutcomeRow, OutcomeRow.session_id == SessionRow.id)
+            .where(
+                SessionRow.account_id == account_id,
+                SessionRow.proposal_id.is_(None),
+            )
+        )
+        adjustments: defaultdict[UUID, int] = defaultdict(int)
+        for task_id, planned_minutes, remaining_minutes in rows:
+            adjustments[task_id] += planned_minutes - remaining_minutes
+        return dict(adjustments)
 
     @staticmethod
     async def _has_unfinished_work(
