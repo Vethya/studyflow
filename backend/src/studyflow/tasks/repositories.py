@@ -151,9 +151,7 @@ class SqlAlchemyTaskDeadlineSessionInvalidator:
         return self._invalidate(rows, session, now)
 
     @staticmethod
-    def _invalidate(
-        rows: list[SessionRow], session: AsyncSession, now: datetime
-    ) -> list[UUID]:
+    def _invalidate(rows: list[SessionRow], session: AsyncSession, now: datetime) -> list[UUID]:
         invalidated_ids = [row.id for row in rows]
         for row in rows:
             row.invalidated_at = now
@@ -187,9 +185,7 @@ class SqlAlchemyAcademicTaskRepository:
     async def _reconcile_overdue(
         self, session: AsyncSession, account_id: UUID, now: datetime
     ) -> None:
-        overdue_task_ids = await self._invalidator.remediate_overdue_tasks(
-            session, account_id, now
-        )
+        overdue_task_ids = await self._invalidator.remediate_overdue_tasks(session, account_id, now)
         for task_id in overdue_task_ids:
             await self._recovery_invalidator.invalidate_for_task(session, account_id, task_id)
 
