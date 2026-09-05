@@ -323,6 +323,15 @@ class InMemoryAdaptivePredictionRepository(AdaptivePredictionRepository):
         self.acknowledgments[category] = correction_factor
         return True
 
+    async def remove_acknowledgment(self, account_id: UUID, category: TaskCategory) -> bool:
+        if category in self.acknowledgments:
+            del self.acknowledgments[category]
+            return True
+        return False
+
+    async def clear_acknowledgments(self, account_id: UUID) -> None:
+        self.acknowledgments.clear()
+
 
 @pytest.mark.anyio
 async def test_capture_starts_shadow_predictions_with_the_sixth_task() -> None:
@@ -468,3 +477,51 @@ async def test_large_factor_repompts_after_a_twenty_five_percent_relative_change
 
     assert below_threshold.acknowledgment_required is False
     assert at_threshold.acknowledgment_required is True
+
+
+@pytest.mark.anyio
+async def test_recalculate_after_deletion_clears_acknowledgments_when_unqualified() -> None:
+    repository = InMemoryAdaptivePredictionRepository(
+        history_records=_history([Decimal("2.5")] * 4),  # Only 4 tasks -> unqualified
+        prediction_evaluations=[
+            _evaluation(index, adaptive_minutes=101, actual_minutes=110) for index in range(4)
+        ],
+        acknowledgments={TaskCategory.OTHER: Decimal("2.5")},
+    )
+    estimator = AdaptiveEstimator(repository, clock=lambda: NOW)
+    account_id = UUID(int=100)
+
+    status = await estimator.recalculate_after_deletion(account_id)
+
+    assert status.is_qualified is False
+    assert status.completed_predictions_count == 4
+    assert status.eligible_history_count == 4
+    assert repository.acknowledgments == {}
+
+
+@pytest.mark.anyio
+async def test_recalculate_after_deletion_reconciles_drifted_or_bounded_acknowledgments() -> None:
+    repository = InMemoryAdaptivePredictionRepository(
+        history_records=_history([Decimal("1.2")] * 5, category=TaskCategory.READING)
+        + _history([Decimal("3.0")] * 5, category=TaskCategory.ASSIGNMENT),
+        prediction_evaluations=[
+            _evaluation(index, adaptive_minutes=101, actual_minutes=110) for index in range(5)
+        ],
+        acknowledgments={
+            # READING is now 1.2 (within normal bounds 0.5..2.0) -> should be removed
+            TaskCategory.READING: Decimal("2.5"),
+            # ASSIGNMENT factor is 3.0 (drifted >= 25% from 2.0) -> should be removed
+            TaskCategory.ASSIGNMENT: Decimal("2.0"),
+            # PROJECT has no category history, overall 2.1 (drifted >= 25% from 3.0) -> removed
+            TaskCategory.PROJECT: Decimal("3.0"),
+            # OTHER has no category history, overall median is 2.1 (drifted < 25% from 2.1) -> kept
+            TaskCategory.OTHER: Decimal("2.1"),
+        },
+    )
+    estimator = AdaptiveEstimator(repository, clock=lambda: NOW)
+    account_id = UUID(int=100)
+
+    status = await estimator.recalculate_after_deletion(account_id)
+
+    assert status.is_qualified is True
+    assert repository.acknowledgments == {TaskCategory.OTHER: Decimal("2.1")}
