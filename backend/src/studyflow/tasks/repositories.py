@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.repositories import SessionTransactions
 from studyflow.database.models import AcademicTask, StudentAccount, TaskDeadlineHistory
+from studyflow.database.models import AdaptiveEstimationPrediction as PredictionRow
 from studyflow.database.models import StudySession as SessionRow
 from studyflow.database.models import StudySessionOutcome as OutcomeRow
 from studyflow.estimation import (
@@ -416,7 +417,32 @@ class SqlAlchemyAcademicTaskRepository:
             await session.execute(
                 delete(TaskDeadlineHistory).where(TaskDeadlineHistory.task_id == row.id)
             )
+            await session.execute(
+                delete(PredictionRow).where(
+                    PredictionRow.task_id == row.id,
+                    PredictionRow.account_id == account_id,
+                )
+            )
+            session_ids = select(SessionRow.id).where(
+                SessionRow.task_id == row.id,
+                SessionRow.account_id == account_id,
+            )
+            await session.execute(delete(OutcomeRow).where(OutcomeRow.session_id.in_(session_ids)))
+            await session.execute(
+                delete(SessionRow).where(
+                    SessionRow.task_id == row.id,
+                    SessionRow.account_id == account_id,
+                )
+            )
             await session.delete(row)
+            await session.flush()
+
+            if self._estimator is not None and self._prediction_repository is not None:
+                pred_repo = self._prediction_repository.with_session(session)
+                await self._estimator.recalculate_after_deletion(
+                    account_id,
+                    repository=pred_repo,
+                )
         return True
 
     async def mark_started(self, account_id: UUID, task_id: UUID, now: datetime) -> bool:
