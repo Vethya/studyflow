@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import Select, case, func, select
+from sqlalchemy import Select, case, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.repositories import SessionTransactions
@@ -82,6 +82,10 @@ class AdaptivePredictionRepository(Protocol):
         correction_factor: Decimal,
         acknowledged_at: datetime,
     ) -> bool: ...
+
+    async def remove_acknowledgment(self, account_id: UUID, category: TaskCategory) -> bool: ...
+
+    async def clear_acknowledgments(self, account_id: UUID) -> None: ...
 
 
 class SqlAlchemyAdaptivePredictionRepository:
@@ -262,6 +266,22 @@ class SqlAlchemyAdaptivePredictionRepository:
                 row.correction_factor = correction_factor
                 row.acknowledged_at = acknowledged_at
             return True
+
+    async def remove_acknowledgment(self, account_id: UUID, category: TaskCategory) -> bool:
+        async with self._database.transaction() as session:
+            row = await session.get(
+                AcknowledgmentRow, (account_id, category.value), with_for_update=True
+            )
+            if row is None:
+                return False
+            await session.delete(row)
+            return True
+
+    async def clear_acknowledgments(self, account_id: UUID) -> None:
+        async with self._database.transaction() as session:
+            await session.execute(
+                delete(AcknowledgmentRow).where(AcknowledgmentRow.account_id == account_id)
+            )
 
     @staticmethod
     def _prediction_row(
@@ -450,3 +470,19 @@ class SessionAdaptivePredictionRepository:
             row.correction_factor = correction_factor
             row.acknowledged_at = acknowledged_at
         return True
+
+    async def remove_acknowledgment(self, account_id: UUID, category: TaskCategory) -> bool:
+        row = await self._session.get(
+            AcknowledgmentRow,
+            (account_id, category.value),
+            with_for_update=True,
+        )
+        if row is None:
+            return False
+        await self._session.delete(row)
+        return True
+
+    async def clear_acknowledgments(self, account_id: UUID) -> None:
+        await self._session.execute(
+            delete(AcknowledgmentRow).where(AcknowledgmentRow.account_id == account_id)
+        )

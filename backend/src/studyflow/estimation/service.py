@@ -41,6 +41,15 @@ class AdaptiveEstimatePreview:
     acknowledgment_required: bool
 
 
+@dataclass(frozen=True, slots=True)
+class AdaptiveEligibilityStatus:
+    """The current adaptive eligibility and history sample state for an account."""
+
+    is_qualified: bool
+    completed_predictions_count: int
+    eligible_history_count: int
+
+
 class AdaptiveEstimator:
     """Calculates, gates, captures, and acknowledges correction predictions."""
 
@@ -105,6 +114,51 @@ class AdaptiveEstimator:
             category,
             prediction.correction_factor,
             self._clock(),
+        )
+
+    async def is_qualified(self, account_id: UUID) -> bool:
+        """Return whether the account currently qualifies for adaptive estimates."""
+        return qualifies(await self._repository.evaluations(account_id))
+
+    async def recalculate_after_deletion(
+        self,
+        account_id: UUID,
+        *,
+        repository: AdaptivePredictionRepository | None = None,
+    ) -> AdaptiveEligibilityStatus:
+        """Recalculate adaptive qualification and reconcile acknowledgments after task deletion."""
+        repo = repository or self._repository
+        evaluations = await repo.evaluations(account_id)
+        history = await repo.history(account_id)
+        is_qualified = qualifies(evaluations)
+        if not is_qualified:
+            await repo.clear_acknowledgments(account_id)
+        else:
+            for category in TaskCategory:
+                acknowledged_factor = await repo.acknowledgment(account_id, category)
+                if acknowledged_factor is None:
+                    continue
+                prediction = median_correction(history, category, 1)
+                if (
+                    prediction is None
+                    or LARGE_FACTOR_LOWER_BOUND
+                    <= prediction.correction_factor
+                    <= LARGE_FACTOR_UPPER_BOUND
+                    or self._acknowledgment_required(
+                        prediction.correction_factor, acknowledged_factor
+                    )
+                ):
+                    await repo.remove_acknowledgment(account_id, category)
+
+        completed_predictions = [
+            e
+            for e in evaluations
+            if e.completed_at is not None and e.actual_minutes is not None and e.actual_minutes > 0
+        ]
+        return AdaptiveEligibilityStatus(
+            is_qualified=is_qualified,
+            completed_predictions_count=len(completed_predictions),
+            eligible_history_count=len(history),
         )
 
     async def _evaluate(

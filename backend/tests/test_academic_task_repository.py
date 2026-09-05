@@ -437,12 +437,7 @@ async def test_unqualified_recapture_removes_the_prior_prediction_snapshot() -> 
                 .limit(1)
             )
             assert history_id is not None
-            await session.execute(
-                delete(AdaptiveEstimationPrediction).where(
-                    AdaptiveEstimationPrediction.task_id == history_id
-                )
-            )
-            await session.execute(delete(AcademicTask).where(AcademicTask.id == history_id))
+        assert await repository.delete(account_id, history_id)
 
         updated = await repository.update(
             account_id,
