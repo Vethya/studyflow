@@ -481,14 +481,17 @@ async def test_large_factor_repompts_after_a_twenty_five_percent_relative_change
 
 @pytest.mark.anyio
 async def test_recalculate_preserves_acknowledgments_across_dequalification() -> None:
+    # 4 records with non-uniform ratios [2.5, 2.5, 4.0, 4.0] whose 4-sample median would
+    # be 3.25 (drift >= 25%), but since sample < 5, reconciliation is deferred and
+    # acknowledgment is preserved.
     repository = InMemoryAdaptivePredictionRepository(
-        history_records=_history([Decimal("2.5")] * 4),  # Only 4 tasks -> temporarily unqualified
+        history_records=_history([Decimal("2.5"), Decimal("2.5"), Decimal("4.0"), Decimal("4.0")]),
         prediction_evaluations=[
             _evaluation(index, adaptive_minutes=101, actual_minutes=110) for index in range(4)
         ],
         acknowledgments={
-            TaskCategory.OTHER: Decimal("2.5"),  # Unchanged factor -> preserved
-            TaskCategory.READING: Decimal("2.5"),  # No reading history, overall 2.5 -> preserved
+            TaskCategory.OTHER: Decimal("2.5"),  # Preserved across temporary dequalification
+            TaskCategory.READING: Decimal("2.5"),  # Preserved across temporary dequalification
         },
     )
     estimator = AdaptiveEstimator(repository, clock=lambda: NOW)
@@ -499,14 +502,17 @@ async def test_recalculate_preserves_acknowledgments_across_dequalification() ->
     assert status.is_qualified is False
     assert status.completed_predictions_count == 4
     assert status.eligible_history_count == 4
-    # Unchanged factors are preserved across temporary dequalification
+    # Acknowledgment is preserved because history has < 5 eligible records
     assert repository.acknowledgments == {
         TaskCategory.OTHER: Decimal("2.5"),
         TaskCategory.READING: Decimal("2.5"),
     }
 
-    # When 5th task restores qualification with the same factor, acknowledgment is still valid
-    repository.history_records = _history([Decimal("2.5")] * 5)
+    # When 5th task restores qualification with the original 2.5 median factor,
+    # acknowledgment is still valid.
+    repository.history_records = _history(
+        [Decimal("2.5"), Decimal("2.5"), Decimal("2.5"), Decimal("4.0"), Decimal("4.0")]
+    )
     repository.prediction_evaluations = [
         _evaluation(index, adaptive_minutes=101, actual_minutes=110) for index in range(5)
     ]
