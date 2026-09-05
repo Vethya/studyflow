@@ -411,3 +411,18 @@ async def test_deleting_task_preserves_unaffected_future_sessions() -> None:
             assert session_b.invalidated_at is None
     finally:
         await database.stop()
+
+
+@pytest.mark.anyio
+async def test_deleting_task_returns_false_when_account_does_not_exist() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        repository = SqlAlchemyAcademicTaskRepository(database)
+        assert await repository.delete(uuid4(), uuid4()) is False
+    finally:
+        await database.stop()
