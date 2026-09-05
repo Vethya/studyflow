@@ -270,6 +270,43 @@ async def test_grouped_timezone_confirmation_revalidates_existing_windows() -> N
 
 
 @pytest.mark.anyio
+async def test_grouped_redundant_timezone_confirmation_does_not_revalidate() -> None:
+    async with study_time_database() as (database, account_id, service):
+        task_id, session_id = uuid4(), uuid4()
+        session_day = datetime(2026, 9, 7, tzinfo=UTC)
+        async with database.transaction() as session:
+            session.add(
+                AcademicTask(
+                    id=task_id,
+                    account_id=account_id,
+                    title="Scenario work",
+                    category="reading",
+                    deadline_at=NOW + timedelta(days=14),
+                    original_estimate_minutes=60,
+                    planned_duration_minutes=60,
+                )
+            )
+            session.add(
+                SessionRow(
+                    id=session_id,
+                    account_id=account_id,
+                    task_id=task_id,
+                    starts_at=session_day + timedelta(hours=14),
+                    ends_at=session_day + timedelta(hours=15),
+                    planned_duration_minutes=60,
+                )
+            )
+
+        result = await service.apply(account_id, StudyTimeChanges(confirm_timezone=True))
+
+        assert result is not None
+        assert result.invalidated_future_session_ids == []
+        async with database.transaction() as session:
+            row = await session.get(SessionRow, session_id)
+        assert row is not None and row.invalidated_at is None
+
+
+@pytest.mark.anyio
 async def test_timezone_change_requires_confirmation_and_unknown_period_rolls_back_everything() -> (
     None
 ):

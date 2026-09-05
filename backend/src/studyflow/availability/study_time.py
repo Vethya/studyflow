@@ -94,6 +94,8 @@ class StudyTimeUpdateService:
             if account is None:
                 return None
 
+            previous_timezone = account.timezone
+            was_timezone_confirmed = account.availability_timezone_confirmed
             period_rows = await self._period_rows(session, account_id, changes)
             preferences = self._apply_preferences(account, changes)
             recurring_windows = await self._apply_recurring_windows(
@@ -144,7 +146,10 @@ class StudyTimeUpdateService:
                     await session.delete(period_rows[period_id])
                     removed_period_ids.append(period_id)
 
-            if recurring_windows is not None or changes.confirm_timezone:
+            timezone_confirmation_transition = changes.confirm_timezone and (
+                not was_timezone_confirmed or account.timezone != previous_timezone
+            )
+            if recurring_windows is not None or timezone_confirmation_transition:
                 windows_for_validation = recurring_windows
                 if windows_for_validation is None:
                     windows_for_validation = [

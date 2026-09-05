@@ -269,21 +269,22 @@ class SqlAlchemyAvailabilityWindowRepository:
             account = await session.get(StudentAccount, account_id, with_for_update=True)
             if account is None:
                 return False
-            windows = [
-                self._to_window(row)
-                for row in await session.scalars(
-                    select(AvailabilityWindowRow)
-                    .where(AvailabilityWindowRow.account_id == account_id)
-                    .order_by(
-                        AvailabilityWindowRow.weekday,
-                        AvailabilityWindowRow.local_start_time,
-                        AvailabilityWindowRow.id,
+            if not account.availability_timezone_confirmed:
+                windows = [
+                    self._to_window(row)
+                    for row in await session.scalars(
+                        select(AvailabilityWindowRow)
+                        .where(AvailabilityWindowRow.account_id == account_id)
+                        .order_by(
+                            AvailabilityWindowRow.weekday,
+                            AvailabilityWindowRow.local_start_time,
+                            AvailabilityWindowRow.id,
+                        )
                     )
+                ]
+                await self._invalidator.remove_sessions_outside_availability(
+                    session, account_id, windows
                 )
-            ]
-            await self._invalidator.remove_sessions_outside_availability(
-                session, account_id, windows
-            )
             account.availability_timezone_confirmed = True
         return True
 

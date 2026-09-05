@@ -273,6 +273,67 @@ async def test_confirming_timezone_revalidates_sessions_in_the_new_timezone() ->
 
 
 @pytest.mark.anyio
+async def test_redundant_timezone_confirmation_does_not_invalidate_sessions() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    account_id, task_id, session_id = uuid4(), uuid4(), uuid4()
+    session_day = datetime(2026, 9, 11, tzinfo=UTC)
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            session.add_all(
+                [
+                    StudentAccount(
+                        id=account_id,
+                        email="student@example.com",
+                        name="Student",
+                        password_hash="$argon2id$hash",
+                        email_verified_at=NOW,
+                        timezone="UTC",
+                        availability_timezone_confirmed=True,
+                    ),
+                    AcademicTask(
+                        id=task_id,
+                        account_id=account_id,
+                        title="Scenario work",
+                        category="reading",
+                        deadline_at=NOW + timedelta(days=14),
+                        original_estimate_minutes=60,
+                        planned_duration_minutes=60,
+                    ),
+                    AvailabilityWindowRow(
+                        account_id=account_id,
+                        weekday=4,
+                        local_start_time=time(10),
+                        local_end_time=time(11),
+                        crosses_midnight=False,
+                    ),
+                    SessionRow(
+                        id=session_id,
+                        account_id=account_id,
+                        task_id=task_id,
+                        starts_at=session_day + timedelta(hours=14),
+                        ends_at=session_day + timedelta(hours=15),
+                        planned_duration_minutes=60,
+                    ),
+                ]
+            )
+
+        repository = SqlAlchemyAvailabilityWindowRepository(
+            database, SqlAlchemyFutureSessionInvalidator(clock=lambda: NOW)
+        )
+        assert await repository.confirm_timezone(account_id)
+
+        async with database.transaction() as session:
+            row = await session.get(SessionRow, session_id)
+        assert row is not None and row.invalidated_at is None
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
 async def test_window_replacement_rolls_back_when_calendar_invalidation_fails() -> None:
     database = Database("sqlite+aiosqlite:///:memory:")
     await database.start()
