@@ -26,6 +26,13 @@ from studyflow.tasks.service import (
 
 
 class TaskDeadlineSessionInvalidator(Protocol):
+    async def remediate_overdue_tasks(
+        self,
+        session: AsyncSession,
+        account_id: UUID,
+        now: datetime,
+    ) -> list[UUID]: ...
+
     async def remove_sessions_after_deadline(
         self,
         session: AsyncSession,
@@ -46,6 +53,14 @@ class TaskRecoveryProposalInvalidator(Protocol):
 
 
 class NoTaskDeadlineSessions:
+    async def remediate_overdue_tasks(
+        self,
+        session: AsyncSession,
+        account_id: UUID,
+        now: datetime,
+    ) -> list[UUID]:
+        return []
+
     async def remove_sessions_after_deadline(
         self,
         session: AsyncSession,
@@ -68,6 +83,48 @@ class NoTaskRecoveryProposals:
 
 
 class SqlAlchemyTaskDeadlineSessionInvalidator:
+    @staticmethod
+    def _aware(value: datetime) -> datetime:
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+    async def remediate_overdue_tasks(
+        self,
+        session: AsyncSession,
+        account_id: UUID,
+        now: datetime,
+    ) -> list[UUID]:
+        now_utc = self._aware(now).astimezone(UTC)
+        overdue_task_ids = list(
+            await session.scalars(
+                select(AcademicTask.id)
+                .where(
+                    AcademicTask.account_id == account_id,
+                    AcademicTask.completed_at.is_(None),
+                    AcademicTask.finished_early_at.is_(None),
+                    AcademicTask.deadline_at < now_utc,
+                )
+                .with_for_update()
+            )
+        )
+        if not overdue_task_ids:
+            return []
+        rows = list(
+            await session.scalars(
+                select(SessionRow)
+                .where(
+                    SessionRow.account_id == account_id,
+                    SessionRow.task_id.in_(overdue_task_ids),
+                    SessionRow.proposal_id.is_(None),
+                    SessionRow.invalidated_at.is_(None),
+                    SessionRow.starts_at > now_utc,
+                )
+                .order_by(SessionRow.starts_at, SessionRow.id)
+                .with_for_update()
+            )
+        )
+        self._invalidate(rows, session, now_utc)
+        return overdue_task_ids
+
     async def remove_sessions_after_deadline(
         self,
         session: AsyncSession,
@@ -91,6 +148,12 @@ class SqlAlchemyTaskDeadlineSessionInvalidator:
                 .with_for_update()
             )
         )
+        return self._invalidate(rows, session, now)
+
+    @staticmethod
+    def _invalidate(
+        rows: list[SessionRow], session: AsyncSession, now: datetime
+    ) -> list[UUID]:
         invalidated_ids = [row.id for row in rows]
         for row in rows:
             row.invalidated_at = now
@@ -121,6 +184,15 @@ class SqlAlchemyAcademicTaskRepository:
         self._clock = clock
         self._recovery_invalidator = recovery_invalidator or NoTaskRecoveryProposals()
 
+    async def _reconcile_overdue(
+        self, session: AsyncSession, account_id: UUID, now: datetime
+    ) -> None:
+        overdue_task_ids = await self._invalidator.remediate_overdue_tasks(
+            session, account_id, now
+        )
+        for task_id in overdue_task_ids:
+            await self._recovery_invalidator.invalidate_for_task(session, account_id, task_id)
+
     async def create(self, account_id: UUID, task: NewAcademicTask) -> AcademicTaskRecord:
         async with self._database.transaction() as session:
             row = AcademicTask(
@@ -147,6 +219,7 @@ class SqlAlchemyAcademicTaskRepository:
         async with self._database.transaction() as session:
             filters = filters or TaskFilters()
             now = self._clock()
+            await self._reconcile_overdue(session, account_id, now)
             await self._freeze_started_estimates(session, account_id, now)
             conditions = [AcademicTask.account_id == account_id]
             if filters.course is not None:
@@ -201,7 +274,9 @@ class SqlAlchemyAcademicTaskRepository:
 
     async def get(self, account_id: UUID, task_id: UUID) -> AcademicTaskRecord | None:
         async with self._database.transaction() as session:
-            await self._freeze_started_estimates(session, account_id, self._clock())
+            now = self._clock()
+            await self._reconcile_overdue(session, account_id, now)
+            await self._freeze_started_estimates(session, account_id, now)
             row = await session.scalar(
                 select(AcademicTask).where(
                     AcademicTask.id == task_id, AcademicTask.account_id == account_id
@@ -213,6 +288,7 @@ class SqlAlchemyAcademicTaskRepository:
         self, account_id: UUID, task_id: UUID, task: NewAcademicTask, now: datetime
     ) -> AcademicTaskRecord | None:
         async with self._database.transaction() as session:
+            await self._reconcile_overdue(session, account_id, now)
             await self._freeze_started_estimates(session, account_id, now)
             row = await session.scalar(
                 select(AcademicTask)
@@ -282,6 +358,7 @@ class SqlAlchemyAcademicTaskRepository:
 
     async def mark_started(self, account_id: UUID, task_id: UUID, now: datetime) -> bool:
         async with self._database.transaction() as session:
+            await self._reconcile_overdue(session, account_id, now)
             row = await session.scalar(
                 select(AcademicTask)
                 .where(AcademicTask.id == task_id, AcademicTask.account_id == account_id)
@@ -294,6 +371,7 @@ class SqlAlchemyAcademicTaskRepository:
 
     async def finish_early(self, account_id: UUID, task_id: UUID, now: datetime) -> bool:
         async with self._database.transaction() as session:
+            await self._reconcile_overdue(session, account_id, now)
             await self._freeze_started_estimates(session, account_id, now)
             row = await session.scalar(
                 select(AcademicTask)

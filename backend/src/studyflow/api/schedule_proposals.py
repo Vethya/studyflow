@@ -477,6 +477,7 @@ async def get_current_schedule_proposal(
     tasks: Annotated[AcademicTasks, Depends(get_academic_tasks)],
     unavailable: Annotated[UnavailablePeriods, Depends(get_unavailable_periods)],
 ) -> ScheduleProposalResponse:
+    await tasks.list(principal.account_id)
     proposal = await proposals.get(principal.account_id)
     if proposal is None:
         raise HTTPException(

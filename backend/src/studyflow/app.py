@@ -278,10 +278,11 @@ def create_app(
     resolved_account_preferences = account_preferences or StudyPreferencesService(
         SqlAlchemyStudyPreferencesRepository(transactions)
     )
+    task_deadline_invalidator = SqlAlchemyTaskDeadlineSessionInvalidator()
     resolved_academic_tasks = academic_tasks or AcademicTaskService(
         SqlAlchemyAcademicTaskRepository(
             transactions,
-            SqlAlchemyTaskDeadlineSessionInvalidator(),
+            task_deadline_invalidator,
             recovery_invalidator=SqlAlchemyTaskRecoveryProposalInvalidator(),
         )
     )
@@ -307,6 +308,7 @@ def create_app(
         SqlAlchemyStudySessionOutcomeRepository(
             transactions,
             SqlAlchemyTaskRecoveryProposalInvalidator(),
+            overdue_remediator=task_deadline_invalidator,
         )
     )
     resolved_schedule_generation = schedule_generation or ScheduleGenerationService(
