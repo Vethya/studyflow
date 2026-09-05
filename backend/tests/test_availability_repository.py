@@ -28,6 +28,7 @@ from studyflow.database.models import (
 from studyflow.database.models import (
     UnavailablePeriod as UnavailablePeriodRow,
 )
+from studyflow.scheduling.contracts import MinuteWindow
 
 NOW = datetime(2026, 9, 4, 10, tzinfo=UTC)
 
@@ -505,3 +506,52 @@ async def test_revalidation_respects_dst_adjusted_windows() -> None:
         assert invalidated == [invalid_id]
     finally:
         await database.stop()
+
+
+def test_calendar_revalidation_sweep_does_not_skip_later_sessions() -> None:
+    account_id, task_id = uuid4(), uuid4()
+    epoch = datetime(1970, 1, 1, tzinfo=UTC)
+
+    def at_minute(minute: int) -> datetime:
+        return epoch + timedelta(minutes=minute)
+
+    rows = [
+        SessionRow(
+            id=uuid4(),
+            account_id=account_id,
+            task_id=task_id,
+            starts_at=at_minute(30),
+            ends_at=at_minute(90),
+            planned_duration_minutes=60,
+        ),
+        SessionRow(
+            id=uuid4(),
+            account_id=account_id,
+            task_id=task_id,
+            starts_at=at_minute(45),
+            ends_at=at_minute(60),
+            planned_duration_minutes=15,
+        ),
+        SessionRow(
+            id=uuid4(),
+            account_id=account_id,
+            task_id=task_id,
+            starts_at=at_minute(90),
+            ends_at=at_minute(120),
+            planned_duration_minutes=30,
+        ),
+        SessionRow(
+            id=uuid4(),
+            account_id=account_id,
+            task_id=task_id,
+            starts_at=at_minute(120),
+            ends_at=at_minute(180),
+            planned_duration_minutes=60,
+        ),
+    ]
+    invalidated = SqlAlchemyFutureSessionInvalidator._sessions_outside_calendar(
+        rows,
+        (MinuteWindow(0, 60), MinuteWindow(120, 180)),
+    )
+
+    assert [row.id for row in invalidated] == [rows[0].id, rows[2].id]

@@ -156,9 +156,7 @@ class SqlAlchemyFutureSessionInvalidator:
                 horizon_end=ends_at,
             ).windows
         )
-        invalidated = [
-            row for row in rows if not self._session_fits_calendar(row, calendar_windows)
-        ]
+        invalidated = self._sessions_outside_calendar(rows, calendar_windows)
         return self._invalidate(invalidated, session, now)
 
     @staticmethod
@@ -180,16 +178,36 @@ class SqlAlchemyFutureSessionInvalidator:
         return invalidated_ids
 
     @classmethod
-    def _session_fits_calendar(
-        cls, row: SessionRow, calendar_windows: Sequence[MinuteWindow]
-    ) -> bool:
-        starts_at = cls._aware(row.starts_at)
-        ends_at = cls._aware(row.ends_at)
-        start_minute, _ = cls._minute_bounds(starts_at)
-        _, end_minute = cls._minute_bounds(ends_at)
-        return any(
-            window.start <= start_minute and end_minute <= window.end for window in calendar_windows
-        )
+    def _sessions_outside_calendar(
+        cls,
+        rows: Sequence[SessionRow],
+        calendar_windows: Sequence[MinuteWindow],
+    ) -> list[SessionRow]:
+        """Find invalid sessions with one chronological sweep.
+
+        Both inputs are ordered by UTC start. Calendar windows are disjoint, so
+        a window that ended before one session starts can never contain a later
+        session either.
+        """
+        invalidated: list[SessionRow] = []
+        window_index = 0
+        for row in rows:
+            starts_at = cls._aware(row.starts_at)
+            ends_at = cls._aware(row.ends_at)
+            start_minute, _ = cls._minute_bounds(starts_at)
+            _, end_minute = cls._minute_bounds(ends_at)
+            while (
+                window_index < len(calendar_windows)
+                and calendar_windows[window_index].end <= start_minute
+            ):
+                window_index += 1
+            if (
+                window_index == len(calendar_windows)
+                or calendar_windows[window_index].start > start_minute
+                or end_minute > calendar_windows[window_index].end
+            ):
+                invalidated.append(row)
+        return invalidated
 
     @staticmethod
     def _minute_bounds(value: datetime) -> tuple[int, int]:
