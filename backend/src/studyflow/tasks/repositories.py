@@ -94,20 +94,25 @@ class SqlAlchemyTaskDeadlineSessionInvalidator:
         now: datetime,
     ) -> list[UUID]:
         now_utc = self._aware(now).astimezone(UTC)
-        overdue_task_ids = list(
+        overdue_tasks = list(
             await session.scalars(
-                select(AcademicTask.id)
+                select(AcademicTask)
                 .where(
                     AcademicTask.account_id == account_id,
                     AcademicTask.completed_at.is_(None),
                     AcademicTask.finished_early_at.is_(None),
                     AcademicTask.deadline_at < now_utc,
+                    or_(
+                        AcademicTask.overdue_remediated_deadline_at.is_(None),
+                        AcademicTask.overdue_remediated_deadline_at != AcademicTask.deadline_at,
+                    ),
                 )
                 .with_for_update()
             )
         )
-        if not overdue_task_ids:
+        if not overdue_tasks:
             return []
+        overdue_task_ids = [task.id for task in overdue_tasks]
         rows = list(
             await session.scalars(
                 select(SessionRow)
@@ -123,6 +128,8 @@ class SqlAlchemyTaskDeadlineSessionInvalidator:
             )
         )
         self._invalidate(rows, session, now_utc)
+        for task in overdue_tasks:
+            task.overdue_remediated_deadline_at = task.deadline_at
         return overdue_task_ids
 
     async def remove_sessions_after_deadline(
