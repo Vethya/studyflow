@@ -291,7 +291,6 @@ class SqlAlchemyAcademicTaskRepository:
         self, account_id: UUID, task_id: UUID, task: NewAcademicTask, now: datetime
     ) -> AcademicTaskRecord | None:
         async with self._database.transaction() as session:
-            await self._reconcile_overdue(session, account_id, now)
             await self._freeze_started_estimates(session, account_id, now)
             row = await session.scalar(
                 select(AcademicTask)
@@ -299,6 +298,7 @@ class SqlAlchemyAcademicTaskRepository:
                 .with_for_update()
             )
             if row is None:
+                await self._reconcile_overdue(session, account_id, now)
                 return None
             if (
                 row.estimate_frozen_at is not None
@@ -318,6 +318,8 @@ class SqlAlchemyAcademicTaskRepository:
                         changed_at=now,
                     )
                 )
+            row.deadline_at = task.deadline_at
+            await self._reconcile_overdue(session, account_id, now)
             if task.deadline_at < previous_deadline:
                 await self._invalidator.remove_sessions_after_deadline(
                     session,
@@ -331,7 +333,6 @@ class SqlAlchemyAcademicTaskRepository:
             row.priority = task.priority.value
             row.course = task.course
             row.notes = task.notes
-            row.deadline_at = task.deadline_at
             row.original_estimate_minutes = task.original_estimate_minutes
             if row.planned_source == "original":
                 row.planned_duration_minutes = task.original_estimate_minutes
