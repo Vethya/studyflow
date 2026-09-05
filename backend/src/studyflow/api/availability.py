@@ -30,7 +30,9 @@ from studyflow.availability.unavailable import (
     UnavailablePeriods,
 )
 from studyflow.availability.windows import (
+    AvailabilityTimezoneConfirmation,
     AvailabilityWindow,
+    AvailabilityWindowChange,
     AvailabilityWindowDraft,
     AvailabilityWindows,
 )
@@ -71,6 +73,15 @@ class AvailabilityWindowResponse(BaseModel):
     crosses_midnight: bool
 
 
+class AvailabilityWindowChangeResponse(BaseModel):
+    windows: list[AvailabilityWindowResponse]
+    invalidated_future_session_ids: list[UUID]
+
+
+class AvailabilityTimezoneConfirmationResponse(BaseModel):
+    invalidated_future_session_ids: list[UUID]
+
+
 def get_availability_windows(request: Request) -> AvailabilityWindows:
     return cast(AvailabilityWindows, request.app.state.availability_windows)
 
@@ -93,6 +104,23 @@ def _response(window: AvailabilityWindow) -> AvailabilityWindowResponse:
     )
 
 
+def _window_change_response(
+    change: AvailabilityWindowChange,
+) -> AvailabilityWindowChangeResponse:
+    return AvailabilityWindowChangeResponse(
+        windows=[_response(window) for window in change.windows],
+        invalidated_future_session_ids=change.invalidated_future_session_ids,
+    )
+
+
+def _timezone_confirmation_response(
+    confirmation: AvailabilityTimezoneConfirmation,
+) -> AvailabilityTimezoneConfirmationResponse:
+    return AvailabilityTimezoneConfirmationResponse(
+        invalidated_future_session_ids=confirmation.invalidated_future_session_ids,
+    )
+
+
 @router.get(
     "/windows",
     response_model=list[AvailabilityWindowResponse],
@@ -107,7 +135,7 @@ async def list_availability_windows(
 
 @router.put(
     "/windows",
-    response_model=list[AvailabilityWindowResponse],
+    response_model=AvailabilityWindowChangeResponse,
     responses={
         status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
         status.HTTP_403_FORBIDDEN: {"model": AccountError},
@@ -117,7 +145,7 @@ async def replace_availability_windows(
     payload: AvailabilityReplacement,
     principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
     availability: Annotated[AvailabilityWindows, Depends(get_availability_windows)],
-) -> list[AvailabilityWindowResponse]:
+) -> AvailabilityWindowChangeResponse:
     try:
         windows = await availability.replace(
             principal.account_id,
@@ -130,12 +158,12 @@ async def replace_availability_windows(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
         ) from error
-    return [_response(window) for window in windows]
+    return _window_change_response(windows)
 
 
 @router.post(
     "/confirm-timezone",
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=AvailabilityTimezoneConfirmationResponse,
     responses={
         status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
         status.HTTP_403_FORBIDDEN: {"model": AccountError},
@@ -145,9 +173,11 @@ async def confirm_availability_timezone(
     payload: AvailabilityConfirmation,
     principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
     availability: Annotated[AvailabilityWindows, Depends(get_availability_windows)],
-) -> None:
-    if not await availability.confirm_timezone(principal.account_id):
+) -> AvailabilityTimezoneConfirmationResponse:
+    confirmation = await availability.confirm_timezone(principal.account_id)
+    if confirmation is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return _timezone_confirmation_response(confirmation)
 
 
 class UnavailablePeriodRequest(BaseModel):
