@@ -402,6 +402,8 @@ class SqlAlchemyAcademicTaskRepository:
 
     async def delete(self, account_id: UUID, task_id: UUID) -> bool:
         async with self._database.transaction() as session:
+            if not await self._lock_account(session, account_id):
+                return False
             row = await session.scalar(
                 select(AcademicTask)
                 .where(AcademicTask.id == task_id, AcademicTask.account_id == account_id)
