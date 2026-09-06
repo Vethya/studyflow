@@ -98,6 +98,17 @@ async def test_seed_nfr02_dataset_creates_complete_spec_workload() -> None:
             )
             assert len(sessions) == 250
 
+            # Verify no sessions overlap with any unavailable periods and respect working hours
+            for s in sessions:
+                assert s.starts_at.weekday() < 5
+                assert s.starts_at.hour >= 9
+                assert s.ends_at.hour < 17 or (s.ends_at.hour == 17 and s.ends_at.minute == 0)
+                for u in unavails:
+                    assert not (s.starts_at < u.ends_at and s.ends_at > u.starts_at), (
+                        f"Session {s.id} ({s.starts_at} - {s.ends_at}) overlaps "
+                        f"unavailable {u.id} ({u.starts_at} - {u.ends_at})"
+                    )
+
             # 6. Allocations for each task
             allocs = (await session.execute(select(ProposalTaskAllocation))).scalars().all()
             assert len(allocs) == 50

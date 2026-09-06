@@ -83,17 +83,21 @@ async def seed_nfr02_dataset(session: AsyncSession) -> UUID:
     unavailable_count = 0
     day_offset = 0
     base_date = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    unavailable_ranges: list[tuple[datetime, datetime]] = []
     while unavailable_count < 50 and day_offset < 112:
         current_day = base_date + timedelta(days=day_offset)
         if current_day.weekday() < 5:  # Weekday
+            u_start = current_day.replace(hour=11, minute=0)
+            u_end = current_day.replace(hour=11, minute=30)
             unavail = UnavailablePeriod(
                 id=uuid4(),
                 account_id=account_id,
-                starts_at=current_day.replace(hour=11, minute=0),
-                ends_at=current_day.replace(hour=11, minute=30),
+                starts_at=u_start,
+                ends_at=u_end,
                 reason=f"Unavailable block #{unavailable_count + 1}",
             )
             session.add(unavail)
+            unavailable_ranges.append((u_start, u_end))
             unavailable_count += 1
         day_offset += 1
 
@@ -159,20 +163,28 @@ async def seed_nfr02_dataset(session: AsyncSession) -> UUID:
             while True:
                 if current_schedule_time.weekday() >= 5:
                     current_schedule_time = (current_schedule_time + timedelta(days=1)).replace(
-                        hour=9, minute=0
+                        hour=9, minute=0, second=0, microsecond=0
                     )
                     continue
-                if current_schedule_time.hour >= 16:
+                if current_schedule_time.time() < time(9, 0):
+                    current_schedule_time = current_schedule_time.replace(
+                        hour=9, minute=0, second=0, microsecond=0
+                    )
+                    continue
+                cand_end = current_schedule_time + timedelta(minutes=60)
+                if cand_end.time() > time(17, 0) or cand_end.date() != current_schedule_time.date():
                     current_schedule_time = (current_schedule_time + timedelta(days=1)).replace(
-                        hour=9, minute=0
+                        hour=9, minute=0, second=0, microsecond=0
                     )
                     continue
-                if (
-                    current_schedule_time.hour == 11
-                    and current_schedule_time.minute < 30
-                    and unavailable_count > 0
-                ):
-                    current_schedule_time = current_schedule_time.replace(minute=30)
+                overlap = False
+                for u_start, u_end in unavailable_ranges:
+                    if current_schedule_time < u_end and cand_end > u_start:
+                        current_schedule_time = u_end
+                        overlap = True
+                        break
+                if overlap:
+                    continue
                 break
 
             session_end = current_schedule_time + timedelta(minutes=60)
