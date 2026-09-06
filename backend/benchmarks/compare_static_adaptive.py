@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import uuid4
 
 from studyflow.evaluation.comparison import (
@@ -137,6 +138,22 @@ def format_table(comparison: ScheduleComparisonResult, scenario_name: str) -> st
     return "\n".join(lines)
 
 
+def _serialize_scenario_result(comparison: ScheduleComparisonResult) -> dict[str, Any]:
+    return {
+        "static_status": comparison.static_run.status.value,
+        "adaptive_status": comparison.adaptive_run.status.value,
+        "static_time_seconds": comparison.static_run.generation_time_seconds,
+        "adaptive_time_seconds": comparison.adaptive_run.generation_time_seconds,
+        "stability": {
+            "sessions_moved": comparison.stability_vs_static.sessions_moved,
+            "minutes_shifted": comparison.stability_vs_static.total_absolute_minutes_shifted,
+            "sessions_added": comparison.stability_vs_static.sessions_added,
+            "sessions_removed": comparison.stability_vs_static.sessions_removed,
+            "unscheduled_minutes": comparison.stability_vs_static.minutes_left_unscheduled,
+        },
+    }
+
+
 def run_comparisons() -> dict[str, object]:
     """Execute comparisons on standard benchmark scenarios."""
     evaluations = generate_sample_evaluations()
@@ -154,19 +171,9 @@ def run_comparisons() -> dict[str, object]:
     res_overloaded = compare_static_vs_adaptive(static_overloaded, adaptive_overloaded, evaluations)
     print(format_table(res_overloaded, "NFR-02 Overloaded Workload"))
 
-    results["feasible"] = {
-        "static_status": res_feasible.static_run.status.value,
-        "adaptive_status": res_feasible.adaptive_run.status.value,
-        "static_time_seconds": res_feasible.static_run.generation_time_seconds,
-        "adaptive_time_seconds": res_feasible.adaptive_run.generation_time_seconds,
-        "stability": {
-            "sessions_moved": res_feasible.stability_vs_static.sessions_moved,
-            "minutes_shifted": res_feasible.stability_vs_static.total_absolute_minutes_shifted,
-            "sessions_added": res_feasible.stability_vs_static.sessions_added,
-            "sessions_removed": res_feasible.stability_vs_static.sessions_removed,
-            "unscheduled_minutes": res_feasible.stability_vs_static.minutes_left_unscheduled,
-        },
-    }
+    results["feasible"] = _serialize_scenario_result(res_feasible)
+    results["overloaded"] = _serialize_scenario_result(res_overloaded)
+
     if res_feasible.estimation_metrics:
         results["estimation_metrics"] = {
             "original_mae": res_feasible.estimation_metrics.original_mae,

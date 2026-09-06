@@ -169,3 +169,21 @@ def test_compare_static_vs_adaptive_end_to_end() -> None:
     assert result.adaptive_run.status is KernelStatus.FEASIBLE
     assert result.static_run.hard_constraint_violations == 0
     assert result.adaptive_run.hard_constraint_violations == 0
+
+
+def test_run_comparisons_includes_both_feasible_and_overloaded() -> None:
+    import sys
+    from pathlib import Path
+
+    benchmarks_dir = str(Path(__file__).parents[1])
+    if benchmarks_dir not in sys.path:
+        sys.path.insert(0, benchmarks_dir)
+
+    from benchmarks.compare_static_adaptive import run_comparisons
+
+    results = run_comparisons()
+    assert "feasible" in results
+    assert "overloaded" in results
+    assert "static_status" in results["feasible"]  # type: ignore[operator]
+    assert "static_status" in results["overloaded"]  # type: ignore[operator]
+
