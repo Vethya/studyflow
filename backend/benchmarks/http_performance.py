@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import sys
+from datetime import UTC, datetime, timedelta
 from math import ceil
 from time import perf_counter
 from typing import Any
@@ -48,6 +49,23 @@ async def run_http_benchmark(
             csrf_token = login_res.json().get("csrf_token")
             headers = {"X-CSRF-Token": csrf_token} if csrf_token else {}
 
+            # Fetch tasks to construct realistic overloaded scenario per SPEC NFR-02
+            tasks_res = await client.get("/api/v1/tasks", headers=headers)
+            overload_payload: dict[str, Any] | None = None
+            if tasks_res.status_code == 200:
+                tasks_data = tasks_res.json()
+                if tasks_data:
+                    now_utc = datetime.now(UTC)
+                    overload_deadline = (now_utc + timedelta(days=2)).isoformat()
+                    overload_payload = {
+                        "scenario": {
+                            "deadline_overrides": [
+                                {"task_id": t["id"], "deadline_at": overload_deadline}
+                                for t in tasks_data[:20]
+                            ]
+                        }
+                    }
+
             # Endpoints to test under NFR-02
             endpoints: list[dict[str, Any]] = [
                 {"name": "Tasks List (50 tasks)", "method": "GET", "url": "/api/v1/tasks"},
@@ -73,9 +91,16 @@ async def run_http_benchmark(
                 },
                 {"name": "Effort Progress", "method": "GET", "url": "/api/v1/progress"},
                 {
-                    "name": "Schedule Generation (50 tasks)",
+                    "name": "Schedule Generation (Feasible, 50 tasks)",
                     "method": "POST",
                     "url": "/api/v1/schedule-proposals",
+                    "is_generation": True,
+                },
+                {
+                    "name": "Schedule Generation (Overloaded, 50 tasks)",
+                    "method": "POST",
+                    "url": "/api/v1/schedule-proposals",
+                    "json": overload_payload,
                     "is_generation": True,
                 },
             ]
@@ -90,6 +115,7 @@ async def run_http_benchmark(
             for endpoint in endpoints:
                 url = endpoint["url"]
                 method = endpoint["method"]
+                payload = endpoint.get("json")
                 is_gen = endpoint.get("is_generation", False)
                 threshold = generation_threshold_seconds if is_gen else page_threshold_seconds
 
@@ -97,7 +123,7 @@ async def run_http_benchmark(
                 if method == "GET":
                     warm_res = await client.get(url, headers=headers)
                 else:
-                    warm_res = await client.post(url, headers=headers)
+                    warm_res = await client.post(url, headers=headers, json=payload)
 
                 if warm_res.status_code >= 400:
                     print(
@@ -115,7 +141,7 @@ async def run_http_benchmark(
                     if method == "GET":
                         res = await client.get(url, headers=headers)
                     else:
-                        res = await client.post(url, headers=headers)
+                        res = await client.post(url, headers=headers, json=payload)
                     elapsed = perf_counter() - started
                     samples.append(elapsed)
 
