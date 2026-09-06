@@ -46,6 +46,26 @@ def test_compute_schedule_stability_metrics() -> None:
     assert metrics.minutes_left_unscheduled == 45
 
 
+def test_compute_schedule_stability_does_not_count_resizing_as_moving() -> None:
+    prev_sessions = (
+        ScheduledSession("s1", "t1", start_minute=0, end_minute=60),
+    )
+    # s1 start unchanged, duration expanded from 60 to 90 min
+    new_sessions = (
+        ScheduledSession("s1", "t1", start_minute=0, end_minute=90),
+    )
+
+    metrics = compute_schedule_stability(
+        previous_sessions=prev_sessions,
+        new_sessions=new_sessions,
+    )
+
+    assert metrics.sessions_moved == 0
+    assert metrics.total_absolute_minutes_shifted == 0
+    assert metrics.sessions_added == 0
+    assert metrics.sessions_removed == 0
+
+
 def test_compute_estimation_metrics_calculates_mae_and_signed_bias() -> None:
     now = datetime.now(UTC)
     evaluations = [

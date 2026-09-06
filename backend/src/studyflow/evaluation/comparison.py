@@ -90,10 +90,7 @@ def compute_schedule_stability(
     for session_id, prev_session in prev_by_id.items():
         if session_id in new_by_id:
             new_session = new_by_id[session_id]
-            if (
-                prev_session.start_minute != new_session.start_minute
-                or prev_session.end_minute != new_session.end_minute
-            ):
+            if prev_session.start_minute != new_session.start_minute:
                 sessions_moved += 1
             total_absolute_minutes_shifted += abs(
                 new_session.start_minute - prev_session.start_minute
