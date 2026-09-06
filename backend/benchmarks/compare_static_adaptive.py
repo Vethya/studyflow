@@ -29,23 +29,23 @@ def generate_sample_evaluations() -> list[PredictionEvaluation]:
     now = datetime.now(UTC)
     evaluations: list[PredictionEvaluation] = []
     # 15 historical task completions
-    # Student systematically underestimates by ~30%, adaptive estimator learns factor ~1.3
+    # Student systematically underestimates, adaptive estimator improves MAE by 15-20%
     cases = [
-        (60, 75, 80),
-        (120, 150, 160),
-        (45, 55, 60),
-        (90, 115, 110),
-        (60, 80, 85),
-        (180, 230, 240),
-        (30, 40, 40),
-        (60, 75, 70),
-        (90, 120, 115),
-        (120, 155, 150),
-        (45, 60, 55),
-        (60, 80, 75),
-        (90, 115, 120),
-        (150, 195, 200),
-        (60, 75, 80),
+        (60, 65, 80),
+        (120, 125, 150),
+        (45, 47, 55),
+        (90, 93, 105),
+        (60, 65, 85),
+        (180, 187, 220),
+        (30, 32, 40),
+        (60, 58, 50),
+        (90, 94, 110),
+        (120, 117, 100),
+        (45, 47, 55),
+        (60, 63, 75),
+        (90, 88, 80),
+        (150, 156, 185),
+        (60, 63, 75),
     ]
     for idx, (orig, adapt, actual) in enumerate(cases):
         evaluations.append(
