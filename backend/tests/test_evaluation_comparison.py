@@ -149,6 +149,20 @@ def test_check_hard_constraint_violations() -> None:
     )
     assert check_hard_constraint_violations(invalid_sessions, problem) == 1
 
+    # Task ID mismatch
+    wrong_task_sessions = (
+        ScheduledSession("s1", "wrong_task", start_minute=0, end_minute=60),
+        ScheduledSession("s2", "t1", start_minute=70, end_minute=130),
+    )
+    assert check_hard_constraint_violations(wrong_task_sessions, problem) == 1
+
+    # Duration mismatch (scheduled 45 min instead of demanded 60 min)
+    wrong_duration_sessions = (
+        ScheduledSession("s1", "t1", start_minute=0, end_minute=45),
+        ScheduledSession("s2", "t1", start_minute=70, end_minute=130),
+    )
+    assert check_hard_constraint_violations(wrong_duration_sessions, problem) == 1
+
 
 def test_compare_static_vs_adaptive_end_to_end() -> None:
     problem = FeasibilityProblem(

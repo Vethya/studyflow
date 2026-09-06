@@ -166,13 +166,17 @@ def check_hard_constraint_violations(
         if following.start_minute < prev.end_minute + problem.minimum_break_minutes:
             violations += 1
 
-    # 2. Window and deadline adherence check
+    # 2. Window, deadline, task ownership, and duration adherence check
     demands_by_id: dict[str, SessionDemand] = {d.session_id: d for d in problem.sessions}
     for session in sessions:
         demand = demands_by_id.get(session.session_id)
         if demand is None:
             violations += 1
             continue
+        if session.task_id != demand.task_id:
+            violations += 1
+        if (session.end_minute - session.start_minute) != demand.duration_minutes:
+            violations += 1
         if session.end_minute > demand.deadline_minute:
             violations += 1
         # Check if contained in at least one allowed window
