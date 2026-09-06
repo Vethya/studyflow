@@ -103,3 +103,33 @@ async def test_seed_nfr02_dataset_creates_complete_spec_workload() -> None:
             assert len(allocs) == 50
     finally:
         await database.stop()
+
+
+@pytest.mark.anyio
+async def test_run_http_benchmark_fails_on_server_or_client_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/auth/login":
+            return httpx.Response(200, json={"csrf_token": "token"})
+        # Return 404 for endpoints
+        return httpx.Response(404, json={"detail": "Not Found"})
+
+    transport = httpx.MockTransport(handler)
+
+    class CustomAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(httpx, "AsyncClient", CustomAsyncClient)
+
+    exit_code = await run_http_benchmark(
+        base_url="http://testserver",
+        runs=2,
+    )
+    assert exit_code == 1
+
+

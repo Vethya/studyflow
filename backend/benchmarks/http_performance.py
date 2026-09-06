@@ -94,12 +94,17 @@ async def run_http_benchmark(
                 else:
                     warm_res = await client.post(url, headers=headers)
 
-                if warm_res.status_code >= 500:
-                    print(f"Server error on warm-up for {endpoint['name']}: {warm_res.status_code}")
+                if warm_res.status_code >= 400:
+                    print(
+                        f"| {endpoint['name']} | - | - | - | - | {threshold:.1f}s | "
+                        f"❌ FAIL (HTTP {warm_res.status_code}) |"
+                    )
                     failed = True
                     continue
 
                 samples: list[float] = []
+                endpoint_failed = False
+                last_error_status: int | None = None
                 for _ in range(runs):
                     started = perf_counter()
                     if method == "GET":
@@ -109,18 +114,24 @@ async def run_http_benchmark(
                     elapsed = perf_counter() - started
                     samples.append(elapsed)
 
-                    if res.status_code >= 500:
-                        failed = True
+                    if res.status_code >= 400:
+                        endpoint_failed = True
+                        last_error_status = res.status_code
 
                 p95 = percentile_95(samples)
                 median = sorted(samples)[len(samples) // 2]
                 minimum = min(samples)
                 maximum = max(samples)
-                passed = p95 <= threshold and not any(s >= 500 for s in samples)
+                passed = p95 <= threshold and not endpoint_failed
 
-                status_str = "✅ PASS" if passed else "❌ FAIL"
                 if not passed:
                     failed = True
+                    if endpoint_failed:
+                        status_str = f"❌ FAIL (HTTP {last_error_status})"
+                    else:
+                        status_str = f"❌ FAIL (P95 > {threshold:.1f}s)"
+                else:
+                    status_str = "✅ PASS"
 
                 print(
                     f"| {endpoint['name']} | {minimum:.4f}s | {median:.4f}s | {maximum:.4f}s | "
