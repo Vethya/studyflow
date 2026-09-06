@@ -97,6 +97,7 @@ async def test_seed_nfr02_dataset_creates_complete_spec_workload() -> None:
                 .all()
             )
             assert len(sessions) == 250
+            assert all(s.proposal_id is None for s in sessions)
 
             # Verify no sessions overlap with any unavailable periods and respect working hours
             for s in sessions:

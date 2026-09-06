@@ -192,7 +192,7 @@ async def seed_nfr02_dataset(session: AsyncSession) -> UUID:
                 id=uuid4(),
                 account_id=account_id,
                 task_id=task.id,
-                proposal_id=proposal.id,
+                proposal_id=None,
                 starts_at=current_schedule_time,
                 ends_at=session_end,
                 planned_duration_minutes=60,

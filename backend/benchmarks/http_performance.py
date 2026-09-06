@@ -62,7 +62,12 @@ async def run_http_benchmark(
                     "url": "/api/v1/availability/unavailable-periods",
                 },
                 {
-                    "name": "Current Schedule (250 sessions)",
+                    "name": "Active Study Sessions (250 sessions)",
+                    "method": "GET",
+                    "url": "/api/v1/study-sessions",
+                },
+                {
+                    "name": "Current Schedule Proposal",
                     "method": "GET",
                     "url": "/api/v1/schedule-proposals/current",
                 },
