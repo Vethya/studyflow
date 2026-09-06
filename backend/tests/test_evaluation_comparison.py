@@ -202,3 +202,39 @@ def test_run_comparisons_includes_both_feasible_and_overloaded() -> None:
     assert "overloaded" in results
     assert "static_status" in results["feasible"]  # type: ignore[operator]
     assert "static_status" in results["overloaded"]  # type: ignore[operator]
+
+
+def test_create_adaptive_problem_resplits_with_preferred_length() -> None:
+    from benchmarks.compare_static_adaptive import create_adaptive_problem_from_static
+
+    problem = FeasibilityProblem(
+        sessions=(
+            SessionDemand(
+                session_id="t1-session-0",
+                task_id="t1",
+                duration_minutes=60,
+                deadline_minute=300,
+                allowed_windows=(MinuteWindow(0, 300),),
+                priority=TaskPriority.MEDIUM,
+            ),
+            SessionDemand(
+                session_id="t1-session-1",
+                task_id="t1",
+                duration_minutes=60,
+                deadline_minute=300,
+                allowed_windows=(MinuteWindow(0, 300),),
+                priority=TaskPriority.MEDIUM,
+            ),
+        ),
+        planning_start_minute=0,
+        minimum_break_minutes=10,
+    )
+    # 120 mins scaled by 1.25 = 150 mins -> two 60 min sessions + one 30 min remainder
+    adapted = create_adaptive_problem_from_static(problem, factor=1.25, preferred_session_length=60)
+    assert len(adapted.sessions) == 3
+    assert [s.duration_minutes for s in adapted.sessions] == [60, 60, 30]
+    assert [s.session_id for s in adapted.sessions] == [
+        "t1-session-0",
+        "t1-session-1",
+        "t1-session-2",
+    ]

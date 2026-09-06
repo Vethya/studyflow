@@ -20,6 +20,7 @@ from studyflow.scheduling.contracts import (
     FeasibilityProblem,
     SessionDemand,
 )
+from studyflow.scheduling.splitting import split_task_sessions
 
 
 def generate_sample_evaluations() -> list[PredictionEvaluation]:
@@ -60,22 +61,37 @@ def generate_sample_evaluations() -> list[PredictionEvaluation]:
 
 def create_adaptive_problem_from_static(
     static_problem: FeasibilityProblem,
-    factor: float = 1.25,
+    factor: float = 1.2,
+    preferred_session_length: int = 60,
 ) -> FeasibilityProblem:
-    """Scale task durations by learned adaptive factor to simulate adjusted demand."""
-    adapted_sessions: list[SessionDemand] = []
+    """Resplit tasks with learned adaptive factor using preferred session lengths (§24.6)."""
+    tasks_sessions: dict[str, list[SessionDemand]] = {}
     for demand in static_problem.sessions:
-        new_duration = round(demand.duration_minutes * factor)
-        adapted_sessions.append(
-            SessionDemand(
-                session_id=demand.session_id,
-                task_id=demand.task_id,
-                duration_minutes=new_duration,
-                deadline_minute=demand.deadline_minute,
-                allowed_windows=demand.allowed_windows,
-                priority=demand.priority,
-            )
+        tasks_sessions.setdefault(demand.task_id, []).append(demand)
+
+    adapted_sessions: list[SessionDemand] = []
+    for task_id, demands in tasks_sessions.items():
+        first_demand = demands[0]
+        total_static_minutes = sum(d.duration_minutes for d in demands)
+        adapted_total_minutes = max(1, round(total_static_minutes * factor))
+
+        split = split_task_sessions(
+            task_id=task_id,
+            remaining_minutes=adapted_total_minutes,
+            preferred_session_length=preferred_session_length,
         )
+        for draft in split:
+            adapted_sessions.append(
+                SessionDemand(
+                    session_id=draft.session_id,
+                    task_id=task_id,
+                    duration_minutes=draft.duration_minutes,
+                    deadline_minute=first_demand.deadline_minute,
+                    allowed_windows=first_demand.allowed_windows,
+                    priority=first_demand.priority,
+                )
+            )
+
     return FeasibilityProblem(
         sessions=tuple(adapted_sessions),
         planning_start_minute=static_problem.planning_start_minute,
@@ -161,7 +177,7 @@ def run_comparisons() -> dict[str, object]:
 
     # Scenario 1: Feasible NFR-02 Problem
     static_feasible = representative_performance_problem(PerformanceScenario.FEASIBLE)
-    adaptive_feasible = create_adaptive_problem_from_static(static_feasible, factor=1.1)
+    adaptive_feasible = create_adaptive_problem_from_static(static_feasible, factor=1.2)
     res_feasible = compare_static_vs_adaptive(static_feasible, adaptive_feasible, evaluations)
     print(format_table(res_feasible, "NFR-02 Feasible Workload"))
 
