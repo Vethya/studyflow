@@ -10,7 +10,7 @@ To run tests against an isolated evaluation deployment:
 
 1. Copy the evaluation environment template:
    ```bash
-   cp .env.evaluation.example .env
+   cp .env.evaluation.example backend/.env
    ```
 2. Apply database migrations:
    ```bash
@@ -50,7 +50,7 @@ uv run python benchmarks/scheduler_performance.py --runs 20 --threshold-seconds 
 
 ### 2.3 Full-Stack HTTP & Page Usability Benchmark (NFR-02-AC01 & AC03)
 
-To measure 20 warm runs across all core endpoints (`/tasks`, `/availability`, `/schedule-proposals/current`, `/progress`, and `/schedule-proposals/generate`) to ensure query routes meet $p95 < 3.0\text{s}$ and generation meets $p95 < 5.0\text{s}$:
+To measure 20 warm runs across core endpoints (`/tasks`, `/availability/windows`, `/availability/unavailable-periods`, `/schedule-proposals/current`, `/progress`, and `POST /schedule-proposals`) to ensure query routes meet $p95 < 3.0\text{s}$ and generation meets $p95 < 5.0\text{s}$:
 
 ```bash
 cd backend
