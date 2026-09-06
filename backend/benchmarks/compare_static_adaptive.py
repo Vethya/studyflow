@@ -172,6 +172,11 @@ def format_table(comparison: ScheduleComparisonResult, scenario_name: str) -> st
     ]
 
     if est:
+        reduction_str = (
+            f"{est.mae_reduction_percentage:.1f}%"
+            if est.mae_reduction_percentage is not None
+            else "Undefined (degraded from perfect static baseline)"
+        )
         lines.extend(
             [
                 "",
@@ -179,7 +184,7 @@ def format_table(comparison: ScheduleComparisonResult, scenario_name: str) -> st
                 f"• Sample Size: {est.sample_count} tasks",
                 f"• Original Estimate MAE: {est.original_mae:.2f} min",
                 f"• Adaptive Estimate MAE: {est.adaptive_mae:.2f} min",
-                f"• Relative MAE Reduction: {est.mae_reduction_percentage:.1f}%",
+                f"• Relative MAE Reduction: {reduction_str}",
                 f"• Original Signed Bias: {est.original_signed_bias:+.2f} min",
                 f"• Adaptive Signed Bias: {est.adaptive_signed_bias:+.2f} min",
             ]

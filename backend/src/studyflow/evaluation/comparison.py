@@ -49,7 +49,7 @@ class EstimationAccuracyMetrics:
     adaptive_mae: float
     original_signed_bias: float
     adaptive_signed_bias: float
-    mae_reduction_percentage: float
+    mae_reduction_percentage: float | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,9 +139,13 @@ def compute_estimation_metrics(
     original_signed_bias = sum(original_signed_errors) / count
     adaptive_signed_bias = sum(adaptive_signed_errors) / count
 
-    reduction = (
-        ((original_mae - adaptive_mae) / original_mae) * 100.0 if original_mae > 0.0 else 0.0
-    )
+    reduction: float | None
+    if original_mae > 0.0:
+        reduction = ((original_mae - adaptive_mae) / original_mae) * 100.0
+    elif adaptive_mae == 0.0:
+        reduction = 0.0
+    else:
+        reduction = None
 
     return EstimationAccuracyMetrics(
         sample_count=count,

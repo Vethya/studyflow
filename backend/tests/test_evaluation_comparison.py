@@ -109,6 +109,41 @@ def test_compute_estimation_metrics_empty() -> None:
     assert metrics.original_mae == 0.0
     assert metrics.adaptive_mae == 0.0
     assert metrics.original_signed_bias == 0.0
+    assert metrics.mae_reduction_percentage == 0.0
+
+
+def test_compute_estimation_metrics_zero_original_mae_degradation() -> None:
+    now = datetime.now(UTC)
+    evaluations = [
+        PredictionEvaluation(
+            task_id=uuid4(),
+            original_minutes=60,
+            adaptive_minutes=80,
+            actual_minutes=60,
+            completed_at=now,
+        ),
+    ]
+    metrics = compute_estimation_metrics(evaluations)
+    assert metrics.original_mae == 0.0
+    assert metrics.adaptive_mae == 20.0
+    assert metrics.mae_reduction_percentage is None
+
+
+def test_compute_estimation_metrics_both_zero_mae() -> None:
+    now = datetime.now(UTC)
+    evaluations = [
+        PredictionEvaluation(
+            task_id=uuid4(),
+            original_minutes=60,
+            adaptive_minutes=60,
+            actual_minutes=60,
+            completed_at=now,
+        ),
+    ]
+    metrics = compute_estimation_metrics(evaluations)
+    assert metrics.original_mae == 0.0
+    assert metrics.adaptive_mae == 0.0
+    assert metrics.mae_reduction_percentage == 0.0
 
 
 def test_check_hard_constraint_violations() -> None:
