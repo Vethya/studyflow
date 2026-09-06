@@ -111,6 +111,17 @@ async def test_extract_evaluation_records_strips_pii() -> None:
             )
             session.add(outcome)
 
+            accepted_session = StudySession(
+                id=uuid4(),
+                account_id=account_id,
+                task_id=task.id,
+                proposal_id=None,
+                starts_at=now + timedelta(hours=3),
+                ends_at=now + timedelta(hours=4),
+                planned_duration_minutes=60,
+            )
+            session.add(accepted_session)
+
         async with database.transaction() as session:
             records = await extract_evaluation_records(session, target_account_id=account_id)
             assert len(records) == 1
@@ -132,17 +143,27 @@ async def test_extract_evaluation_records_strips_pii() -> None:
             assert rec["tasks"][0]["adaptive_estimate_minutes"] == 150
             assert rec["tasks"][0]["planned_duration_minutes"] == 150
 
-            assert len(rec["sessions"]) == 1
+            assert len(rec["sessions"]) == 2
+            # First session is associated with proposal and is not yet accepted
+            assert rec["sessions"][0]["proposal_code"].startswith("PROP-")
+            assert rec["sessions"][0]["is_accepted"] is False
             assert rec["sessions"][0]["outcome"]["kind"] == "completed"
             assert rec["sessions"][0]["outcome"]["actual_minutes"] == 65
+            # Second session is an accepted session with no proposal_id
+            assert rec["sessions"][1]["proposal_code"] is None
+            assert rec["sessions"][1]["is_accepted"] is True
+            assert rec["sessions"][1]["outcome"] is None
 
             # Test CSV formatting
             csv_text = format_as_csv(records)
             assert "participant_code,task_code,category" in csv_text
+            assert "session_code,proposal_code,is_accepted" in csv_text
             assert rec["participant_code"] in csv_text
             assert "outcome_kind,actual_minutes,remaining_minutes" in csv_text
             assert "completed" in csv_text
             assert "65" in csv_text
+            assert "true" in csv_text
+            assert "false" in csv_text
     finally:
         await database.stop()
 

@@ -91,8 +91,10 @@ async def extract_evaluation_records(
         proposal_rows = (await session.execute(proposal_stmt)).scalars().all()
 
         proposals_data: list[dict[str, Any]] = []
+        proposal_code_map: dict[UUID, str] = {}
         for p in proposal_rows:
             proposal_code = pseudonymize_id(p.id, prefix="PROP")
+            proposal_code_map[p.id] = proposal_code
             alloc_stmt = select(ProposalTaskAllocation).where(
                 ProposalTaskAllocation.proposal_id == p.id
             )
@@ -140,10 +142,17 @@ async def extract_evaluation_records(
                 if outcome
                 else None
             )
+            session_proposal_code: str | None = (
+                proposal_code_map.get(s.proposal_id, pseudonymize_id(s.proposal_id, "PROP"))
+                if s.proposal_id is not None
+                else None
+            )
             sessions_data.append(
                 {
                     "session_code": session_code,
                     "task_code": task_code_map.get(s.task_id, pseudonymize_id(s.task_id, "TASK")),
+                    "proposal_code": session_proposal_code,
+                    "is_accepted": s.proposal_id is None,
                     "starts_at": _iso(s.starts_at),
                     "ends_at": _iso(s.ends_at),
                     "planned_duration_minutes": s.planned_duration_minutes,
@@ -189,6 +198,8 @@ def format_as_csv(records: Sequence[dict[str, Any]]) -> str:
             "deadline_at",
             "completed_at",
             "session_code",
+            "proposal_code",
+            "is_accepted",
             "session_starts_at",
             "session_ends_at",
             "session_planned_duration_minutes",
@@ -221,7 +232,7 @@ def format_as_csv(records: Sequence[dict[str, Any]]) -> str:
                 task["completed_at"],
             ]
             if not task_sessions:
-                writer.writerow([*base_row, "", "", "", "", "", "", "", ""])
+                writer.writerow([*base_row, "", "", "", "", "", "", "", "", "", "", ""])
             else:
                 for s in task_sessions:
                     outcome = s.get("outcome") or {}
@@ -229,6 +240,8 @@ def format_as_csv(records: Sequence[dict[str, Any]]) -> str:
                         [
                             *base_row,
                             s.get("session_code", ""),
+                            s.get("proposal_code") or "",
+                            "true" if s.get("is_accepted") else "false",
                             s.get("starts_at", ""),
                             s.get("ends_at", ""),
                             s.get("planned_duration_minutes", ""),
