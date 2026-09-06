@@ -59,7 +59,7 @@ async def run_http_benchmark(
                 {
                     "name": "Unavailable Periods (50 gaps)",
                     "method": "GET",
-                    "url": "/api/v1/availability/unavailable",
+                    "url": "/api/v1/availability/unavailable-periods",
                 },
                 {
                     "name": "Current Schedule (250 sessions)",
@@ -70,7 +70,7 @@ async def run_http_benchmark(
                 {
                     "name": "Schedule Generation (50 tasks)",
                     "method": "POST",
-                    "url": "/api/v1/schedule-proposals/generate",
+                    "url": "/api/v1/schedule-proposals",
                     "is_generation": True,
                 },
             ]
