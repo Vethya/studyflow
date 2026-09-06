@@ -143,5 +143,3 @@ async def test_run_http_benchmark_fails_on_server_or_client_error(
         runs=2,
     )
     assert exit_code == 1
-
-

@@ -47,13 +47,9 @@ def test_compute_schedule_stability_metrics() -> None:
 
 
 def test_compute_schedule_stability_does_not_count_resizing_as_moving() -> None:
-    prev_sessions = (
-        ScheduledSession("s1", "t1", start_minute=0, end_minute=60),
-    )
+    prev_sessions = (ScheduledSession("s1", "t1", start_minute=0, end_minute=60),)
     # s1 start unchanged, duration expanded from 60 to 90 min
-    new_sessions = (
-        ScheduledSession("s1", "t1", start_minute=0, end_minute=90),
-    )
+    new_sessions = (ScheduledSession("s1", "t1", start_minute=0, end_minute=90),)
 
     metrics = compute_schedule_stability(
         previous_sessions=prev_sessions,
@@ -206,4 +202,3 @@ def test_run_comparisons_includes_both_feasible_and_overloaded() -> None:
     assert "overloaded" in results
     assert "static_status" in results["feasible"]  # type: ignore[operator]
     assert "static_status" in results["overloaded"]  # type: ignore[operator]
-
