@@ -140,6 +140,9 @@ async def test_extract_evaluation_records_strips_pii() -> None:
             csv_text = format_as_csv(records)
             assert "participant_code,task_code,category" in csv_text
             assert rec["participant_code"] in csv_text
+            assert "outcome_kind,actual_minutes,remaining_minutes" in csv_text
+            assert "completed" in csv_text
+            assert "65" in csv_text
     finally:
         await database.stop()
 

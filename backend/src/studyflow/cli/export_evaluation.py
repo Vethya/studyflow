@@ -188,26 +188,56 @@ def format_as_csv(records: Sequence[dict[str, Any]]) -> str:
             "created_at",
             "deadline_at",
             "completed_at",
+            "session_code",
+            "session_starts_at",
+            "session_ends_at",
+            "session_planned_duration_minutes",
+            "outcome_kind",
+            "actual_minutes",
+            "remaining_minutes",
+            "outcome_recorded_at",
         ]
     )
     for record in records:
         p_code = record["participant_code"]
+        sessions_by_task: dict[str, list[dict[str, Any]]] = {}
+        for s in record.get("sessions", []):
+            sessions_by_task.setdefault(s["task_code"], []).append(s)
+
         for task in record["tasks"]:
-            writer.writerow(
-                [
-                    p_code,
-                    task["task_code"],
-                    task["category"],
-                    task["priority"],
-                    task["original_estimate_minutes"],
-                    task["adaptive_estimate_minutes"],
-                    task["planned_duration_minutes"],
-                    task["planned_source"],
-                    task["created_at"],
-                    task["deadline_at"],
-                    task["completed_at"],
-                ]
-            )
+            t_code = task["task_code"]
+            task_sessions = sessions_by_task.get(t_code, [])
+            base_row = [
+                p_code,
+                t_code,
+                task["category"],
+                task["priority"],
+                task["original_estimate_minutes"],
+                task["adaptive_estimate_minutes"],
+                task["planned_duration_minutes"],
+                task["planned_source"],
+                task["created_at"],
+                task["deadline_at"],
+                task["completed_at"],
+            ]
+            if not task_sessions:
+                writer.writerow([*base_row, "", "", "", "", "", "", "", ""])
+            else:
+                for s in task_sessions:
+                    outcome = s.get("outcome") or {}
+                    writer.writerow(
+                        [
+                            *base_row,
+                            s.get("session_code", ""),
+                            s.get("starts_at", ""),
+                            s.get("ends_at", ""),
+                            s.get("planned_duration_minutes", ""),
+                            outcome.get("kind", ""),
+                            outcome.get("actual_minutes", ""),
+                            outcome.get("remaining_minutes", ""),
+                            outcome.get("recorded_at", ""),
+                        ]
+                    )
     return output.getvalue()
 
 
