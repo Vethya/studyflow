@@ -63,6 +63,7 @@ class ScheduleRunResult:
     hard_constraint_violations: int
     deadline_feasible: bool
     total_unscheduled_minutes: int
+    successful_recovery: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +195,7 @@ def solve_and_measure(problem: FeasibilityProblem) -> ScheduleRunResult:
     violations = check_hard_constraint_violations(result.sessions, problem)
     total_unscheduled = sum(item.unscheduled_minutes for item in result.allocations)
     deadline_feasible = result.status is KernelStatus.FEASIBLE
+    successful_recovery = deadline_feasible and violations == 0 and total_unscheduled == 0
 
     return ScheduleRunResult(
         status=result.status,
@@ -203,6 +205,7 @@ def solve_and_measure(problem: FeasibilityProblem) -> ScheduleRunResult:
         hard_constraint_violations=violations,
         deadline_feasible=deadline_feasible,
         total_unscheduled_minutes=total_unscheduled,
+        successful_recovery=successful_recovery,
     )
 
 

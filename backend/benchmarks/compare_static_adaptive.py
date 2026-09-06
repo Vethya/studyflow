@@ -18,6 +18,7 @@ from studyflow.scheduling._performance import (
 )
 from studyflow.scheduling.contracts import (
     FeasibilityProblem,
+    MinuteWindow,
     SessionDemand,
 )
 from studyflow.scheduling.splitting import split_task_sessions
@@ -101,6 +102,37 @@ def create_adaptive_problem_from_static(
     )
 
 
+def create_missed_session_recovery_problem(
+    base_problem: FeasibilityProblem,
+    planning_start_minute: int = 1440,
+) -> FeasibilityProblem:
+    """Simulate missed session recovery by replanning remaining workload (§24.6)."""
+    recovery_sessions = [
+        SessionDemand(
+            session_id=s.session_id,
+            task_id=s.task_id,
+            duration_minutes=s.duration_minutes,
+            deadline_minute=s.deadline_minute,
+            allowed_windows=tuple(
+                MinuteWindow(start=max(w.start, planning_start_minute), end=w.end)
+                for w in s.allowed_windows
+                if w.end > planning_start_minute
+            ),
+            priority=s.priority,
+        )
+        for s in base_problem.sessions
+    ]
+    return FeasibilityProblem(
+        sessions=tuple(recovery_sessions),
+        planning_start_minute=planning_start_minute,
+        minimum_break_minutes=base_problem.minimum_break_minutes,
+        max_solve_seconds=base_problem.max_solve_seconds,
+        planning_days=tuple(
+            d for d in base_problem.planning_days if d.end_minute > planning_start_minute
+        ),
+    )
+
+
 def format_table(comparison: ScheduleComparisonResult, scenario_name: str) -> str:
     """Format comparison result as a markdown / text summary table."""
     static = comparison.static_run
@@ -126,6 +158,8 @@ def format_table(comparison: ScheduleComparisonResult, scenario_name: str) -> st
         f"| Hard Constraint Violations | {static.hard_constraint_violations} | "
         f"{adaptive.hard_constraint_violations} | {viol_diff} |",
         f"| Deadline Feasible | {static.deadline_feasible} | {adaptive.deadline_feasible} | - |",
+        f"| Successful Recovery | {static.successful_recovery} | "
+        f"{adaptive.successful_recovery} | - |",
         f"| Unscheduled Minutes | {static.total_unscheduled_minutes} min | "
         f"{adaptive.total_unscheduled_minutes} min | {unsched_diff} |",
         "",
@@ -160,6 +194,8 @@ def _serialize_scenario_result(comparison: ScheduleComparisonResult) -> dict[str
         "adaptive_status": comparison.adaptive_run.status.value,
         "static_time_seconds": comparison.static_run.generation_time_seconds,
         "adaptive_time_seconds": comparison.adaptive_run.generation_time_seconds,
+        "static_successful_recovery": comparison.static_run.successful_recovery,
+        "adaptive_successful_recovery": comparison.adaptive_run.successful_recovery,
         "stability": {
             "sessions_moved": comparison.stability_vs_static.sessions_moved,
             "minutes_shifted": comparison.stability_vs_static.total_absolute_minutes_shifted,
@@ -187,8 +223,15 @@ def run_comparisons() -> dict[str, object]:
     res_overloaded = compare_static_vs_adaptive(static_overloaded, adaptive_overloaded, evaluations)
     print(format_table(res_overloaded, "NFR-02 Overloaded Workload"))
 
+    # Scenario 3: Missed-Session Recovery (§24.6 & §19.3)
+    static_recovery = create_missed_session_recovery_problem(static_feasible)
+    adaptive_recovery = create_adaptive_problem_from_static(static_recovery, factor=1.2)
+    res_recovery = compare_static_vs_adaptive(static_recovery, adaptive_recovery, evaluations)
+    print(format_table(res_recovery, "Missed-Session Recovery (§24.6)"))
+
     results["feasible"] = _serialize_scenario_result(res_feasible)
     results["overloaded"] = _serialize_scenario_result(res_overloaded)
+    results["missed_session_recovery"] = _serialize_scenario_result(res_recovery)
 
     if res_feasible.estimation_metrics:
         results["estimation_metrics"] = {

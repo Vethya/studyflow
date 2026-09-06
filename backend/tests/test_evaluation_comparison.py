@@ -187,7 +187,7 @@ def test_compare_static_vs_adaptive_end_to_end() -> None:
     assert result.adaptive_run.hard_constraint_violations == 0
 
 
-def test_run_comparisons_includes_both_feasible_and_overloaded() -> None:
+def test_run_comparisons_includes_feasible_overloaded_and_recovery() -> None:
     import sys
     from pathlib import Path
 
@@ -200,8 +200,33 @@ def test_run_comparisons_includes_both_feasible_and_overloaded() -> None:
     results = run_comparisons()
     assert "feasible" in results
     assert "overloaded" in results
+    assert "missed_session_recovery" in results
     assert "static_status" in results["feasible"]  # type: ignore[operator]
     assert "static_status" in results["overloaded"]  # type: ignore[operator]
+    assert "static_successful_recovery" in results["missed_session_recovery"]  # type: ignore[operator]
+
+
+def test_create_missed_session_recovery_problem() -> None:
+    from benchmarks.compare_static_adaptive import create_missed_session_recovery_problem
+
+    problem = FeasibilityProblem(
+        sessions=(
+            SessionDemand(
+                session_id="t1-session-0",
+                task_id="t1",
+                duration_minutes=60,
+                deadline_minute=2880,
+                allowed_windows=(MinuteWindow(0, 1440), MinuteWindow(1440, 2880)),
+                priority=TaskPriority.MEDIUM,
+            ),
+        ),
+        planning_start_minute=0,
+        minimum_break_minutes=10,
+    )
+    recovery = create_missed_session_recovery_problem(problem, planning_start_minute=1440)
+    assert recovery.planning_start_minute == 1440
+    assert len(recovery.sessions[0].allowed_windows) == 1
+    assert recovery.sessions[0].allowed_windows[0].start == 1440
 
 
 def test_create_adaptive_problem_resplits_with_preferred_length() -> None:
