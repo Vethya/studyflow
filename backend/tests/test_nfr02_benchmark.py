@@ -111,8 +111,23 @@ async def test_seed_nfr02_dataset_creates_complete_spec_workload() -> None:
                     )
 
             # 6. Allocations for each task
-            allocs = (await session.execute(select(ProposalTaskAllocation))).scalars().all()
+            allocs = (
+                (
+                    await session.execute(
+                        select(ProposalTaskAllocation).order_by(ProposalTaskAllocation.deadline_at)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             assert len(allocs) == 50
+            for a in allocs:
+                assert a.raw_calendar_capacity_minutes >= 2000
+                assert a.raw_calendar_capacity_minutes == a.available_minutes_before_deadline
+                assert a.shortfall_minutes == 0
+            assert (
+                allocs[0].raw_calendar_capacity_minutes < allocs[-1].raw_calendar_capacity_minutes
+            )
     finally:
         await database.stop()
 

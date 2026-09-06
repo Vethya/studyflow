@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import sys
+from collections.abc import Sequence
 from datetime import UTC, datetime, time, timedelta
 from uuid import UUID, uuid4
 
@@ -31,6 +32,35 @@ TASK_CATEGORIES = [
     "other",
 ]
 TASK_PRIORITIES = ["low", "medium", "high"]
+
+
+def compute_calendar_capacity_minutes(
+    start_time: datetime,
+    deadline_at: datetime,
+    unavailable_ranges: Sequence[tuple[datetime, datetime]],
+) -> int:
+    """Compute available working calendar minutes between start_time and deadline_at."""
+    total_minutes = 0
+    current_day = start_time.date()
+    end_date = deadline_at.date()
+
+    while current_day <= end_date:
+        if current_day.weekday() < 5:  # Monday through Friday
+            win_start = datetime.combine(current_day, time(9, 0), tzinfo=UTC)
+            win_end = datetime.combine(current_day, time(17, 0), tzinfo=UTC)
+            eff_start = max(start_time, win_start)
+            eff_end = min(deadline_at, win_end)
+            if eff_end > eff_start:
+                day_minutes = int((eff_end - eff_start).total_seconds() // 60)
+                for u_start, u_end in unavailable_ranges:
+                    ov_start = max(eff_start, u_start)
+                    ov_end = min(eff_end, u_end)
+                    if ov_end > ov_start:
+                        day_minutes -= int((ov_end - ov_start).total_seconds() // 60)
+                total_minutes += max(0, day_minutes)
+        current_day += timedelta(days=1)
+
+    return total_minutes
 
 
 async def seed_nfr02_dataset(session: AsyncSession) -> UUID:
@@ -142,7 +172,13 @@ async def seed_nfr02_dataset(session: AsyncSession) -> UUID:
     # Generate 250 sessions (5 sessions per task, 60 minutes each)
     session_count = 0
     current_schedule_time = base_date.replace(hour=9, minute=0)
+    planning_start = base_date.replace(hour=9, minute=0)
     for task in tasks:
+        capacity = compute_calendar_capacity_minutes(
+            planning_start,
+            task.deadline_at,
+            unavailable_ranges,
+        )
         # Task allocations
         alloc = ProposalTaskAllocation(
             proposal_id=proposal.id,
@@ -151,8 +187,8 @@ async def seed_nfr02_dataset(session: AsyncSession) -> UUID:
             required_minutes=300,
             scheduled_minutes=300,
             unscheduled_minutes=0,
-            raw_calendar_capacity_minutes=600,
-            available_minutes_before_deadline=600,
+            raw_calendar_capacity_minutes=capacity,
+            available_minutes_before_deadline=capacity,
             shortfall_minutes=0,
         )
         session.add(alloc)
