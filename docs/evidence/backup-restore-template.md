@@ -1,7 +1,8 @@
 # StudyFlow backup and restore evidence
 
-Copy this file to a dated record after completing the restore test. Do not include passwords,
-database URLs containing passwords, OAuth tokens, private age identities, or raw database dumps.
+Copy this file to a dated record after completing the restore test, or let the restore script
+generate the record. Do not include passwords, database URLs containing passwords, OAuth tokens,
+private age identities, or raw database dumps.
 
 ## Backup record
 
@@ -24,22 +25,25 @@ database URLs containing passwords, OAuth tokens, private age identities, or raw
 
 - Restore test date and time UTC:
 - Restore operator:
-- Restore Neon project:
+- Restore target:
 - PostgreSQL major version:
+- Encrypted archive checksum: pass / fail
+- Archive decryption: pass / fail
+- Restore database connection: pass / fail
 - Restore command completed: pass / fail
 - `alembic_version` verified: pass / fail
-- Expected tables verified: pass / fail
-- Important row counts verified: pass / fail
-- Backend readiness verified: pass / fail
-- Login verified: pass / fail
-- Task creation verified: pass / fail
-- Availability verified: pass / fail
-- Schedule generation verified: pass / fail
-- Session outcome recording verified: pass / fail
+- Expected tables verified: pass / fail / not tested
+- Important row counts verified: pass / fail / not tested
+- Backend readiness verified: pass / fail / not tested
+- Login verified: pass / fail / not tested
+- Task creation verified: pass / fail / not tested
+- Availability verified: pass / fail / not tested
+- Schedule generation verified: pass / fail / not tested
+- Session outcome recording verified: pass / fail / not tested
 
 ## Result
 
-- Overall result: pass / fail
+- Overall database restore result: pass / fail
 - Problems found:
 - Corrective action:
 - Evidence links or screenshots:

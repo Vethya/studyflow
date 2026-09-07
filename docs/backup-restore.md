@@ -156,10 +156,60 @@ Use `rclone copy`, not `rclone sync`. The scripts never delete older Drive backu
 
 ## Restore test
 
-Perform this test against a separate Neon Free project with the same PostgreSQL major version.
-Never test restoration against the active production database.
+The restore script supports any explicit PostgreSQL target URL. Use a separate local database for
+the fastest test, or a separate Neon project when a cloud restore is required. Never restore into
+the active production database.
 
-Download a backup folder from Drive, then decrypt the archive:
+### Automated restore and evidence
+
+On macOS, copy the restore configuration and edit the backup folder, target URL, and private age
+identity path:
+
+```bash
+cp scripts/restore.env.example scripts/restore.env
+chmod 600 scripts/restore.env
+```
+
+Run the local restore verification from the repository root:
+
+```bash
+docker compose up -d postgres
+./scripts/restore-backup.sh
+```
+
+The default local target is `studyflow_restore`. The script verifies the encrypted archive hash,
+decrypts it, restores it, checks the migration version and expected tables, records important row
+counts, and writes a dated report under `docs/evidence/`.
+
+For a separate Neon project, use a direct URL and explicit remote confirmation:
+
+```bash
+./scripts/restore-backup.sh \
+  --backup-dir /secure/path/downloaded-backup \
+  --target-url 'postgresql://USER:PASSWORD@ep-restore.REGION.aws.neon.tech/neondb?sslmode=require' \
+  --identity /secure/path/studyflow-backup-private-key.txt \
+  --target-label 'Neon restore project' \
+  --allow-remote \
+  --yes
+```
+
+The target URL is never written to the evidence report. Do not use `--allow-destructive` unless the
+target is disposable or you have explicitly confirmed that replacing its objects is intended.
+
+The script accepts `--target-url` for one-off restores or `STUDYFLOW_RESTORE_DATABASE_URL` in the
+ignored `scripts/restore.env` file. It prefers local `pg_restore` and `psql`; if they are not
+installed, it uses the repository's Docker Compose PostgreSQL service.
+
+On Windows, copy `scripts/restore-config.ps1.example` to `scripts/restore-config.ps1`, edit it,
+start Docker Desktop's PostgreSQL service, and run:
+
+```powershell
+.\scripts\restore-backup.ps1
+```
+
+### Manual fallback
+
+If the restore script is unavailable, download a backup folder from Drive, then decrypt the archive:
 
 ```bash
 age --decrypt \
