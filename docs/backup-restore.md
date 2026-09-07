@@ -182,7 +182,7 @@ The second command creates the separate restore database when it is missing. It 
 Compose database user; replace `studyflow` if `POSTGRES_USER` is overridden. The default local target
 is `studyflow_restore`. The script verifies the encrypted archive hash,
 decrypts it, restores it, checks the migration version and expected tables, records important row
-counts, and writes a dated report under `docs/evidence/`.
+counts, and writes a timestamped report under `docs/evidence/`.
 
 For a separate Neon project, use a direct URL and explicit remote confirmation:
 

@@ -112,9 +112,8 @@ while (($# > 0)); do
 done
 
 restore_timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-restore_date="$(date -u +%Y-%m-%d)"
 if [[ -z "$evidence_file" ]]; then
-  evidence_file="$repo_root/docs/evidence/backup-restore-$restore_date.md"
+  evidence_file="$repo_root/docs/evidence/backup-restore-$restore_timestamp.md"
 fi
 
 [[ -n "$backup_dir" ]] || die "backup directory is not set"

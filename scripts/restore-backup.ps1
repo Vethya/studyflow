@@ -51,14 +51,14 @@ $sourceProject = if ($env:STUDYFLOW_RESTORE_SOURCE_NEON_PROJECT) { $env:STUDYFLO
 $sourceBranch = if ($env:STUDYFLOW_RESTORE_SOURCE_NEON_BRANCH) { $env:STUDYFLOW_RESTORE_SOURCE_NEON_BRANCH } else { "not recorded" }
 $drivePath = if ($env:STUDYFLOW_RESTORE_GOOGLE_DRIVE_PATH) { $env:STUDYFLOW_RESTORE_GOOGLE_DRIVE_PATH } else { "not recorded" }
 $offlinePath = if ($env:STUDYFLOW_RESTORE_OFFLINE_COPY_PATH) { $env:STUDYFLOW_RESTORE_OFFLINE_COPY_PATH } else { "not recorded" }
+$restoreNow = (Get-Date).ToUniversalTime()
+$restoreTimestamp = $restoreNow.ToString("yyyyMMddTHHmmssZ")
 if ([string]::IsNullOrWhiteSpace($EvidenceFile)) {
     $EvidenceFile = if ($env:STUDYFLOW_RESTORE_EVIDENCE_FILE) { $env:STUDYFLOW_RESTORE_EVIDENCE_FILE } else {
-        Join-Path $repoRoot ("docs\evidence\backup-restore-{0}.md" -f (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd"))
+        Join-Path $repoRoot ("docs\evidence\backup-restore-{0}.md" -f $restoreTimestamp)
     }
 }
 
-$restoreNow = (Get-Date).ToUniversalTime()
-$restoreTimestamp = $restoreNow.ToString("yyyyMMddTHHmmssZ")
 $failureMessage = "none"
 $hashResult = "not tested"
 $decryptResult = "not tested"
