@@ -174,7 +174,7 @@ try {
         Fail "re-run with -Yes to confirm the selected target and restore mode"
     }
 
-    $requiredCommands = @("age.exe", "docker.exe")
+    $requiredCommands = @("age.exe")
     $commandPaths = @{}
     foreach ($commandName in $requiredCommands) {
         $command = Get-Command $commandName -ErrorAction SilentlyContinue
@@ -183,6 +183,14 @@ try {
     }
     $pgRestoreCommand = Get-Command pg_restore.exe -ErrorAction SilentlyContinue
     $psqlCommand = Get-Command psql.exe -ErrorAction SilentlyContinue
+    $dockerCommand = Get-Command docker.exe -ErrorAction SilentlyContinue
+    if ($null -ne $dockerCommand) { $commandPaths["docker.exe"] = $dockerCommand.Source }
+    if ($null -eq $psqlCommand -and $null -eq $dockerCommand) {
+        Fail "psql.exe is unavailable and Docker is unavailable for the fallback"
+    }
+    if ($null -eq $pgRestoreCommand -and $null -eq $dockerCommand) {
+        Fail "pg_restore.exe is unavailable and Docker is unavailable for the fallback"
+    }
 
     $encryptedDump = Get-SingleFile "*.dump.age"
     $metadataFile = Get-SingleFile "*.metadata.txt"
