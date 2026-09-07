@@ -160,7 +160,7 @@ metadata_file="$(find_one '*.metadata.txt')"
 hash_file="$(find_one '*.sha256')"
 
 metadata_value() {
-  sed -n "s/^$1=//p" "$metadata_file" | head -n 1
+  sed -n "s/^$1=//p" "$metadata_file" | head -n 1 | tr -d '\r'
 }
 
 backup_id="$(metadata_value backup_id)"
@@ -253,7 +253,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if (cd "$backup_dir" && shasum -a 256 -c "$(basename "$hash_file")" >/dev/null); then
+if (cd "$backup_dir" && tr -d '\r' < "$hash_file" | shasum -a 256 -c - >/dev/null); then
   hash_result="pass"
 else
   hash_result="fail"
