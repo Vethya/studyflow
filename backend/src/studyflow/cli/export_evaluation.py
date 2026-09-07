@@ -232,7 +232,7 @@ def format_as_csv(records: Sequence[dict[str, Any]]) -> str:
                 task["completed_at"],
             ]
             if not task_sessions:
-                writer.writerow([*base_row, "", "", "", "", "", "", "", "", "", "", ""])
+                writer.writerow([*base_row, "", "", "", "", "", "", "", "", "", ""])
             else:
                 for s in task_sessions:
                     outcome = s.get("outcome") or {}

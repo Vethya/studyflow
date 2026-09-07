@@ -1,5 +1,6 @@
 """Tests for evaluation export CLI and pseudonymization per SPEC §24.4."""
 
+import csv
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -30,6 +31,35 @@ def test_pseudonymize_id_is_deterministic_and_masks_id() -> None:
     assert code1 == code2
     assert code1.startswith("PARTICIPANT-")
     assert str(uid) not in code1
+
+
+def test_format_as_csv_matches_header_width_for_tasks_without_sessions() -> None:
+    csv_text = format_as_csv(
+        [
+            {
+                "participant_code": "PARTICIPANT-abc",
+                "tasks": [
+                    {
+                        "task_code": "TASK-abc",
+                        "category": "assignment",
+                        "priority": "medium",
+                        "original_estimate_minutes": 60,
+                        "adaptive_estimate_minutes": None,
+                        "planned_duration_minutes": 60,
+                        "planned_source": "original",
+                        "created_at": "2026-01-01T00:00:00+00:00",
+                        "deadline_at": "2026-01-08T00:00:00+00:00",
+                        "completed_at": None,
+                    }
+                ],
+                "sessions": [],
+            }
+        ]
+    )
+    rows = list(csv.reader(csv_text.splitlines()))
+    assert len(rows) == 2
+    assert len(rows[0]) == 21
+    assert len(rows[1]) == len(rows[0])
 
 
 @pytest.mark.anyio
