@@ -41,7 +41,7 @@ For a host-side application run instead of Compose, start the API on port `8000`
 
 ```bash
 cd backend
-uv run uvicorn studyflow.app:app --port 8000
+STUDYFLOW_SMTP_HOST=localhost uv run uvicorn studyflow.app:app --port 8000
 ```
 
 ---
