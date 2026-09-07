@@ -229,6 +229,10 @@ async def test_extract_evaluation_records_has_stable_tie_breakers() -> None:
         account_id = uuid4()
         task_ids: tuple[UUID, ...] = tuple(sorted((uuid4(), uuid4())))
         proposal_id = uuid4()
+        session_ids = (
+            UUID("00000000-0000-0000-0000-000000000001"),
+            UUID("00000000-0000-0000-0000-000000000002"),
+        )
 
         async with database.transaction() as session:
             await session.run_sync(
@@ -342,7 +346,7 @@ async def test_extract_evaluation_records_has_stable_tie_breakers() -> None:
                         shortfall_minutes=0,
                     ),
                     StudySession(
-                        id=uuid4(),
+                        id=session_ids[1],
                         account_id=account_id,
                         task_id=task_ids[1],
                         proposal_id=proposal_id,
@@ -351,7 +355,7 @@ async def test_extract_evaluation_records_has_stable_tie_breakers() -> None:
                         planned_duration_minutes=60,
                     ),
                     StudySession(
-                        id=uuid4(),
+                        id=session_ids[0],
                         account_id=account_id,
                         task_id=task_ids[0],
                         proposal_id=proposal_id,
