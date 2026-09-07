@@ -185,7 +185,6 @@ async def seed_evaluation_dataset(session: AsyncSession) -> list[UUID]:
             adaptive_available = task_number == TASKS_PER_PARTICIPANT
             has_prediction = calibration or adaptive_available
             completed = task_number < TASKS_PER_PARTICIPANT
-            completed_at = BASE_TIME + timedelta(days=task_number, hours=1) if completed else None
             planned_minutes = adaptive_minutes if adaptive_available else original_minutes
             task = AcademicTask(
                 id=task_id,
@@ -201,7 +200,7 @@ async def seed_evaluation_dataset(session: AsyncSession) -> list[UUID]:
                 planned_source="adaptive" if adaptive_available else "original",
                 planned_duration_minutes=planned_minutes,
                 estimate_frozen_at=BASE_TIME if completed else None,
-                completed_at=completed_at,
+                completed_at=None,
                 finished_early_at=None,
                 created_at=BASE_TIME,
                 updated_at=BASE_TIME,
@@ -254,13 +253,15 @@ async def seed_evaluation_dataset(session: AsyncSession) -> list[UUID]:
             )
             session.add(study_session)
             if completed:
+                outcome_recorded_at = starts_at + timedelta(minutes=planned_minutes)
+                task.completed_at = outcome_recorded_at
                 session.add(
                     StudySessionOutcome(
                         session_id=study_session_id,
                         kind="completed",
                         actual_minutes=80,
                         remaining_minutes=0,
-                        recorded_at=starts_at + timedelta(minutes=planned_minutes),
+                        recorded_at=outcome_recorded_at,
                         rescheduled_at=None,
                     )
                 )

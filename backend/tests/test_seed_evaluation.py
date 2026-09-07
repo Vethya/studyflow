@@ -122,6 +122,7 @@ async def test_evaluation_seed_is_repeatable_and_keeps_pending_actuals_unset() -
                 .scalars()
                 .all()
             )
+            outcomes = (await session.execute(select(StudySessionOutcome))).scalars().all()
 
         windows_by_account = {}
         for window in windows:
@@ -146,5 +147,19 @@ async def test_evaluation_seed_is_repeatable_and_keeps_pending_actuals_unset() -
                 )
                 for period in unavailable_by_account[study_session.account_id]
             )
+
+        sessions_by_task = {
+            study_session.task_id: study_session for study_session in study_sessions
+        }
+        outcomes_by_session = {outcome.session_id: outcome for outcome in outcomes}
+        for task in seeded_tasks:
+            study_session = sessions_by_task[task.id]
+            outcome = outcomes_by_session.get(study_session.id)
+            if task.completed_at is None:
+                assert outcome is None
+            else:
+                assert outcome is not None
+                assert task.completed_at == outcome.recorded_at
+                assert task.completed_at >= study_session.ends_at
     finally:
         await database.stop()
