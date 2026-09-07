@@ -1,7 +1,7 @@
 # Copy this file to scripts/restore-config.ps1. The real file is ignored by Git.
 # Use a local downloaded backup folder and an explicit restore target.
 $env:STUDYFLOW_RESTORE_BACKUP_DIR = "C:\path\to\downloaded-backup"
-$env:STUDYFLOW_RESTORE_DATABASE_URL = "postgresql://studyflow:studyflow@127.0.0.1:5432/studyflow_restore"
+$env:STUDYFLOW_RESTORE_DATABASE_URL = 'postgresql://studyflow:studyflow@127.0.0.1:5432/studyflow_restore'
 $env:STUDYFLOW_RESTORE_AGE_IDENTITY_FILE = "C:\secure\studyflow-backup-private-key.txt"
 
 # Optional evidence metadata. These values are written without passwords or private keys.
