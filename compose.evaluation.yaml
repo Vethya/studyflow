@@ -1,0 +1,23 @@
+name: studyflow-evaluation
+
+services:
+  backend:
+    environment:
+      STUDYFLOW_ENVIRONMENT: evaluation
+      STUDYFLOW_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    ports: !override
+      - "127.0.0.1:18000:8000"
+
+  migrate:
+    environment:
+      STUDYFLOW_ENVIRONMENT: evaluation
+      STUDYFLOW_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+
+  postgres:
+    ports: !override
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres_evaluation_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_evaluation_data:

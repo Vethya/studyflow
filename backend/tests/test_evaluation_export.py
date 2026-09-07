@@ -21,7 +21,7 @@ from studyflow.database.models.scheduling import (
     StudySession,
     StudySessionOutcome,
 )
-from studyflow.database.models.tasks import AcademicTask
+from studyflow.database.models.tasks import AcademicTask, AdaptiveEstimationPrediction
 
 
 def test_pseudonymize_id_is_deterministic_and_masks_id() -> None:
@@ -58,7 +58,7 @@ def test_format_as_csv_matches_header_width_for_tasks_without_sessions() -> None
     )
     rows = list(csv.reader(csv_text.splitlines()))
     assert len(rows) == 2
-    assert len(rows[0]) == 21
+    assert len(rows[0]) == 25
     assert len(rows[1]) == len(rows[0])
 
 
@@ -108,6 +108,20 @@ async def test_extract_evaluation_records_strips_pii() -> None:
                 updated_at=now,
             )
             session.add(task)
+            session.add(
+                AdaptiveEstimationPrediction(
+                    task_id=task.id,
+                    account_id=account_id,
+                    category="assignment",
+                    original_minutes=120,
+                    predicted_minutes=150,
+                    correction_factor=1.25,
+                    history_scope="overall",
+                    history_count=5,
+                    exposed=True,
+                    created_at=now,
+                )
+            )
 
             proposal = ScheduleProposal(
                 id=uuid4(),
@@ -172,6 +186,12 @@ async def test_extract_evaluation_records_strips_pii() -> None:
             assert rec["tasks"][0]["original_estimate_minutes"] == 120
             assert rec["tasks"][0]["adaptive_estimate_minutes"] == 150
             assert rec["tasks"][0]["planned_duration_minutes"] == 150
+            assert len(rec["evaluation_records"]) == 1
+            assert rec["evaluation_records"][0]["actual_minutes"] == 65
+            assert rec["evaluation_records"][0]["eligible"] is True
+            assert rec["evaluation_metrics"]["sample_count"] == 1
+            assert rec["evaluation_metrics"]["original_mae"] == 55.0
+            assert rec["evaluation_metrics"]["adaptive_mae"] == 85.0
 
             assert len(rec["sessions"]) == 2
             # First session is associated with proposal and is not yet accepted
