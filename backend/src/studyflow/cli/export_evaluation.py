@@ -100,9 +100,11 @@ async def extract_evaluation_records(
         for p in proposal_rows:
             proposal_code = pseudonymize_id(p.id, prefix="PROP")
             proposal_code_map[p.id] = proposal_code
-            alloc_stmt = select(ProposalTaskAllocation).where(
-                ProposalTaskAllocation.proposal_id == p.id
-            ).order_by(ProposalTaskAllocation.deadline_at, ProposalTaskAllocation.task_id)
+            alloc_stmt = (
+                select(ProposalTaskAllocation)
+                .where(ProposalTaskAllocation.proposal_id == p.id)
+                .order_by(ProposalTaskAllocation.deadline_at, ProposalTaskAllocation.task_id)
+            )
             alloc_rows = (await session.execute(alloc_stmt)).scalars().all()
             allocations = [
                 {

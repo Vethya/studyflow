@@ -89,8 +89,7 @@ async def test_evaluation_seed_is_repeatable_and_keeps_pending_actuals_unset() -
             if task.id == stable_id("task", 1, number)
         }
         predictions_by_number = {
-            tasks_by_number[prediction.task_id]: prediction
-            for prediction in seeded_predictions
+            tasks_by_number[prediction.task_id]: prediction for prediction in seeded_predictions
         }
 
         assert set(predictions_by_number) == set(
@@ -102,8 +101,7 @@ async def test_evaluation_seed_is_repeatable_and_keeps_pending_actuals_unset() -
         )
         assert predictions_by_number[TASKS_PER_PARTICIPANT].exposed
         assert all(
-            task.adaptive_estimate_minutes is None
-            and task.planned_source == "original"
+            task.adaptive_estimate_minutes is None and task.planned_source == "original"
             for task in seeded_tasks
             if tasks_by_number[task.id] <= COLD_START_TASK_COUNT + CALIBRATION_TASK_COUNT
         )
@@ -114,12 +112,8 @@ async def test_evaluation_seed_is_repeatable_and_keeps_pending_actuals_unset() -
         assert adaptive_task.planned_source == "adaptive"
 
         async with database.transaction() as session:
-            windows = (
-                (await session.execute(select(AvailabilityWindow))).scalars().all()
-            )
-            unavailable_periods = (
-                (await session.execute(select(UnavailablePeriod))).scalars().all()
-            )
+            windows = (await session.execute(select(AvailabilityWindow))).scalars().all()
+            unavailable_periods = (await session.execute(select(UnavailablePeriod))).scalars().all()
             study_sessions = (
                 (await session.execute(select(StudySession).order_by(StudySession.starts_at)))
                 .scalars()
@@ -137,12 +131,14 @@ async def test_evaluation_seed_is_repeatable_and_keeps_pending_actuals_unset() -
         assert study_sessions[0].starts_at.replace(tzinfo=BASE_TIME.tzinfo) == BASE_TIME
         for study_session in study_sessions:
             assert study_session.starts_at.weekday() < 5
-            assert study_session.starts_at.time() >= windows_by_account[
-                study_session.account_id
-            ][0].local_start_time
-            assert study_session.ends_at.time() <= windows_by_account[
-                study_session.account_id
-            ][0].local_end_time
+            assert (
+                study_session.starts_at.time()
+                >= windows_by_account[study_session.account_id][0].local_start_time
+            )
+            assert (
+                study_session.ends_at.time()
+                <= windows_by_account[study_session.account_id][0].local_end_time
+            )
             assert all(
                 not (
                     study_session.starts_at < period.ends_at

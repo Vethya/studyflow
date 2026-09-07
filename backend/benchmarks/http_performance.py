@@ -238,8 +238,7 @@ async def run_http_benchmark(
                     elif expected_status is not None and response_status(res) != expected_status:
                         endpoint_failed = True
                         last_error = (
-                            f"expected status {expected_status!r}, "
-                            f"got {response_status(res)!r}"
+                            f"expected status {expected_status!r}, got {response_status(res)!r}"
                         )
 
                 p95 = percentile_95(samples)

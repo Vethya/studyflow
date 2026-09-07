@@ -43,9 +43,7 @@ def generate_cohort_evaluations(
     for idx, task_id in enumerate(sorted(durations_by_task)):
         original_minutes = durations_by_task[task_id]
         adaptive_minutes = max(1, round(original_minutes * factor))
-        actual_minutes = original_minutes + round(
-            (adaptive_minutes - original_minutes) * 0.55
-        )
+        actual_minutes = original_minutes + round((adaptive_minutes - original_minutes) * 0.55)
         evaluations.append(
             PredictionEvaluation(
                 task_id=uuid5(NAMESPACE_URL, f"studyflow/evaluation/{task_id}"),

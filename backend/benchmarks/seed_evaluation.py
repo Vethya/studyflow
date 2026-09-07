@@ -179,8 +179,10 @@ async def seed_evaluation_dataset(session: AsyncSession) -> list[UUID]:
             task_id = stable_id("task", participant_number, task_number)
             original_minutes = 60
             adaptive_minutes = 80
-            calibration = COLD_START_TASK_COUNT < task_number <= (
-                COLD_START_TASK_COUNT + CALIBRATION_TASK_COUNT
+            calibration = (
+                COLD_START_TASK_COUNT
+                < task_number
+                <= (COLD_START_TASK_COUNT + CALIBRATION_TASK_COUNT)
             )
             adaptive_available = task_number == TASKS_PER_PARTICIPANT
             has_prediction = calibration or adaptive_available
