@@ -19,7 +19,11 @@ from benchmarks.seed_nfr02 import (
 from studyflow.database import Base, Database
 from studyflow.database.models.authentication import StudentAccount
 from studyflow.database.models.availability import AvailabilityWindow, UnavailablePeriod
-from studyflow.database.models.scheduling import ProposalTaskAllocation, StudySession
+from studyflow.database.models.scheduling import (
+    ProposalTaskAllocation,
+    ScheduleProposal,
+    StudySession,
+)
 from studyflow.database.models.tasks import AcademicTask
 
 
@@ -97,7 +101,18 @@ async def test_seed_nfr02_dataset_creates_complete_spec_workload() -> None:
                 .all()
             )
             assert len(sessions) == 250
-            assert all(s.proposal_id is None for s in sessions)
+
+            proposals = (
+                (
+                    await session.execute(
+                        select(ScheduleProposal).where(ScheduleProposal.account_id == account_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(proposals) == 1
+            assert all(s.proposal_id == proposals[0].id for s in sessions)
 
             # Verify no sessions overlap with any unavailable periods and respect working hours
             for s in sessions:

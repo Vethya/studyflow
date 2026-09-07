@@ -157,7 +157,7 @@ async def seed_nfr02_dataset(session: AsyncSession) -> UUID:
         tasks.append(task)
     await session.flush()
 
-    # 6. Create Accepted Schedule Proposal with 250 Study Sessions
+    # 6. Create a current Schedule Proposal with 250 proposed Study Sessions
     proposal = ScheduleProposal(
         id=uuid4(),
         account_id=account_id,
@@ -230,7 +230,7 @@ async def seed_nfr02_dataset(session: AsyncSession) -> UUID:
                 id=uuid4(),
                 account_id=account_id,
                 task_id=task.id,
-                proposal_id=None,
+                proposal_id=proposal.id,
                 starts_at=current_schedule_time,
                 ends_at=session_end,
                 planned_duration_minutes=60,
