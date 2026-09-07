@@ -365,6 +365,19 @@ async def test_cross_user_isolation_matrix_covers_all_student_resources() -> Non
                     headers=_headers("session-b"),
                 )
             ).status_code == 404
+            assert (
+                await client_b.post(
+                    f"/api/v1/tasks/{TASK_A_MUTABLE}/start",
+                    headers=_headers("session-b"),
+                )
+            ).status_code == 404
+            assert (
+                await client_b.post(
+                    f"/api/v1/tasks/{TASK_A_MUTABLE}/finish-early",
+                    headers=_headers("session-b"),
+                    json={"confirmed": True},
+                )
+            ).status_code == 404
 
             period_body = {
                 "starts_at": (now + timedelta(days=4)).isoformat(),
@@ -402,6 +415,9 @@ async def test_cross_user_isolation_matrix_covers_all_student_resources() -> Non
                 )
             ).status_code == 404
             assert (
+                await client_b.get(f"/api/v1/study-sessions/{SESSION_A_ACCEPTED}")
+            ).status_code == 404
+            assert (
                 await client_b.post(
                     f"/api/v1/schedule-proposals/{PROPOSAL_A}/accept",
                     headers=_headers("session-b"),
@@ -413,6 +429,22 @@ async def test_cross_user_isolation_matrix_covers_all_student_resources() -> Non
                     headers=_headers("session-b"),
                 )
             ).status_code == 404
+            assert (
+                await client_b.post(
+                    "/api/v1/schedule-proposals/simulate",
+                    headers=_headers("session-b"),
+                    json={
+                        "scenario": {
+                            "deadline_overrides": [
+                                {
+                                    "task_id": str(TASK_A_MUTABLE),
+                                    "deadline_at": (now + timedelta(days=6)).isoformat(),
+                                }
+                            ]
+                        }
+                    },
+                )
+            ).status_code == 422
 
             # The same ownership guarantees hold in the opposite direction.
             assert (await client_a.get(f"/api/v1/tasks/{TASK_B_MUTABLE}")).status_code == 404
@@ -421,6 +453,19 @@ async def test_cross_user_isolation_matrix_covers_all_student_resources() -> Non
                     f"/api/v1/tasks/{TASK_B_MUTABLE}",
                     headers=_headers("session-a"),
                     json=task_body,
+                )
+            ).status_code == 404
+            assert (
+                await client_a.post(
+                    f"/api/v1/tasks/{TASK_B_MUTABLE}/start",
+                    headers=_headers("session-a"),
+                )
+            ).status_code == 404
+            assert (
+                await client_a.post(
+                    f"/api/v1/tasks/{TASK_B_MUTABLE}/finish-early",
+                    headers=_headers("session-a"),
+                    json={"confirmed": True},
                 )
             ).status_code == 404
             assert (
@@ -447,11 +492,30 @@ async def test_cross_user_isolation_matrix_covers_all_student_resources() -> Non
                 )
             ).status_code == 404
             assert (
+                await client_a.get(f"/api/v1/study-sessions/{SESSION_B_ACCEPTED}")
+            ).status_code == 404
+            assert (
                 await client_a.post(
                     f"/api/v1/schedule-proposals/{PROPOSAL_B}/accept",
                     headers=_headers("session-a"),
                 )
             ).status_code == 404
+            assert (
+                await client_a.post(
+                    "/api/v1/schedule-proposals/simulate",
+                    headers=_headers("session-a"),
+                    json={
+                        "scenario": {
+                            "deadline_overrides": [
+                                {
+                                    "task_id": str(TASK_B_MUTABLE),
+                                    "deadline_at": (now + timedelta(days=6)).isoformat(),
+                                }
+                            ]
+                        }
+                    },
+                )
+            ).status_code == 422
 
             # A remains unchanged after every attempted B mutation.
             tasks_a = await client_a.get("/api/v1/tasks")
