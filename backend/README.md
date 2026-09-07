@@ -98,3 +98,14 @@ uv run alembic upgrade head --sql
 
 The first domain schema PR will add the first revision. CI commands will be added by its dedicated
 infrastructure PR.
+
+## Evaluation and performance benchmarks
+
+See `docs/evaluation.md` for full instructions.
+
+- **Seed NFR-02 dataset:** `uv run python benchmarks/seed_nfr02.py`
+- **Scheduler performance gate:** `uv run python benchmarks/scheduler_performance.py`
+- **HTTP performance benchmark:** `uv run python benchmarks/http_performance.py`
+- **Static vs adaptive comparison (§24.6):** `uv run python benchmarks/compare_static_adaptive.py`
+- **Pseudonymized evaluation export (§24.4):** `uv run python -m studyflow.cli.export_evaluation --output eval.json`
+
