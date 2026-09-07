@@ -18,9 +18,12 @@ from studyflow.scheduling._performance import (
 )
 from studyflow.scheduling.contracts import (
     FeasibilityProblem,
+    KernelStatus,
     MinuteWindow,
+    PlanningDay,
     SessionDemand,
 )
+from studyflow.scheduling.overload import solve_with_overload
 from studyflow.scheduling.splitting import split_task_sessions
 
 
@@ -104,9 +107,24 @@ def create_adaptive_problem_from_static(
 
 def create_missed_session_recovery_problem(
     base_problem: FeasibilityProblem,
-    planning_start_minute: int = 1440,
 ) -> FeasibilityProblem:
-    """Simulate missed session recovery by replanning remaining workload (§24.6)."""
+    """Build a recovery problem after a deterministic missed baseline session (§24.6)."""
+    baseline = solve_with_overload(base_problem)
+    if baseline.status is not KernelStatus.FEASIBLE or not baseline.sessions:
+        raise ValueError("Missed-session recovery requires a feasible baseline schedule")
+
+    scheduled_sessions = sorted(
+        baseline.sessions,
+        key=lambda session: (session.start_minute, session.session_id),
+    )
+    missed_session = scheduled_sessions[len(scheduled_sessions) // 2]
+    recovery_start = missed_session.end_minute + base_problem.minimum_break_minutes
+    completed_session_ids = {
+        session.session_id
+        for session in scheduled_sessions
+        if session.end_minute <= missed_session.start_minute
+    }
+
     recovery_sessions = [
         SessionDemand(
             session_id=s.session_id,
@@ -114,22 +132,34 @@ def create_missed_session_recovery_problem(
             duration_minutes=s.duration_minutes,
             deadline_minute=s.deadline_minute,
             allowed_windows=tuple(
-                MinuteWindow(start=max(w.start, planning_start_minute), end=w.end)
+                MinuteWindow(
+                    start=max(w.start, recovery_start),
+                    end=min(w.end, s.deadline_minute),
+                )
                 for w in s.allowed_windows
-                if w.end > planning_start_minute
+                if max(w.start, recovery_start) < min(w.end, s.deadline_minute)
             ),
             priority=s.priority,
         )
         for s in base_problem.sessions
+        if s.session_id not in completed_session_ids
     ]
+
+    recovery_days = tuple(
+        PlanningDay(
+            day.day_index,
+            max(day.start_minute, recovery_start),
+            day.end_minute,
+        )
+        for day in base_problem.planning_days
+        if max(day.start_minute, recovery_start) < day.end_minute
+    )
     return FeasibilityProblem(
         sessions=tuple(recovery_sessions),
-        planning_start_minute=planning_start_minute,
+        planning_start_minute=recovery_start,
         minimum_break_minutes=base_problem.minimum_break_minutes,
         max_solve_seconds=base_problem.max_solve_seconds,
-        planning_days=tuple(
-            d for d in base_problem.planning_days if d.end_minute > planning_start_minute
-        ),
+        planning_days=recovery_days,
     )
 
 

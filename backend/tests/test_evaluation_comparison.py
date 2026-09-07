@@ -273,14 +273,26 @@ def test_create_missed_session_recovery_problem() -> None:
                 allowed_windows=(MinuteWindow(0, 1440), MinuteWindow(1440, 2880)),
                 priority=TaskPriority.MEDIUM,
             ),
+            SessionDemand(
+                session_id="t1-session-1",
+                task_id="t1",
+                duration_minutes=60,
+                deadline_minute=2880,
+                allowed_windows=(MinuteWindow(0, 1440), MinuteWindow(1440, 2880)),
+                priority=TaskPriority.MEDIUM,
+            ),
         ),
         planning_start_minute=0,
         minimum_break_minutes=10,
     )
-    recovery = create_missed_session_recovery_problem(problem, planning_start_minute=1440)
-    assert recovery.planning_start_minute == 1440
-    assert len(recovery.sessions[0].allowed_windows) == 1
-    assert recovery.sessions[0].allowed_windows[0].start == 1440
+    recovery = create_missed_session_recovery_problem(problem)
+    assert recovery.planning_start_minute > 0
+    assert [session.session_id for session in recovery.sessions] == ["t1-session-1"]
+    assert len(recovery.sessions[0].allowed_windows) == 2
+    assert all(
+        window.start >= recovery.planning_start_minute
+        for window in recovery.sessions[0].allowed_windows
+    )
 
 
 def test_create_adaptive_problem_resplits_with_preferred_length() -> None:
