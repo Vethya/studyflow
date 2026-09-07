@@ -174,10 +174,13 @@ Run the local restore verification from the repository root:
 
 ```bash
 docker compose up -d postgres
+docker compose exec -T postgres createdb -U studyflow --if-not-exists studyflow_restore
 ./scripts/restore-backup.sh
 ```
 
-The default local target is `studyflow_restore`. The script verifies the encrypted archive hash,
+The second command creates the separate restore database when it is missing. It uses the default
+Compose database user; replace `studyflow` if `POSTGRES_USER` is overridden. The default local target
+is `studyflow_restore`. The script verifies the encrypted archive hash,
 decrypts it, restores it, checks the migration version and expected tables, records important row
 counts, and writes a dated report under `docs/evidence/`.
 
@@ -204,6 +207,8 @@ On Windows, copy `scripts/restore-config.ps1.example` to `scripts/restore-config
 start Docker Desktop's PostgreSQL service, and run:
 
 ```powershell
+docker compose up -d postgres
+docker compose exec -T postgres createdb -U studyflow --if-not-exists studyflow_restore
 .\scripts\restore-backup.ps1
 ```
 
