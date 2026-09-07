@@ -260,6 +260,33 @@ def test_run_comparisons_includes_feasible_overloaded_and_recovery() -> None:
     assert 15.0 <= est_metrics["mae_reduction_pct"] <= 20.0
 
 
+def test_cohort_evaluations_use_the_scheduled_task_cohort() -> None:
+    import sys
+    from pathlib import Path
+    from uuid import NAMESPACE_URL, uuid5
+
+    benchmarks_dir = str(Path(__file__).parents[1])
+    if benchmarks_dir not in sys.path:
+        sys.path.insert(0, benchmarks_dir)
+
+    from benchmarks.compare_static_adaptive import generate_cohort_evaluations
+    from studyflow.scheduling._performance import (
+        PerformanceScenario,
+        representative_performance_problem,
+    )
+
+    problem = representative_performance_problem(PerformanceScenario.FEASIBLE)
+    evaluations = generate_cohort_evaluations(problem)
+    task_ids = {demand.task_id for demand in problem.sessions}
+
+    assert len(evaluations) == len(task_ids)
+    assert {evaluation.task_id for evaluation in evaluations} == {
+        uuid5(NAMESPACE_URL, f"studyflow/evaluation/{task_id}") for task_id in task_ids
+    }
+    assert {evaluation.original_minutes for evaluation in evaluations} == {300}
+    assert {evaluation.adaptive_minutes for evaluation in evaluations} == {360}
+
+
 def test_create_missed_session_recovery_problem() -> None:
     from benchmarks.compare_static_adaptive import create_missed_session_recovery_problem
 
