@@ -203,10 +203,21 @@ try {
     $metadataGitCommit = Get-MetadataValue $metadataFile "git_commit"
     $metadataGitClean = Get-MetadataValue $metadataFile "git_worktree_clean"
     $metadataMigration = Get-MetadataValue $metadataFile "migration_version"
+    $metadataArchiveFilename = Get-MetadataValue $metadataFile "archive_filename"
+    $metadataArchiveSha256 = (Get-MetadataValue $metadataFile "archive_sha256").ToLowerInvariant()
     $archiveFilename = Split-Path -Leaf $encryptedDump
     $archiveBytes = (Get-Item -LiteralPath $encryptedDump).Length
-    $hashLine = Get-Content -LiteralPath $hashFile | Select-Object -First 1
-    $archiveSha256 = ($hashLine -split '\s+')[0].ToLowerInvariant()
+    $hashLineValue = Get-Content -LiteralPath $hashFile | Select-Object -First 1
+    if ($null -eq $hashLineValue) { Fail "checksum file is empty" }
+    $hashParts = $hashLineValue.ToString().Trim() -split '\s+', 2
+    if ($hashParts.Count -ne 2) { Fail "checksum file is malformed" }
+    $archiveSha256 = $hashParts[0].ToLowerInvariant()
+    $hashFilename = $hashParts[1].Trim()
+    if ($metadataArchiveFilename -eq "not recorded") { Fail "backup metadata does not record the archive filename" }
+    if ($metadataArchiveSha256 -eq "not recorded") { Fail "backup metadata does not record the archive checksum" }
+    if ($metadataArchiveFilename -ne $archiveFilename) { Fail "backup metadata does not match the selected archive" }
+    if ($hashFilename -ne $archiveFilename) { Fail "checksum file does not match the selected archive" }
+    if ($metadataArchiveSha256 -ne $archiveSha256) { Fail "backup metadata does not match the checksum file" }
     $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $encryptedDump).Hash.ToLowerInvariant()
     if ($archiveSha256 -ne $actualHash) { $hashResult = "fail"; Fail "encrypted archive checksum does not match" }
     $hashResult = "pass"
