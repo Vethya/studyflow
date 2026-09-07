@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 from benchmarks.http_performance import (
     percentile_95,
     run_http_benchmark,
+    validate_nfr02_dataset,
 )
 from benchmarks.seed_nfr02 import (
     BENCHMARK_EMAIL,
@@ -32,6 +33,16 @@ def test_percentile_95_calculation() -> None:
     samples = [i * 0.1 for i in range(1, 21)]
     p95 = percentile_95(samples)
     assert abs(p95 - 1.9) < 1e-5
+
+
+def test_validate_nfr02_dataset_rejects_incomplete_profiles() -> None:
+    error = validate_nfr02_dataset(
+        tasks=[{"deadline_at": "2026-01-01T00:00:00+00:00"}],
+        sessions=[],
+        availability_windows=[],
+        unavailable_periods=[],
+    )
+    assert error == "Expected 50 tasks, found 1."
 
 
 @pytest.mark.anyio
@@ -195,7 +206,26 @@ async def test_run_http_benchmark_rejects_wrong_schedule_classification(
         if request.url.path == "/api/v1/auth/login":
             return httpx.Response(200, json={"csrf_token": "token"})
         if request.url.path == "/api/v1/tasks":
-            return httpx.Response(200, json=[{"id": "task-1"}])
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "id": f"task-{index}",
+                        "deadline_at": (
+                            "2026-01-01T00:00:00+00:00"
+                            if index < 49
+                            else "2026-05-01T00:00:00+00:00"
+                        ),
+                    }
+                    for index in range(50)
+                ],
+            )
+        if request.url.path == "/api/v1/study-sessions":
+            return httpx.Response(200, json=[{} for _ in range(250)])
+        if request.url.path == "/api/v1/availability/windows":
+            return httpx.Response(200, json=[{} for _ in range(5)])
+        if request.url.path == "/api/v1/availability/unavailable-periods":
+            return httpx.Response(200, json=[{} for _ in range(50)])
         if request.url.path == "/api/v1/schedule-proposals":
             return httpx.Response(201, json={"status": "feasible"})
         return httpx.Response(200, json={})
