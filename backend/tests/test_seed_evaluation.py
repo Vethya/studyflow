@@ -2,6 +2,7 @@
 
 import sys
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from sqlalchemy import func, select
@@ -42,7 +43,9 @@ async def test_evaluation_seed_is_repeatable_and_keeps_pending_actuals_unset() -
             predictions = await session.scalar(
                 select(func.count()).select_from(AdaptiveEstimationPrediction)
             )
-            outcomes = await session.scalar(select(func.count()).select_from(StudySessionOutcome))
+            outcome_count = await session.scalar(
+                select(func.count()).select_from(StudySessionOutcome)
+            )
             pending = await session.scalar(
                 select(func.count())
                 .select_from(AcademicTask)
@@ -52,7 +55,7 @@ async def test_evaluation_seed_is_repeatable_and_keeps_pending_actuals_unset() -
         assert accounts == 5
         assert tasks == 5 * TASKS_PER_PARTICIPANT
         assert predictions == 5 * (CALIBRATION_TASK_COUNT + 1)
-        assert outcomes == 5 * (TASKS_PER_PARTICIPANT - 1)
+        assert outcome_count == 5 * (TASKS_PER_PARTICIPANT - 1)
         assert pending == 5
 
         async with database.transaction() as session:
@@ -124,10 +127,10 @@ async def test_evaluation_seed_is_repeatable_and_keeps_pending_actuals_unset() -
             )
             outcomes = (await session.execute(select(StudySessionOutcome))).scalars().all()
 
-        windows_by_account = {}
+        windows_by_account: dict[UUID, list[AvailabilityWindow]] = {}
         for window in windows:
             windows_by_account.setdefault(window.account_id, []).append(window)
-        unavailable_by_account = {}
+        unavailable_by_account: dict[UUID, list[UnavailablePeriod]] = {}
         for period in unavailable_periods:
             unavailable_by_account.setdefault(period.account_id, []).append(period)
 
