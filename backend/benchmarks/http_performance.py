@@ -153,14 +153,14 @@ async def run_http_benchmark(
                 median = sorted(samples)[len(samples) // 2]
                 minimum = min(samples)
                 maximum = max(samples)
-                passed = p95 <= threshold and not endpoint_failed
+                passed = p95 < threshold and not endpoint_failed
 
                 if not passed:
                     failed = True
                     if endpoint_failed:
                         status_str = f"❌ FAIL (HTTP {last_error_status})"
                     else:
-                        status_str = f"❌ FAIL (P95 > {threshold:.1f}s)"
+                        status_str = f"❌ FAIL (P95 >= {threshold:.1f}s)"
                 else:
                     status_str = "✅ PASS"
 
