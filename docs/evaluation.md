@@ -29,7 +29,8 @@ To run tests against an isolated evaluation deployment:
      --env-file .env.evaluation.example down
    ```
 
-The evaluation database is exposed to host-side seed/export commands at port `55432`:
+The evaluation database is exposed to host-side seed/export commands at port `55432`. Evaluation
+Mailpit is exposed at SMTP port `11025` and web UI port `18025`:
 
 ```bash
 cd backend
@@ -41,7 +42,8 @@ For a host-side application run instead of Compose, start the API on port `8000`
 
 ```bash
 cd backend
-STUDYFLOW_SMTP_HOST=localhost uv run uvicorn studyflow.app:app --port 8000
+STUDYFLOW_SMTP_HOST=localhost STUDYFLOW_SMTP_PORT=11025 \
+  uv run uvicorn studyflow.app:app --port 8000
 ```
 
 ---
