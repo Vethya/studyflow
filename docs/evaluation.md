@@ -37,10 +37,12 @@ uv run python benchmarks/seed_evaluation.py \
   --database-url postgresql+psycopg://studyflow_eval:studyflow_eval@127.0.0.1:55432/studyflow_eval
 ```
 
-For a host-side application run instead of Compose:
-   ```bash
-   uv run uvicorn studyflow.app:app --port 8000
-   ```
+For a host-side application run instead of Compose, start the API on port `8000`:
+
+```bash
+cd backend
+uv run uvicorn studyflow.app:app --port 8000
+```
 
 ---
 
@@ -49,8 +51,8 @@ For a host-side application run instead of Compose:
 ### 2.0 Seed the deterministic evaluation dataset (§24.1)
 
 After applying migrations, seed the dedicated evaluation database with five pseudonymous
-participants, availability inputs, tasks, schedules, outcomes, five completed adaptive
-predictions per participant, and one pending prediction per participant:
+participants, availability inputs, tasks, schedules, outcomes, five completed hidden calibration
+predictions per participant, and one pending exposed adaptive prediction per participant:
 
 ```bash
 cd backend
@@ -82,14 +84,23 @@ cd backend
 uv run python benchmarks/scheduler_performance.py --runs 20 --threshold-seconds 5.0
 ```
 
-### 2.3 Full-Stack HTTP & Page Usability Benchmark (NFR-02-AC01 & AC03)
+### 2.3 Full-Stack HTTP API Benchmark (NFR-02-AC03)
 
-To measure 20 warm runs across core endpoints (`/tasks`, `/availability/windows`, `/availability/unavailable-periods`, `/study-sessions`, `/schedule-proposals/current`, `/progress`, and `POST /schedule-proposals` for feasible and overloaded scenarios) to ensure query routes meet $p95 < 3.0\text{s}$ and generation meets $p95 < 5.0\text{s}$:
+The benchmark measures 20 warm API runs across core endpoints (`/tasks`, `/availability/windows`,
+`/availability/unavailable-periods`, `/study-sessions`, `/schedule-proposals/current`,
+`/progress`, and `POST /schedule-proposals` for feasible and overloaded scenarios). Query routes
+must meet $p95 < 3.0\text{s}$ and generation must meet $p95 < 5.0\text{s}$.
+
+For the Compose evaluation stack, use port `18000`:
 
 ```bash
 cd backend
-uv run python benchmarks/http_performance.py --base-url http://127.0.0.1:8000 --runs 20
+uv run python benchmarks/http_performance.py --base-url http://127.0.0.1:18000 --runs 20
 ```
+
+For the host-side application run described in section 1, use port `8000` instead. This script
+does not measure browser navigation or frontend main-content readiness. The NFR-02 page-usability
+measurement remains a follow-up task.
 
 ---
 
