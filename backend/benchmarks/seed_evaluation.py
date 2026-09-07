@@ -22,7 +22,9 @@ from studyflow.database.models.tasks import AcademicTask, AdaptiveEstimationPred
 from studyflow.settings import Settings
 
 PARTICIPANT_COUNT = 5
-TASKS_PER_PARTICIPANT = 6
+COLD_START_TASK_COUNT = 5
+CALIBRATION_TASK_COUNT = 5
+TASKS_PER_PARTICIPANT = COLD_START_TASK_COUNT + CALIBRATION_TASK_COUNT + 1
 EVALUATION_NAMESPACE = "https://studyflow.local/evaluation/2026-09"
 BASE_TIME = datetime(2026, 9, 1, 9, 0, tzinfo=UTC)
 
@@ -78,7 +80,7 @@ async def clear_existing(session: AsyncSession) -> None:
 
 
 async def seed_evaluation_dataset(session: AsyncSession) -> list[UUID]:
-    """Create five participants, six predictions each, and completed/pending outcomes."""
+    """Create the deterministic cold-start, calibration, and adaptive dataset."""
     await clear_existing(session)
     password_hash = PasswordHasher().hash("EvaluationPassword123!")
     account_ids: list[UUID] = []
@@ -142,8 +144,14 @@ async def seed_evaluation_dataset(session: AsyncSession) -> list[UUID]:
             task_id = stable_id("task", participant_number, task_number)
             original_minutes = 60
             adaptive_minutes = 80
-            completed = task_number <= 5
+            calibration = COLD_START_TASK_COUNT < task_number <= (
+                COLD_START_TASK_COUNT + CALIBRATION_TASK_COUNT
+            )
+            adaptive_available = task_number == TASKS_PER_PARTICIPANT
+            has_prediction = calibration or adaptive_available
+            completed = task_number < TASKS_PER_PARTICIPANT
             completed_at = BASE_TIME + timedelta(days=task_number, hours=1) if completed else None
+            planned_minutes = adaptive_minutes if adaptive_available else original_minutes
             task = AcademicTask(
                 id=task_id,
                 account_id=account_id,
@@ -154,9 +162,9 @@ async def seed_evaluation_dataset(session: AsyncSession) -> list[UUID]:
                 notes=None,
                 deadline_at=BASE_TIME + timedelta(days=14),
                 original_estimate_minutes=original_minutes,
-                adaptive_estimate_minutes=adaptive_minutes,
-                planned_source="adaptive",
-                planned_duration_minutes=adaptive_minutes,
+                adaptive_estimate_minutes=adaptive_minutes if adaptive_available else None,
+                planned_source="adaptive" if adaptive_available else "original",
+                planned_duration_minutes=planned_minutes,
                 estimate_frozen_at=BASE_TIME if completed else None,
                 completed_at=completed_at,
                 finished_early_at=None,
@@ -164,27 +172,28 @@ async def seed_evaluation_dataset(session: AsyncSession) -> list[UUID]:
                 updated_at=BASE_TIME,
             )
             session.add(task)
-            session.add(
-                AdaptiveEstimationPrediction(
-                    task_id=task_id,
-                    account_id=account_id,
-                    category=task.category,
-                    original_minutes=original_minutes,
-                    predicted_minutes=adaptive_minutes,
-                    correction_factor=Decimal("1.33"),
-                    history_scope="category",
-                    history_count=3,
-                    exposed=True,
-                    created_at=BASE_TIME,
+            if has_prediction:
+                session.add(
+                    AdaptiveEstimationPrediction(
+                        task_id=task_id,
+                        account_id=account_id,
+                        category=task.category,
+                        original_minutes=original_minutes,
+                        predicted_minutes=adaptive_minutes,
+                        correction_factor=Decimal("1.33"),
+                        history_scope="overall",
+                        history_count=COLD_START_TASK_COUNT,
+                        exposed=adaptive_available,
+                        created_at=BASE_TIME + timedelta(days=task_number),
+                    )
                 )
-            )
             session.add(
                 ProposalTaskAllocation(
                     proposal_id=proposal_id,
                     task_id=task_id,
                     deadline_at=task.deadline_at,
-                    required_minutes=adaptive_minutes,
-                    scheduled_minutes=adaptive_minutes,
+                    required_minutes=planned_minutes,
+                    scheduled_minutes=planned_minutes,
                     unscheduled_minutes=0,
                     raw_calendar_capacity_minutes=480,
                     available_minutes_before_deadline=480,
@@ -200,8 +209,8 @@ async def seed_evaluation_dataset(session: AsyncSession) -> list[UUID]:
                 task_id=task_id,
                 proposal_id=None,
                 starts_at=starts_at,
-                ends_at=starts_at + timedelta(minutes=adaptive_minutes),
-                planned_duration_minutes=adaptive_minutes,
+                ends_at=starts_at + timedelta(minutes=planned_minutes),
+                planned_duration_minutes=planned_minutes,
             )
             session.add(study_session)
             if completed:
@@ -209,9 +218,9 @@ async def seed_evaluation_dataset(session: AsyncSession) -> list[UUID]:
                     StudySessionOutcome(
                         session_id=study_session_id,
                         kind="completed",
-                        actual_minutes=70,
+                        actual_minutes=80,
                         remaining_minutes=0,
-                        recorded_at=starts_at + timedelta(minutes=adaptive_minutes),
+                        recorded_at=starts_at + timedelta(minutes=planned_minutes),
                         rescheduled_at=None,
                     )
                 )

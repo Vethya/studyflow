@@ -8,7 +8,13 @@ from sqlalchemy import func, select
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
-from benchmarks.seed_evaluation import seed_evaluation_dataset
+from benchmarks.seed_evaluation import (
+    CALIBRATION_TASK_COUNT,
+    COLD_START_TASK_COUNT,
+    TASKS_PER_PARTICIPANT,
+    seed_evaluation_dataset,
+    stable_id,
+)
 from studyflow.database import Base, Database
 from studyflow.database.models.authentication import StudentAccount
 from studyflow.database.models.scheduling import StudySessionOutcome
@@ -42,9 +48,64 @@ async def test_evaluation_seed_is_repeatable_and_keeps_pending_actuals_unset() -
             )
 
         assert accounts == 5
-        assert tasks == 30
-        assert predictions == 30
-        assert outcomes == 25
+        assert tasks == 5 * TASKS_PER_PARTICIPANT
+        assert predictions == 5 * (CALIBRATION_TASK_COUNT + 1)
+        assert outcomes == 5 * (TASKS_PER_PARTICIPANT - 1)
         assert pending == 5
+
+        async with database.transaction() as session:
+            seeded_tasks = (
+                (
+                    await session.execute(
+                        select(AcademicTask).where(
+                            AcademicTask.account_id == stable_id("account", 1)
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            seeded_predictions = (
+                (
+                    await session.execute(
+                        select(AdaptiveEstimationPrediction).where(
+                            AdaptiveEstimationPrediction.account_id == stable_id("account", 1)
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+        tasks_by_number = {
+            task.id: number
+            for number in range(1, TASKS_PER_PARTICIPANT + 1)
+            for task in seeded_tasks
+            if task.id == stable_id("task", 1, number)
+        }
+        predictions_by_number = {
+            tasks_by_number[prediction.task_id]: prediction
+            for prediction in seeded_predictions
+        }
+
+        assert set(predictions_by_number) == set(
+            range(COLD_START_TASK_COUNT + 1, TASKS_PER_PARTICIPANT + 1)
+        )
+        assert all(
+            not predictions_by_number[number].exposed
+            for number in range(COLD_START_TASK_COUNT + 1, TASKS_PER_PARTICIPANT)
+        )
+        assert predictions_by_number[TASKS_PER_PARTICIPANT].exposed
+        assert all(
+            task.adaptive_estimate_minutes is None
+            and task.planned_source == "original"
+            for task in seeded_tasks
+            if tasks_by_number[task.id] <= COLD_START_TASK_COUNT + CALIBRATION_TASK_COUNT
+        )
+        adaptive_task = next(
+            task for task in seeded_tasks if tasks_by_number[task.id] == TASKS_PER_PARTICIPANT
+        )
+        assert adaptive_task.adaptive_estimate_minutes == 80
+        assert adaptive_task.planned_source == "adaptive"
     finally:
         await database.stop()
