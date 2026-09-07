@@ -188,7 +188,9 @@ async def seed_nfr02_dataset(session: AsyncSession) -> UUID:
             scheduled_minutes=300,
             unscheduled_minutes=0,
             raw_calendar_capacity_minutes=capacity,
-            available_minutes_before_deadline=capacity,
+            # This field reports the task's allocation. Raw calendar capacity is
+            # kept separately above because several tasks share the same calendar.
+            available_minutes_before_deadline=300,
             shortfall_minutes=0,
         )
         session.add(alloc)

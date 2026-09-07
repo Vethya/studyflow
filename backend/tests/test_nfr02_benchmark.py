@@ -123,7 +123,7 @@ async def test_seed_nfr02_dataset_creates_complete_spec_workload() -> None:
             assert len(allocs) == 50
             for a in allocs:
                 assert a.raw_calendar_capacity_minutes >= 2000
-                assert a.raw_calendar_capacity_minutes == a.available_minutes_before_deadline
+                assert a.available_minutes_before_deadline == a.scheduled_minutes
                 assert a.shortfall_minutes == 0
             assert (
                 allocs[0].raw_calendar_capacity_minutes < allocs[-1].raw_calendar_capacity_minutes
