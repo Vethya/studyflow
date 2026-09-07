@@ -157,5 +157,6 @@ Postman and curl are unaffected by cookie site rules; import
 ## Backups
 
 SPEC §20.8 requires a manual backup before each review/demo plus at least one documented
-restore test. Export a Neon backup (branch snapshot or `pg_dump`) beforehand and record the
-restore test outcome alongside review materials.
+restore test. Use the cross-platform procedure in [`docs/backup-restore.md`](backup-restore.md).
+The repository contains the backup scripts, but never the database dump, database password,
+Google OAuth token, or age private key.
