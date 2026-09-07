@@ -27,6 +27,9 @@ async def run_http_benchmark(
     password: str = BENCHMARK_PASSWORD,
 ) -> int:
     """Measure warm response latencies against live API endpoints with seeded NFR-02 data."""
+    if runs <= 0:
+        print("Error: runs must be greater than zero.", file=sys.stderr)
+        return 1
     try:
         async with httpx.AsyncClient(base_url=base_url, timeout=30.0) as client:
             # 1. Login

@@ -45,6 +45,16 @@ async def test_run_http_benchmark_fails_on_unreachable_endpoint() -> None:
 
 
 @pytest.mark.anyio
+async def test_run_http_benchmark_rejects_nonpositive_run_counts() -> None:
+    for runs in (0, -1):
+        exit_code = await run_http_benchmark(
+            base_url="http://127.0.0.1:59999",
+            runs=runs,
+        )
+        assert exit_code == 1
+
+
+@pytest.mark.anyio
 async def test_seed_nfr02_dataset_creates_complete_spec_workload() -> None:
     database = Database("sqlite+aiosqlite:///:memory:")
     await database.start()
