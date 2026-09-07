@@ -14,6 +14,16 @@ BENCHMARK_EMAIL = "nfr02_benchmark@studyflow.local"
 BENCHMARK_PASSWORD = "BenchmarkPassword123!"
 
 
+def response_status(response: httpx.Response) -> str | None:
+    """Read a schedule proposal status without assuming every response is JSON."""
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    status_value = payload.get("status") if isinstance(payload, dict) else None
+    return status_value if isinstance(status_value, str) else None
+
+
 def percentile_95(samples: list[float]) -> float:
     return sorted(samples)[ceil(len(samples) * 0.95) - 1]
 
@@ -98,6 +108,7 @@ async def run_http_benchmark(
                     "method": "POST",
                     "url": "/api/v1/schedule-proposals",
                     "is_generation": True,
+                    "expected_status": "feasible",
                 },
                 {
                     "name": "Schedule Generation (Overloaded, 50 tasks)",
@@ -105,6 +116,7 @@ async def run_http_benchmark(
                     "url": "/api/v1/schedule-proposals",
                     "json": overload_payload,
                     "is_generation": True,
+                    "expected_status": "overload",
                 },
             ]
 
@@ -135,10 +147,19 @@ async def run_http_benchmark(
                     )
                     failed = True
                     continue
+                expected_status = endpoint.get("expected_status")
+                if expected_status is not None and response_status(warm_res) != expected_status:
+                    print(
+                        f"| {endpoint['name']} | - | - | - | - | {threshold:.1f}s | "
+                        f"❌ FAIL (expected status {expected_status!r}, got "
+                        f"{response_status(warm_res)!r}) |"
+                    )
+                    failed = True
+                    continue
 
                 samples: list[float] = []
                 endpoint_failed = False
-                last_error_status: int | None = None
+                last_error: str | None = None
                 for _ in range(runs):
                     started = perf_counter()
                     if method == "GET":
@@ -150,7 +171,13 @@ async def run_http_benchmark(
 
                     if res.status_code >= 400:
                         endpoint_failed = True
-                        last_error_status = res.status_code
+                        last_error = f"HTTP {res.status_code}"
+                    elif expected_status is not None and response_status(res) != expected_status:
+                        endpoint_failed = True
+                        last_error = (
+                            f"expected status {expected_status!r}, "
+                            f"got {response_status(res)!r}"
+                        )
 
                 p95 = percentile_95(samples)
                 median = sorted(samples)[len(samples) // 2]
@@ -161,7 +188,7 @@ async def run_http_benchmark(
                 if not passed:
                     failed = True
                     if endpoint_failed:
-                        status_str = f"❌ FAIL (HTTP {last_error_status})"
+                        status_str = f"❌ FAIL ({last_error})"
                     else:
                         status_str = f"❌ FAIL (P95 >= {threshold:.1f}s)"
                 else:

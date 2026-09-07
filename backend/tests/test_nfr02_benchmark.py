@@ -183,3 +183,34 @@ async def test_run_http_benchmark_fails_on_server_or_client_error(
         runs=2,
     )
     assert exit_code == 1
+
+
+@pytest.mark.anyio
+async def test_run_http_benchmark_rejects_wrong_schedule_classification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/auth/login":
+            return httpx.Response(200, json={"csrf_token": "token"})
+        if request.url.path == "/api/v1/tasks":
+            return httpx.Response(200, json=[{"id": "task-1"}])
+        if request.url.path == "/api/v1/schedule-proposals":
+            return httpx.Response(201, json={"status": "feasible"})
+        return httpx.Response(200, json={})
+
+    transport = httpx.MockTransport(handler)
+
+    class CustomAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            kwargs["transport"] = transport
+            super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(httpx, "AsyncClient", CustomAsyncClient)
+
+    exit_code = await run_http_benchmark(
+        base_url="http://testserver",
+        runs=1,
+    )
+    assert exit_code == 1
