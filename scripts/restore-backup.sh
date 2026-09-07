@@ -201,7 +201,7 @@ work_dir=""
 write_evidence() {
   local result="$restore_result"
   [[ -n "$result" ]] || result="fail"
-  mkdir -p "$(dirname "$evidence_file")" 2>/dev/null || true
+  mkdir -p "$(dirname "$evidence_file")"
   cat > "$evidence_file" <<EOF
 # StudyFlow backup and restore evidence
 
@@ -254,10 +254,25 @@ EOF
 }
 
 cleanup() {
+  local exit_code=$?
   if [[ -n "$work_dir" && -d "$work_dir" ]]; then
-    rm -rf -- "$work_dir"
+    if ! rm -rf -- "$work_dir"; then
+      if ((exit_code == 0)); then
+        exit_code=1
+        failure_message="could not remove temporary restore files"
+        restore_result="fail"
+      fi
+    fi
   fi
-  write_evidence || true
+  if ! write_evidence; then
+    printf 'restore failed: could not write evidence file: %s\n' "$evidence_file" >&2
+    if ((exit_code == 0)); then
+      exit_code=1
+      failure_message="could not write evidence file: $evidence_file"
+      restore_result="fail"
+    fi
+  fi
+  return "$exit_code"
 }
 trap cleanup EXIT
 
