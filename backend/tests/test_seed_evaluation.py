@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from benchmarks.seed_evaluation import (
+    BASE_TIME,
     CALIBRATION_TASK_COUNT,
     COLD_START_TASK_COUNT,
     TASKS_PER_PARTICIPANT,
@@ -17,7 +18,8 @@ from benchmarks.seed_evaluation import (
 )
 from studyflow.database import Base, Database
 from studyflow.database.models.authentication import StudentAccount
-from studyflow.database.models.scheduling import StudySessionOutcome
+from studyflow.database.models.availability import AvailabilityWindow, UnavailablePeriod
+from studyflow.database.models.scheduling import StudySession, StudySessionOutcome
 from studyflow.database.models.tasks import AcademicTask, AdaptiveEstimationPrediction
 
 
@@ -107,5 +109,42 @@ async def test_evaluation_seed_is_repeatable_and_keeps_pending_actuals_unset() -
         )
         assert adaptive_task.adaptive_estimate_minutes == 80
         assert adaptive_task.planned_source == "adaptive"
+
+        async with database.transaction() as session:
+            windows = (
+                (await session.execute(select(AvailabilityWindow))).scalars().all()
+            )
+            unavailable_periods = (
+                (await session.execute(select(UnavailablePeriod))).scalars().all()
+            )
+            study_sessions = (
+                (await session.execute(select(StudySession).order_by(StudySession.starts_at)))
+                .scalars()
+                .all()
+            )
+
+        windows_by_account = {}
+        for window in windows:
+            windows_by_account.setdefault(window.account_id, []).append(window)
+        unavailable_by_account = {}
+        for period in unavailable_periods:
+            unavailable_by_account.setdefault(period.account_id, []).append(period)
+
+        assert study_sessions[0].starts_at.replace(tzinfo=BASE_TIME.tzinfo) == BASE_TIME
+        for study_session in study_sessions:
+            assert study_session.starts_at.weekday() < 5
+            assert study_session.starts_at.time() >= windows_by_account[
+                study_session.account_id
+            ][0].local_start_time
+            assert study_session.ends_at.time() <= windows_by_account[
+                study_session.account_id
+            ][0].local_end_time
+            assert all(
+                not (
+                    study_session.starts_at < period.ends_at
+                    and study_session.ends_at > period.starts_at
+                )
+                for period in unavailable_by_account[study_session.account_id]
+            )
     finally:
         await database.stop()

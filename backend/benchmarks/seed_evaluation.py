@@ -40,6 +40,38 @@ def account_email(participant_number: int) -> str:
     return f"evaluation-participant-{participant_number:02d}@studyflow.local"
 
 
+def next_available_start(
+    candidate: datetime,
+    duration_minutes: int,
+    unavailable_ranges: list[tuple[datetime, datetime]],
+) -> datetime:
+    """Find the next weekday session slot inside the evaluation availability window."""
+    candidate = candidate.replace(second=0, microsecond=0)
+    while True:
+        if candidate.weekday() >= 5:
+            candidate = (candidate + timedelta(days=1)).replace(hour=9, minute=0)
+            continue
+        if candidate.time() < time(9):
+            candidate = candidate.replace(hour=9, minute=0)
+        session_end = candidate + timedelta(minutes=duration_minutes)
+        window_end = candidate.replace(hour=17, minute=0)
+        if session_end > window_end or session_end.date() != candidate.date():
+            candidate = (candidate + timedelta(days=1)).replace(hour=9, minute=0)
+            continue
+        overlapping_unavailable = next(
+            (
+                (unavailable_start, unavailable_end)
+                for unavailable_start, unavailable_end in unavailable_ranges
+                if candidate < unavailable_end and session_end > unavailable_start
+            ),
+            None,
+        )
+        if overlapping_unavailable is not None:
+            candidate = overlapping_unavailable[1]
+            continue
+        return candidate
+
+
 async def clear_existing(session: AsyncSession) -> None:
     """Remove only rows owned by this deterministic dataset so the seed is repeatable."""
     account_ids = [stable_id("account", number) for number in range(1, PARTICIPANT_COUNT + 1)]
@@ -116,12 +148,13 @@ async def seed_evaluation_dataset(session: AsyncSession) -> list[UUID]:
             )
 
         unavailable_start = BASE_TIME + timedelta(days=participant_number, hours=2)
+        unavailable_end = unavailable_start + timedelta(minutes=30)
         session.add(
             UnavailablePeriod(
                 id=stable_id("unavailable", participant_number),
                 account_id=account_id,
                 starts_at=unavailable_start,
-                ends_at=unavailable_start + timedelta(minutes=30),
+                ends_at=unavailable_end,
                 reason="Evaluation block",
             )
         )
@@ -140,6 +173,8 @@ async def seed_evaluation_dataset(session: AsyncSession) -> list[UUID]:
             )
         )
 
+        next_session_start = BASE_TIME
+        unavailable_ranges = [(unavailable_start, unavailable_end)]
         for task_number in range(1, TASKS_PER_PARTICIPANT + 1):
             task_id = stable_id("task", participant_number, task_number)
             original_minutes = 60
@@ -202,7 +237,12 @@ async def seed_evaluation_dataset(session: AsyncSession) -> list[UUID]:
             )
 
             study_session_id = stable_id("session", participant_number, task_number)
-            starts_at = BASE_TIME + timedelta(days=task_number, hours=2)
+            starts_at = next_available_start(
+                next_session_start,
+                planned_minutes,
+                unavailable_ranges,
+            )
+            next_session_start = starts_at + timedelta(minutes=planned_minutes + 10)
             study_session = StudySession(
                 id=study_session_id,
                 account_id=account_id,
