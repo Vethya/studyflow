@@ -113,7 +113,8 @@ try {
         $migrationVersion = "unavailable"
     }
 
-    $gitBranch = (& $commandPaths["git.exe"] -C $repoRoot branch --show-current 2>$null | Select-Object -First 1).Trim()
+    $gitBranchValue = & $commandPaths["git.exe"] -C $repoRoot branch --show-current 2>$null | Select-Object -First 1
+    $gitBranch = if ($null -eq $gitBranchValue) { "" } else { $gitBranchValue.ToString().Trim() }
     $gitCommit = (& $commandPaths["git.exe"] -C $repoRoot rev-parse HEAD 2>$null | Select-Object -First 1).Trim()
     $gitStatus = (& $commandPaths["git.exe"] -C $repoRoot status --short --untracked-files=all 2>$null)
     if ([string]::IsNullOrWhiteSpace($gitBranch)) { $gitBranch = "detached-or-unavailable" }
