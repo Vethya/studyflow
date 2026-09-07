@@ -50,7 +50,7 @@ async def extract_evaluation_records(
     account_stmt = select(StudentAccount)
     if target_account_id is not None:
         account_stmt = account_stmt.where(StudentAccount.id == target_account_id)
-    account_stmt = account_stmt.order_by(StudentAccount.created_at)
+    account_stmt = account_stmt.order_by(StudentAccount.created_at, StudentAccount.id)
 
     account_rows = (await session.execute(account_stmt)).scalars().all()
     records: list[dict[str, Any]] = []
@@ -62,7 +62,7 @@ async def extract_evaluation_records(
         task_stmt = (
             select(AcademicTask)
             .where(AcademicTask.account_id == account.id)
-            .order_by(AcademicTask.created_at)
+            .order_by(AcademicTask.created_at, AcademicTask.id)
         )
         task_rows = (await session.execute(task_stmt)).scalars().all()
 
@@ -91,7 +91,7 @@ async def extract_evaluation_records(
         proposal_stmt = (
             select(ScheduleProposal)
             .where(ScheduleProposal.account_id == account.id)
-            .order_by(ScheduleProposal.created_at)
+            .order_by(ScheduleProposal.created_at, ScheduleProposal.id)
         )
         proposal_rows = (await session.execute(proposal_stmt)).scalars().all()
 
@@ -102,7 +102,7 @@ async def extract_evaluation_records(
             proposal_code_map[p.id] = proposal_code
             alloc_stmt = select(ProposalTaskAllocation).where(
                 ProposalTaskAllocation.proposal_id == p.id
-            )
+            ).order_by(ProposalTaskAllocation.deadline_at, ProposalTaskAllocation.task_id)
             alloc_rows = (await session.execute(alloc_stmt)).scalars().all()
             allocations = [
                 {
@@ -130,7 +130,7 @@ async def extract_evaluation_records(
             select(StudySession, StudySessionOutcome)
             .outerjoin(StudySessionOutcome, StudySession.id == StudySessionOutcome.session_id)
             .where(StudySession.account_id == account.id)
-            .order_by(StudySession.starts_at)
+            .order_by(StudySession.starts_at, StudySession.id)
         )
         session_rows = (await session.execute(session_stmt)).all()
 
@@ -210,7 +210,7 @@ async def extract_evaluation_records(
                 AdaptiveEstimationPrediction.created_at,
                 AcademicTask.completed_at,
             )
-            .order_by(AdaptiveEstimationPrediction.created_at)
+            .order_by(AdaptiveEstimationPrediction.created_at, AdaptiveEstimationPrediction.task_id)
         )
         prediction_rows = (await session.execute(prediction_stmt)).all()
         evaluation_records: list[dict[str, Any]] = []
@@ -265,7 +265,12 @@ async def extract_evaluation_records(
                 await session.execute(
                     select(AvailabilityWindow)
                     .where(AvailabilityWindow.account_id == account.id)
-                    .order_by(AvailabilityWindow.weekday, AvailabilityWindow.local_start_time)
+                    .order_by(
+                        AvailabilityWindow.weekday,
+                        AvailabilityWindow.local_start_time,
+                        AvailabilityWindow.local_end_time,
+                        AvailabilityWindow.id,
+                    )
                 )
             )
             .scalars()
@@ -276,7 +281,11 @@ async def extract_evaluation_records(
                 await session.execute(
                     select(UnavailablePeriod)
                     .where(UnavailablePeriod.account_id == account.id)
-                    .order_by(UnavailablePeriod.starts_at)
+                    .order_by(
+                        UnavailablePeriod.starts_at,
+                        UnavailablePeriod.ends_at,
+                        UnavailablePeriod.id,
+                    )
                 )
             )
             .scalars()
