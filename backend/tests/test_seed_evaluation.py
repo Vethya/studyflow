@@ -164,5 +164,16 @@ async def test_evaluation_seed_is_repeatable_and_keeps_pending_actuals_unset() -
                 assert outcome is not None
                 assert task.completed_at == outcome.recorded_at
                 assert task.completed_at >= study_session.ends_at
+
+        for prediction in seeded_predictions:
+            prediction_number = tasks_by_number[prediction.task_id]
+            predicted_session = sessions_by_task[prediction.task_id]
+            assert prediction.created_at < predicted_session.starts_at
+            previous_task_id = stable_id("task", 1, prediction_number - 1)
+            previous_session = sessions_by_task.get(previous_task_id)
+            if previous_session is not None:
+                previous_outcome = outcomes_by_session.get(previous_session.id)
+                assert previous_outcome is not None
+                assert previous_outcome.recorded_at < prediction.created_at
     finally:
         await database.stop()

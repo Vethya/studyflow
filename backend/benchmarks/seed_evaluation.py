@@ -186,6 +186,12 @@ async def seed_evaluation_dataset(session: AsyncSession) -> list[UUID]:
             has_prediction = calibration or adaptive_available
             completed = task_number < TASKS_PER_PARTICIPANT
             planned_minutes = adaptive_minutes if adaptive_available else original_minutes
+            starts_at = next_available_start(
+                next_session_start,
+                planned_minutes,
+                unavailable_ranges,
+            )
+            next_session_start = starts_at + timedelta(minutes=planned_minutes + 10)
             task = AcademicTask(
                 id=task_id,
                 account_id=account_id,
@@ -199,7 +205,7 @@ async def seed_evaluation_dataset(session: AsyncSession) -> list[UUID]:
                 adaptive_estimate_minutes=adaptive_minutes if adaptive_available else None,
                 planned_source="adaptive" if adaptive_available else "original",
                 planned_duration_minutes=planned_minutes,
-                estimate_frozen_at=BASE_TIME if completed else None,
+                estimate_frozen_at=starts_at,
                 completed_at=None,
                 finished_early_at=None,
                 created_at=BASE_TIME,
@@ -218,7 +224,7 @@ async def seed_evaluation_dataset(session: AsyncSession) -> list[UUID]:
                         history_scope="overall",
                         history_count=COLD_START_TASK_COUNT,
                         exposed=adaptive_available,
-                        created_at=BASE_TIME + timedelta(days=task_number),
+                        created_at=starts_at - timedelta(minutes=1),
                     )
                 )
             session.add(
@@ -236,12 +242,6 @@ async def seed_evaluation_dataset(session: AsyncSession) -> list[UUID]:
             )
 
             study_session_id = stable_id("session", participant_number, task_number)
-            starts_at = next_available_start(
-                next_session_start,
-                planned_minutes,
-                unavailable_ranges,
-            )
-            next_session_start = starts_at + timedelta(minutes=planned_minutes + 10)
             study_session = StudySession(
                 id=study_session_id,
                 account_id=account_id,
