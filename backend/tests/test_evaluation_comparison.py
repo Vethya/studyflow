@@ -252,6 +252,8 @@ def test_run_comparisons_includes_feasible_overloaded_and_recovery() -> None:
     assert "missed_session_recovery" in results
     assert "static_status" in results["feasible"]  # type: ignore[operator]
     assert "static_status" in results["overloaded"]  # type: ignore[operator]
+    assert "static_hard_constraint_violations" in results["feasible"]  # type: ignore[operator]
+    assert "static_deadline_feasible" in results["feasible"]  # type: ignore[operator]
     assert "static_successful_recovery" in results["missed_session_recovery"]  # type: ignore[operator]
     est_metrics = results.get("estimation_metrics")
     assert isinstance(est_metrics, dict)

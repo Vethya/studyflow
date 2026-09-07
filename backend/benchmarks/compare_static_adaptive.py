@@ -199,6 +199,10 @@ def _serialize_scenario_result(comparison: ScheduleComparisonResult) -> dict[str
         "adaptive_status": comparison.adaptive_run.status.value,
         "static_time_seconds": comparison.static_run.generation_time_seconds,
         "adaptive_time_seconds": comparison.adaptive_run.generation_time_seconds,
+        "static_hard_constraint_violations": comparison.static_run.hard_constraint_violations,
+        "adaptive_hard_constraint_violations": comparison.adaptive_run.hard_constraint_violations,
+        "static_deadline_feasible": comparison.static_run.deadline_feasible,
+        "adaptive_deadline_feasible": comparison.adaptive_run.deadline_feasible,
         "static_successful_recovery": comparison.static_run.successful_recovery,
         "adaptive_successful_recovery": comparison.adaptive_run.successful_recovery,
         "stability": {
