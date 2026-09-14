@@ -229,15 +229,11 @@ async def _benchmark_reset_targets(
     ).all()
     if any(
         study_session.task_id not in task_ids
-        or (
-            study_session.proposal_id is not None
-            and study_session.proposal_id not in proposal_ids
-        )
+        or (study_session.proposal_id is not None and study_session.proposal_id not in proposal_ids)
         for study_session in study_sessions
     ):
         raise RuntimeError(
-            "Refusing --reset-existing: the account has study sessions outside the benchmark "
-            "tasks."
+            "Refusing --reset-existing: the account has study sessions outside the benchmark tasks."
         )
     session_ids = [study_session.id for study_session in study_sessions]
 
@@ -640,9 +636,7 @@ def main() -> int:
     parser.add_argument(
         "--reset-existing",
         action="store_true",
-        help=(
-            "Delete a verified NFR-02 data footprint from the selected account before reseeding"
-        ),
+        help=("Delete a verified NFR-02 data footprint from the selected account before reseeding"),
     )
     parser.add_argument(
         "--dry-run",

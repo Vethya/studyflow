@@ -89,8 +89,7 @@ async def run_http_benchmark(
             tasks_data = tasks_res.json()
             if not isinstance(tasks_data, list) or len(tasks_data) < OVERLOAD_TASK_COUNT:
                 report["error"] = (
-                    "Seeded workload does not contain at least "
-                    f"{OVERLOAD_TASK_COUNT} tasks"
+                    f"Seeded workload does not contain at least {OVERLOAD_TASK_COUNT} tasks"
                 )
                 write_json_report(json_output, report)
                 return 1
@@ -201,9 +200,7 @@ async def run_http_benchmark(
                         }
                     )
                     warmup_status = (
-                        f"HTTP {warmup_status_code}"
-                        if warm_res is not None
-                        else "request error"
+                        f"HTTP {warmup_status_code}" if warm_res is not None else "request error"
                     )
                     print(
                         f"| {endpoint['name']} | - | - | - | - | {threshold:.1f}s | "
