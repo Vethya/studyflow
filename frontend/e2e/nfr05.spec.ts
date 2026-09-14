@@ -98,6 +98,12 @@ async function assertNoHorizontalOverflow(page: Page): Promise<void> {
     documentWidth: document.documentElement.scrollWidth,
     bodyWidth: document.body.scrollWidth,
     viewportWidth: window.innerWidth,
+    appMain: (() => {
+      const main = document.querySelector("main");
+      return main
+        ? { scrollWidth: main.scrollWidth, clientWidth: main.clientWidth }
+        : null;
+    })(),
   }));
 
   expect(metrics.documentWidth, `document overflow: ${JSON.stringify(metrics)}`).toBeLessThanOrEqual(
@@ -106,6 +112,12 @@ async function assertNoHorizontalOverflow(page: Page): Promise<void> {
   expect(metrics.bodyWidth, `body overflow: ${JSON.stringify(metrics)}`).toBeLessThanOrEqual(
     metrics.viewportWidth + 1,
   );
+  if (metrics.appMain) {
+    expect(
+      metrics.appMain.scrollWidth,
+      `application scroll-container overflow: ${JSON.stringify(metrics)}`,
+    ).toBeLessThanOrEqual(metrics.appMain.clientWidth + 1);
+  }
 }
 
 async function assertControlNames(page: Page): Promise<void> {
