@@ -9,7 +9,7 @@
     "lint": "eslint",
     "benchmark:nfr02:pages": "node benchmarks/page_performance.mjs",
     "test:nfr05": "playwright test --config=playwright.config.ts",
-    "test:nfr05:install": "playwright install chromium webkit msedge"
+    "test:nfr05:install": "playwright install chromium chrome webkit msedge"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
