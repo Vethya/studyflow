@@ -239,7 +239,7 @@ for (const viewport of VIEWPORTS) {
       test.skip(testInfo.project.name.startsWith("mobile-") && viewport.width !== 360, "Mobile projects run at 360px only.");
 
       const issues = installRuntimeMonitoring(page);
-      await installNfr05ApiMocks(page, { authenticated: true });
+      const mockState = await installNfr05ApiMocks(page, { authenticated: true });
 
       for (const route of PUBLIC_ROUTES) {
         await test.step(route, async () => {
@@ -256,7 +256,12 @@ for (const viewport of VIEWPORTS) {
         body: JSON.stringify(issues, null, 2),
         contentType: "application/json",
       });
+      await testInfo.attach("unhandled-api-requests.json", {
+        body: JSON.stringify(mockState.unhandledRequests, null, 2),
+        contentType: "application/json",
+      });
       expect(issues).toEqual([]);
+      expect(mockState.unhandledRequests).toEqual([]);
     });
 
     test("authenticated core routes render without responsive or accessible regressions", async ({ page }, testInfo) => {
