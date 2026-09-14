@@ -1,4 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
+import { arch, platform, release } from "node:os";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import {
   FLOW_PROPOSAL_ID,
@@ -222,6 +223,17 @@ async function captureEvidence(page: Page, testInfo: TestInfo, route: string): P
 for (const viewport of VIEWPORTS) {
   test.describe(`${viewport.width}px viewport`, () => {
     test.use({ viewport });
+
+    test.beforeEach(async ({ browser }, testInfo) => {
+      testInfo.annotations.push({
+        type: "environment",
+        description: JSON.stringify({
+          browser: testInfo.project.use.channel ?? browser.browserType().name(),
+          version: browser.version(),
+          os: `${platform()} ${release()} (${arch()})`,
+        }),
+      });
+    });
 
     test("public routes render without responsive or accessible regressions", async ({ page }, testInfo) => {
       test.skip(testInfo.project.name.startsWith("mobile-") && viewport.width !== 360, "Mobile projects run at 360px only.");

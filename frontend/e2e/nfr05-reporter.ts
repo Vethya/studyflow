@@ -11,7 +11,40 @@ interface TestSummary {
   project: string;
   status: string;
   duration: number;
+  browser: string;
+  browserVersion: string;
+  os: string;
   axeAnnotations: string[];
+}
+
+interface RuntimeEnvironment {
+  browser: string;
+  version: string;
+  os: string;
+}
+
+function readRuntimeEnvironment(
+  annotations: Array<{ type: string; description?: string }>,
+): RuntimeEnvironment {
+  const annotation = annotations.find((candidate) => candidate.type === "environment");
+  if (!annotation?.description) {
+    return { browser: "unknown", version: "unknown", os: "unknown" };
+  }
+
+  try {
+    const environment = JSON.parse(annotation.description) as Partial<RuntimeEnvironment>;
+    if (
+      typeof environment.browser === "string" &&
+      typeof environment.version === "string" &&
+      typeof environment.os === "string"
+    ) {
+      return environment as RuntimeEnvironment;
+    }
+  } catch {
+    // Keep report generation resilient if a test emits malformed metadata.
+  }
+
+  return { browser: "unknown", version: "unknown", os: "unknown" };
 }
 
 function markdownCell(value: string): string {
@@ -33,11 +66,15 @@ export default class Nfr05Reporter implements Reporter {
   }
 
   onTestEnd(test: TestCase, result: TestResult): void {
+    const environment = readRuntimeEnvironment(result.annotations);
     this.tests.push({
       title: test.titlePath().slice(2).join(" › "),
       project: test.parent.project()?.name ?? "unknown",
       status: result.status,
       duration: result.duration,
+      browser: environment.browser,
+      browserVersion: environment.version,
+      os: environment.os,
       axeAnnotations: test.annotations
         .filter((annotation) => annotation.type === "axe")
         .map((annotation) => annotation.description ?? "axe scan"),
@@ -62,28 +99,43 @@ export default class Nfr05Reporter implements Reporter {
       "",
       "## Automated matrix",
       "",
-      "| Project | Browser coverage | Viewport source | Mobile context |",
-      "| --- | --- | --- | --- |",
+      "| Project | Configured coverage | Actual browser | Host operating system | Viewport source | Mobile context |",
+      "| --- | --- | --- | --- | --- | --- |",
       ...projects.map((project) => {
         const use = project.use;
         const browser = use.channel ?? use.browserName ?? "default";
+        const runtimes = [
+          ...new Set(
+            this.tests
+              .filter((test) => test.project === project.name)
+              .map((test) => `${test.browser} ${test.browserVersion}`),
+          ),
+        ];
+        const operatingSystems = [
+          ...new Set(
+            this.tests
+              .filter((test) => test.project === project.name)
+              .map((test) => test.os),
+          ),
+        ];
         const viewport = project.name.startsWith("mobile-")
           ? "test-defined: 360×800"
           : "test-defined: 360×800, 768×1024, 1440×1000";
         const mobile = use.isMobile ? "yes" : "no";
-        return `| ${markdownCell(project.name)} | ${markdownCell(String(browser))} | ${viewport} | ${mobile} |`;
+        return `| ${markdownCell(project.name)} | ${markdownCell(String(browser))} | ${markdownCell(runtimes.join("; ") || "not recorded")} | ${markdownCell(operatingSystems.join("; ") || "not recorded")} | ${viewport} | ${mobile} |`;
       }),
       "",
-      "The tests define the required 360, 768, and 1440 CSS-pixel viewports. Mobile projects use device emulation. The `safari-webkit` projects are automated WebKit coverage, not Apple Safari; actual mobile Safari must be recorded with the companion iPhone checklist.",
+      "The tests define the required 360, 768, and 1440 CSS-pixel viewports. Mobile projects use device emulation. The actual browser version and host operating system are captured at runtime. The `safari-webkit` projects are automated WebKit coverage, not Apple Safari; actual mobile Safari must be recorded with the companion iPhone checklist.",
       "Axe findings are recorded as soft assertions so all routes are scanned in one run; a failed test identifies accessibility findings that need review.",
       "",
       "## Test results",
       "",
-      "| Project | Test | Status | Duration | Accessibility annotations |",
-      "| --- | --- | --- | ---: | --- |",
+      "| Project | Test | Status | Duration | Runtime | Accessibility annotations |",
+      "| --- | --- | --- | ---: | --- | --- |",
       ...this.tests.map((test) => {
         const axe = test.axeAnnotations.length > 0 ? test.axeAnnotations.join("; ") : "—";
-        return `| ${markdownCell(test.project)} | ${markdownCell(test.title)} | ${test.status} | ${test.duration} ms | ${markdownCell(axe)} |`;
+        const runtime = `${test.browser} ${test.browserVersion} on ${test.os}`;
+        return `| ${markdownCell(test.project)} | ${markdownCell(test.title)} | ${test.status} | ${test.duration} ms | ${markdownCell(runtime)} | ${markdownCell(axe)} |`;
       }),
       "",
       "## Generated artifacts",
