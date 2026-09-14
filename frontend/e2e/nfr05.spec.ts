@@ -25,13 +25,68 @@ const PUBLIC_ROUTES = [
 ] as const;
 
 const AUTHENTICATED_ROUTES = [
-  { path: "/dashboard", heading: /Hello, Alex|Dashboard/ },
-  { path: "/tasks", heading: /^Tasks$/ },
-  { path: "/tasks/task-reading", heading: /Read cognitive science paper/ },
-  { path: "/calendar", heading: /(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday), | – / },
-  { path: "/availability", heading: /^Availability$/ },
-  { path: "/progress", heading: /^Progress$/ },
-  { path: "/settings", heading: /^Settings$/ },
+  {
+    path: "/dashboard",
+    heading: /Hello, Alex|Dashboard/,
+    readyRequests: [
+      "/api/v1/auth/session",
+      "/api/v1/tasks",
+      "/api/v1/availability/windows",
+      "/api/v1/availability/unavailable-periods",
+      "/api/v1/account/preferences",
+      "/api/v1/study-sessions",
+    ],
+  },
+  {
+    path: "/tasks",
+    heading: /^Tasks$/,
+    readyRequests: ["/api/v1/auth/session", "/api/v1/tasks"],
+  },
+  {
+    path: "/tasks/task-reading",
+    heading: /Read cognitive science paper/,
+    readyRequests: [
+      "/api/v1/auth/session",
+      "/api/v1/tasks/task-reading",
+      "/api/v1/tasks",
+      "/api/v1/study-sessions",
+    ],
+  },
+  {
+    path: "/calendar",
+    heading: /(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday), | – /,
+    readyRequests: [
+      "/api/v1/auth/session",
+      "/api/v1/tasks",
+      "/api/v1/availability/windows",
+      "/api/v1/availability/unavailable-periods",
+      "/api/v1/study-sessions",
+    ],
+  },
+  {
+    path: "/availability",
+    heading: /^Availability$/,
+    readyRequests: [
+      "/api/v1/auth/session",
+      "/api/v1/availability/windows",
+      "/api/v1/availability/unavailable-periods",
+    ],
+  },
+  {
+    path: "/progress",
+    heading: /^Progress$/,
+    readyRequests: ["/api/v1/auth/session", "/api/v1/tasks", "/api/v1/study-sessions"],
+  },
+  {
+    path: "/settings",
+    heading: /^Settings$/,
+    readyRequests: [
+      "/api/v1/auth/session",
+      "/api/v1/account/profile",
+      "/api/v1/account/preferences",
+      "/api/v1/account/identities",
+    ],
+  },
 ] as const;
 
 type RuntimeIssue = {
@@ -100,6 +155,26 @@ async function waitForPageReady(page: Page, heading?: RegExp): Promise<void> {
   if (heading) {
     await expect(page.getByRole("heading", { name: heading }).first()).toBeVisible();
   }
+}
+
+async function gotoAndWaitForPageReady(
+  page: Page,
+  path: string,
+  heading: RegExp | undefined,
+  readyRequests: readonly string[],
+): Promise<void> {
+  const responseWaits = readyRequests.map((expectedPath) =>
+    page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === expectedPath &&
+        response.request().method() === "GET" &&
+        response.ok(),
+    ),
+  );
+
+  await page.goto(path);
+  await waitForPageReady(page, heading);
+  await Promise.all(responseWaits);
 }
 
 async function assertNoHorizontalOverflow(page: Page): Promise<void> {
@@ -286,8 +361,7 @@ for (const viewport of VIEWPORTS) {
 
       for (const route of AUTHENTICATED_ROUTES) {
         await test.step(route.path, async () => {
-          await page.goto(route.path);
-          await waitForPageReady(page, route.heading);
+          await gotoAndWaitForPageReady(page, route.path, route.heading, route.readyRequests);
           await assertNoHorizontalOverflow(page);
           await assertControlNames(page);
           await scanAccessibility(page, testInfo, route.path);
@@ -346,8 +420,18 @@ for (const viewport of VIEWPORTS) {
       const issues = installRuntimeMonitoring(page);
       const mockState = await installNfr05ApiMocks(page, { authenticated: true });
 
-      await page.goto("/calendar");
-      await waitForPageReady(page, /(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday), | – /);
+      await gotoAndWaitForPageReady(
+        page,
+        "/calendar",
+        /(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday), | – /,
+        [
+          "/api/v1/auth/session",
+          "/api/v1/tasks",
+          "/api/v1/availability/windows",
+          "/api/v1/availability/unavailable-periods",
+          "/api/v1/study-sessions",
+        ],
+      );
 
       await page.getByRole("button", { name: "Add task", exact: true }).click();
       const dialog = page.getByRole("dialog");
@@ -399,8 +483,12 @@ for (const viewport of VIEWPORTS) {
       const issues = installRuntimeMonitoring(page);
       await installNfr05ApiMocks(page, { authenticated: true });
 
-      await page.goto("/tasks");
-      await waitForPageReady(page, /^Tasks$/);
+      await gotoAndWaitForPageReady(
+        page,
+        "/tasks",
+        /^Tasks$/,
+        ["/api/v1/auth/session", "/api/v1/tasks"],
+      );
       await expect(page.getByText("Not started", { exact: true }).first()).toBeVisible();
       await expect(page.getByText("In progress", { exact: true }).first()).toBeVisible();
       await assertNoHorizontalOverflow(page);
