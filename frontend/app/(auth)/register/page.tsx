@@ -10,6 +10,7 @@ import { AlertCircle, ArrowLeft, CheckCircle2, Loader2 } from "lucide-react";
 import { ApiError, auth } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
 import { detectTimezone } from "@/lib/timezones";
+import { FieldError } from "@/components/ui/field-error";
 
 const GoogleIcon = () => (
   <svg className="h-4 w-4" viewBox="0 0 48 48" aria-hidden="true">
@@ -29,12 +30,23 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+    const trimmed = email.trim();
+    if (!trimmed) {
+      setEmailError("Enter your email address.");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setEmailError("Enter a valid email address, like name@university.edu.");
+      return;
+    }
+    setEmailError(null);
     setIsSubmitting(true);
     try {
       await auth.register(email);
@@ -42,6 +54,10 @@ export default function RegisterPage() {
     } catch (cause) {
       if (cause instanceof ApiError && cause.isRateLimited) {
         setError("Too many registration attempts. Please try again later.");
+      } else if (cause instanceof ApiError && cause.isValidation) {
+        // Duplicate emails are deliberately not revealed (SPEC §6.4), so the
+        // only field-level error here is an address the API cannot accept.
+        setEmailError(cause.fieldErrors.email ?? "Enter a valid email address.");
       } else {
         setError(describeError(cause));
       }
@@ -132,7 +148,7 @@ export default function RegisterPage() {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
         <div className="space-y-1.5">
           <Label htmlFor="email" className="text-xs font-medium">Email</Label>
           <Input
@@ -144,8 +160,11 @@ export default function RegisterPage() {
             onChange={(e) => setEmail(e.target.value)}
             disabled={isBusy}
             required
+            aria-invalid={emailError ? true : undefined}
+            aria-describedby={emailError ? "email-error email-hint" : "email-hint"}
           />
-          <p className="text-[11px] text-muted-foreground">
+          <FieldError id="email-error" message={emailError} />
+          <p id="email-hint" className="text-[11px] text-muted-foreground">
             We&apos;ll email you a link to choose a name and password.
           </p>
         </div>
