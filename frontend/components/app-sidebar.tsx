@@ -101,7 +101,7 @@ export function AppSidebar() {
           edge of the rail. */}
       <SidebarContent className="px-2 group-data-[collapsible=icon]:px-0">
         <SidebarGroup className="py-1">
-          <SidebarGroupLabel className="px-2 text-xs font-medium text-muted-foreground/80">
+          <SidebarGroupLabel className="px-2 text-xs font-medium text-muted-foreground">
             Menu
           </SidebarGroupLabel>
           <SidebarGroupContent>
@@ -128,7 +128,7 @@ export function AppSidebar() {
         </SidebarGroup>
 
         <SidebarGroup className="py-1">
-          <SidebarGroupLabel className="px-2 text-xs font-medium text-muted-foreground/80">
+          <SidebarGroupLabel className="px-2 text-xs font-medium text-muted-foreground">
             Account
           </SidebarGroupLabel>
           <SidebarGroupContent>

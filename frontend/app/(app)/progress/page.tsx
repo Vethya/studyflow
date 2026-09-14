@@ -236,7 +236,7 @@ function ProgressRow({
           <span className="tabular-nums">
             {row.sessionsCompleted}
             {row.sessionsUpcoming > 0 && (
-              <span className="text-muted-foreground/60"> +{row.sessionsUpcoming}</span>
+              <span className="text-muted-foreground"> +{row.sessionsUpcoming}</span>
             )}
           </span>
         </span>

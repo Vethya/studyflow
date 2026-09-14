@@ -350,6 +350,7 @@ export default function AvailabilityPage() {
             </EmptyState>
           ) : (
             <WeekGrid
+              ariaLabel="Weekly availability"
               columns={columns}
               blocks={blocks}
               hourStart={hourRange.start}
@@ -403,7 +404,7 @@ export default function AvailabilityPage() {
                             "w-10 shrink-0 pt-1 text-xs font-medium",
                             dayWindows.length > 0
                               ? "text-foreground"
-                              : "text-muted-foreground/60",
+                              : "text-muted-foreground",
                           )}
                         >
                           {DAY_NAMES_SHORT[dayIdx]}
@@ -411,7 +412,7 @@ export default function AvailabilityPage() {
 
                         <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
                           {dayWindows.length === 0 ? (
-                            <span className="pt-1 text-xs text-muted-foreground/60">
+                            <span className="pt-1 text-xs text-muted-foreground">
                               Not free
                             </span>
                           ) : (

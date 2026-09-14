@@ -440,6 +440,8 @@ function SliderRow({
         max={bounds.max}
         step={bounds.step}
         onValueChange={(next) => onChange(Array.isArray(next) ? next[0] : next)}
+        getAriaLabel={() => label}
+        getAriaValueText={() => formatDuration(value)}
       />
       <p className="mt-1.5 text-xs text-muted-foreground">{hint}</p>
     </div>

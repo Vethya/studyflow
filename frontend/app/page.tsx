@@ -12,12 +12,20 @@ if (typeof window !== "undefined") {
   gsap.registerPlugin(ScrollTrigger, useGSAP);
 }
 
+/**
+ * Students who ask for reduced motion get the finished page straight away.
+ * This also keeps fade-ins from being read mid-animation by contrast checks.
+ */
+function prefersReducedMotion(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 /* ─── Floating Student Elements ─── */
 function FloatingElements() {
   const elRef = useRef<HTMLDivElement>(null);
 
   useGSAP(() => {
-    if (!elRef.current) return;
+    if (!elRef.current || prefersReducedMotion()) return;
     const items = elRef.current.querySelectorAll(".float-item");
     items.forEach((item) => {
       gsap.to(item, {
@@ -87,6 +95,7 @@ function Navigation() {
   const navRef = useRef(null);
 
   useGSAP(() => {
+    if (prefersReducedMotion()) return;
     gsap.from(navRef.current, {
       y: -20,
       opacity: 0,
@@ -146,6 +155,7 @@ export default function LandingPage() {
     // ═══ HERO ANIMATIONS ═══
     // Cards show immediately — no waiting
     gsap.set(".hero-cards-wrapper", { opacity: 1 });
+    if (prefersReducedMotion()) return;
     gsap.from(".before-card", {
       x: -20, rotation: -5, opacity: 0, duration: 0.6, ease: "power2.out", delay: 0.1,
     });
@@ -378,12 +388,12 @@ Add your coursework and the hours you are free.<br />
                 </div>
               </div>
               <div className="space-y-1.5 text-[12px] text-[#070709] leading-[1.5] font-[family-name:var(--font-display)]">
-                <p className="text-[#8b8b8b] text-[11px]">Your weekly plan,</p>
+                <p className="text-[#6b6b6b] text-[11px]">Your weekly plan,</p>
                 <p>Monday — Data Structures (2h)</p>
                 <p>Tuesday — Linear Algebra (1.5h)</p>
                 <p>Wednesday — Essay Draft (2h)</p>
-                <p className="text-[#8b8b8b]">Thursday — Algorithms rev...</p>
-                <p className="text-[#8b8b8b]">Friday — Physics lab pre...</p>
+                <p className="text-[#6b6b6b]">Thursday — Algorithms rev...</p>
+                <p className="text-[#6b6b6b]">Friday — Physics lab pre...</p>
               </div>
             </div>
           </div>
@@ -405,7 +415,8 @@ Add your coursework and the hours you are free.<br />
                 data-value={stat.value}
                 data-suffix={stat.suffix}
               >
-                0{stat.suffix}
+                {/* Final value by default, so it stays correct when the count-up is skipped. */}
+                {stat.value}{stat.suffix}
               </div>
               <div className="text-[14px] text-[#60606c] tracking-[-0.01em] mt-1 font-medium">{stat.label}</div>
             </div>
@@ -511,7 +522,7 @@ Each task carries an estimate, a priority and a due date. Add them up across the
                   <div className="w-10 h-10 rounded-lg bg-[#f5f5f5] flex items-center justify-center">
                     <item.icon className="w-5 h-5 text-[#2597d0]" />
                   </div>
-                  <span className="step-number font-[family-name:var(--font-display)] text-[48px] font-bold text-[#f5f5f5] leading-none tracking-[-0.04em]">
+                  <span className="step-number font-[family-name:var(--font-display)] text-[48px] font-bold text-[#909090] leading-none tracking-[-0.04em]">
                     {item.step}
                   </span>
                 </div>
@@ -586,7 +597,7 @@ It takes about five minutes to enter a term of coursework and the hours you have
             <span className="text-[14px] text-[#60606c] cursor-pointer hover:text-[#070709] transition-colors">Terms</span>
           </div>
 
-          <p className="text-[12px] text-[#8b8b8b]">© 2026 Studyflow</p>
+          <p className="text-[12px] text-[#6b6b6b]">© 2026 Studyflow</p>
         </div>
       </footer>
     </div>

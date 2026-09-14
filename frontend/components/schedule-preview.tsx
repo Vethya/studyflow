@@ -390,6 +390,7 @@ function ProposalCalendar({
       </div>
 
       <WeekGrid
+        ariaLabel="Proposed sessions"
         columns={columns}
         blocks={blocks}
         hourStart={hourRange.start}
