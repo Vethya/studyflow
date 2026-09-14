@@ -75,7 +75,7 @@ export default class Nfr05Reporter implements Reporter {
       browser: environment.browser,
       browserVersion: environment.version,
       os: environment.os,
-      axeAnnotations: test.annotations
+      axeAnnotations: result.annotations
         .filter((annotation) => annotation.type === "axe")
         .map((annotation) => annotation.description ?? "axe scan"),
     });
