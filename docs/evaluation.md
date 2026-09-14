@@ -42,6 +42,24 @@ complete NFR-02 dataset is already present, it skips seeding. The account's
 real password is supplied separately to the HTTP benchmark; it is never
 changed or printed by the seeder.
 
+If the verified benchmark footprint must be removed before reseeding, preview
+and then run the explicit reset-only command. It preserves the account and
+does not require benchmark scheduling preferences:
+
+```bash
+cd backend
+NFR02_BENCHMARK_EMAIL='<existing-dev-account-email>' \
+uv run python benchmarks/seed_nfr02.py \
+  --reset-existing \
+  --reset-only \
+  --dry-run
+
+NFR02_BENCHMARK_EMAIL='<existing-dev-account-email>' \
+uv run python benchmarks/seed_nfr02.py \
+  --reset-existing \
+  --reset-only
+```
+
 ### 2.2 In-Memory Scheduler Kernel Performance Gate (NFR-02-AC02)
 
 To verify that schedule generation completes within 5.0 seconds at the 95th percentile under warm conditions:
@@ -96,9 +114,12 @@ The command seeds the dev database, measures each main page and the HTTP
 endpoints for 20 runs, covers feasible and overloaded schedule generation, and
 writes `docs/evidence/nfr02-performance-YYYY-MM-DD.md`. The report includes
 the measured p95 values, frontend URL, safe database target, browser, viewport,
-machine, deployed Git revision, benchmark checkout revision, workload, and
-pass/fail status. Set `NFR02_DEPLOYED_REVISION` to the exact commit SHA shown by
-the dev frontend deployment. The runner rejects a missing or malformed SHA.
+machine, account timezone and scheduling preferences, deployed Git revision,
+benchmark checkout revision, workload, and pass/fail status. The account keeps
+its existing IANA timezone; the seeder requires 60-minute preferred sessions,
+a 10-minute minimum break, and confirmed timezone availability. Set
+`NFR02_DEPLOYED_REVISION` to the exact commit SHA shown by the dev frontend
+deployment. The runner rejects a missing or malformed SHA.
 
 The browser benchmark uses the installed Google Chrome application through
 Playwright's `chrome` channel. It does not download a separate Playwright

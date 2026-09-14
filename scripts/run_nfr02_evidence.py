@@ -149,6 +149,15 @@ def render_report(
 ) -> str:
     page_rows = page_report.get("pages", [])
     endpoint_rows = http_report.get("endpoints", [])
+    account_preferences = http_report.get("account_preferences", {})
+    if not isinstance(account_preferences, dict):
+        account_preferences = {}
+    account_timezone = account_preferences.get("timezone", "unknown")
+    preferred_session_length = account_preferences.get(
+        "preferred_session_length_minutes", "unknown"
+    )
+    minimum_break = account_preferences.get("minimum_break_minutes", "unknown")
+    timezone_confirmed = account_preferences.get("timezone_confirmed", "unknown")
     page_lines = [
         "| Page | Min | Median | Max | p95 | Limit | Result |",
         "| :--- | ---: | ---: | ---: | ---: | ---: | :--- |",
@@ -201,6 +210,10 @@ Benchmark checkout revision: `{git_revision()}`
 - Environment: dev only
 - Frontend URL: `{args.base_url}`
 - Database target: `{safe_database_target(args.database_url)}`
+- Account timezone: `{account_timezone}`
+- Preferred session length: `{preferred_session_length} minutes`
+- Minimum break: `{minimum_break} minutes`
+- Timezone confirmed: `{timezone_confirmed}`
 - Machine: {machine}
 - Browser: {browser_details}
 - Viewport: {viewport_details}

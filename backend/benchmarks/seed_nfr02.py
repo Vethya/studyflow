@@ -43,7 +43,6 @@ EXPECTED_DATA_COUNTS = {
     "schedule_proposals": 1,
     "proposal_allocations": 50,
 }
-BENCHMARK_TIMEZONE = "UTC"
 BENCHMARK_SESSION_LENGTH_MINUTES = 60
 BENCHMARK_MINIMUM_BREAK_MINUTES = 10
 BENCHMARK_HORIZON_DAYS = 112
@@ -120,8 +119,6 @@ def _as_utc(value: datetime) -> datetime:
 
 def _validate_benchmark_preferences(account: StudentAccount) -> None:
     mismatches: list[str] = []
-    if account.timezone != BENCHMARK_TIMEZONE:
-        mismatches.append(f"timezone={account.timezone!r}")
     if account.preferred_session_length_minutes != BENCHMARK_SESSION_LENGTH_MINUTES:
         mismatches.append(
             f"preferred_session_length_minutes={account.preferred_session_length_minutes!r}"
@@ -132,14 +129,14 @@ def _validate_benchmark_preferences(account: StudentAccount) -> None:
         mismatches.append("availability_timezone_confirmed=False")
     if mismatches:
         expected = (
-            f"timezone={BENCHMARK_TIMEZONE!r}, "
             f"preferred_session_length_minutes={BENCHMARK_SESSION_LENGTH_MINUTES}, "
             f"minimum_break_minutes={BENCHMARK_MINIMUM_BREAK_MINUTES}, "
             "availability_timezone_confirmed=True"
         )
         raise RuntimeError(
             "Refusing NFR-02 seed: the selected account's scheduling preferences do not "
-            f"match the benchmark ({', '.join(mismatches)}; expected {expected})."
+            f"match the benchmark ({', '.join(mismatches)}; expected {expected}). "
+            f"The account timezone {account.timezone!r} is retained and recorded in the report."
         )
 
 
@@ -416,6 +413,7 @@ async def seed_nfr02_dataset(
     password: str = BENCHMARK_PASSWORD,
     require_existing: bool = False,
     reset_existing: bool = False,
+    reset_only: bool = False,
     dry_run: bool = False,
 ) -> UUID:
     """Seed the NFR-02 workload without replacing an existing student account."""
@@ -425,6 +423,43 @@ async def seed_nfr02_dataset(
     )
 
     if existing_account is not None:
+        if reset_only and not reset_existing:
+            raise ValueError("--reset-only requires --reset-existing")
+
+        if reset_only:
+            counts = await account_data_counts(session, existing_account.id)
+            existing_data = {name: count for name, count in counts.items() if count}
+            if existing_data:
+                reset_targets = await _benchmark_reset_targets(session, existing_account.id)
+                if dry_run:
+                    print(
+                        f"NFR-02 reset dry run: would remove {counts['tasks']} tasks, "
+                        f"{counts['sessions']} sessions, {counts['availability_windows']} "
+                        f"availability windows, {counts['unavailable_periods']} unavailable "
+                        f"periods, and {counts['schedule_proposals']} schedule proposal(s) "
+                        f"from account {existing_account.id}."
+                    )
+                    return existing_account.id
+
+                await _reset_nfr02_dataset(
+                    session,
+                    task_ids=reset_targets[0],
+                    proposal_ids=reset_targets[1],
+                    session_ids=reset_targets[2],
+                    unavailable_ids=reset_targets[3],
+                    window_ids=reset_targets[4],
+                )
+                await session.commit()
+                print(
+                    f"NFR-02 benchmark footprint reset for account {existing_account.id}; "
+                    "account credentials and profile were preserved."
+                )
+            elif dry_run:
+                print(f"NFR-02 reset dry run: account {existing_account.id} is already empty.")
+            else:
+                print(f"NFR-02 reset: account {existing_account.id} is already empty.")
+            return existing_account.id
+
         _validate_benchmark_preferences(existing_account)
         complete_dataset = await has_complete_nfr02_dataset(session, existing_account.id)
         if complete_dataset and not reset_existing:
@@ -653,6 +688,7 @@ async def run_seed(
     password: str = BENCHMARK_PASSWORD,
     require_existing: bool = False,
     reset_existing: bool = False,
+    reset_only: bool = False,
     dry_run: bool = False,
 ) -> None:
     engine = create_async_engine(database_url)
@@ -666,15 +702,20 @@ async def run_seed(
                     password=password,
                     require_existing=require_existing,
                     reset_existing=reset_existing,
+                    reset_only=reset_only,
                     dry_run=dry_run,
                 )
             except Exception:
                 await session.rollback()
                 raise
-            print(f"NFR-02 dataset ready for account ID: {account_id}")
-            if require_existing:
+            if reset_only:
+                action = "reset dry run completed" if dry_run else "reset completed"
+                print(f"NFR-02 {action} for account ID: {account_id}")
+            elif require_existing:
+                print(f"NFR-02 dataset ready for account ID: {account_id}")
                 print("Existing account selected; its password and profile were not changed.")
             else:
+                print(f"NFR-02 dataset ready for account ID: {account_id}")
                 print(f"Credentials -> Email: {email} | Password: {password}")
     finally:
         await engine.dispose()
@@ -699,6 +740,14 @@ def main() -> int:
         help=("Delete a verified NFR-02 data footprint from the selected account before reseeding"),
     )
     parser.add_argument(
+        "--reset-only",
+        action="store_true",
+        help=(
+            "Delete a verified NFR-02 data footprint without checking scheduling preferences "
+            "or reseeding"
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Show what --reset-existing would remove without changing the database",
@@ -708,6 +757,8 @@ def main() -> int:
         parser.error("--email or NFR02_BENCHMARK_EMAIL is required")
     if args.dry_run and not args.reset_existing:
         parser.error("--dry-run requires --reset-existing")
+    if args.reset_only and not args.reset_existing:
+        parser.error("--reset-only requires --reset-existing")
     settings = Settings()
     db_url = args.database_url or settings.database_url.get_secret_value()
 
@@ -717,6 +768,7 @@ def main() -> int:
             email=args.email,
             require_existing=True,
             reset_existing=args.reset_existing,
+            reset_only=args.reset_only,
             dry_run=args.dry_run,
         )
     )

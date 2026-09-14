@@ -67,7 +67,26 @@ proposal, using the remaining benchmark markers and exact task allocations. It
 aborts without changes when it finds unmarked tasks, sessions, availability, or
 proposals.
 It never falls back to the local `backend/.env` database URL.
-The selected account must use the benchmark scheduling preferences: UTC,
-60-minute preferred sessions, a 10-minute minimum break, and confirmed timezone
-availability. The evidence runner also requires the Git SHA deployed at the
-target frontend URL so the report identifies the code that was measured.
+The selected account keeps its own IANA timezone, which the HTTP benchmark
+records in the evidence report. It must use the workload-defining scheduling
+preferences: 60-minute preferred sessions, a 10-minute minimum break, and
+confirmed timezone availability.
+
+To remove the verified benchmark footprint without changing the account or
+checking its scheduling preferences, use the explicit reset-only mode:
+
+```console
+uv run python benchmarks/seed_nfr02.py \
+  --email '<existing-dev-account-email>' \
+  --reset-existing \
+  --reset-only \
+  --dry-run
+
+uv run python benchmarks/seed_nfr02.py \
+  --email '<existing-dev-account-email>' \
+  --reset-existing \
+  --reset-only
+```
+
+The evidence runner also requires the Git SHA deployed at the target frontend
+URL so the report identifies the code that was measured.

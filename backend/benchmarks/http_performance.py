@@ -104,6 +104,32 @@ async def run_http_benchmark(
             csrf_token = login_res.json().get("csrf_token")
             headers = {"X-CSRF-Token": csrf_token} if csrf_token else {}
 
+            preferences_res = await client.get(
+                "/api/v1/account/preferences",
+                headers=headers,
+            )
+            if preferences_res.status_code != 200:
+                report["error"] = (
+                    f"Could not load benchmark account preferences ({preferences_res.status_code})"
+                )
+                write_json_report(json_output, report)
+                return 1
+            preferences_data = preferences_res.json()
+            if not isinstance(preferences_data, dict):
+                report["error"] = "Benchmark account preferences response was not an object"
+                write_json_report(json_output, report)
+                return 1
+            report["account_preferences"] = {
+                "timezone": preferences_data.get("timezone"),
+                "preferred_session_length_minutes": preferences_data.get(
+                    "preferred_session_length_minutes"
+                ),
+                "minimum_break_minutes": preferences_data.get("minimum_break_minutes"),
+                "timezone_confirmed": not preferences_data.get(
+                    "availability_confirmation_required", True
+                ),
+            }
+
             # Fetch tasks to construct realistic overloaded scenario per SPEC NFR-02
             tasks_res = await client.get("/api/v1/tasks", headers=headers)
             if tasks_res.status_code != 200:
