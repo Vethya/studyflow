@@ -71,7 +71,7 @@ URL, and TLS for email delivery.
    pre-deploy commands require a paid plan. The Blueprint leaves `dockerCommand` unset so Render
    uses that `CMD` without reparsing its shell quoting. `alembic upgrade head` is idempotent, so the
    extra run on every cold start costs only seconds.
-3. Keep the existing production secret values. Configure separate values for staging and dev,
+3. Keep the existing production secret values. Configure separate values for production and dev,
    especially separate Neon databases. `sync: false` values for newly added services may need to
    be entered manually after syncing an existing Blueprint:
    - `STUDYFLOW_DATABASE_URL` (converted Neon URL from step 1)
@@ -79,8 +79,8 @@ URL, and TLS for email delivery.
    - `STUDYFLOW_SMTP_PASSWORD` and `STUDYFLOW_EMAIL_FROM_ADDRESS`
    - all three Google OIDC variables together, if Google Sign-In is enabled
    All hosted services use production mode so cookies retain their `Secure` attribute and
-   `__Host-` prefix. The shared frontend currently proxies to the dev service, so authentication
-   flows for staging and production remain inactive until each gets a matching frontend deployment.
+   `__Host-` prefix. The shared frontend currently proxies to the dev service, so production
+   authentication remains inactive until it gets a matching frontend deployment.
 4. Note the production service URL (for example `https://studyflow-api.onrender.com`). If Google
    Sign-In will be used, register
    `https://studyflow.vercel.app/api/v1/auth/google/callback` in the Google Cloud console,
