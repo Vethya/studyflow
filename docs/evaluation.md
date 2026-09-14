@@ -70,12 +70,15 @@ To seed the exact SPEC NFR-02 workload (1 student, 50 active tasks, 250 study se
 
 ```bash
 cd backend
+NFR02_BENCHMARK_EMAIL='<existing-dev-account-email>' \
 uv run python benchmarks/seed_nfr02.py
 ```
 
-Default benchmark credentials:
-- **Email:** `nfr02_benchmark@studyflow.local`
-- **Password:** `BenchmarkPassword123!`
+The seeder targets an existing student account, preserves its password and
+profile, and refuses to mix benchmark rows with other student data. If the
+complete NFR-02 dataset is already present, it skips seeding. The account's
+real password is supplied separately to the HTTP benchmark; it is never
+changed or printed by the seeder.
 
 ### 2.2 In-Memory Scheduler Kernel Performance Gate (NFR-02-AC02)
 
@@ -86,23 +89,68 @@ cd backend
 uv run python benchmarks/scheduler_performance.py --runs 20 --threshold-seconds 5.0
 ```
 
-### 2.3 Full-Stack HTTP API Benchmark (NFR-02-AC03)
+### 2.3 Full-Stack HTTP & Page Usability Benchmark (NFR-02-AC01 & AC03)
 
-The benchmark measures 20 warm API runs across core endpoints (`/tasks`, `/availability/windows`,
-`/availability/unavailable-periods`, `/study-sessions`, `/schedule-proposals/current`,
-`/progress`, and `POST /schedule-proposals` for feasible and overloaded scenarios). Query routes
-must meet $p95 < 3.0\text{s}$ and generation must meet $p95 < 5.0\text{s}$.
-
-For the Compose evaluation stack, use port `18000`:
+To measure 20 warm runs across core endpoints (`/tasks`, `/availability/windows`, `/availability/unavailable-periods`, `/study-sessions`, `/schedule-proposals/current`, `/progress`, and `POST /schedule-proposals` for feasible and overloaded scenarios) to ensure query routes meet $p95 < 3.0\text{s}$ and generation meets $p95 < 5.0\text{s}$:
 
 ```bash
 cd backend
+NFR02_BENCHMARK_EMAIL='<existing-dev-account-email>' \
+NFR02_BENCHMARK_PASSWORD='<existing-dev-account-password>' \
+uv run python benchmarks/http_performance.py --base-url http://127.0.0.1:8000 --runs 20
+```
+
+The overloaded request keeps the complete seeded workload and sets five task
+deadlines to approximately two hours from the benchmark start. This is a
+clearly overloaded scenario while preserving the required 50-task/250-session
+dataset; deadline overrides are rounded to an exact UTC minute for API
+validation.
+
+For the Compose evaluation stack, use port `18000` and pass the seeded account
+credentials:
+
+```bash
+cd backend
+NFR02_BENCHMARK_EMAIL='<existing-eval-account-email>' \
+NFR02_BENCHMARK_PASSWORD='<existing-eval-account-password>' \
 uv run python benchmarks/http_performance.py --base-url http://127.0.0.1:18000 --runs 20
 ```
 
-For the host-side application run described in section 1, use port `8000` instead. This script
-does not measure browser navigation or frontend main-content readiness. The NFR-02 page-usability
-measurement remains a follow-up task.
+### 2.4 Complete dev-environment evidence run
+
+The final NFR-02 evidence run uses one isolated dev environment:
+
+```text
+dev frontend -> dev backend deployment -> dev database
+```
+
+The deployment must already be warm. The runner checks `/api/v1/ready` and
+stops if the readiness check exceeds its warm limit. It does not start or wake
+the deployment, and it does not use the local `backend/.env` database by
+accident.
+
+From the repository root, provide the dev database URL explicitly:
+
+```bash
+NFR02_DATABASE_URL='postgresql+psycopg://<dev-database-url>' \
+NFR02_BENCHMARK_EMAIL='<existing-dev-account-email>' \
+NFR02_BENCHMARK_PASSWORD='<existing-dev-account-password>' \
+NFR02_DEPLOYED_REVISION='<git-sha-deployed-at-the-dev-frontend-url>' \
+python3 scripts/run_nfr02_evidence.py \
+  --base-url https://<dev-frontend-url>
+```
+
+The command seeds the dev database, measures each main page and the HTTP
+endpoints for 20 runs, covers feasible and overloaded schedule generation, and
+writes `docs/evidence/nfr02-performance-YYYY-MM-DD.md`. The report includes
+the measured p95 values, frontend URL, safe database target, browser, viewport,
+machine, deployed Git revision, benchmark checkout revision, workload, and
+pass/fail status. Set `NFR02_DEPLOYED_REVISION` to the exact commit SHA shown by
+the dev frontend deployment. The runner rejects a missing or malformed SHA.
+
+The browser benchmark uses the installed Google Chrome application through
+Playwright's `chrome` channel. It does not download a separate Playwright
+Chromium binary.
 
 ---
 

@@ -1,31 +1,30 @@
-"""Run the full-stack HTTP and page usability benchmark gate per SPEC NFR-02."""
+"""Run the full-stack HTTP response benchmark gate per SPEC NFR-02."""
 
 import argparse
 import asyncio
+import json
+import os
 import sys
 from datetime import UTC, datetime, timedelta
 from math import ceil
+from pathlib import Path
 from time import perf_counter
 from typing import Any
 
 import httpx
 
-BENCHMARK_EMAIL = "nfr02_benchmark@studyflow.local"
+BENCHMARK_EMAIL = "nfr02_benchmark@studyflow.dev"
 BENCHMARK_PASSWORD = "BenchmarkPassword123!"
+OVERLOAD_TASK_COUNT = 5
+OVERLOAD_DEADLINE_OFFSET = timedelta(hours=2)
 EXPECTED_TASK_COUNT = 50
 EXPECTED_SESSION_COUNT = 250
 EXPECTED_AVAILABILITY_WINDOW_COUNT = 5
 EXPECTED_UNAVAILABLE_PERIOD_COUNT = 50
 
 
-def response_status(response: httpx.Response) -> str | None:
-    """Read a schedule proposal status without assuming every response is JSON."""
-    try:
-        payload = response.json()
-    except ValueError:
-        return None
-    status_value = payload.get("status") if isinstance(payload, dict) else None
-    return status_value if isinstance(status_value, str) else None
+def percentile_95(samples: list[float]) -> float:
+    return sorted(samples)[ceil(len(samples) * 0.95) - 1]
 
 
 def validate_nfr02_dataset(
@@ -58,8 +57,37 @@ def validate_nfr02_dataset(
     return None
 
 
-def percentile_95(samples: list[float]) -> float:
-    return sorted(samples)[ceil(len(samples) * 0.95) - 1]
+def write_json_report(path: str | None, report: dict[str, Any]) -> None:
+    if path is None:
+        return
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+
+
+def proposal_status(response: httpx.Response | None) -> str | None:
+    if response is None:
+        return None
+    try:
+        payload = response.json()
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    status = payload.get("status")
+    return status if isinstance(status, str) else None
+
+
+def validate_proposal_status(
+    response: httpx.Response | None,
+    expected_status: str | None,
+) -> str | None:
+    if expected_status is None or response is None or response.status_code >= 400:
+        return None
+    actual_status = proposal_status(response)
+    if actual_status != expected_status:
+        return f"expected proposal status {expected_status!r}, got {actual_status!r}"
+    return None
 
 
 async def run_http_benchmark(
@@ -69,11 +97,26 @@ async def run_http_benchmark(
     generation_threshold_seconds: float = 5.0,
     email: str = BENCHMARK_EMAIL,
     password: str = BENCHMARK_PASSWORD,
+    json_output: str | None = None,
 ) -> int:
     """Measure warm response latencies against live API endpoints with seeded NFR-02 data."""
     if runs <= 0:
         print("Error: runs must be greater than zero.", file=sys.stderr)
         return 1
+    report: dict[str, Any] = {
+        "benchmark": "nfr02-http",
+        "started_at": datetime.now(UTC).isoformat(),
+        "base_url": base_url,
+        "runs": runs,
+        "warmup_runs_per_endpoint": 1,
+        "thresholds_seconds": {
+            "query": page_threshold_seconds,
+            "generation": generation_threshold_seconds,
+        },
+        "endpoints": [],
+        "status": "failed",
+    }
+
     try:
         async with httpx.AsyncClient(base_url=base_url, timeout=30.0) as client:
             # 1. Login
@@ -87,10 +130,12 @@ async def run_http_benchmark(
                     file=sys.stderr,
                 )
                 print(
-                    "Make sure you have seeded the database first using:\n"
-                    "  uv run python benchmarks/seed_nfr02.py",
+                    "Make sure the target account exists and the supplied benchmark "
+                    "credentials match it.",
                     file=sys.stderr,
                 )
+                report["error"] = f"Authentication failed ({login_res.status_code})"
+                write_json_report(json_output, report)
                 return 1
 
             csrf_token = login_res.json().get("csrf_token")
@@ -106,6 +151,10 @@ async def run_http_benchmark(
             for name, url in dataset_requests.items():
                 dataset_res = await client.get(url, headers=headers)
                 if dataset_res.status_code != 200:
+                    report["error"] = (
+                        f"Dataset preflight failed for {name} (HTTP {dataset_res.status_code})"
+                    )
+                    write_json_report(json_output, report)
                     print(
                         f"Error: Dataset preflight failed for {name} "
                         f"(HTTP {dataset_res.status_code}).",
@@ -114,6 +163,8 @@ async def run_http_benchmark(
                     return 1
                 payload = dataset_res.json()
                 if not isinstance(payload, list):
+                    report["error"] = f"Dataset preflight expected a list for {name}"
+                    write_json_report(json_output, report)
                     print(
                         f"Error: Dataset preflight expected a list for {name}.",
                         file=sys.stderr,
@@ -128,16 +179,27 @@ async def run_http_benchmark(
                 unavailable_periods=dataset["unavailable periods"],
             )
             if dataset_error is not None:
+                report["error"] = f"Dataset preflight failed: {dataset_error}"
+                write_json_report(json_output, report)
                 print(f"Error: Dataset preflight failed: {dataset_error}", file=sys.stderr)
                 return 1
 
-            now_utc = datetime.now(UTC)
-            overload_deadline = (now_utc + timedelta(days=2)).isoformat()
+            tasks_data = dataset["tasks"]
+
+            # Keep the full seeded workload, but make five tasks clearly impossible
+            # to finish in the near term. This produces a fast, proven overload
+            # without changing the production scheduler or reducing the dataset.
+            # Scenario deadline overrides are required to use an exact UTC minute.
+            overload_deadline = (
+                (datetime.now(UTC) + OVERLOAD_DEADLINE_OFFSET)
+                .replace(second=0, microsecond=0)
+                .isoformat(timespec="minutes")
+            )
             overload_payload: dict[str, Any] = {
                 "scenario": {
                     "deadline_overrides": [
-                        {"task_id": task["id"], "deadline_at": overload_deadline}
-                        for task in dataset["tasks"][:20]
+                        {"task_id": t["id"], "deadline_at": overload_deadline}
+                        for t in tasks_data[:OVERLOAD_TASK_COUNT]
                     ]
                 }
             }
@@ -195,51 +257,90 @@ async def run_http_benchmark(
                 method = endpoint["method"]
                 payload = endpoint.get("json")
                 is_gen = endpoint.get("is_generation", False)
+                expected_status = endpoint.get("expected_status")
                 threshold = generation_threshold_seconds if is_gen else page_threshold_seconds
 
                 # Warm-up run
-                if method == "GET":
-                    warm_res = await client.get(url, headers=headers)
-                else:
-                    warm_res = await client.post(url, headers=headers, json=payload)
+                warmup_started = perf_counter()
+                warmup_error: str | None = None
+                try:
+                    if method == "GET":
+                        warm_res = await client.get(url, headers=headers)
+                    else:
+                        warm_res = await client.post(url, headers=headers, json=payload)
+                except httpx.RequestError as exc:
+                    warm_res = None
+                    warmup_error = str(exc)
+                warmup_elapsed = perf_counter() - warmup_started
+                warmup_validation_error = validate_proposal_status(warm_res, expected_status)
+                if warmup_validation_error:
+                    warmup_error = warmup_validation_error
 
-                if warm_res.status_code >= 400:
-                    print(
-                        f"| {endpoint['name']} | - | - | - | - | {threshold:.1f}s | "
-                        f"❌ FAIL (HTTP {warm_res.status_code}) |"
+                if warm_res is None or warm_res.status_code >= 400 or warmup_validation_error:
+                    warmup_status_code = warm_res.status_code if warm_res is not None else None
+                    report["endpoints"].append(
+                        {
+                            "name": endpoint["name"],
+                            "path": url,
+                            "scenario": (
+                                "overloaded"
+                                if "Overloaded" in endpoint["name"]
+                                else "feasible"
+                                if is_gen
+                                else None
+                            ),
+                            "threshold_seconds": threshold,
+                            "warmup_seconds": warmup_elapsed,
+                            "warmup_status_code": warmup_status_code,
+                            "warmup_error": warmup_error,
+                            "expected_proposal_status": expected_status,
+                            "warmup_proposal_status": proposal_status(warm_res),
+                            "sample_seconds": [],
+                            "status": "failed",
+                        }
                     )
-                    failed = True
-                    continue
-                expected_status = endpoint.get("expected_status")
-                if expected_status is not None and response_status(warm_res) != expected_status:
+                    warmup_status = warmup_error or (
+                        f"HTTP {warmup_status_code}" if warm_res is not None else "request error"
+                    )
                     print(
                         f"| {endpoint['name']} | - | - | - | - | {threshold:.1f}s | "
-                        f"❌ FAIL (expected status {expected_status!r}, got "
-                        f"{response_status(warm_res)!r}) |"
+                        f"❌ FAIL ({warmup_status}) |"
                     )
                     failed = True
                     continue
 
                 samples: list[float] = []
+                status_codes: list[int | None] = []
+                request_errors: list[str] = []
+                validation_errors: list[str] = []
+                proposal_statuses: list[str | None] = []
                 endpoint_failed = False
-                last_error: str | None = None
+                last_error_status: int | None = None
+                last_error_detail: str | None = None
                 for _ in range(runs):
                     started = perf_counter()
-                    if method == "GET":
-                        res = await client.get(url, headers=headers)
-                    else:
-                        res = await client.post(url, headers=headers, json=payload)
+                    try:
+                        if method == "GET":
+                            res = await client.get(url, headers=headers)
+                        else:
+                            res = await client.post(url, headers=headers, json=payload)
+                    except httpx.RequestError as exc:
+                        res = None
+                        request_errors.append(str(exc))
                     elapsed = perf_counter() - started
                     samples.append(elapsed)
+                    status_codes.append(res.status_code if res is not None else None)
+                    proposal_statuses.append(proposal_status(res))
 
-                    if res.status_code >= 400:
+                    if res is None or res.status_code >= 400:
                         endpoint_failed = True
-                        last_error = f"HTTP {res.status_code}"
-                    elif expected_status is not None and response_status(res) != expected_status:
+                        if res is not None:
+                            last_error_status = res.status_code
+                    validation_error = validate_proposal_status(res, expected_status)
+                    if validation_error:
                         endpoint_failed = True
-                        last_error = (
-                            f"expected status {expected_status!r}, got {response_status(res)!r}"
-                        )
+                        validation_errors.append(validation_error)
+                        last_error_detail = validation_error
 
                 p95 = percentile_95(samples)
                 median = sorted(samples)[len(samples) // 2]
@@ -247,10 +348,48 @@ async def run_http_benchmark(
                 maximum = max(samples)
                 passed = p95 < threshold and not endpoint_failed
 
+                report["endpoints"].append(
+                    {
+                        "name": endpoint["name"],
+                        "path": url,
+                        "scenario": (
+                            "overloaded"
+                            if "Overloaded" in endpoint["name"]
+                            else "feasible"
+                            if is_gen
+                            else None
+                        ),
+                        "threshold_seconds": threshold,
+                        "warmup_seconds": warmup_elapsed,
+                        "warmup_status_code": warm_res.status_code,
+                        "warmup_error": None,
+                        "expected_proposal_status": expected_status,
+                        "warmup_proposal_status": proposal_status(warm_res),
+                        "sample_seconds": samples,
+                        "status_codes": sorted({code for code in status_codes if code is not None}),
+                        "request_errors": request_errors,
+                        "validation_errors": validation_errors,
+                        "proposal_statuses": proposal_statuses,
+                        "minimum_seconds": minimum,
+                        "median_seconds": median,
+                        "maximum_seconds": maximum,
+                        "p95_seconds": p95,
+                        "status": "passed" if passed else "failed",
+                    }
+                )
+
                 if not passed:
                     failed = True
                     if endpoint_failed:
-                        status_str = f"❌ FAIL ({last_error})"
+                        status_str = (
+                            f"❌ FAIL ({last_error_detail})"
+                            if last_error_detail is not None
+                            else (
+                                f"❌ FAIL (HTTP {last_error_status})"
+                                if last_error_status is not None
+                                else "❌ FAIL (request error)"
+                            )
+                        )
                     else:
                         status_str = f"❌ FAIL (P95 >= {threshold:.1f}s)"
                 else:
@@ -262,14 +401,20 @@ async def run_http_benchmark(
                 )
 
             print()
+            report["status"] = "failed" if failed else "passed"
+            report["finished_at"] = datetime.now(UTC).isoformat()
+            write_json_report(json_output, report)
             if failed:
                 print("❌ NFR-02 Performance Gate FAILED.")
                 return 1
             else:
                 print("✅ NFR-02 Performance Gate PASSED.")
                 return 0
-    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+    except httpx.RequestError as exc:
         print(f"Connection error to {base_url}: {exc}", file=sys.stderr)
+        report["error"] = str(exc)
+        report["finished_at"] = datetime.now(UTC).isoformat()
+        write_json_report(json_output, report)
         return 1
 
 
@@ -279,7 +424,7 @@ def main() -> int:
         "--base-url",
         type=str,
         default="http://127.0.0.1:8000",
-        help="Backend base URL",
+        help="Frontend origin or backend base URL",
     )
     parser.add_argument(
         "--runs",
@@ -299,10 +444,31 @@ def main() -> int:
         default=5.0,
         help="Max p95 latency for schedule generation in seconds (default: 5.0)",
     )
-    parser.add_argument("--email", type=str, default=BENCHMARK_EMAIL)
-    parser.add_argument("--password", type=str, default=BENCHMARK_PASSWORD)
+    parser.add_argument(
+        "--json-output",
+        type=str,
+        help="Write raw samples and summary statistics to this JSON file",
+    )
+    parser.add_argument(
+        "--email",
+        type=str,
+        default=os.environ.get("NFR02_BENCHMARK_EMAIL"),
+        help="Student account email (also settable via NFR02_BENCHMARK_EMAIL)",
+    )
+    parser.add_argument(
+        "--password",
+        type=str,
+        default=os.environ.get("NFR02_BENCHMARK_PASSWORD"),
+        help="Student account password (also settable via NFR02_BENCHMARK_PASSWORD)",
+    )
 
     args = parser.parse_args()
+    if args.runs < 1:
+        parser.error("--runs must be at least 1")
+    if not args.email:
+        parser.error("--email or NFR02_BENCHMARK_EMAIL is required")
+    if not args.password:
+        parser.error("--password or NFR02_BENCHMARK_PASSWORD is required")
     return asyncio.run(
         run_http_benchmark(
             base_url=args.base_url,
@@ -311,6 +477,7 @@ def main() -> int:
             generation_threshold_seconds=args.generation_threshold,
             email=args.email,
             password=args.password,
+            json_output=args.json_output,
         )
     )
 

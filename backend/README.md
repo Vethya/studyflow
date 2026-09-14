@@ -157,7 +157,7 @@ The full coverage gate remains `uv run pytest --cov=studyflow --cov-branch`, wit
 
 See `docs/evaluation.md` for full instructions.
 
-- **Seed NFR-02 dataset:** `uv run python benchmarks/seed_nfr02.py`
+- **Seed NFR-02 dataset:** `NFR02_BENCHMARK_EMAIL='<existing-dev-account-email>' uv run python benchmarks/seed_nfr02.py`
 - **Scheduler performance gate:** `uv run python benchmarks/scheduler_performance.py`
 - **HTTP performance benchmark:** `uv run python benchmarks/http_performance.py`
 - **Static vs adaptive comparison (§24.6):** `uv run python benchmarks/compare_static_adaptive.py`
