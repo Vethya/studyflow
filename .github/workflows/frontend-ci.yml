@@ -90,8 +90,12 @@ jobs:
       - name: Production build
         run: pnpm build
 
-      # The smoke test mocks the API, so no backend is needed. GitHub's Ubuntu
-      # runners ship Google Chrome, which the "chrome" project uses.
+      # The runner already has Google Chrome for the "chrome" project; only
+      # ffmpeg is missing, which Playwright needs to record failure videos.
+      - name: Install Playwright ffmpeg
+        run: pnpm exec playwright install ffmpeg
+
+      # The smoke test mocks the API, so no backend is needed.
       - name: Playwright smoke test
         env:
           CI: "true"
