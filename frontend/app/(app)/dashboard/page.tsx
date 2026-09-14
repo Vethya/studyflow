@@ -13,7 +13,10 @@ import {
   CalendarOff,
   Clock3,
   ListChecks,
+  Plus,
 } from "lucide-react";
+import { toast } from "sonner";
+import { TaskFormDialog } from "@/components/task-form-dialog";
 import { CapacityBar } from "@/components/capacity-bar";
 import { ShortfallCard } from "@/components/shortfall-card";
 import { RecordOutcomeDialog } from "@/components/record-outcome-dialog";
@@ -58,6 +61,7 @@ export default function DashboardPage() {
   const [outcomeSession, setOutcomeSession] = useState<StudySession | null>(null);
   const [proposal, setProposal] = useState<ScheduleProposal | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
 
   const loadTasks = useCallback((s: AbortSignal) => tasksApi.listTasks({}, s), []);
   const loadWindows = useCallback((s: AbortSignal) => availabilityApi.listWindows(s), []);
@@ -199,6 +203,13 @@ export default function DashboardPage() {
       <PageHeader
         title={firstName ? `Hello, ${firstName}` : "Dashboard"}
         description="Whether your coursework fits the time you have."
+        actions={
+          // SPEC §17.2 Quick Add Task, using the same form as Calendar and Tasks.
+          <Button onClick={() => setAddOpen(true)}>
+            <Plus />
+            Add task
+          </Button>
+        }
       />
 
       {loadError && (
@@ -453,6 +464,16 @@ export default function DashboardPage() {
           </div>
         </section>
       )}
+
+      <TaskFormDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        task={null}
+        onSaved={() => {
+          toast.success("Task added");
+          tasks.reload();
+        }}
+      />
 
       <RecordOutcomeDialog
         session={outcomeSession}
