@@ -63,9 +63,9 @@ URL, and TLS for email delivery.
 
 1. Push this repository to GitHub and connect the Render workspace.
 2. Create a **Blueprint** deployment from the repository root so `render.yaml` applies:
-   - `studyflow-api` from `master` (production; this name intentionally matches the existing service)
-   - `studyflow-api-staging` from `staging`
-   - `studyflow-api-dev` from `dev`
+   - Project `StudyFlow`
+   - `Production`: `studyflow-api` from `master` (this name intentionally matches the existing service)
+   - `dev`: `studyflow-api-dev` from `dev`
    Each service uses Docker, the free plan, a health check, and its own environment variables.
    The Dockerfile `CMD` applies migrations (`alembic upgrade head`) before launching Uvicorn because
    pre-deploy commands require a paid plan. The Blueprint leaves `dockerCommand` unset so Render

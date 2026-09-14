@@ -18,7 +18,12 @@ def load_blueprint() -> dict[str, Any]:
 
 
 def services() -> list[dict[str, Any]]:
-    return [cast(dict[str, Any], service_config) for service_config in load_blueprint()["services"]]
+    return [
+        cast(dict[str, Any], service_config)
+        for project in load_blueprint()["projects"]
+        for environment_config in project["environments"]
+        for service_config in environment_config["services"]
+    ]
 
 
 def service(name: str = "studyflow-api") -> dict[str, Any]:
@@ -30,16 +35,30 @@ def environment(service_config: dict[str, Any]) -> dict[str, str | None]:
 
 
 def test_blueprint_deploys_each_environment_from_its_own_branch() -> None:
+    project = load_blueprint()["projects"][0]
+    environments = {
+        environment_config["name"]: environment_config
+        for environment_config in project["environments"]
+    }
+
+    assert project["name"] == "StudyFlow"
+    assert set(environments) == {"Production", "dev"}
+    assert {
+        name: [service_config["name"] for service_config in environment_config["services"]]
+        for name, environment_config in environments.items()
+    } == {
+        "Production": ["studyflow-api"],
+        "dev": ["studyflow-api-dev"],
+    }
+
     service_configs = {service_config["name"]: service_config for service_config in services()}
 
     assert set(service_configs) == {
         "studyflow-api",
-        "studyflow-api-staging",
         "studyflow-api-dev",
     }
     assert {name: service_config["branch"] for name, service_config in service_configs.items()} == {
         "studyflow-api": "master",
-        "studyflow-api-staging": "staging",
         "studyflow-api-dev": "dev",
     }
     environment_by_service = {
@@ -48,7 +67,6 @@ def test_blueprint_deploys_each_environment_from_its_own_branch() -> None:
     }
     assert environment_by_service == {
         "studyflow-api": "production",
-        "studyflow-api-staging": "production",
         "studyflow-api-dev": "production",
     }
 
