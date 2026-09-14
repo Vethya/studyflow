@@ -26,7 +26,7 @@ URL, and TLS for email delivery.
 | `STUDYFLOW_DATABASE_URL` | yes | You (secret) | Neon **pooled** URL, converted; see below |
 | `STUDYFLOW_PUBLIC_APP_URL` | yes | `render.yaml` (`https://studyflow.vercel.app`) | Shared frontend origin; verification links point here |
 | `STUDYFLOW_SMTP_HOST` | yes | `render.yaml` (`smtp.resend.com`) | |
-| `STUDYFLOW_SMTP_PORT` | yes | `render.yaml` (`587`) | |
+| `STUDYFLOW_SMTP_PORT` | yes | `render.yaml` (`2587`) | |
 | `STUDYFLOW_SMTP_USERNAME` | yes | `render.yaml` (`resend`) | Literal username for Resend's relay |
 | `STUDYFLOW_SMTP_PASSWORD` | yes | You (secret) | Resend API key |
 | `STUDYFLOW_SMTP_START_TLS` | yes | `render.yaml` (`true`) | Production requires TLS delivery |
