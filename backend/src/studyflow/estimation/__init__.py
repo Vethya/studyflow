@@ -9,6 +9,7 @@ from studyflow.estimation.model import (
 )
 from studyflow.estimation.repositories import AdaptivePredictionRepository
 from studyflow.estimation.service import (
+    AdaptiveEligibilityStatus,
     AdaptiveEstimatePreview,
     AdaptiveEstimateUnavailableError,
     AdaptiveEstimator,
@@ -16,6 +17,7 @@ from studyflow.estimation.service import (
 )
 
 __all__ = [
+    "AdaptiveEligibilityStatus",
     "AdaptiveEstimatePreview",
     "AdaptiveEstimateUnavailableError",
     "AdaptiveEstimator",
