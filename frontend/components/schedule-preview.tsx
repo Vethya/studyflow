@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { DetailDrawer } from "@/components/detail-drawer";
+import { OverloadWarningList } from "@/components/overload-warning-list";
 import { UnscheduledWorkList } from "@/components/unscheduled-work-list";
 import { DAY_NAMES_SHORT, formatDuration } from "@/lib/constants";
 import { formatClock } from "@/lib/datetime";
@@ -104,6 +105,11 @@ export function SchedulePreview({
 
   const totalMinutes = upcoming.reduce((sum, session) => sum + session.plannedDuration, 0);
   const scenarioDescription = proposal.scenario ? describeScenario(proposal.scenario) : null;
+  // Overloaded tasks already show their unplaced work with the full explanation.
+  const overloadedTaskIds = new Set(proposal.overloadWarnings.map((warning) => warning.taskId));
+  const unexplainedUnscheduled = proposal.unscheduledWork.filter(
+    (item) => !overloadedTaskIds.has(item.taskId),
+  );
 
   async function run(action: "accept" | "reject") {
     setBusy(action);
@@ -167,22 +173,26 @@ export function SchedulePreview({
           </Callout>
         )}
 
+        {/* SPEC §10.5 / §11.2: the full Overload explanation for each affected task. */}
         {proposal.overloadWarnings.length > 0 && (
-          <Callout
-            tone="warning"
-            title={`${proposal.overloadWarnings.length} ${
-              proposal.overloadWarnings.length === 1 ? "task still doesn’t" : "tasks still don’t"
-            } fit`}
-          >
-            Using this plan is still an improvement, but you will need to move a deadline or
-            add study time to fit everything.
-          </Callout>
+          <section className="space-y-2">
+            <Callout
+              tone="warning"
+              title={`${proposal.overloadWarnings.length} ${
+                proposal.overloadWarnings.length === 1 ? "task still doesn’t" : "tasks still don’t"
+              } fit`}
+            >
+              Using this plan still places everything that fits. To fit the rest, move a deadline
+              or add study time.
+            </Callout>
+            <OverloadWarningList warnings={proposal.overloadWarnings} />
+          </section>
         )}
 
-        {proposal.unscheduledWork.length > 0 && (
+        {unexplainedUnscheduled.length > 0 && (
           <section>
             <h3 className="mb-2 text-sm font-medium">Work with no slot</h3>
-            <UnscheduledWorkList items={proposal.unscheduledWork} />
+            <UnscheduledWorkList items={unexplainedUnscheduled} />
           </section>
         )}
 

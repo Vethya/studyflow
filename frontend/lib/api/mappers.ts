@@ -234,6 +234,7 @@ function toScheduleScenario(wire: WireScheduleProposal["scenario"]): ScheduleSce
 
 export function toScheduleProposal(wire: WireScheduleProposal): ScheduleProposal {
   const periods = wire.overload_warning?.relevant_unavailable_periods ?? [];
+  const remedies = wire.overload_warning?.remedies ?? ["extend_deadline", "add_availability"];
 
   return {
     id: wire.id,
@@ -263,9 +264,17 @@ export function toScheduleProposal(wire: WireScheduleProposal): ScheduleProposal
         requiredMinutes: a.required_minutes,
         availableMinutes: a.available_minutes_before_deadline,
         shortfallMinutes: a.shortfall_minutes,
-        relevantUnavailablePeriods: periods.map(
-          (p) => p.reason ?? "an unavailable period",
-        ),
+        // The API lists periods for the whole overload; each task only shows
+        // the ones that begin before its own deadline.
+        relevantUnavailablePeriods: periods
+          .filter((p) => new Date(p.starts_at) < new Date(a.deadline_at))
+          .map((p) => ({
+            id: p.id,
+            startsAt: p.starts_at,
+            endsAt: p.ends_at,
+            reason: p.reason ?? undefined,
+          })),
+        remedies,
       })),
     createdAt: wire.created_at,
     scenario: toScheduleScenario(wire.scenario),
