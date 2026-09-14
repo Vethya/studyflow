@@ -150,7 +150,7 @@ function LoginForm() {
             <Label htmlFor="password" className="text-xs font-medium">Password</Label>
             <Link
               href="/forgot-password"
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             >
               Forgot password?
             </Link>
@@ -178,7 +178,7 @@ function LoginForm() {
       {/* Sign up link */}
       <p className="text-center text-sm text-muted-foreground">
         Don&apos;t have an account?{" "}
-        <Link href="/register" className="font-medium text-foreground hover:underline">
+        <Link href="/register" className="font-medium text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
           Sign up free
         </Link>
       </p>

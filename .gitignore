@@ -14,6 +14,17 @@ htmlcov/
 .env
 .env.*
 !.env.example
+!.env.evaluation.example
+scripts/backup.env
+scripts/backup-config.ps1
+scripts/backup-recipients.txt
+scripts/restore.env
+scripts/restore-config.ps1
+studyflow-backup-private-key.txt
+studyflow-backup-private-key.age
+*.dump
+*.dump.age
+*.gpg
 
 # Editors and operating systems
 .DS_Store

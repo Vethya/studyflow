@@ -39,6 +39,30 @@ The browser talks to the backend at `/api/v1/*` on this app's **own** origin;
 Set `BACKEND_ORIGIN` in `frontend/.env.local` if the backend is not on
 `http://localhost:8000`. See `.env.example`.
 
+## NFR-05 browser evidence
+
+Run the automated compatibility and accessibility evidence suite from this
+directory:
+
+```bash
+pnpm test:nfr05:install
+pnpm test:nfr05
+```
+
+The suite exercises 360, 768, and 1440 CSS-pixel viewports across stable
+Chrome, Edge, Playwright WebKit, mobile Chrome emulation, and mobile Safari
+emulation. It also checks core route rendering, horizontal overflow, runtime
+errors, control names, keyboard focus, labels, contrast, and non-color status
+cues. Results are written to `test-results/nfr05/evidence.md`, with the
+interactive report in `playwright-report/`.
+
+The Chrome and Edge projects use the locally installed stable applications;
+install Edge separately if it is not present.
+
+Playwright WebKit is not Apple Safari. Complete
+`../docs/nfr05-mobile-safari-checklist.md` on a real iPhone to close the mobile
+Safari evidence requirement.
+
 ## Screens
 
 | Route | What it shows |

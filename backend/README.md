@@ -149,3 +149,13 @@ Focused tests: `uv run pytest tests/test_adaptive_estimation.py
 tests/test_adaptive_estimation_repository.py tests/test_adaptive_estimate_api.py` (one command).
 The full coverage gate remains `uv run pytest --cov=studyflow --cov-branch`, with the configured
 90% minimum.
+
+## Evaluation and performance benchmarks
+
+See `docs/evaluation.md` for full instructions.
+
+- **Seed NFR-02 dataset:** `NFR02_BENCHMARK_EMAIL='<existing-dev-account-email>' uv run python benchmarks/seed_nfr02.py`
+- **Scheduler performance gate:** `uv run python benchmarks/scheduler_performance.py`
+- **HTTP performance benchmark:** `uv run python benchmarks/http_performance.py`
+- **Static vs adaptive comparison (§24.6):** `uv run python benchmarks/compare_static_adaptive.py`
+- **Pseudonymized evaluation export (§24.4):** `uv run python -m studyflow.cli.export_evaluation --output eval.json`

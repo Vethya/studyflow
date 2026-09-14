@@ -26,7 +26,7 @@ URL, and TLS for email delivery.
 | `STUDYFLOW_DATABASE_URL` | yes | You (secret) | Neon **pooled** URL, converted; see below |
 | `STUDYFLOW_PUBLIC_APP_URL` | yes | `render.yaml` (`https://studyflow.vercel.app`) | Shared frontend origin; verification links point here |
 | `STUDYFLOW_SMTP_HOST` | yes | `render.yaml` (`smtp.resend.com`) | |
-| `STUDYFLOW_SMTP_PORT` | yes | `render.yaml` (`587`) | |
+| `STUDYFLOW_SMTP_PORT` | yes | `render.yaml` (`2587`) | |
 | `STUDYFLOW_SMTP_USERNAME` | yes | `render.yaml` (`resend`) | Literal username for Resend's relay |
 | `STUDYFLOW_SMTP_PASSWORD` | yes | You (secret) | Resend API key |
 | `STUDYFLOW_SMTP_START_TLS` | yes | `render.yaml` (`true`) | Production requires TLS delivery |
@@ -63,15 +63,15 @@ URL, and TLS for email delivery.
 
 1. Push this repository to GitHub and connect the Render workspace.
 2. Create a **Blueprint** deployment from the repository root so `render.yaml` applies:
-   - `studyflow-api` from `master` (production; this name intentionally matches the existing service)
-   - `studyflow-api-staging` from `staging`
-   - `studyflow-api-dev` from `dev`
+   - Project `StudyFlow`
+   - `Production`: `studyflow-api` from `master` (this name intentionally matches the existing service)
+   - `dev`: `studyflow-api-dev` from `dev`
    Each service uses Docker, the free plan, a health check, and its own environment variables.
    The Dockerfile `CMD` applies migrations (`alembic upgrade head`) before launching Uvicorn because
    pre-deploy commands require a paid plan. The Blueprint leaves `dockerCommand` unset so Render
    uses that `CMD` without reparsing its shell quoting. `alembic upgrade head` is idempotent, so the
    extra run on every cold start costs only seconds.
-3. Keep the existing production secret values. Configure separate values for staging and dev,
+3. Keep the existing production secret values. Configure separate values for production and dev,
    especially separate Neon databases. `sync: false` values for newly added services may need to
    be entered manually after syncing an existing Blueprint:
    - `STUDYFLOW_DATABASE_URL` (converted Neon URL from step 1)
@@ -79,8 +79,8 @@ URL, and TLS for email delivery.
    - `STUDYFLOW_SMTP_PASSWORD` and `STUDYFLOW_EMAIL_FROM_ADDRESS`
    - all three Google OIDC variables together, if Google Sign-In is enabled
    All hosted services use production mode so cookies retain their `Secure` attribute and
-   `__Host-` prefix. The shared frontend currently proxies to the dev service, so authentication
-   flows for staging and production remain inactive until each gets a matching frontend deployment.
+   `__Host-` prefix. The shared frontend currently proxies to the dev service, so production
+   authentication remains inactive until it gets a matching frontend deployment.
 4. Note the production service URL (for example `https://studyflow-api.onrender.com`). If Google
    Sign-In will be used, register
    `https://studyflow.vercel.app/api/v1/auth/google/callback` in the Google Cloud console,
@@ -157,5 +157,6 @@ Postman and curl are unaffected by cookie site rules; import
 ## Backups
 
 SPEC §20.8 requires a manual backup before each review/demo plus at least one documented
-restore test. Export a Neon backup (branch snapshot or `pg_dump`) beforehand and record the
-restore test outcome alongside review materials.
+restore test. Use the cross-platform procedure in [`docs/backup-restore.md`](backup-restore.md).
+The repository contains the backup scripts, but never the database dump, database password,
+Google OAuth token, or age private key.

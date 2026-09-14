@@ -5,7 +5,7 @@ StudyFlow helps university students turn academic work into feasible, adaptable 
 ## Language
 
 **Student Account**:
-The personal identity and planning preferences of StudyFlow's only direct user type. The student may manage their name, password, Account Timezone, Preferred Session Length, Minimum Session Length, and Minimum Break.
+The personal identity and planning preferences of StudyFlow's only direct user type. The student may manage their name, password, Account Timezone, Preferred Session Length, and Minimum Break.
 _Avoid_: Adviser account, administrator account
 
 **Academic Task**:
@@ -81,12 +81,8 @@ A Study Session whose placement was chosen by the student and must remain unchan
 _Avoid_: Fixed task
 
 **Preferred Session Length**:
-The maximum duration a student prefers for Study Sessions. It defaults to sixty minutes and may be changed for the account or overridden for an individual Academic Task.
+The maximum duration a student prefers for Study Sessions. It defaults to sixty minutes and may be changed for the account.
 _Avoid_: Task duration, estimated duration
-
-**Minimum Session Length**:
-The shortest uninterrupted period the student considers useful for a Study Session. It defaults to twenty minutes. StudyFlow rebalances split work to avoid smaller fragments, except when the entire Academic Task is shorter than this minimum; an Academic Task may override the account preference.
-_Avoid_: Preferred Session Length
 
 **Minimum Break**:
 The shortest rest period the student wants between consecutive Study Sessions. It defaults to ten minutes and may be set to zero.
