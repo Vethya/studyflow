@@ -7,6 +7,7 @@ interface ReporterOptions {
 }
 
 interface TestSummary {
+  id: string;
   title: string;
   project: string;
   status: string;
@@ -67,7 +68,8 @@ export default class Nfr05Reporter implements Reporter {
 
   onTestEnd(test: TestCase, result: TestResult): void {
     const environment = readRuntimeEnvironment(result.annotations);
-    this.tests.push({
+    const summary: TestSummary = {
+      id: test.id,
       title: test.titlePath().slice(2).join(" › "),
       project: test.parent.project()?.name ?? "unknown",
       status: result.status,
@@ -78,7 +80,13 @@ export default class Nfr05Reporter implements Reporter {
       axeAnnotations: result.annotations
         .filter((annotation) => annotation.type === "axe")
         .map((annotation) => annotation.description ?? "axe scan"),
-    });
+    };
+    const previousAttempt = this.tests.findIndex((candidate) => candidate.id === test.id);
+    if (previousAttempt === -1) {
+      this.tests.push(summary);
+    } else {
+      this.tests[previousAttempt] = summary;
+    }
   }
 
   onEnd(result: FullResult): void {
