@@ -1,6 +1,12 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { installNfr05ApiMocks, MOCK_ACCOUNT } from "./nfr05-mocks";
+import {
+  FLOW_PROPOSAL_ID,
+  FLOW_TASK_ID,
+  FLOW_TASK_TITLE,
+  installNfr05ApiMocks,
+  MOCK_ACCOUNT,
+} from "./nfr05-mocks";
 
 const VIEWPORTS = [
   { width: 360, height: 800 },
@@ -43,9 +49,15 @@ function installRuntimeMonitoring(page: Page): RuntimeIssue[] {
   page.on("console", (message) => {
     // The dashboard and calendar intentionally treat a missing pending
     // proposal as an ordinary 404, which Chromium reports as a console error.
+    // WebKit can also report a lost Next.js dev-server HMR socket while the
+    // page is running. That is test-server noise, not an application error.
+    const isExpectedHmrDisconnect =
+      message.text().includes("WebSocket connection") &&
+      message.text().includes("/_next/webpack-hmr");
     if (
       message.type() === "error" &&
-      !message.text().includes("status of 404 (Not Found)")
+      !message.text().includes("status of 404 (Not Found)") &&
+      !isExpectedHmrDisconnect
     ) {
       issues.push({ kind: "console", message: message.text() });
     }
@@ -271,6 +283,59 @@ for (const viewport of VIEWPORTS) {
         contentType: "application/json",
       });
       expect(issues).toEqual([]);
+    });
+
+    test("task-to-schedule workflow completes", async ({ page }, testInfo) => {
+      test.skip(testInfo.project.name.startsWith("mobile-") && viewport.width !== 360, "Mobile projects run at 360px only.");
+
+      const issues = installRuntimeMonitoring(page);
+      const mockState = await installNfr05ApiMocks(page, { authenticated: true });
+
+      await page.goto("/calendar");
+      await waitForPageReady(page, /(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday), | – /);
+
+      await page.getByRole("button", { name: "Add task", exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+      await dialog.getByLabel("Title").fill(FLOW_TASK_TITLE);
+      await dialog.getByLabel("Deadline").fill(
+        new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString().slice(0, 16),
+      );
+      await dialog.getByLabel("Estimate (minutes)").fill("60");
+      await dialog.getByRole("button", { name: "Add task", exact: true }).click();
+
+      await expect(dialog).toBeHidden();
+      await expect.poll(() => mockState.createdTaskIds).toContain(FLOW_TASK_ID);
+
+      const proposalResponse = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/v1/schedule-proposals") &&
+          response.request().method() === "POST",
+      );
+      await page.getByRole("button", { name: "Plan my time", exact: true }).click();
+      await expect((await proposalResponse).status()).toBe(201);
+      await expect(page.getByRole("heading", { name: "Your proposed plan" })).toBeVisible();
+
+      const acceptResponse = page.waitForResponse(
+        (response) =>
+          response.url().endsWith(`/api/v1/schedule-proposals/${FLOW_PROPOSAL_ID}/accept`) &&
+          response.request().method() === "POST",
+      );
+      await page.getByRole("button", { name: "Use this plan", exact: true }).click();
+      await expect((await acceptResponse).status()).toBe(204);
+      await expect.poll(() => mockState.acceptedProposalIds).toContain(FLOW_PROPOSAL_ID);
+      await expect(page.getByRole("heading", { name: "Your proposed plan" })).toBeHidden();
+
+      await testInfo.attach("runtime-issues.json", {
+        body: JSON.stringify(issues, null, 2),
+        contentType: "application/json",
+      });
+      await testInfo.attach("unhandled-api-requests.json", {
+        body: JSON.stringify(mockState.unhandledRequests, null, 2),
+        contentType: "application/json",
+      });
+      expect(issues).toEqual([]);
+      expect(mockState.unhandledRequests).toEqual([]);
     });
 
     test("task statuses expose text cues in addition to color", async ({ page }, testInfo) => {

@@ -1,7 +1,13 @@
 import type { Page, Route } from "@playwright/test";
+import type { WireAcademicTask } from "../lib/api/wire";
 
 const now = Date.now();
 const iso = (offsetMinutes: number) => new Date(now + offsetMinutes * 60_000).toISOString();
+
+export const FLOW_TASK_ID = "task-nfr05-flow";
+export const FLOW_TASK_TITLE = "Compatibility smoke task";
+export const FLOW_PROPOSAL_ID = "proposal-nfr05-flow";
+export const FLOW_SESSION_ID = "session-nfr05-flow";
 
 export const MOCK_ACCOUNT = {
   id: "account-nfr05",
@@ -9,7 +15,7 @@ export const MOCK_ACCOUNT = {
   name: "Alex Student",
 };
 
-export const MOCK_TASKS = [
+export const MOCK_TASKS: WireAcademicTask[] = [
   {
     id: "task-reading",
     title: "Read cognitive science paper",
@@ -89,6 +95,72 @@ const MOCK_PROPOSAL = {
 export interface MockApiState {
   unhandledRequests: string[];
   authenticated: boolean;
+  createdTaskIds: string[];
+  acceptedProposalIds: string[];
+}
+
+function createFlowTask(input: {
+  title: string;
+  category: (typeof MOCK_TASKS)[number]["category"];
+  priority: (typeof MOCK_TASKS)[number]["priority"];
+  course: string | null;
+  notes: string | null;
+  deadline_at: string;
+  original_estimate_minutes: number;
+}) {
+  return {
+    id: FLOW_TASK_ID,
+    title: input.title,
+    category: input.category,
+    priority: input.priority,
+    course: input.course,
+    notes: input.notes,
+    deadline_at: input.deadline_at,
+    original_estimate_minutes: input.original_estimate_minutes,
+    planned_duration_minutes: input.original_estimate_minutes,
+    created_at: iso(-1),
+    updated_at: iso(-1),
+    status: "not_started" as const,
+  };
+}
+
+function createFlowProposal(task: WireAcademicTask) {
+  const startsAt = iso(24 * 60 + 180);
+  const endsAt = iso(24 * 60 + 180 + task.original_estimate_minutes);
+
+  return {
+    id: FLOW_PROPOSAL_ID,
+    kind: "generation" as const,
+    revision_reason: null,
+    status: "feasible" as const,
+    created_at: iso(-15),
+    sessions: [
+      {
+        id: FLOW_SESSION_ID,
+        task_id: task.id,
+        task_title: task.title,
+        starts_at: startsAt,
+        ends_at: endsAt,
+        planned_duration_minutes: task.original_estimate_minutes,
+      },
+    ],
+    task_allocations: [
+      {
+        task_id: task.id,
+        task_title: task.title,
+        deadline_at: task.deadline_at,
+        required_minutes: task.original_estimate_minutes,
+        scheduled_minutes: task.original_estimate_minutes,
+        unscheduled_minutes: 0,
+        raw_calendar_capacity_minutes: task.original_estimate_minutes,
+        available_minutes_before_deadline: task.original_estimate_minutes,
+        shortfall_minutes: 0,
+      },
+    ],
+    unscheduled_work: [],
+    overload_warning: null,
+    scenario: null,
+  };
 }
 
 async function fulfillJson(route: Route, body: unknown, status = 200): Promise<void> {
@@ -115,7 +187,12 @@ export async function installNfr05ApiMocks(
   const state: MockApiState = {
     authenticated: options.authenticated,
     unhandledRequests: [],
+    createdTaskIds: [],
+    acceptedProposalIds: [],
   };
+  const taskStore = [...MOCK_TASKS];
+  let pendingProposal: ReturnType<typeof createFlowProposal> | null = null;
+  let acceptedSessions = [...MOCK_SESSIONS];
 
   await page.addInitScript(() => {
     document.cookie = "studyflow_csrf=nfr05-csrf; Path=/";
@@ -148,17 +225,21 @@ export async function installNfr05ApiMocks(
     }
 
     if (path === "/api/v1/tasks" && method === "GET") {
-      await fulfillJson(route, MOCK_TASKS);
+      await fulfillJson(route, taskStore);
       return;
     }
 
     if (path === "/api/v1/tasks" && method === "POST") {
-      await fulfillJson(route, MOCK_TASKS[0], 201);
+      const input = request.postDataJSON() as Parameters<typeof createFlowTask>[0];
+      const created = createFlowTask(input);
+      taskStore.unshift(created);
+      state.createdTaskIds.push(created.id);
+      await fulfillJson(route, created, 201);
       return;
     }
 
     if (path === "/api/v1/tasks/task-reading" && method === "GET") {
-      await fulfillJson(route, MOCK_TASKS[0]);
+      await fulfillJson(route, taskStore.find((task) => task.id === "task-reading") ?? MOCK_TASKS[0]);
       return;
     }
 
@@ -251,7 +332,7 @@ export async function installNfr05ApiMocks(
     }
 
     if (path === "/api/v1/study-sessions" && method === "GET") {
-      await fulfillJson(route, MOCK_SESSIONS);
+      await fulfillJson(route, acceptedSessions);
       return;
     }
 
@@ -275,7 +356,9 @@ export async function installNfr05ApiMocks(
     }
 
     if (path === "/api/v1/schedule-proposals" && method === "POST") {
-      await fulfillJson(route, MOCK_PROPOSAL, 201);
+      const task = taskStore.find((candidate) => candidate.id === FLOW_TASK_ID) ?? taskStore[0];
+      pendingProposal = createFlowProposal(task);
+      await fulfillJson(route, pendingProposal, 201);
       return;
     }
 
@@ -290,6 +373,21 @@ export async function installNfr05ApiMocks(
     }
 
     if (/^\/api\/v1\/schedule-proposals\/[^/]+\/(accept|reject)$/.test(path) && method === "POST") {
+      if (path.endsWith("/accept") && pendingProposal) {
+        acceptedSessions = [
+          ...MOCK_SESSIONS,
+          ...pendingProposal.sessions.map((session) => ({
+            id: session.id,
+            task_id: session.task_id,
+            starts_at: session.starts_at,
+            ends_at: session.ends_at,
+            planned_duration_minutes: session.planned_duration_minutes,
+            outcome: null,
+          })),
+        ];
+        state.acceptedProposalIds.push(pendingProposal.id);
+        pendingProposal = null;
+      }
       await fulfillEmpty(route);
       return;
     }
