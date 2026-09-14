@@ -12,19 +12,57 @@ To run tests against an isolated evaluation deployment:
    ```bash
    cp .env.evaluation.example backend/.env
    ```
-2. Apply database migrations:
+2. Start the isolated evaluation stack (separate project, ports, and volume):
+   ```bash
+   docker compose -f compose.yaml -f compose.evaluation.yaml \
+     --env-file .env.evaluation.example up --build -d
+   ```
+3. Apply database migrations (already run by the `migrate` service; rerun when needed):
    ```bash
    cd backend
    uv run alembic upgrade head
    ```
-3. Start the application in evaluation mode:
+4. The evaluation API is available at `http://127.0.0.1:18000`. Stop it without deleting
+   evaluation data with:
    ```bash
-   uv run uvicorn studyflow.app:app --port 8000
+   docker compose -f compose.yaml -f compose.evaluation.yaml \
+     --env-file .env.evaluation.example down
    ```
+
+The evaluation database is exposed to host-side seed/export commands at port `55432`. Evaluation
+Mailpit is exposed at SMTP port `11025` and web UI port `18025`:
+
+```bash
+cd backend
+uv run python benchmarks/seed_evaluation.py \
+  --database-url postgresql+psycopg://studyflow_eval:studyflow_eval@127.0.0.1:55432/studyflow_eval
+```
+
+For a host-side application run instead of Compose, start the API on port `8000`:
+
+```bash
+cd backend
+STUDYFLOW_SMTP_HOST=localhost STUDYFLOW_SMTP_PORT=11025 \
+  uv run uvicorn studyflow.app:app --port 8000
+```
 
 ---
 
 ## 2. NFR-02 Performance Benchmark Suite
+
+### 2.0 Seed the deterministic evaluation dataset (§24.1)
+
+After applying migrations, seed the dedicated evaluation database with five pseudonymous
+participants, availability inputs, tasks, schedules, outcomes, five completed hidden calibration
+predictions per participant, and one pending exposed adaptive prediction per participant:
+
+```bash
+cd backend
+uv run python benchmarks/seed_evaluation.py
+```
+
+The seed is deterministic and repeatable. It only removes rows belonging to its own dataset.
+Export it with the command in section 4; pending actual durations remain `null`.
 
 ### 2.1 Seed NFR-02 Representative Workload
 
@@ -67,6 +105,16 @@ deadlines to approximately two hours from the benchmark start. This is a
 clearly overloaded scenario while preserving the required 50-task/250-session
 dataset; deadline overrides are rounded to an exact UTC minute for API
 validation.
+
+For the Compose evaluation stack, use port `18000` and pass the seeded account
+credentials:
+
+```bash
+cd backend
+NFR02_BENCHMARK_EMAIL='<existing-eval-account-email>' \
+NFR02_BENCHMARK_PASSWORD='<existing-eval-account-password>' \
+uv run python benchmarks/http_performance.py --base-url http://127.0.0.1:18000 --runs 20
+```
 
 ### 2.4 Complete dev-environment evidence run
 
@@ -154,3 +202,20 @@ uv run python -m studyflow.cli.export_evaluation --format csv --output evaluatio
 cd backend
 uv run python -m studyflow.cli.export_evaluation --account-id <uuid> --output participant_eval.json
 ```
+
+The JSON export includes pseudonymized `evaluation_records`, per-participant `evaluation_metrics`
+(sample count, MAE, signed bias, and MAE reduction), recurring availability, and unavailable
+period inputs. The CSV export adds per-task actual/error fields. No email, name, password, task
+title, course, notes, account ID, or raw resource UUID is exported.
+
+## 5. Isolation verification (§18.3 / NFR-01)
+
+Run the HTTP-level two-account ownership matrix:
+
+```bash
+cd backend
+uv run pytest tests/test_cross_user_isolation.py
+```
+
+It checks read isolation and mutation rejection for tasks, availability, unavailable periods,
+study sessions/outcomes, schedule proposals, progress, and account profile/preferences.

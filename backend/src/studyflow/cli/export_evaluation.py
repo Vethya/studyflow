@@ -13,17 +13,22 @@ from typing import Any
 from uuid import UUID
 
 import anyio
-from sqlalchemy import select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from studyflow.database.models.authentication import StudentAccount
+from studyflow.database.models.availability import AvailabilityWindow, UnavailablePeriod
 from studyflow.database.models.scheduling import (
     ProposalTaskAllocation,
     ScheduleProposal,
     StudySession,
     StudySessionOutcome,
 )
-from studyflow.database.models.tasks import AcademicTask
+from studyflow.database.models.tasks import AcademicTask, AdaptiveEstimationPrediction
+from studyflow.evaluation.comparison import (
+    PredictionEvaluation,
+    compute_estimation_metrics,
+)
 from studyflow.settings import Settings
 
 
@@ -45,7 +50,7 @@ async def extract_evaluation_records(
     account_stmt = select(StudentAccount)
     if target_account_id is not None:
         account_stmt = account_stmt.where(StudentAccount.id == target_account_id)
-    account_stmt = account_stmt.order_by(StudentAccount.created_at)
+    account_stmt = account_stmt.order_by(StudentAccount.created_at, StudentAccount.id)
 
     account_rows = (await session.execute(account_stmt)).scalars().all()
     records: list[dict[str, Any]] = []
@@ -57,7 +62,7 @@ async def extract_evaluation_records(
         task_stmt = (
             select(AcademicTask)
             .where(AcademicTask.account_id == account.id)
-            .order_by(AcademicTask.created_at)
+            .order_by(AcademicTask.created_at, AcademicTask.id)
         )
         task_rows = (await session.execute(task_stmt)).scalars().all()
 
@@ -86,7 +91,7 @@ async def extract_evaluation_records(
         proposal_stmt = (
             select(ScheduleProposal)
             .where(ScheduleProposal.account_id == account.id)
-            .order_by(ScheduleProposal.created_at)
+            .order_by(ScheduleProposal.created_at, ScheduleProposal.id)
         )
         proposal_rows = (await session.execute(proposal_stmt)).scalars().all()
 
@@ -95,8 +100,10 @@ async def extract_evaluation_records(
         for p in proposal_rows:
             proposal_code = pseudonymize_id(p.id, prefix="PROP")
             proposal_code_map[p.id] = proposal_code
-            alloc_stmt = select(ProposalTaskAllocation).where(
-                ProposalTaskAllocation.proposal_id == p.id
+            alloc_stmt = (
+                select(ProposalTaskAllocation)
+                .where(ProposalTaskAllocation.proposal_id == p.id)
+                .order_by(ProposalTaskAllocation.deadline_at, ProposalTaskAllocation.task_id)
             )
             alloc_rows = (await session.execute(alloc_stmt)).scalars().all()
             allocations = [
@@ -125,7 +132,7 @@ async def extract_evaluation_records(
             select(StudySession, StudySessionOutcome)
             .outerjoin(StudySessionOutcome, StudySession.id == StudySessionOutcome.session_id)
             .where(StudySession.account_id == account.id)
-            .order_by(StudySession.starts_at)
+            .order_by(StudySession.starts_at, StudySession.id)
         )
         session_rows = (await session.execute(session_stmt)).all()
 
@@ -160,7 +167,152 @@ async def extract_evaluation_records(
                 }
             )
 
-        # 4. Compute Participant Technical Metrics
+        # 4. Fetch persisted adaptive predictions joined to later outcomes.
+        # Pending actuals remain null; they must not be treated as zero in §16 metrics.
+        prediction_stmt = (
+            select(
+                AdaptiveEstimationPrediction,
+                AcademicTask.completed_at,
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                StudySessionOutcome.kind.in_(("completed", "delayed")),
+                                StudySessionOutcome.actual_minutes,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("actual_minutes"),
+            )
+            .join(AcademicTask, AdaptiveEstimationPrediction.task_id == AcademicTask.id)
+            .outerjoin(
+                StudySession,
+                and_(
+                    StudySession.task_id == AcademicTask.id,
+                    StudySession.account_id == account.id,
+                ),
+            )
+            .outerjoin(StudySessionOutcome, StudySession.id == StudySessionOutcome.session_id)
+            .where(
+                AdaptiveEstimationPrediction.account_id == account.id,
+                AcademicTask.account_id == account.id,
+            )
+            .group_by(
+                AdaptiveEstimationPrediction.task_id,
+                AdaptiveEstimationPrediction.account_id,
+                AdaptiveEstimationPrediction.category,
+                AdaptiveEstimationPrediction.original_minutes,
+                AdaptiveEstimationPrediction.predicted_minutes,
+                AdaptiveEstimationPrediction.correction_factor,
+                AdaptiveEstimationPrediction.history_scope,
+                AdaptiveEstimationPrediction.history_count,
+                AdaptiveEstimationPrediction.exposed,
+                AdaptiveEstimationPrediction.created_at,
+                AcademicTask.completed_at,
+            )
+            .order_by(AdaptiveEstimationPrediction.created_at, AdaptiveEstimationPrediction.task_id)
+        )
+        prediction_rows = (await session.execute(prediction_stmt)).all()
+        evaluation_records: list[dict[str, Any]] = []
+        evaluations: list[PredictionEvaluation] = []
+        for prediction, completed_at, actual_minutes in prediction_rows:
+            has_actual = completed_at is not None and actual_minutes > 0
+            actual = actual_minutes if has_actual else None
+            evaluations.append(
+                PredictionEvaluation(
+                    task_id=prediction.task_id,
+                    original_minutes=prediction.original_minutes,
+                    adaptive_minutes=prediction.predicted_minutes,
+                    actual_minutes=actual,
+                    completed_at=completed_at,
+                )
+            )
+            evaluation_records.append(
+                {
+                    "evaluation_code": pseudonymize_id(prediction.task_id, prefix="EVAL"),
+                    "task_code": task_code_map.get(
+                        prediction.task_id, pseudonymize_id(prediction.task_id, "TASK")
+                    ),
+                    "category": prediction.category,
+                    "original_minutes": prediction.original_minutes,
+                    "adaptive_minutes": prediction.predicted_minutes,
+                    "actual_minutes": actual,
+                    "completed_at": _iso(completed_at),
+                    "prediction_created_at": _iso(prediction.created_at),
+                    "history_scope": prediction.history_scope,
+                    "history_count": prediction.history_count,
+                    "exposed": prediction.exposed,
+                    "eligible": has_actual,
+                    "original_signed_error": (
+                        prediction.original_minutes - actual if actual is not None else None
+                    ),
+                    "adaptive_signed_error": (
+                        prediction.predicted_minutes - actual if actual is not None else None
+                    ),
+                    "original_absolute_error": (
+                        abs(prediction.original_minutes - actual) if actual is not None else None
+                    ),
+                    "adaptive_absolute_error": (
+                        abs(prediction.predicted_minutes - actual) if actual is not None else None
+                    ),
+                }
+            )
+
+        # Availability is included as technical input, without account identifiers or reasons
+        # that could contain personal context.
+        window_rows = (
+            (
+                await session.execute(
+                    select(AvailabilityWindow)
+                    .where(AvailabilityWindow.account_id == account.id)
+                    .order_by(
+                        AvailabilityWindow.weekday,
+                        AvailabilityWindow.local_start_time,
+                        AvailabilityWindow.local_end_time,
+                        AvailabilityWindow.id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        unavailable_rows = (
+            (
+                await session.execute(
+                    select(UnavailablePeriod)
+                    .where(UnavailablePeriod.account_id == account.id)
+                    .order_by(
+                        UnavailablePeriod.starts_at,
+                        UnavailablePeriod.ends_at,
+                        UnavailablePeriod.id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        availability_data = [
+            {
+                "weekday": window.weekday,
+                "start_time": window.local_start_time.isoformat(),
+                "end_time": window.local_end_time.isoformat(),
+                "crosses_midnight": window.crosses_midnight,
+            }
+            for window in window_rows
+        ]
+        unavailable_data = [
+            {
+                "starts_at": _iso(period.starts_at),
+                "ends_at": _iso(period.ends_at),
+            }
+            for period in unavailable_rows
+        ]
+
+        estimation_metrics = compute_estimation_metrics(evaluations)
+
+        # 5. Compute Participant Technical Metrics
         completed_tasks = [t for t in tasks_data if t["completed_at"] is not None]
         records.append(
             {
@@ -171,9 +323,20 @@ async def extract_evaluation_records(
                 "created_at": _iso(account.created_at),
                 "tasks_count": len(tasks_data),
                 "completed_tasks_count": len(completed_tasks),
+                "availability_windows": availability_data,
+                "unavailable_periods": unavailable_data,
                 "tasks": tasks_data,
                 "proposals": proposals_data,
                 "sessions": sessions_data,
+                "evaluation_records": evaluation_records,
+                "evaluation_metrics": {
+                    "sample_count": estimation_metrics.sample_count,
+                    "original_mae": estimation_metrics.original_mae,
+                    "adaptive_mae": estimation_metrics.adaptive_mae,
+                    "original_signed_bias": estimation_metrics.original_signed_bias,
+                    "adaptive_signed_bias": estimation_metrics.adaptive_signed_bias,
+                    "mae_reduction_percentage": estimation_metrics.mae_reduction_percentage,
+                },
             }
         )
 
@@ -207,6 +370,10 @@ def format_as_csv(records: Sequence[dict[str, Any]]) -> str:
             "actual_minutes",
             "remaining_minutes",
             "outcome_recorded_at",
+            "evaluation_actual_minutes",
+            "evaluation_original_signed_error",
+            "evaluation_adaptive_signed_error",
+            "evaluation_eligible",
         ]
     )
     for record in records:
@@ -218,6 +385,14 @@ def format_as_csv(records: Sequence[dict[str, Any]]) -> str:
         for task in record["tasks"]:
             t_code = task["task_code"]
             task_sessions = sessions_by_task.get(t_code, [])
+            evaluation: dict[str, Any] = next(
+                (
+                    item
+                    for item in record.get("evaluation_records", [])
+                    if item["task_code"] == t_code
+                ),
+                {},
+            )
             base_row = [
                 p_code,
                 t_code,
@@ -232,7 +407,25 @@ def format_as_csv(records: Sequence[dict[str, Any]]) -> str:
                 task["completed_at"],
             ]
             if not task_sessions:
-                writer.writerow([*base_row, "", "", "", "", "", "", "", "", "", ""])
+                writer.writerow(
+                    [
+                        *base_row,
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        evaluation.get("actual_minutes", ""),
+                        evaluation.get("original_signed_error", ""),
+                        evaluation.get("adaptive_signed_error", ""),
+                        str(evaluation.get("eligible", "")).lower() if evaluation else "",
+                    ]
+                )
             else:
                 for s in task_sessions:
                     outcome = s.get("outcome") or {}
@@ -249,6 +442,10 @@ def format_as_csv(records: Sequence[dict[str, Any]]) -> str:
                             outcome.get("actual_minutes", ""),
                             outcome.get("remaining_minutes", ""),
                             outcome.get("recorded_at", ""),
+                            evaluation.get("actual_minutes", ""),
+                            evaluation.get("original_signed_error", ""),
+                            evaluation.get("adaptive_signed_error", ""),
+                            str(evaluation.get("eligible", "")).lower() if evaluation else "",
                         ]
                     )
     return output.getvalue()

@@ -4,7 +4,7 @@ import csv
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -16,12 +16,14 @@ from studyflow.cli.export_evaluation import (
 )
 from studyflow.database import Base, Database
 from studyflow.database.models.authentication import StudentAccount
+from studyflow.database.models.availability import AvailabilityWindow, UnavailablePeriod
 from studyflow.database.models.scheduling import (
+    ProposalTaskAllocation,
     ScheduleProposal,
     StudySession,
     StudySessionOutcome,
 )
-from studyflow.database.models.tasks import AcademicTask
+from studyflow.database.models.tasks import AcademicTask, AdaptiveEstimationPrediction
 
 
 def test_pseudonymize_id_is_deterministic_and_masks_id() -> None:
@@ -58,7 +60,7 @@ def test_format_as_csv_matches_header_width_for_tasks_without_sessions() -> None
     )
     rows = list(csv.reader(csv_text.splitlines()))
     assert len(rows) == 2
-    assert len(rows[0]) == 21
+    assert len(rows[0]) == 25
     assert len(rows[1]) == len(rows[0])
 
 
@@ -108,6 +110,20 @@ async def test_extract_evaluation_records_strips_pii() -> None:
                 updated_at=now,
             )
             session.add(task)
+            session.add(
+                AdaptiveEstimationPrediction(
+                    task_id=task.id,
+                    account_id=account_id,
+                    category="assignment",
+                    original_minutes=120,
+                    predicted_minutes=150,
+                    correction_factor=1.25,
+                    history_scope="overall",
+                    history_count=5,
+                    exposed=True,
+                    created_at=now,
+                )
+            )
 
             proposal = ScheduleProposal(
                 id=uuid4(),
@@ -172,6 +188,12 @@ async def test_extract_evaluation_records_strips_pii() -> None:
             assert rec["tasks"][0]["original_estimate_minutes"] == 120
             assert rec["tasks"][0]["adaptive_estimate_minutes"] == 150
             assert rec["tasks"][0]["planned_duration_minutes"] == 150
+            assert len(rec["evaluation_records"]) == 1
+            assert rec["evaluation_records"][0]["actual_minutes"] == 65
+            assert rec["evaluation_records"][0]["eligible"] is True
+            assert rec["evaluation_metrics"]["sample_count"] == 1
+            assert rec["evaluation_metrics"]["original_mae"] == 55.0
+            assert rec["evaluation_metrics"]["adaptive_mae"] == 85.0
 
             assert len(rec["sessions"]) == 2
             # First session is associated with proposal and is not yet accepted
@@ -194,6 +216,195 @@ async def test_extract_evaluation_records_strips_pii() -> None:
             assert "65" in csv_text
             assert "true" in csv_text
             assert "false" in csv_text
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_extract_evaluation_records_has_stable_tie_breakers() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        now = datetime(2026, 1, 1, tzinfo=UTC)
+        account_id = uuid4()
+        task_ids: tuple[UUID, ...] = tuple(sorted((uuid4(), uuid4())))
+        proposal_id = uuid4()
+        session_ids = (
+            UUID("00000000-0000-0000-0000-000000000001"),
+            UUID("00000000-0000-0000-0000-000000000002"),
+        )
+
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            session.add(
+                StudentAccount(
+                    id=account_id,
+                    email="stable@example.com",
+                    name="Stable Export",
+                    password_hash="hash",
+                    email_verified_at=now,
+                    timezone="UTC",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            session.add_all(
+                [
+                    AcademicTask(
+                        id=task_ids[1],
+                        account_id=account_id,
+                        title="Task 2",
+                        category="reading",
+                        priority="medium",
+                        course=None,
+                        notes=None,
+                        deadline_at=now + timedelta(days=7),
+                        original_estimate_minutes=60,
+                        adaptive_estimate_minutes=None,
+                        planned_source="original",
+                        planned_duration_minutes=60,
+                        estimate_frozen_at=None,
+                        completed_at=None,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                    AcademicTask(
+                        id=task_ids[0],
+                        account_id=account_id,
+                        title="Task 1",
+                        category="reading",
+                        priority="medium",
+                        course=None,
+                        notes=None,
+                        deadline_at=now + timedelta(days=7),
+                        original_estimate_minutes=60,
+                        adaptive_estimate_minutes=None,
+                        planned_source="original",
+                        planned_duration_minutes=60,
+                        estimate_frozen_at=None,
+                        completed_at=None,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                    ScheduleProposal(
+                        id=proposal_id,
+                        account_id=account_id,
+                        kind="generation",
+                        status="feasible",
+                        input_fingerprint="b" * 64,
+                        created_at=now,
+                    ),
+                    AvailabilityWindow(
+                        id=uuid4(),
+                        account_id=account_id,
+                        weekday=0,
+                        local_start_time=datetime.min.time().replace(hour=9),
+                        local_end_time=datetime.min.time().replace(hour=17),
+                        crosses_midnight=False,
+                    ),
+                    UnavailablePeriod(
+                        id=uuid4(),
+                        account_id=account_id,
+                        starts_at=now + timedelta(days=2),
+                        ends_at=now + timedelta(days=2, hours=1),
+                        reason="first",
+                    ),
+                    UnavailablePeriod(
+                        id=uuid4(),
+                        account_id=account_id,
+                        starts_at=now + timedelta(days=2),
+                        ends_at=now + timedelta(days=2, hours=1),
+                        reason="second",
+                    ),
+                ]
+            )
+            await session.flush()
+            session.add_all(
+                [
+                    ProposalTaskAllocation(
+                        proposal_id=proposal_id,
+                        task_id=task_ids[1],
+                        deadline_at=now + timedelta(days=7),
+                        required_minutes=60,
+                        scheduled_minutes=60,
+                        unscheduled_minutes=0,
+                        raw_calendar_capacity_minutes=480,
+                        available_minutes_before_deadline=60,
+                        shortfall_minutes=0,
+                    ),
+                    ProposalTaskAllocation(
+                        proposal_id=proposal_id,
+                        task_id=task_ids[0],
+                        deadline_at=now + timedelta(days=7),
+                        required_minutes=60,
+                        scheduled_minutes=60,
+                        unscheduled_minutes=0,
+                        raw_calendar_capacity_minutes=480,
+                        available_minutes_before_deadline=60,
+                        shortfall_minutes=0,
+                    ),
+                    StudySession(
+                        id=session_ids[1],
+                        account_id=account_id,
+                        task_id=task_ids[1],
+                        proposal_id=proposal_id,
+                        starts_at=now + timedelta(days=1),
+                        ends_at=now + timedelta(days=1, hours=1),
+                        planned_duration_minutes=60,
+                    ),
+                    StudySession(
+                        id=session_ids[0],
+                        account_id=account_id,
+                        task_id=task_ids[0],
+                        proposal_id=proposal_id,
+                        starts_at=now + timedelta(days=1),
+                        ends_at=now + timedelta(days=1, hours=1),
+                        planned_duration_minutes=60,
+                    ),
+                    AdaptiveEstimationPrediction(
+                        task_id=task_ids[1],
+                        account_id=account_id,
+                        category="reading",
+                        original_minutes=60,
+                        predicted_minutes=70,
+                        correction_factor=1.166,
+                        history_scope="overall",
+                        history_count=5,
+                        exposed=False,
+                        created_at=now,
+                    ),
+                    AdaptiveEstimationPrediction(
+                        task_id=task_ids[0],
+                        account_id=account_id,
+                        category="reading",
+                        original_minutes=60,
+                        predicted_minutes=70,
+                        correction_factor=1.166,
+                        history_scope="overall",
+                        history_count=5,
+                        exposed=False,
+                        created_at=now,
+                    ),
+                ]
+            )
+
+        async with database.transaction() as session:
+            first = await extract_evaluation_records(session, target_account_id=account_id)
+            second = await extract_evaluation_records(session, target_account_id=account_id)
+
+        assert first == second
+        record = first[0]
+        expected_task_codes = [pseudonymize_id(task_id, "TASK") for task_id in task_ids]
+        assert [task["task_code"] for task in record["tasks"]] == expected_task_codes
+        assert [
+            allocation["task_code"] for allocation in record["proposals"][0]["allocations"]
+        ] == expected_task_codes
+        assert [session["task_code"] for session in record["sessions"]] == expected_task_codes
+        assert [
+            evaluation["task_code"] for evaluation in record["evaluation_records"]
+        ] == expected_task_codes
     finally:
         await database.stop()
 

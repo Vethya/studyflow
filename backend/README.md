@@ -33,6 +33,9 @@ volume, rotate credentials inside PostgreSQL before updating `.env`; for disposa
 PostgreSQL data persists in the `studyflow_postgres_data` Docker volume. Run
 `docker compose down` to stop services without deleting that data.
 
+The evaluation stack is isolated from development by using `compose.evaluation.yaml`, port 55432
+for PostgreSQL, port 18000 for the API, and a separate Docker volume. See `docs/evaluation.md`.
+
 The initial public endpoints are:
 
 - Health: <http://127.0.0.1:8000/api/v1/health>
@@ -158,4 +161,6 @@ See `docs/evaluation.md` for full instructions.
 - **Scheduler performance gate:** `uv run python benchmarks/scheduler_performance.py`
 - **HTTP performance benchmark:** `uv run python benchmarks/http_performance.py`
 - **Static vs adaptive comparison (§24.6):** `uv run python benchmarks/compare_static_adaptive.py`
+- **Deterministic evaluation seed (§24.1):** `uv run python benchmarks/seed_evaluation.py`
 - **Pseudonymized evaluation export (§24.4):** `uv run python -m studyflow.cli.export_evaluation --output eval.json`
+- **Cross-user isolation matrix (§18.3):** `uv run pytest tests/test_cross_user_isolation.py`

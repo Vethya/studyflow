@@ -17,10 +17,44 @@ BENCHMARK_EMAIL = "nfr02_benchmark@studyflow.dev"
 BENCHMARK_PASSWORD = "BenchmarkPassword123!"
 OVERLOAD_TASK_COUNT = 5
 OVERLOAD_DEADLINE_OFFSET = timedelta(hours=2)
+EXPECTED_TASK_COUNT = 50
+EXPECTED_SESSION_COUNT = 250
+EXPECTED_AVAILABILITY_WINDOW_COUNT = 5
+EXPECTED_UNAVAILABLE_PERIOD_COUNT = 50
 
 
 def percentile_95(samples: list[float]) -> float:
     return sorted(samples)[ceil(len(samples) * 0.95) - 1]
+
+
+def validate_nfr02_dataset(
+    tasks: list[Any],
+    sessions: list[Any],
+    availability_windows: list[Any],
+    unavailable_periods: list[Any],
+) -> str | None:
+    """Validate the seeded NFR-02 workload before collecting timings."""
+    counts = (
+        ("tasks", len(tasks), EXPECTED_TASK_COUNT),
+        ("sessions", len(sessions), EXPECTED_SESSION_COUNT),
+        ("availability windows", len(availability_windows), EXPECTED_AVAILABILITY_WINDOW_COUNT),
+        ("unavailable periods", len(unavailable_periods), EXPECTED_UNAVAILABLE_PERIOD_COUNT),
+    )
+    for name, actual, expected in counts:
+        if actual != expected:
+            return f"Expected {expected} {name}, found {actual}."
+
+    deadlines: list[datetime] = []
+    for task in tasks:
+        if not isinstance(task, dict) or not isinstance(task.get("deadline_at"), str):
+            return "Tasks must include ISO-8601 deadline_at values."
+        try:
+            deadlines.append(datetime.fromisoformat(task["deadline_at"].replace("Z", "+00:00")))
+        except ValueError:
+            return "Tasks must include valid ISO-8601 deadline_at values."
+    if max(deadlines) - min(deadlines) < timedelta(days=100):
+        return "Task deadlines must span the documented 16-week benchmark horizon."
+    return None
 
 
 def write_json_report(path: str | None, report: dict[str, Any]) -> None:
@@ -66,6 +100,9 @@ async def run_http_benchmark(
     json_output: str | None = None,
 ) -> int:
     """Measure warm response latencies against live API endpoints with seeded NFR-02 data."""
+    if runs <= 0:
+        print("Error: runs must be greater than zero.", file=sys.stderr)
+        return 1
     report: dict[str, Any] = {
         "benchmark": "nfr02-http",
         "started_at": datetime.now(UTC).isoformat(),
@@ -104,20 +141,50 @@ async def run_http_benchmark(
             csrf_token = login_res.json().get("csrf_token")
             headers = {"X-CSRF-Token": csrf_token} if csrf_token else {}
 
-            # Fetch tasks to construct realistic overloaded scenario per SPEC NFR-02
-            tasks_res = await client.get("/api/v1/tasks", headers=headers)
-            if tasks_res.status_code != 200:
-                report["error"] = f"Could not load seeded tasks ({tasks_res.status_code})"
+            dataset_requests = {
+                "tasks": "/api/v1/tasks",
+                "sessions": "/api/v1/study-sessions",
+                "availability windows": "/api/v1/availability/windows",
+                "unavailable periods": "/api/v1/availability/unavailable-periods",
+            }
+            dataset: dict[str, list[Any]] = {}
+            for name, url in dataset_requests.items():
+                dataset_res = await client.get(url, headers=headers)
+                if dataset_res.status_code != 200:
+                    report["error"] = (
+                        f"Dataset preflight failed for {name} (HTTP {dataset_res.status_code})"
+                    )
+                    write_json_report(json_output, report)
+                    print(
+                        f"Error: Dataset preflight failed for {name} "
+                        f"(HTTP {dataset_res.status_code}).",
+                        file=sys.stderr,
+                    )
+                    return 1
+                payload = dataset_res.json()
+                if not isinstance(payload, list):
+                    report["error"] = f"Dataset preflight expected a list for {name}"
+                    write_json_report(json_output, report)
+                    print(
+                        f"Error: Dataset preflight expected a list for {name}.",
+                        file=sys.stderr,
+                    )
+                    return 1
+                dataset[name] = payload
+
+            dataset_error = validate_nfr02_dataset(
+                tasks=dataset["tasks"],
+                sessions=dataset["sessions"],
+                availability_windows=dataset["availability windows"],
+                unavailable_periods=dataset["unavailable periods"],
+            )
+            if dataset_error is not None:
+                report["error"] = f"Dataset preflight failed: {dataset_error}"
                 write_json_report(json_output, report)
+                print(f"Error: Dataset preflight failed: {dataset_error}", file=sys.stderr)
                 return 1
 
-            tasks_data = tasks_res.json()
-            if not isinstance(tasks_data, list) or len(tasks_data) < OVERLOAD_TASK_COUNT:
-                report["error"] = (
-                    f"Seeded workload does not contain at least {OVERLOAD_TASK_COUNT} tasks"
-                )
-                write_json_report(json_output, report)
-                return 1
+            tasks_data = dataset["tasks"]
 
             # Keep the full seeded workload, but make five tasks clearly impossible
             # to finish in the near term. This produces a fast, proven overload
