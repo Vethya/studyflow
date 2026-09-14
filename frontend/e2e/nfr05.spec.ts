@@ -163,7 +163,13 @@ async function assertControlNames(page: Page): Promise<void> {
 
 async function assertKeyboardFocus(page: Page): Promise<void> {
   await page.keyboard.press("Tab");
-  const focusStates: Array<{ visible: boolean; focusVisible: boolean; indicator: boolean }> = [];
+  const focusStates: Array<{
+    control: string;
+    visible: boolean;
+    isControl: boolean;
+    focusVisible: boolean;
+    indicator: boolean;
+  }> = [];
 
   for (let index = 0; index < 16; index += 1) {
     const state = await page.evaluate(() => {
@@ -173,12 +179,15 @@ async function assertKeyboardFocus(page: Page): Promise<void> {
       const style = getComputedStyle(element);
       const rect = element.getBoundingClientRect();
       const outlineWidth = Number.parseFloat(style.outlineWidth) || 0;
-      const hasBoxShadow = style.boxShadow !== "none";
 
       return {
+        control: `${element.tagName.toLowerCase()}${element.id ? `#${element.id}` : ""}`,
         visible: rect.width > 0 && rect.height > 0,
+        isControl: element.matches(
+          "a[href], button, input, textarea, select, [tabindex]:not([tabindex='-1'])",
+        ),
         focusVisible: element.matches(":focus-visible"),
-        indicator: outlineWidth > 0 || hasBoxShadow,
+        indicator: outlineWidth > 0 && style.outlineStyle !== "none",
       };
     });
 
@@ -186,10 +195,12 @@ async function assertKeyboardFocus(page: Page): Promise<void> {
     await page.keyboard.press("Tab");
   }
 
-  const visibleFocusStates = focusStates.filter((state) => state.visible);
-  expect(visibleFocusStates.length).toBeGreaterThan(0);
-  expect(visibleFocusStates.some((state) => state.focusVisible)).toBeTruthy();
-  expect(visibleFocusStates.some((state) => state.indicator)).toBeTruthy();
+  const visibleControls = focusStates.filter((state) => state.visible && state.isControl);
+  expect(visibleControls.length).toBeGreaterThan(0);
+  expect(
+    visibleControls.filter((state) => !state.focusVisible || !state.indicator),
+    "Every visible keyboard-traversed control must expose its own focus indicator",
+  ).toEqual([]);
 }
 
 async function scanAccessibility(page: Page, testInfo: TestInfo, route: string): Promise<void> {
