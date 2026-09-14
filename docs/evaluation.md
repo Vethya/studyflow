@@ -87,6 +87,7 @@ From the repository root, provide the dev database URL explicitly:
 NFR02_DATABASE_URL='postgresql+psycopg://<dev-database-url>' \
 NFR02_BENCHMARK_EMAIL='<existing-dev-account-email>' \
 NFR02_BENCHMARK_PASSWORD='<existing-dev-account-password>' \
+NFR02_DEPLOYED_REVISION='<git-sha-deployed-at-the-dev-frontend-url>' \
 python3 scripts/run_nfr02_evidence.py \
   --base-url https://<dev-frontend-url>
 ```
@@ -95,7 +96,9 @@ The command seeds the dev database, measures each main page and the HTTP
 endpoints for 20 runs, covers feasible and overloaded schedule generation, and
 writes `docs/evidence/nfr02-performance-YYYY-MM-DD.md`. The report includes
 the measured p95 values, frontend URL, safe database target, browser, viewport,
-machine, Git revision, workload, and pass/fail status.
+machine, deployed Git revision, benchmark checkout revision, workload, and
+pass/fail status. Set `NFR02_DEPLOYED_REVISION` to the exact commit SHA shown by
+the dev frontend deployment. The runner rejects a missing or malformed SHA.
 
 The browser benchmark uses the installed Google Chrome application through
 Playwright's `chrome` channel. It does not download a separate Playwright

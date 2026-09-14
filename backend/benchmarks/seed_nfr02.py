@@ -43,6 +43,10 @@ EXPECTED_DATA_COUNTS = {
     "schedule_proposals": 1,
     "proposal_allocations": 50,
 }
+BENCHMARK_TIMEZONE = "UTC"
+BENCHMARK_SESSION_LENGTH_MINUTES = 60
+BENCHMARK_MINIMUM_BREAK_MINUTES = 10
+BENCHMARK_HORIZON_DAYS = 112
 TASK_CATEGORIES = [
     "assignment",
     "reading",
@@ -108,6 +112,61 @@ async def account_data_counts(session: AsyncSession, account_id: UUID) -> dict[s
     }
 
 
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _validate_benchmark_preferences(account: StudentAccount) -> None:
+    mismatches: list[str] = []
+    if account.timezone != BENCHMARK_TIMEZONE:
+        mismatches.append(f"timezone={account.timezone!r}")
+    if account.preferred_session_length_minutes != BENCHMARK_SESSION_LENGTH_MINUTES:
+        mismatches.append(
+            f"preferred_session_length_minutes={account.preferred_session_length_minutes!r}"
+        )
+    if account.minimum_break_minutes != BENCHMARK_MINIMUM_BREAK_MINUTES:
+        mismatches.append(f"minimum_break_minutes={account.minimum_break_minutes!r}")
+    if not account.availability_timezone_confirmed:
+        mismatches.append("availability_timezone_confirmed=False")
+    if mismatches:
+        expected = (
+            f"timezone={BENCHMARK_TIMEZONE!r}, "
+            f"preferred_session_length_minutes={BENCHMARK_SESSION_LENGTH_MINUTES}, "
+            f"minimum_break_minutes={BENCHMARK_MINIMUM_BREAK_MINUTES}, "
+            "availability_timezone_confirmed=True"
+        )
+        raise RuntimeError(
+            "Refusing NFR-02 seed: the selected account's scheduling preferences do not "
+            f"match the benchmark ({', '.join(mismatches)}; expected {expected})."
+        )
+
+
+async def _has_current_nfr02_horizon(session: AsyncSession, account_id: UUID) -> bool:
+    tasks = (
+        await session.scalars(select(AcademicTask).where(AcademicTask.account_id == account_id))
+    ).all()
+    unavailable = (
+        await session.scalars(
+            select(UnavailablePeriod).where(UnavailablePeriod.account_id == account_id)
+        )
+    ).all()
+    if not tasks or not unavailable:
+        return False
+
+    now = datetime.now(UTC)
+    deadlines = [_as_utc(task.deadline_at) for task in tasks]
+    unavailable_endpoints = [
+        (_as_utc(period.starts_at), _as_utc(period.ends_at)) for period in unavailable
+    ]
+    return (
+        all(deadline > now for deadline in deadlines)
+        and max(deadlines) >= now + timedelta(days=BENCHMARK_HORIZON_DAYS)
+        and all(starts_at > now and ends_at > now for starts_at, ends_at in unavailable_endpoints)
+    )
+
+
 async def has_complete_nfr02_dataset(session: AsyncSession, account_id: UUID) -> bool:
     """Return whether this account already contains the complete seeded workload."""
 
@@ -123,7 +182,7 @@ async def has_complete_nfr02_dataset(session: AsyncSession, account_id: UUID) ->
         return False
 
     counts = await account_data_counts(session, account_id)
-    return counts == EXPECTED_DATA_COUNTS
+    return counts == EXPECTED_DATA_COUNTS and await _has_current_nfr02_horizon(session, account_id)
 
 
 async def _benchmark_reset_targets(
@@ -366,6 +425,7 @@ async def seed_nfr02_dataset(
     )
 
     if existing_account is not None:
+        _validate_benchmark_preferences(existing_account)
         complete_dataset = await has_complete_nfr02_dataset(session, existing_account.id)
         if complete_dataset and not reset_existing:
             return existing_account.id

@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import shlex
 import subprocess
 import sys
@@ -21,12 +22,19 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
 FRONTEND = ROOT / "frontend"
+
+
 def parse_args() -> argparse.Namespace:
     today = datetime.now(UTC).date().isoformat()
     parser = argparse.ArgumentParser(
         description="Run NFR-02 performance evidence against one warm dev environment."
     )
     parser.add_argument("--base-url", required=True, help="Dev frontend URL")
+    parser.add_argument(
+        "--deployed-revision",
+        default=os.environ.get("NFR02_DEPLOYED_REVISION"),
+        help=("Git revision deployed at --base-url; alternatively set NFR02_DEPLOYED_REVISION"),
+    )
     parser.add_argument(
         "--database-url",
         default=os.environ.get("NFR02_DATABASE_URL"),
@@ -55,6 +63,10 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if not args.database_url:
         parser.error("--database-url or NFR02_DATABASE_URL is required")
+    if not args.deployed_revision:
+        parser.error("--deployed-revision or NFR02_DEPLOYED_REVISION is required")
+    if not re.fullmatch(r"[0-9a-fA-F]{7,64}", args.deployed_revision):
+        parser.error("--deployed-revision must be a Git SHA (7 to 64 hexadecimal characters)")
     if not args.email:
         parser.error("--email or NFR02_BENCHMARK_EMAIL is required")
     if not args.password:
@@ -181,7 +193,8 @@ def render_report(
 
 Status: **{overall_status}**
 Measured at: `{datetime.now(UTC).isoformat()}`
-Git revision: `{git_revision()}`
+Deployed Git revision: `{args.deployed_revision}`
+Benchmark checkout revision: `{git_revision()}`
 
 ## Test conditions
 

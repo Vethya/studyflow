@@ -31,6 +31,31 @@ def write_json_report(path: str | None, report: dict[str, Any]) -> None:
     output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
 
+def proposal_status(response: httpx.Response | None) -> str | None:
+    if response is None:
+        return None
+    try:
+        payload = response.json()
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    status = payload.get("status")
+    return status if isinstance(status, str) else None
+
+
+def validate_proposal_status(
+    response: httpx.Response | None,
+    expected_status: str | None,
+) -> str | None:
+    if expected_status is None or response is None or response.status_code >= 400:
+        return None
+    actual_status = proposal_status(response)
+    if actual_status != expected_status:
+        return f"expected proposal status {expected_status!r}, got {actual_status!r}"
+    return None
+
+
 async def run_http_benchmark(
     base_url: str,
     runs: int = 20,
@@ -141,6 +166,7 @@ async def run_http_benchmark(
                     "method": "POST",
                     "url": "/api/v1/schedule-proposals",
                     "is_generation": True,
+                    "expected_status": "feasible",
                 },
                 {
                     "name": "Schedule Generation (Overloaded, 50 tasks)",
@@ -148,6 +174,7 @@ async def run_http_benchmark(
                     "url": "/api/v1/schedule-proposals",
                     "json": overload_payload,
                     "is_generation": True,
+                    "expected_status": "overload",
                 },
             ]
 
@@ -163,6 +190,7 @@ async def run_http_benchmark(
                 method = endpoint["method"]
                 payload = endpoint.get("json")
                 is_gen = endpoint.get("is_generation", False)
+                expected_status = endpoint.get("expected_status")
                 threshold = generation_threshold_seconds if is_gen else page_threshold_seconds
 
                 # Warm-up run
@@ -177,8 +205,11 @@ async def run_http_benchmark(
                     warm_res = None
                     warmup_error = str(exc)
                 warmup_elapsed = perf_counter() - warmup_started
+                warmup_validation_error = validate_proposal_status(warm_res, expected_status)
+                if warmup_validation_error:
+                    warmup_error = warmup_validation_error
 
-                if warm_res is None or warm_res.status_code >= 400:
+                if warm_res is None or warm_res.status_code >= 400 or warmup_validation_error:
                     warmup_status_code = warm_res.status_code if warm_res is not None else None
                     report["endpoints"].append(
                         {
@@ -195,11 +226,13 @@ async def run_http_benchmark(
                             "warmup_seconds": warmup_elapsed,
                             "warmup_status_code": warmup_status_code,
                             "warmup_error": warmup_error,
+                            "expected_proposal_status": expected_status,
+                            "warmup_proposal_status": proposal_status(warm_res),
                             "sample_seconds": [],
                             "status": "failed",
                         }
                     )
-                    warmup_status = (
+                    warmup_status = warmup_error or (
                         f"HTTP {warmup_status_code}" if warm_res is not None else "request error"
                     )
                     print(
@@ -212,8 +245,11 @@ async def run_http_benchmark(
                 samples: list[float] = []
                 status_codes: list[int | None] = []
                 request_errors: list[str] = []
+                validation_errors: list[str] = []
+                proposal_statuses: list[str | None] = []
                 endpoint_failed = False
                 last_error_status: int | None = None
+                last_error_detail: str | None = None
                 for _ in range(runs):
                     started = perf_counter()
                     try:
@@ -227,11 +263,17 @@ async def run_http_benchmark(
                     elapsed = perf_counter() - started
                     samples.append(elapsed)
                     status_codes.append(res.status_code if res is not None else None)
+                    proposal_statuses.append(proposal_status(res))
 
                     if res is None or res.status_code >= 400:
                         endpoint_failed = True
                         if res is not None:
                             last_error_status = res.status_code
+                    validation_error = validate_proposal_status(res, expected_status)
+                    if validation_error:
+                        endpoint_failed = True
+                        validation_errors.append(validation_error)
+                        last_error_detail = validation_error
 
                 p95 = percentile_95(samples)
                 median = sorted(samples)[len(samples) // 2]
@@ -254,9 +296,13 @@ async def run_http_benchmark(
                         "warmup_seconds": warmup_elapsed,
                         "warmup_status_code": warm_res.status_code,
                         "warmup_error": None,
+                        "expected_proposal_status": expected_status,
+                        "warmup_proposal_status": proposal_status(warm_res),
                         "sample_seconds": samples,
                         "status_codes": sorted({code for code in status_codes if code is not None}),
                         "request_errors": request_errors,
+                        "validation_errors": validation_errors,
+                        "proposal_statuses": proposal_statuses,
                         "minimum_seconds": minimum,
                         "median_seconds": median,
                         "maximum_seconds": maximum,
@@ -269,9 +315,13 @@ async def run_http_benchmark(
                     failed = True
                     if endpoint_failed:
                         status_str = (
-                            f"❌ FAIL (HTTP {last_error_status})"
-                            if last_error_status is not None
-                            else "❌ FAIL (request error)"
+                            f"❌ FAIL ({last_error_detail})"
+                            if last_error_detail is not None
+                            else (
+                                f"❌ FAIL (HTTP {last_error_status})"
+                                if last_error_status is not None
+                                else "❌ FAIL (request error)"
+                            )
                         )
                     else:
                         status_str = f"❌ FAIL (P95 >= {threshold:.1f}s)"

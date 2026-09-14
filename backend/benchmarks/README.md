@@ -38,6 +38,7 @@ repository root:
 NFR02_DATABASE_URL='postgresql+psycopg://<dev-database-url>' \
 NFR02_BENCHMARK_EMAIL='<existing-dev-account-email>' \
 NFR02_BENCHMARK_PASSWORD='<existing-dev-account-password>' \
+NFR02_DEPLOYED_REVISION='<git-sha-deployed-at-the-dev-frontend-url>' \
 python3 scripts/run_nfr02_evidence.py \
   --base-url https://<dev-frontend-url>
 ```
@@ -66,3 +67,7 @@ proposal, using the remaining benchmark markers and exact task allocations. It
 aborts without changes when it finds unmarked tasks, sessions, availability, or
 proposals.
 It never falls back to the local `backend/.env` database URL.
+The selected account must use the benchmark scheduling preferences: UTC,
+60-minute preferred sessions, a 10-minute minimum break, and confirmed timezone
+availability. The evidence runner also requires the Git SHA deployed at the
+target frontend URL so the report identifies the code that was measured.
