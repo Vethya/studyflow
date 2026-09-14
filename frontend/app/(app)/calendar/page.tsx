@@ -22,6 +22,7 @@ import {
 import { cn } from "@/lib/utils";
 import { DAY_NAMES_SHORT, formatDuration, CATEGORY_CONFIG } from "@/lib/constants";
 import { describeDeadline, formatClock } from "@/lib/datetime";
+import { applyRecordedOutcome } from "@/lib/outcome-ui";
 import {
   dayKey,
   expandUnavailablePeriods,
@@ -622,15 +623,9 @@ export default function CalendarPage() {
         session={outcomeSession}
         open={outcomeSession !== null}
         onOpenChange={(next) => !next && setOutcomeSession(null)}
-        onRecorded={(result) => {
-          schedule.reload();
-          tasks.reload();
-          if (result.revision) {
-            setProposal(result.revision);
-            setPreviewOpen(true);
-          }
-          revision.reload();
-        }}
+        onRecorded={(result) =>
+          applyRecordedOutcome(result, { setProposal, setPreviewOpen })
+        }
       />
 
       <SchedulePreview

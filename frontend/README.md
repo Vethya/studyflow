@@ -4,19 +4,10 @@ Next.js 16 (App Router) client for the StudyFlow API.
 
 ## What this app is
 
-The backend stores coursework, availability windows and account settings. It
-does **not** schedule study sessions — there is no scheduling endpoint, no
-session record, and no logged-effort tracking.
-
-So the product is not a scheduler. It answers one question the stored data can
-genuinely answer:
-
-> Does the coursework I owe fit in the study time I actually have?
-
-Weekly availability windows minus blocked-out periods gives capacity. Open
-tasks due inside a horizon give commitment. The difference is the headline
-figure on the dashboard, and the reason the interface is otherwise monochrome:
-colour is reserved for surplus and deficit, and means nothing else.
+StudyFlow combines coursework, availability, generated study sessions, and confirmed outcomes.
+Students can record Completed, Delayed, or Missed sessions and review proposed schedule revisions.
+Capacity views explain whether upcoming coursework fits the available time. Adaptive estimates
+use the student's own completed-task history while preserving their original estimate.
 
 ## Running locally
 
@@ -79,17 +70,15 @@ Safari evidence requirement.
 | `/dashboard` | Capacity vs. commitment over 7/14/30 days, what is next, overdue work, time by course |
 | `/tasks` | Coursework ledger with server-side status, category, priority and course filters |
 | `/tasks/[taskId]` | One task in full, with start / finish early / edit / delete |
-| `/calendar` | Month grid: deadlines against the study hours each day actually holds |
+| `/calendar` | Sessions, deadlines, schedule proposals, and session outcomes |
+| `/progress` | Confirmed study effort and outcome history; no prediction-accuracy metrics |
 | `/availability` | Weekly windows and one-off exceptions, both editable |
 | `/settings/*` | Profile, security, preferences, timezone, and service status |
 
-There is no Progress screen. Every chart it would have needed depends on logged
-study effort, which the backend does not record.
-
 ## Endpoint coverage
 
-The API exposes 35 endpoints. 33 are reached from the interface. The two that
-are not, deliberately:
+The typed client covers task, availability, scheduling, outcome, account, and adaptive-estimate
+workflows. Two authentication endpoints are intentionally not directly called by JavaScript:
 
 - `GET /auth/google/callback` — the browser is redirected here by Google;
   JavaScript must never call it. The frontend's job is to host the routes it
@@ -121,11 +110,37 @@ signup token, then `POST /auth/complete-registration`. `/register` and
 
 ## Known assumption
 
-Availability weekdays are indexed 0–6, but the backend does not document which
-day is 0. The client assumes **0 = Monday** (Python's `datetime.weekday()`) and
-converts in `lib/api/mappers.ts`. If that is wrong, every window lands one day
-out; the fix is the two helpers in that file and nothing else.
+Availability weekdays are indexed 0–6 with **0 = Monday**, matching the backend's weekly model.
+The client translates weekdays in `lib/api/mappers.ts`.
 
 Capacity arithmetic runs in the browser's local timezone. Windows are stored
 against the account's configured zone, so a mismatch shifts the figures — the
 timezone settings page flags it when the two disagree.
+
+## Adaptive task forms
+
+The form requests `GET /api/v1/adaptive-estimates/preview` for the selected category and original
+minutes. Unavailable previews remain on Original and hide internal predictions. Five eligible
+completed tasks start chronological hidden prediction capture; at least five later completed
+predictions must qualify before suggestions appear. Category history falls back to overall
+history when fewer than five category examples exist. The backend owns this evidence gate.
+
+A qualified suggestion defaults to Adaptive for a new task. Students may choose Original;
+editing a saved task preserves its saved choice instead of adopting a new preview default.
+Large adjustments ask for acknowledgment through
+`POST /api/v1/adaptive-estimates/acknowledgments` before Adaptive can be chosen. The saved task
+view distinguishes original, adaptive, and planned minutes. Planned equals the chosen source;
+it does not overwrite the original. Accuracy metrics remain internal and are not shown.
+
+## Verify
+
+```bash
+pnpm test
+pnpm lint
+pnpm build
+```
+
+Browser-check desktop and 360px widths against disposable local data: cold start, hidden
+prediction capture, qualification after ten chronologically seeded completed tasks, category
+fallback, Adaptive default, Original override, large-adjustment acknowledgment, saved estimate
+fields, and all three session outcomes. Unit tests do not replace this end-to-end check.

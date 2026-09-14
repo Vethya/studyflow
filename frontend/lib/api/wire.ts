@@ -20,6 +20,8 @@ export type WireTaskPriority = "low" | "medium" | "high";
 
 export type WireTaskStatus = "not_started" | "in_progress" | "completed" | "overdue";
 
+export type WirePlannedSource = "original" | "adaptive";
+
 // ─── Authentication (api/auth.py) ────────────────────────────────
 export interface WireAuthenticatedAccount {
   id: string;
@@ -78,7 +80,10 @@ export interface WireAcademicTask {
   notes: string | null;
   deadline_at: string;
   original_estimate_minutes: number;
+  adaptive_estimate_minutes: number | null;
+  planned_source: WirePlannedSource;
   planned_duration_minutes: number;
+  estimate_frozen?: boolean;
   created_at: string;
   updated_at: string;
   status: WireTaskStatus;
@@ -92,6 +97,22 @@ export interface WireAcademicTaskRequest {
   notes: string | null;
   deadline_at: string;
   original_estimate_minutes: number;
+  planned_source?: WirePlannedSource;
+}
+
+// ─── Adaptive estimates (api/adaptive_estimates.py) ─────────────
+export interface WireAdaptiveEstimatePreview {
+  category: WireTaskCategory;
+  original_minutes: number;
+  adaptive_minutes: number | null;
+  planned_minutes: number;
+  /** FastAPI serializes Decimal response values as JSON strings. */
+  correction_factor: string | null;
+  history_scope: "overall" | "category" | null;
+  history_count: number | null;
+  available: boolean;
+  planned_source: WirePlannedSource;
+  acknowledgment_required: boolean;
 }
 
 // ─── Availability (api/availability.py) ──────────────────────────
@@ -246,4 +267,10 @@ export interface WireMissedSessionRecovery {
   session: WireStudySession;
   outcome: WireSessionOutcome;
   revision: WireScheduleProposal;
+}
+
+export interface WireSessionOutcomeRecordingResponse {
+  session: WireStudySession;
+  outcome: WireSessionOutcome;
+  revision: WireScheduleProposal | null;
 }

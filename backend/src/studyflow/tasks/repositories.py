@@ -10,14 +10,21 @@ from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.repositories import SessionTransactions
-from studyflow.database.models import AcademicTask, TaskDeadlineHistory
+from studyflow.database.models import AcademicTask, StudentAccount, TaskDeadlineHistory
 from studyflow.database.models import StudySession as SessionRow
 from studyflow.database.models import StudySessionOutcome as OutcomeRow
+from studyflow.estimation import (
+    AdaptiveEstimatePreview,
+    AdaptiveEstimateUnavailableError,
+    AdaptiveEstimator,
+)
+from studyflow.estimation.repositories import SqlAlchemyAdaptivePredictionRepository
 from studyflow.tasks.service import (
     AcademicTaskRecord,
     EstimateFrozenError,
     InvalidTaskDeadlineError,
     NewAcademicTask,
+    PlannedDurationSource,
     TaskCategory,
     TaskFilters,
     TaskMustBeStartedError,
@@ -184,11 +191,15 @@ class SqlAlchemyAcademicTaskRepository:
         invalidator: TaskDeadlineSessionInvalidator | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         recovery_invalidator: TaskRecoveryProposalInvalidator | None = None,
+        estimator: AdaptiveEstimator | None = None,
+        prediction_repository: SqlAlchemyAdaptivePredictionRepository | None = None,
     ) -> None:
         self._database = database
         self._invalidator = invalidator or NoTaskDeadlineSessions()
         self._clock = clock
         self._recovery_invalidator = recovery_invalidator or NoTaskRecoveryProposals()
+        self._estimator = estimator
+        self._prediction_repository = prediction_repository
 
     async def _reconcile_overdue(
         self, session: AsyncSession, account_id: UUID, now: datetime
@@ -199,6 +210,8 @@ class SqlAlchemyAcademicTaskRepository:
 
     async def create(self, account_id: UUID, task: NewAcademicTask) -> AcademicTaskRecord:
         async with self._database.transaction() as session:
+            if not await self._lock_account(session, account_id):
+                raise ValueError("Account not found")
             row = AcademicTask(
                 account_id=account_id,
                 title=task.title,
@@ -213,6 +226,16 @@ class SqlAlchemyAcademicTaskRepository:
                 planned_duration_minutes=task.original_estimate_minutes,
             )
             session.add(row)
+            await session.flush()
+            preview = await self._capture_estimate(
+                session,
+                account_id,
+                row.id,
+                task.category,
+                task.original_estimate_minutes,
+                task.planned_source,
+            )
+            self._apply_snapshot(row, task.original_estimate_minutes, preview)
             await session.flush()
             await session.refresh(row)
             return self._to_record(row)
@@ -312,6 +335,8 @@ class SqlAlchemyAcademicTaskRepository:
         self, account_id: UUID, task_id: UUID, task: NewAcademicTask, now: datetime
     ) -> AcademicTaskRecord | None:
         async with self._database.transaction() as session:
+            if not await self._lock_account(session, account_id):
+                return None
             await self._freeze_started_estimates(session, account_id, now)
             row = await session.scalar(
                 select(AcademicTask)
@@ -321,9 +346,12 @@ class SqlAlchemyAcademicTaskRepository:
             if row is None:
                 await self._reconcile_overdue(session, account_id, now)
                 return None
-            if (
-                row.estimate_frozen_at is not None
-                and row.original_estimate_minutes != task.original_estimate_minutes
+            if row.estimate_frozen_at is not None and (
+                row.original_estimate_minutes != task.original_estimate_minutes
+                or (
+                    task.planned_source is not None
+                    and task.planned_source.value != row.planned_source
+                )
             ):
                 raise EstimateFrozenError
             previous_deadline = self._aware(row.deadline_at)
@@ -355,8 +383,18 @@ class SqlAlchemyAcademicTaskRepository:
             row.course = task.course
             row.notes = task.notes
             row.original_estimate_minutes = task.original_estimate_minutes
-            if row.planned_source == "original":
-                row.planned_duration_minutes = task.original_estimate_minutes
+            if row.estimate_frozen_at is None:
+                self._apply_snapshot(row, task.original_estimate_minutes, None)
+                preview = await self._capture_estimate(
+                    session,
+                    account_id,
+                    row.id,
+                    task.category,
+                    task.original_estimate_minutes,
+                    task.planned_source,
+                    replace=True,
+                )
+                self._apply_snapshot(row, task.original_estimate_minutes, preview)
             await session.flush()
             await session.refresh(row)
             return self._to_record(row)
@@ -448,6 +486,56 @@ class SqlAlchemyAcademicTaskRepository:
     def _aware(value: datetime) -> datetime:
         return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
+    @staticmethod
+    async def _lock_account(session: AsyncSession, account_id: UUID) -> bool:
+        account = await session.get(StudentAccount, account_id, with_for_update=True)
+        return account is not None
+
+    async def _capture_estimate(
+        self,
+        session: AsyncSession,
+        account_id: UUID,
+        task_id: UUID,
+        category: TaskCategory,
+        original_minutes: int,
+        planned_source: PlannedDurationSource | None,
+        *,
+        replace: bool = False,
+    ) -> AdaptiveEstimatePreview | None:
+        if self._estimator is None or self._prediction_repository is None:
+            if planned_source is PlannedDurationSource.ADAPTIVE:
+                raise AdaptiveEstimateUnavailableError
+            return None
+        return await self._estimator.capture_for_task(
+            account_id,
+            task_id,
+            category,
+            original_minutes,
+            planned_source=planned_source.value if planned_source is not None else None,
+            repository=self._prediction_repository.with_session(session),
+            replace=replace,
+        )
+
+    @staticmethod
+    def _apply_snapshot(
+        row: AcademicTask,
+        original_minutes: int,
+        preview: AdaptiveEstimatePreview | None,
+    ) -> None:
+        if preview is None:
+            row.adaptive_estimate_minutes = None
+            row.planned_source = PlannedDurationSource.ORIGINAL.value
+            row.planned_duration_minutes = original_minutes
+            return
+        row.adaptive_estimate_minutes = preview.adaptive_minutes
+        row.planned_source = preview.planned_source
+        if preview.planned_source == "adaptive":
+            if preview.adaptive_minutes is None:
+                raise ValueError("Adaptive source requires an adaptive estimate")
+            row.planned_duration_minutes = preview.adaptive_minutes
+        else:
+            row.planned_duration_minutes = original_minutes
+
     def _to_record(self, row: AcademicTask, now: datetime | None = None) -> AcademicTaskRecord:
         now = now or self._clock()
         if row.completed_at is not None or row.finished_early_at is not None:
@@ -472,4 +560,7 @@ class SqlAlchemyAcademicTaskRepository:
             created_at=self._aware(row.created_at),
             updated_at=self._aware(row.updated_at),
             status=task_status,
+            adaptive_estimate_minutes=row.adaptive_estimate_minutes,
+            planned_source=PlannedDurationSource(row.planned_source),
+            estimate_frozen=row.estimate_frozen_at is not None,
         )

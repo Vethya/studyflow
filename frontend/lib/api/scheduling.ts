@@ -4,34 +4,35 @@
  * Backed by the real API as of the `dev` merge:
  *   GET    /study-sessions                      accepted sessions
  *   GET    /study-sessions/{id}
- *   POST   /study-sessions/{id}/outcomes        currently "missed" only
+ *   POST   /study-sessions/{id}/outcomes        records completed, delayed, or missed
  *   POST   /schedule-proposals                  generate (inactive proposal)
  *   GET    /schedule-proposals/current          pending proposal, or 404
  *   POST   /schedule-proposals/{id}/accept
  *   POST   /schedule-proposals/{id}/reject
  *
- * Two things the backend does not expose yet, handled here rather than in the
+ * One thing the backend does not expose yet, handled here rather than in the
  * screens so the seam stays in one place:
  *
  *  - **Effort progress has no endpoint.** `listEffortProgress` derives its
  *    figures from tasks plus accepted sessions. The arithmetic is SPEC §13's,
  *    but it runs in the browser.
- *  - **Adaptive estimation has no endpoint.** `getAdaptiveEstimate` returns
- *    null, so the §15.6 explanation and the §15.4 acknowledgement stay hidden
- *    until the model ships. Returning null rather than a guess keeps the UI
- *    honest — it simply does not claim to know anything about your history.
  */
 
 import { apiJson, apiVoid, ApiError, buildQuery } from "./client";
+import { toWireOutcome } from "./outcome-contract";
+import { toAdaptiveEstimate } from "./adaptive-contract";
 import { listTasks } from "./tasks";
 import {
   toEffortProgress,
   toScheduleProposal,
   toStudySession,
+  toWireCategory,
 } from "./mappers";
 import type {
   WireScheduleProposal,
   WireScheduleScenario,
+  WireAdaptiveEstimatePreview,
+  WireSessionOutcomeRecordingResponse,
   WireScheduleSimulation,
   WireStudySession,
 } from "./wire";
@@ -53,16 +54,6 @@ export class ScheduleTechnicalFailure extends Error {
   constructor(message = "The scheduler could not finish in time.") {
     super(message);
     this.name = "ScheduleTechnicalFailure";
-  }
-}
-
-/** Recording Completed or Delayed is not reachable through the API yet. */
-export class OutcomeNotSupportedError extends Error {
-  constructor(readonly outcome: string) {
-    super(
-      `Recording “${outcome}” is not available yet — the API accepts only missed sessions.`,
-    );
-    this.name = "OutcomeNotSupportedError";
   }
 }
 
@@ -215,34 +206,36 @@ export function rejectProposal(proposalId: string, signal?: AbortSignal): Promis
 /**
  * Records what happened in a past session.
  *
- * `RecordSessionOutcomeRequest` currently accepts `outcome: "missed"` only.
- * Completed and Delayed exist in the domain enum but have no route, so they
- * are rejected here with a clear error rather than sent and 422'd.
+ * The backend returns the recorded outcome, its updated accepted session, and
+ * an optional revision for student review.
  */
 export async function recordOutcome(
   sessionId: string,
   data: OutcomeFormData,
   signal?: AbortSignal,
 ): Promise<OutcomeResult> {
-  if (data.outcome !== "Missed") {
-    throw new OutcomeNotSupportedError(data.outcome);
+  try {
+    const response = await apiJson<WireSessionOutcomeRecordingResponse>(
+      `/study-sessions/${sessionId}/outcomes`,
+      {
+        method: "POST",
+        body: toWireOutcome(data, data.largeActualConfirmed ?? false),
+        signal,
+      },
+    );
+
+    const titles = await taskTitles(signal);
+    const revision = response.revision ? toScheduleProposal(response.revision) : null;
+    return {
+      session: toStudySession(response.session, titles),
+      revision: revision ? { ...revision, reason: revision.reason ?? "" } : null,
+    };
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 503) {
+      throw new ScheduleTechnicalFailure(cause.message);
+    }
+    throw cause;
   }
-
-  const recovery = await apiJson<{
-    session: WireStudySession;
-    revision: WireScheduleProposal | null;
-  }>(`/study-sessions/${sessionId}/outcomes`, {
-    method: "POST",
-    body: { outcome: "missed" },
-    signal,
-  });
-
-  const titles = await taskTitles(signal);
-  const revision = recovery.revision ? toScheduleProposal(recovery.revision) : null;
-  return {
-    session: toStudySession(recovery.session, titles),
-    revision: revision ? { ...revision, reason: revision.reason ?? "" } : null,
-  };
 }
 
 // ─── Progress (derived — no endpoint yet) ───────────────────────
@@ -257,19 +250,26 @@ export async function listEffortProgress(
 }
 
 
-// ─── Adaptive estimation (not implemented server-side) ──────────
-// The parameters are kept so the signature matches what the real endpoint
-// will need; nothing reads them until it exists.
-/* eslint-disable @typescript-eslint/no-unused-vars */
+// ─── Adaptive estimation ────────────────────────────────────────
 export async function getAdaptiveEstimate(
-  _category: Category,
-  _originalEstimate: number,
-  _signal?: AbortSignal,
+  category: Category,
+  originalEstimate: number,
+  signal?: AbortSignal,
 ): Promise<AdaptiveEstimate | null> {
-  return null;
+  const wire = await apiJson<WireAdaptiveEstimatePreview>(
+    `/adaptive-estimates/preview${buildQuery({
+      category: toWireCategory(category),
+      original_minutes: originalEstimate,
+    })}`,
+    { signal },
+  );
+  return toAdaptiveEstimate(wire);
 }
 
-export async function acknowledgeAdjustment(_category: Category): Promise<void> {
-  // No-op until the estimation model ships.
+export function acknowledgeAdjustment(category: Category, signal?: AbortSignal): Promise<void> {
+  return apiVoid("/adaptive-estimates/acknowledgments", {
+    method: "POST",
+    body: { category: toWireCategory(category) },
+    signal,
+  });
 }
-/* eslint-enable @typescript-eslint/no-unused-vars */

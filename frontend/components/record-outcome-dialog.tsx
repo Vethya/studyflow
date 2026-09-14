@@ -18,34 +18,29 @@ import { Callout } from "@/components/ui/callout";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { formatDuration } from "@/lib/constants";
 import { formatClock } from "@/lib/datetime";
+import { isPositiveWholeMinute, outcomeSuccessCopy } from "@/lib/outcome-ui";
 import { cn } from "@/lib/utils";
 import { scheduling } from "@/lib/api";
+import { withLargeActualConfirmation } from "@/lib/api/outcome-contract";
 import { describeError } from "@/hooks/use-api";
-import { LARGE_ENTRY_FACTOR, type SessionOutcome, type StudySession } from "@/types/session";
+import {
+  LARGE_ENTRY_FACTOR,
+  type OutcomeFormData,
+  type SessionOutcome,
+  type StudySession,
+} from "@/types/session";
 import type { OutcomeResult } from "@/lib/api";
 
-/**
- * SPEC §12 defines three outcomes, but the API's RecordSessionOutcomeRequest
- * currently accepts `outcome: "missed"` only — Completed and Delayed exist in
- * the domain enum with no route behind them.
- *
- * They stay visible and disabled rather than hidden: the student can see the
- * choice exists and is coming, instead of picking one, filling in the minutes
- * and hitting a 422 on save.
- */
 const OPTIONS: {
   value: SessionOutcome;
   label: string;
   hint: string;
   icon: React.ElementType;
-  available: boolean;
 }[] = [
-  { value: "Completed", label: "Finished it", hint: "The work for this session is done", icon: CheckCircle2, available: false },
-  { value: "Delayed", label: "Partly done", hint: "I worked, but there is more left", icon: Clock, available: false },
-  { value: "Missed", label: "Didn’t study", hint: "This session didn’t happen", icon: XCircle, available: true },
+  { value: "Completed", label: "Finished it", hint: "The work for this session is done", icon: CheckCircle2 },
+  { value: "Delayed", label: "Partly done", hint: "I worked, but there is more left", icon: Clock },
+  { value: "Missed", label: "Didn’t study", hint: "This session didn’t happen", icon: XCircle },
 ];
-
-const UNAVAILABLE = OPTIONS.filter((o) => !o.available).length > 0;
 
 /**
  * Records what actually happened in a past session (SPEC §12).
@@ -58,8 +53,9 @@ const UNAVAILABLE = OPTIONS.filter((o) => !o.available).length > 0;
  *               (SPEC §12.3).
  *   Missed    — nothing worked; the full planned work stands.
  *
- * Saving Delayed or Missed produces a proposed Schedule Revision, which the
- * caller is handed so it can show the preview (SPEC §14.1).
+ * A Missed outcome can produce a proposed Schedule Revision. Every outcome
+ * returns the same nullable revision field, which callers preview only when
+ * the backend actually created a recovery proposal (SPEC §14.1).
  */
 export function RecordOutcomeDialog({
   session,
@@ -99,36 +95,37 @@ export function RecordOutcomeDialog({
   }
 
   const workedNumber = Number(worked);
-  const hasWorked = worked.trim() !== "" && Number.isFinite(workedNumber);
+  const hasWorked = isPositiveWholeMinute(worked);
 
   // SPEC §12.3's default, recomputed until the student edits it themselves.
   const defaultRemaining = Math.max(0, planned - (hasWorked ? workedNumber : 0));
   const remainingValue = remainingTouched ? remaining : String(defaultRemaining || "");
   const remainingNumber = Number(remainingValue);
 
-  const workedInvalid = outcome !== "Missed" && (!hasWorked || workedNumber <= 0);
+  const workedInvalid = outcome !== "Missed" && !hasWorked;
   const remainingInvalid =
-    outcome === "Delayed" && (!Number.isFinite(remainingNumber) || remainingNumber <= 0);
+    outcome === "Delayed" && !isPositiveWholeMinute(remainingValue);
   const canSave = !workedInvalid && !remainingInvalid && !isSaving;
 
   /** An entry far above what was planned is more often a typo than a marathon. */
   const isLargeEntry =
     outcome !== "Missed" && hasWorked && workedNumber > planned * LARGE_ENTRY_FACTOR;
 
-  async function save() {
+  async function save(largeActualConfirmed = false) {
     if (!session) return;
     setSaving(true);
     try {
-      const result = await scheduling.recordOutcome(session.id, {
+      const data: OutcomeFormData = {
         outcome,
         actualMinutes: outcome === "Missed" ? 0 : workedNumber,
         revisedRemainingMinutes: outcome === "Delayed" ? remainingNumber : undefined,
-      });
-      toast.success(
-        outcome === "Completed"
-          ? "Session recorded"
-          : "Recorded — StudyFlow has a new plan for you to review",
+        largeActualConfirmed,
+      };
+      const result = await scheduling.recordOutcome(
+        session.id,
+        largeActualConfirmed ? withLargeActualConfirmation(data) : data,
       );
+      toast.success(outcomeSuccessCopy(outcome, result.revision));
       onRecorded(result);
       onOpenChange(false);
     } catch (cause) {
@@ -170,13 +167,10 @@ export function RecordOutcomeDialog({
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => option.available && setOutcome(option.value)}
+                      onClick={() => setOutcome(option.value)}
                       aria-pressed={selected}
-                      disabled={!option.available}
-                      title={option.available ? undefined : "Not available yet"}
                       className={cn(
                         "flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                        !option.available && "cursor-not-allowed opacity-50",
                         selected
                           ? "border-foreground bg-muted"
                           : "border-border hover:bg-muted/50",
@@ -199,12 +193,6 @@ export function RecordOutcomeDialog({
                   );
                 })}
               </div>
-              {UNAVAILABLE && (
-                <p className="pt-1 text-xs text-muted-foreground">
-                  Recording finished and partly-done sessions is still being built.
-                  For now you can only report a session you missed.
-                </p>
-              )}
             </fieldset>
 
             {outcome !== "Missed" && (
@@ -218,13 +206,16 @@ export function RecordOutcomeDialog({
                     type="number"
                     inputMode="numeric"
                     min={1}
+                    step={1}
                     max={1440}
                     value={worked}
                     onChange={(event) => setWorked(event.target.value)}
                     aria-invalid={workedInvalid || undefined}
                   />
                   {workedInvalid && (
-                    <p className="text-xs text-deficit">Enter more than 0 minutes.</p>
+                    <p className="text-xs text-deficit">
+                      Enter a whole number of minutes greater than 0.
+                    </p>
                   )}
                 </div>
 
@@ -238,6 +229,7 @@ export function RecordOutcomeDialog({
                       type="number"
                       inputMode="numeric"
                       min={1}
+                      step={1}
                       max={10_000}
                       value={remainingValue}
                       onChange={(event) => {
@@ -252,7 +244,9 @@ export function RecordOutcomeDialog({
                         : "Our guess — change it if you know better."}
                     </p>
                     {remainingInvalid && (
-                      <p className="text-xs text-deficit">Enter more than 0 minutes.</p>
+                      <p className="text-xs text-deficit">
+                        Enter a whole number of minutes greater than 0.
+                      </p>
                     )}
                   </div>
                 )}
@@ -289,7 +283,7 @@ export function RecordOutcomeDialog({
         )}. Is that right?`}
         confirmLabel="Yes, save it"
         cancelLabel="Let me check"
-        onConfirm={save}
+        onConfirm={() => save(true)}
       />
     </>
   );

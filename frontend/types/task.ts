@@ -18,7 +18,10 @@ export interface AcademicTask {
   priority: Priority;
   originalEstimate: number; // minutes
   adaptiveEstimate?: number; // minutes, undefined until qualified
+  /** The original estimate or adaptive snapshot backing `plannedDuration`. */
+  plannedSource: "Original" | "Adaptive";
   plannedDuration: number; // minutes — original or adaptive
+  estimateFrozen?: boolean; // authoritative server snapshot lock, independent of status
   actualDuration: number; // minutes — sum of completed/delayed work
   remainingDuration: number; // minutes
   course?: string; // max 100 chars
@@ -36,6 +39,7 @@ export interface TaskFormData {
   deadline: string;
   priority: Priority;
   originalEstimate: number;
+  plannedSource?: "Original" | "Adaptive";
   course?: string;
   notes?: string;
 }

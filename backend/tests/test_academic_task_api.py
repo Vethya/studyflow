@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -7,11 +7,13 @@ from httpx import ASGITransport, AsyncClient
 
 from studyflow.app import create_app
 from studyflow.auth.session_authentication import SessionPrincipal
+from studyflow.estimation import AdaptiveEstimateUnavailableError
 from studyflow.tasks.service import (
     AcademicTaskRecord,
     EstimateFrozenError,
     InvalidTaskDeadlineError,
     NewAcademicTask,
+    PlannedDurationSource,
     TaskCategory,
     TaskFilters,
     TaskMustBeStartedError,
@@ -46,6 +48,7 @@ class TasksStub:
     creates: list[tuple[UUID, NewAcademicTask]] = field(default_factory=list)
     filters: list[TaskFilters] = field(default_factory=list)
     create_failure: bool = False
+    adaptive_unavailable: bool = False
     update_failure: str | None = None
     updates: list[tuple[UUID, UUID, NewAcademicTask]] = field(default_factory=list)
     deletes: list[tuple[UUID, UUID]] = field(default_factory=list)
@@ -56,6 +59,8 @@ class TasksStub:
     async def create(self, account_id: UUID, task: NewAcademicTask) -> AcademicTaskRecord:
         if self.create_failure:
             raise InvalidTaskDeadlineError
+        if self.adaptive_unavailable:
+            raise AdaptiveEstimateUnavailableError
         self.creates.append((account_id, task))
         return self.records[0]
 
@@ -72,6 +77,8 @@ class TasksStub:
         self, account_id: UUID, task_id: UUID, task: NewAcademicTask
     ) -> AcademicTaskRecord | None:
         self.updates.append((account_id, task_id, task))
+        if self.adaptive_unavailable:
+            raise AdaptiveEstimateUnavailableError
         if self.update_failure == "frozen":
             raise EstimateFrozenError
         if self.update_failure == "missing":
@@ -153,6 +160,71 @@ async def test_task_create_list_and_detail_contract() -> None:
         priority=TaskPriority.MEDIUM,
         status=TaskStatus.NOT_STARTED,
     )
+
+
+@pytest.mark.anyio
+async def test_task_create_exposes_adaptive_snapshot_and_forwards_original_override() -> None:
+    adaptive_record = replace(
+        task_record(),
+        adaptive_estimate_minutes=135,
+        estimate_frozen=True,
+        planned_source=PlannedDurationSource.ADAPTIVE,
+        planned_duration_minutes=135,
+    )
+    tasks = TasksStub([adaptive_record])
+    app = create_app(session_authentication=AuthenticationStub(), academic_tasks=tasks)
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://test",
+        cookies={"studyflow_session": "session-token"},
+    ) as client:
+        response = await client.post(
+            "/api/v1/tasks",
+            headers={"X-CSRF-Token": "csrf-token"},
+            json={
+                "title": "Read chapter 4",
+                "category": "reading",
+                "deadline_at": "2026-07-30T12:00:00Z",
+                "original_estimate_minutes": 90,
+                "planned_source": "original",
+            },
+        )
+
+    assert response.status_code == 201
+    assert response.json()["adaptive_estimate_minutes"] == 135
+    assert response.json()["estimate_frozen"] is True
+    assert response.json()["planned_source"] == "adaptive"
+    assert tasks.creates[0][1].planned_source is PlannedDurationSource.ORIGINAL
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("method", ["post", "put"])
+async def test_task_create_rejects_an_unavailable_adaptive_selection(method: str) -> None:
+    app = create_app(
+        session_authentication=AuthenticationStub(),
+        academic_tasks=TasksStub([task_record()], adaptive_unavailable=True),
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://test",
+        cookies={"studyflow_session": "session-token"},
+    ) as client:
+        response = await client.request(
+            method,
+            "/api/v1/tasks" + (f"/{TASK_ID}" if method == "put" else ""),
+            headers={"X-CSRF-Token": "csrf-token"},
+            json={
+                "title": "Read chapter 4",
+                "category": "reading",
+                "deadline_at": "2026-07-30T12:00:00Z",
+                "original_estimate_minutes": 90,
+                "planned_source": "adaptive",
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "adaptive_estimate_conflict"
+    assert "refresh" in response.json()["detail"]["message"].lower()
 
 
 @pytest.mark.anyio

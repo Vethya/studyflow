@@ -20,10 +20,17 @@ from studyflow.database.models.scheduling import (
     StudySession,
     StudySessionOutcome,
 )
-from studyflow.database.models.tasks import AcademicTask, TaskDeadlineHistory
+from studyflow.database.models.tasks import (
+    AcademicTask,
+    AdaptiveEstimationAcknowledgment,
+    AdaptiveEstimationPrediction,
+    TaskDeadlineHistory,
+)
 
 __all__ = [
     "AcademicTask",
+    "AdaptiveEstimationAcknowledgment",
+    "AdaptiveEstimationPrediction",
     "AuthenticationEmailToken",
     "AuthenticationIdentity",
     "AuthenticationOIDCLinkChallenge",

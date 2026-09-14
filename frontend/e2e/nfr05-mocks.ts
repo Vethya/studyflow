@@ -25,6 +25,8 @@ export const MOCK_TASKS: WireAcademicTask[] = [
     notes: "Highlight the main findings.",
     deadline_at: iso(2 * 24 * 60),
     original_estimate_minutes: 90,
+    adaptive_estimate_minutes: null,
+    planned_source: "original" as const,
     planned_duration_minutes: 90,
     created_at: iso(-3 * 24 * 60),
     updated_at: iso(-3 * 24 * 60),
@@ -39,6 +41,8 @@ export const MOCK_TASKS: WireAcademicTask[] = [
     notes: null,
     deadline_at: iso(7 * 24 * 60),
     original_estimate_minutes: 120,
+    adaptive_estimate_minutes: null,
+    planned_source: "original" as const,
     planned_duration_minutes: 120,
     created_at: iso(-2 * 24 * 60),
     updated_at: iso(-2 * 24 * 60),
@@ -117,6 +121,8 @@ function createFlowTask(input: {
     notes: input.notes,
     deadline_at: input.deadline_at,
     original_estimate_minutes: input.original_estimate_minutes,
+    adaptive_estimate_minutes: null,
+    planned_source: "original" as const,
     planned_duration_minutes: input.original_estimate_minutes,
     created_at: iso(-1),
     updated_at: iso(-1),
@@ -220,6 +226,29 @@ export async function installNfr05ApiMocks(
 
     if (path === "/api/v1/auth/logout" && method === "POST") {
       state.authenticated = false;
+      await fulfillEmpty(route);
+      return;
+    }
+
+    if (path === "/api/v1/adaptive-estimates/preview" && method === "GET") {
+      const url = new URL(request.url());
+      const originalMinutes = Number(url.searchParams.get("original_minutes") ?? "60");
+      await fulfillJson(route, {
+        category: url.searchParams.get("category") ?? "reading",
+        original_minutes: originalMinutes,
+        adaptive_minutes: null,
+        planned_minutes: originalMinutes,
+        correction_factor: null,
+        history_scope: null,
+        history_count: null,
+        available: false,
+        planned_source: "original",
+        acknowledgment_required: false,
+      });
+      return;
+    }
+
+    if (path === "/api/v1/adaptive-estimates/acknowledgments" && method === "POST") {
       await fulfillEmpty(route);
       return;
     }

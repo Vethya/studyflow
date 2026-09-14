@@ -9,12 +9,14 @@ from pydantic import BaseModel, Field, field_validator
 
 from studyflow.api.account import AccountError, require_csrf_session, require_session
 from studyflow.auth.session_authentication import SessionPrincipal
+from studyflow.estimation import AdaptiveEstimateUnavailableError
 from studyflow.tasks.service import (
     AcademicTaskRecord,
     AcademicTasks,
     EstimateFrozenError,
     InvalidTaskDeadlineError,
     NewAcademicTask,
+    PlannedDurationSource,
     TaskCategory,
     TaskFilters,
     TaskMustBeStartedError,
@@ -42,6 +44,7 @@ class AcademicTaskRequest(BaseModel):
         Field(description="RFC 3339 timestamp with an explicit UTC offset"),
     ]
     original_estimate_minutes: Annotated[int, Field(gt=0, le=2_147_483_647)]
+    planned_source: PlannedDurationSource | None = None
 
     @field_validator("title")
     @classmethod
@@ -73,7 +76,10 @@ class AcademicTaskResponse(BaseModel):
     notes: str | None
     deadline_at: datetime
     original_estimate_minutes: int
+    adaptive_estimate_minutes: int | None
+    planned_source: PlannedDurationSource
     planned_duration_minutes: int
+    estimate_frozen: bool
     created_at: datetime
     updated_at: datetime
     status: TaskStatus
@@ -85,6 +91,18 @@ class FinishEarlyRequest(BaseModel):
 
 class TaskError(BaseModel):
     detail: str
+
+
+class AdaptiveConflictDetail(BaseModel):
+    code: Literal["adaptive_estimate_conflict"] = "adaptive_estimate_conflict"
+    message: str = (
+        "Adaptive planning changed. Refresh the estimate, then choose Original "
+        "or acknowledge the updated suggestion before retrying."
+    )
+
+
+class TaskConflict(BaseModel):
+    detail: str | AdaptiveConflictDetail
 
 
 def get_academic_tasks(request: Request) -> AcademicTasks:
@@ -101,7 +119,10 @@ def _response(task: AcademicTaskRecord) -> AcademicTaskResponse:
         notes=task.notes,
         deadline_at=task.deadline_at,
         original_estimate_minutes=task.original_estimate_minutes,
+        adaptive_estimate_minutes=task.adaptive_estimate_minutes,
+        planned_source=task.planned_source,
         planned_duration_minutes=task.planned_duration_minutes,
+        estimate_frozen=task.estimate_frozen,
         created_at=task.created_at,
         updated_at=task.updated_at,
         status=task.status,
@@ -113,6 +134,7 @@ def _response(task: AcademicTaskRecord) -> AcademicTaskResponse:
     status_code=status.HTTP_201_CREATED,
     response_model=AcademicTaskResponse,
     responses={
+        status.HTTP_409_CONFLICT: {"model": TaskConflict},
         status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
         status.HTTP_403_FORBIDDEN: {"model": AccountError},
         status.HTTP_422_UNPROCESSABLE_CONTENT: {
@@ -146,12 +168,18 @@ async def create_task(
                 notes=payload.notes,
                 deadline_at=payload.deadline_at,
                 original_estimate_minutes=payload.original_estimate_minutes,
+                planned_source=payload.planned_source,
             ),
         )
     except InvalidTaskDeadlineError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Deadline must be a future absolute date and time",
+        ) from error
+    except AdaptiveEstimateUnavailableError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=AdaptiveConflictDetail().model_dump(),
         ) from error
     return _response(task)
 
@@ -234,7 +262,7 @@ async def get_task(
         status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
         status.HTTP_403_FORBIDDEN: {"model": AccountError},
         status.HTTP_404_NOT_FOUND: {"model": TaskError},
-        status.HTTP_409_CONFLICT: {"model": TaskError},
+        status.HTTP_409_CONFLICT: {"model": TaskConflict},
         status.HTTP_422_UNPROCESSABLE_CONTENT: {
             "description": "Invalid task fields or deadline",
             "content": {
@@ -268,6 +296,7 @@ async def update_task(
                 notes=payload.notes,
                 deadline_at=payload.deadline_at,
                 original_estimate_minutes=payload.original_estimate_minutes,
+                planned_source=payload.planned_source,
             ),
         )
     except InvalidTaskDeadlineError as error:
@@ -279,6 +308,11 @@ async def update_task(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Original estimate is frozen after work starts",
+        ) from error
+    except AdaptiveEstimateUnavailableError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=AdaptiveConflictDetail().model_dump(),
         ) from error
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")

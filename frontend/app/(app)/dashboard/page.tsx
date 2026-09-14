@@ -20,6 +20,7 @@ import { RecordOutcomeDialog } from "@/components/record-outcome-dialog";
 import { PendingPlanBanner, SchedulePreview } from "@/components/schedule-preview";
 import { UnscheduledWorkList } from "@/components/unscheduled-work-list";
 import { formatClock } from "@/lib/datetime";
+import { applyRecordedOutcome } from "@/lib/outcome-ui";
 import { EmptyState, PageHeader, PageShell, SectionHeader, StatTile } from "@/components/page-kit";
 import { formatDuration, CATEGORY_CONFIG } from "@/lib/constants";
 import { describeDeadline } from "@/lib/datetime";
@@ -457,15 +458,9 @@ export default function DashboardPage() {
         session={outcomeSession}
         open={outcomeSession !== null}
         onOpenChange={(next) => !next && setOutcomeSession(null)}
-        onRecorded={(result) => {
-          schedule.reload();
-          tasks.reload();
-          if (result.revision) {
-            setProposal(result.revision);
-            setPreviewOpen(true);
-          }
-          revision.reload();
-        }}
+        onRecorded={(result) =>
+          applyRecordedOutcome(result, { setProposal, setPreviewOpen })
+        }
       />
 
       <SchedulePreview

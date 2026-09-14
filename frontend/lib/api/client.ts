@@ -19,13 +19,15 @@ export class ApiError extends Error {
   readonly status: number;
   readonly detail: string;
   readonly retryAfterSeconds: number | null;
+  readonly code: string | null;
 
-  constructor(status: number, detail: string, retryAfterSeconds: number | null = null) {
+  constructor(status: number, detail: string, retryAfterSeconds: number | null = null, code: string | null = null) {
     super(detail);
     this.name = "ApiError";
     this.status = status;
     this.detail = detail;
     this.retryAfterSeconds = retryAfterSeconds;
+    this.code = code;
   }
 
   /** No session, or the session expired. Callers usually redirect to /login. */
@@ -78,25 +80,28 @@ export function buildQuery(params: Record<string, QueryValue>): string {
  * FastAPI returns `{ detail: string }` for handled errors and
  * `{ detail: [{ loc, msg, ... }] }` for Pydantic validation failures.
  */
-async function extractDetail(response: Response): Promise<string> {
+async function extractDetail(response: Response): Promise<{ message: string; code?: string }> {
   let body: unknown;
   try {
     body = await response.json();
   } catch {
-    return response.statusText || `Request failed with status ${response.status}`;
+    return { message: response.statusText || `Request failed with status ${response.status}` };
   }
 
   const detail = (body as { detail?: unknown })?.detail;
-  if (typeof detail === "string") return detail;
+  if (typeof detail === "string") return { message: detail };
+  if (detail && typeof detail === "object" && "message" in detail && typeof detail.message === "string") {
+    return { message: detail.message, code: "code" in detail && typeof detail.code === "string" ? detail.code : undefined };
+  }
 
   if (Array.isArray(detail)) {
     const messages = detail
       .map((item) => (item as { msg?: unknown })?.msg)
       .filter((msg): msg is string => typeof msg === "string");
-    if (messages.length > 0) return messages.join(". ");
+    if (messages.length > 0) return { message: messages.join(". ") };
   }
 
-  return response.statusText || `Request failed with status ${response.status}`;
+  return { message: response.statusText || `Request failed with status ${response.status}` };
 }
 
 interface RequestOptions {
@@ -133,10 +138,12 @@ async function request(path: string, options: RequestOptions = {}): Promise<Resp
 
   if (!response.ok) {
     const retryAfter = response.headers.get("Retry-After");
+    const detail = await extractDetail(response);
     throw new ApiError(
       response.status,
-      await extractDetail(response),
+      detail.message,
       retryAfter ? Number(retryAfter) : null,
+      detail.code,
     );
   }
 
