@@ -9,25 +9,14 @@
  *   GET    /schedule-proposals/current          pending proposal, or 404
  *   POST   /schedule-proposals/{id}/accept
  *   POST   /schedule-proposals/{id}/reject
- *
- * One thing the backend does not expose yet, handled here rather than in the
- * screens so the seam stays in one place:
- *
- *  - **Effort progress has no endpoint.** `listEffortProgress` derives its
- *    figures from tasks plus accepted sessions. The arithmetic is SPEC §13's,
- *    but it runs in the browser.
+ *   GET    /progress                            server-calculated effort progress
  */
 
 import { apiJson, apiVoid, ApiError, buildQuery } from "./client";
 import { toWireOutcome } from "./outcome-contract";
 import { toAdaptiveEstimate } from "./adaptive-contract";
 import { listTasks } from "./tasks";
-import {
-  toEffortProgress,
-  toScheduleProposal,
-  toStudySession,
-  toWireCategory,
-} from "./mappers";
+import { toScheduleProposal, toStudySession, toWireCategory } from "./mappers";
 import type {
   WireScheduleProposal,
   WireScheduleScenario,
@@ -39,8 +28,8 @@ import type {
 import type { ScenarioOverrides, SimulatePlanResult } from "@/lib/webmcp/contracts";
 import type { OutcomeFormData, StudySession } from "@/types/session";
 import type { Schedule, ScheduleProposal, ScheduleRevision } from "@/types/schedule";
-import type { AdaptiveEstimate, EffortProgress } from "@/types/progress";
-import type { AcademicTask, Category } from "@/types/task";
+import type { AdaptiveEstimate } from "@/types/progress";
+import type { Category } from "@/types/task";
 
 /**
  * CP-SAT timed out or could not prove its objective (SPEC §10.7), surfaced by
@@ -238,16 +227,9 @@ export async function recordOutcome(
   }
 }
 
-// ─── Progress (derived — no endpoint yet) ───────────────────────
-export async function listEffortProgress(
-  signal?: AbortSignal,
-): Promise<EffortProgress[]> {
-  const [tasks, sessions] = await Promise.all([
-    listTasks({}, signal),
-    listSessions(signal),
-  ]);
-  return toEffortProgress(tasks as AcademicTask[], sessions);
-}
+// ─── Progress ───────────────────────────────────────────────────
+/** `GET /progress`; kept here so existing `scheduling.listEffortProgress` callers work. */
+export { listEffortProgress } from "./progress";
 
 
 // ─── Adaptive estimation ────────────────────────────────────────

@@ -7,6 +7,8 @@ import {
   toWirePriority,
   toWireStatus,
 } from "./mappers";
+import { listEffortProgress } from "./progress";
+import type { EffortProgress } from "@/types/progress";
 import type { AcademicTask, Category, Priority, TaskFormData, TaskStatus } from "@/types/task";
 import type { WireAcademicTask, WireAcademicTaskRequest, WirePlannedSource } from "./wire";
 
@@ -32,12 +34,25 @@ export async function listTasks(
     deadline_from: filters.deadlineFrom,
     deadline_to: filters.deadlineTo,
   });
-  const wire = await apiJson<WireAcademicTask[]>(`/tasks${query}`, { signal });
-  return wire.map(toAcademicTask);
+  const [wire, progress] = await Promise.all([
+    apiJson<WireAcademicTask[]>(`/tasks${query}`, { signal }),
+    progressByTask(signal),
+  ]);
+  return wire.map((task) => toAcademicTask(task, progress.get(task.id)));
 }
 
 export async function getTask(taskId: string, signal?: AbortSignal): Promise<AcademicTask> {
-  return toAcademicTask(await apiJson<WireAcademicTask>(`/tasks/${taskId}`, { signal }));
+  const [wire, progress] = await Promise.all([
+    apiJson<WireAcademicTask>(`/tasks/${taskId}`, { signal }),
+    progressByTask(signal),
+  ]);
+  return toAcademicTask(wire, progress.get(taskId));
+}
+
+/** Worked, remaining and session counts come from `GET /progress`, not the task resource. */
+async function progressByTask(signal?: AbortSignal): Promise<Map<string, EffortProgress>> {
+  const rows = await listEffortProgress(signal);
+  return new Map(rows.map((row) => [row.taskId, row]));
 }
 
 /**

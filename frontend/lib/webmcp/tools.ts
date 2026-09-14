@@ -1,7 +1,6 @@
 import { account, availability, scheduling, tasks } from "@/lib/api";
 import { assessCapacity } from "@/lib/capacity";
 import { notifyStudyFlowDataChanged } from "@/lib/data-events";
-import { toEffortProgress } from "@/lib/api/mappers";
 import { CATEGORIES, PRIORITIES } from "@/types";
 import type { UnavailablePeriodDraft, WindowDraft } from "@/lib/api/availability";
 import type { AcademicTask, Category, Priority, TaskFormData } from "@/types/task";
@@ -328,7 +327,7 @@ export function createStudyFlowTools(): WebMcpTool[] {
       execute: async (input, options) => {
         const horizon = horizonDays(input);
         const signal = signalFor(options);
-        const [allTasks, windows, periods, preferences, activeSchedule, pendingProposal] =
+        const [allTasks, windows, periods, preferences, activeSchedule, pendingProposal, progress] =
           await Promise.all([
             tasks.listTasks({}, signal),
             availability.listWindows(signal),
@@ -336,9 +335,9 @@ export function createStudyFlowTools(): WebMcpTool[] {
             account.getPreferences(signal),
             scheduling.getActiveSchedule(signal),
             scheduling.getPendingRevision(signal),
+            scheduling.listEffortProgress(signal),
           ]);
         const capacity = assessCapacity(allTasks, windows, periods, horizon);
-        const progress = toEffortProgress(allTasks, activeSchedule?.sessions ?? []);
 
         return result(
           {

@@ -89,6 +89,18 @@ export interface WireAcademicTask {
   status: WireTaskStatus;
 }
 
+// ─── Effort progress (api/progress.py) ───────────────────────────
+export interface WireEffortProgress {
+  task_id: string;
+  task_title: string;
+  actual_duration_minutes: number;
+  estimated_remaining_minutes: number;
+  effort_percent: number;
+  sessions_completed: number;
+  sessions_upcoming: number;
+  status: WireTaskStatus;
+}
+
 export interface WireAcademicTaskRequest {
   title: string;
   category: WireTaskCategory;
