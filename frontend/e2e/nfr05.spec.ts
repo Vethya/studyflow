@@ -51,15 +51,20 @@ function installRuntimeMonitoring(page: Page): RuntimeIssue[] {
     // proposal as an ordinary 404, which Chromium reports as a console error.
     // WebKit can also report a lost Next.js dev-server HMR socket while the
     // page is running. That is test-server noise, not an application error.
+    const locationUrl = message.location().url;
     const isExpectedHmrDisconnect =
       message.text().includes("WebSocket connection") &&
       message.text().includes("/_next/webpack-hmr");
+    const isExpectedSignedOutSession =
+      message.text().includes("401 (Unauthorized)") &&
+      locationUrl.includes("/api/v1/auth/session");
     if (
       message.type() === "error" &&
       !message.text().includes("status of 404 (Not Found)") &&
-      !isExpectedHmrDisconnect
+      !isExpectedHmrDisconnect &&
+      !isExpectedSignedOutSession
     ) {
-      issues.push({ kind: "console", message: message.text() });
+      issues.push({ kind: "console", message: `${message.text()} @ ${locationUrl}` });
     }
   });
 
@@ -275,7 +280,7 @@ for (const viewport of VIEWPORTS) {
       test.skip(testInfo.project.name.startsWith("mobile-") && viewport.width !== 360, "Mobile projects run at 360px only.");
 
       const issues = installRuntimeMonitoring(page);
-      const mockState = await installNfr05ApiMocks(page, { authenticated: true });
+      const mockState = await installNfr05ApiMocks(page, { authenticated: false });
 
       await page.goto("/login");
       await waitForPageReady(page, /Welcome back/);
@@ -285,9 +290,16 @@ for (const viewport of VIEWPORTS) {
       await page.getByLabel("Email").focus();
       await page.keyboard.type(MOCK_ACCOUNT.email);
       await page.keyboard.press("Tab");
-      await page.keyboard.type("nfr05-password");
-      await page.getByRole("button", { name: "Sign In" }).focus();
-      await page.keyboard.press("Enter");
+      const passwordInput = page.getByLabel("Password");
+      await passwordInput.type("nfr05-password");
+      await expect(passwordInput).toBeFocused();
+      const loginResponse = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/v1/auth/login") &&
+          response.request().method() === "POST",
+      );
+      await passwordInput.press("Enter");
+      await expect((await loginResponse).status()).toBe(200);
       await expect.poll(() => mockState.authenticated).toBeTruthy();
 
       await testInfo.attach("runtime-issues.json", {
