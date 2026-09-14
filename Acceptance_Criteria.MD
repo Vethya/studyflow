@@ -5,7 +5,7 @@
 - “Main pages”: Dashboard, Tasks, Availability, Schedule, and Progress.
 - Valid duration: positive integer minutes.
 - Current browsers: latest stable Chrome, Edge, and Safari at test time; record versions.
-- Performance profile: production-like build, seeded user with 100 tasks and 200 study sessions, 50 concurrent users, warm-up excluded, 100 measured runs.
+- Performance profile: production-like warm deployment, one student, 50 active tasks, up to 250 study sessions, a 16-week horizon, 50 unavailable periods, feasible and overloaded scenarios, one unmeasured warm-up, and 20 measured runs.
 - Performance thresholds apply to the 95th percentile.
 - “Representative users”: at least 5 KIT students unfamiliar with StudyFlow.
 - A hard conflict means a session overlaps unavailable time, another session, or falls outside defined availability.
@@ -57,6 +57,9 @@
 - **FR-06-AC02:** Given a valid positive actual duration, when it is recorded, then it persists and is linked to the correct session.
 - **FR-06-AC03:** Given zero, negative, or nonnumeric actual duration, when submitted, then it is rejected.
 - **FR-06-AC04:** Given a completed session, then its duration is removed from the task’s remaining workload; delayed or missed work remains outstanding.
+- **FR-06-AC05:** Given recorded work and estimated remaining duration, then Effort Progress is calculated as `Actual Duration / (Actual Duration + estimated remaining duration)` and displays the percentage, actual minutes worked, estimated minutes remaining, completed-session count, upcoming-session count, and task status.
+- **FR-06-AC06:** Effort Progress is clearly labeled as expected effort consumed, not content completion, quality, or grade.
+- **FR-06-AC07:** Sessions without a confirmed actual duration remain pending and are not treated as zero-duration completions.
 
 ### FR-07 — Adaptive estimates
 
@@ -65,6 +68,7 @@
 - **FR-07-AC03:** Given a history where actual durations consistently fall below estimates, then the adaptive estimate is lower than the equivalent unadjusted estimate.
 - **FR-07-AC04:** Given no usable history, then the original student estimate is retained or a documented default is applied.
 - **FR-07-AC05:** Repeating estimation with identical inputs and history produces the same result.
+- **FR-07-AC06 (evaluation-only):** Original-versus-Adaptive comparison metrics are retained for adaptive-estimation qualification and thesis evaluation, but are not presented as student-facing estimation-error statistics or model-accuracy analytics.
 
 ### FR-08 — Overload detection
 
@@ -81,13 +85,6 @@
 - **FR-09-AC04:** Rescheduled sessions contain no hard conflicts and do not exceed their task deadlines when a feasible solution exists.
 - **FR-09-AC05:** Under limited capacity, urgency and priority determine which outstanding work is placed first.
 - **FR-09-AC06:** If no feasible reschedule exists, then an overload explanation is shown instead of an invalid plan.
-
-### FR-10 — Progress and comparison
-
-- **FR-10-AC01:** Given tasks with planned sessions, then progress displays completed workload relative to total workload.
-- **FR-10-AC02:** Given completed sessions with actual durations, then estimated duration, actual duration, and their numeric difference are displayed.
-- **FR-10-AC03:** Progress and comparisons update after a session outcome or actual duration changes.
-- **FR-10-AC04:** Sessions without actual duration are shown as pending or unavailable and are not treated as zero-duration completions.
 
 ## Non-functional acceptance criteria
 
