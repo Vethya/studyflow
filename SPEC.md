@@ -1024,7 +1024,7 @@ Evidence uses the data inventory, deletion tests, and cross-user ownership tests
 
 - React.
 - TypeScript.
-- Vite.
+- Next.js (App Router).
 - Shared task/session form components across pages.
 - Responsive weekly Calendar and mobile agenda.
 
