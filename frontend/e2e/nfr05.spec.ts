@@ -59,9 +59,12 @@ function installRuntimeMonitoring(page: Page): RuntimeIssue[] {
     const isExpectedSignedOutSession =
       message.text().includes("401 (Unauthorized)") &&
       locationUrl.includes("/api/v1/auth/session");
+    const isExpectedPendingProposal =
+      message.text().includes("status of 404 (Not Found)") &&
+      locationUrl.includes("/api/v1/schedule-proposals/current");
     if (
       message.type() === "error" &&
-      !message.text().includes("status of 404 (Not Found)") &&
+      !isExpectedPendingProposal &&
       !isExpectedHmrDisconnect &&
       !isExpectedSignedOutSession
     ) {
