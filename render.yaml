@@ -1,7 +1,7 @@
 projects:
   - name: StudyFlow
     environments:
-      - name: Dev
+      - name: dev
         services:
           - type: web
             name: studyflow-api-dev
