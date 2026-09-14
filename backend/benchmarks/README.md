@@ -61,7 +61,8 @@ uv run python benchmarks/seed_nfr02.py \
 
 The reset preserves the account credentials and profile, deletes only a
 verified NFR-02 footprint, and reseeds the exact workload. It can recover when
-the benchmark proposal was manually deleted, using the remaining benchmark
-markers and relationships. It aborts without changes when it finds unmarked
-tasks, sessions, availability, or proposals.
+the benchmark proposal was manually deleted or replaced by an API-generated
+proposal, using the remaining benchmark markers and exact task allocations. It
+aborts without changes when it finds unmarked tasks, sessions, availability, or
+proposals.
 It never falls back to the local `backend/.env` database URL.

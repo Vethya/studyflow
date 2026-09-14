@@ -193,15 +193,7 @@ async def _benchmark_reset_targets(
     # The proposal may have been manually deleted; task and availability markers
     # below still provide a safe reset boundary for the remaining footprint.
     proposal_ids = [proposals[0].id] if proposals else []
-    if proposals and proposals[0].input_fingerprint not in {
-        BENCHMARK_INPUT_FINGERPRINT,
-        LEGACY_INPUT_FINGERPRINT,
-    }:
-        raise RuntimeError(
-            "Refusing --reset-existing: the account has a schedule proposal that is not "
-            "exclusively owned by the NFR-02 benchmark."
-        )
-
+    proposal_matches_benchmark_tasks = False
     if proposal_ids:
         allocations = (
             await session.scalars(
@@ -210,13 +202,27 @@ async def _benchmark_reset_targets(
                 )
             )
         ).all()
-        if len(allocations) != 50 or {
+        proposal_matches_benchmark_tasks = len(allocations) == 50 and {
             allocation.task_id for allocation in allocations
-        } != set(task_ids):
+        } == set(task_ids)
+        if not proposal_matches_benchmark_tasks:
             raise RuntimeError(
                 "Refusing --reset-existing: the benchmark proposal contains allocations for "
                 "unexpected tasks."
             )
+
+    # API-generated benchmark proposals have a runtime fingerprint rather than
+    # the fixed seeder fingerprint. Their complete allocation set is the
+    # ownership marker in that case.
+    known_benchmark_fingerprint = bool(proposals) and proposals[0].input_fingerprint in {
+        BENCHMARK_INPUT_FINGERPRINT,
+        LEGACY_INPUT_FINGERPRINT,
+    }
+    if proposals and not known_benchmark_fingerprint and not proposal_matches_benchmark_tasks:
+        raise RuntimeError(
+            "Refusing --reset-existing: the account has a schedule proposal that is not "
+            "exclusively owned by the NFR-02 benchmark."
+        )
 
     study_sessions = (
         await session.scalars(select(StudySession).where(StudySession.account_id == account_id))
