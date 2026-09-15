@@ -2,6 +2,7 @@
 
 import csv
 import json
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -11,6 +12,7 @@ import pytest
 from studyflow.cli.export_evaluation import (
     extract_evaluation_records,
     format_as_csv,
+    main,
     pseudonymize_id,
     run_export,
 )
@@ -443,3 +445,129 @@ async def test_run_export_writes_json_and_csv_files(tmp_path: Path) -> None:
     csv_out = await run_export(database_url=db_url, output_path=csv_file, output_format="csv")
     assert "participant_code" in csv_out
     assert (tmp_path / "out.csv").exists()
+
+    # Test output_path is None
+    none_out = await run_export(database_url=db_url, output_path=None, output_format="json")
+    assert '"participant_count": 1' in none_out
+
+
+def test_cli_main_with_output_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_path = tmp_path / "cli_eval.db"
+    db_url = f"sqlite+aiosqlite:///{db_path}"
+    out_file = tmp_path / "cli_export.json"
+
+    # Setup database with schema
+    database = Database(db_url)
+    import asyncio
+
+    async def setup_db() -> None:
+        await database.start()
+        try:
+            async with database.transaction() as session:
+                await session.run_sync(lambda sync: Base.metadata.create_all(sync.connection()))
+                session.add(
+                    StudentAccount(
+                        id=uuid4(),
+                        email="cli_student@example.com",
+                        name="CLI Student",
+                        password_hash="hash",
+                        email_verified_at=datetime.now(UTC),
+                        timezone="UTC",
+                    )
+                )
+        finally:
+            await database.stop()
+
+    asyncio.run(setup_db())
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "export_evaluation",
+            "--database-url",
+            db_url,
+            "--output",
+            str(out_file),
+            "--format",
+            "json",
+        ],
+    )
+    exit_code = main()
+    assert exit_code == 0
+    assert out_file.exists()
+    captured = capsys.readouterr()
+    assert "Evaluation dataset exported successfully" in captured.out
+
+
+def test_cli_main_stdout_and_account_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_path = tmp_path / "cli_eval_stdout.db"
+    db_url = f"sqlite+aiosqlite:///{db_path}"
+    account_id = uuid4()
+
+    database = Database(db_url)
+    import asyncio
+
+    async def setup_db() -> None:
+        await database.start()
+        try:
+            async with database.transaction() as session:
+                await session.run_sync(lambda sync: Base.metadata.create_all(sync.connection()))
+                session.add(
+                    StudentAccount(
+                        id=account_id,
+                        email="stdout_student@example.com",
+                        name="Stdout Student",
+                        password_hash="hash",
+                        email_verified_at=datetime.now(UTC),
+                        timezone="UTC",
+                    )
+                )
+        finally:
+            await database.stop()
+
+    asyncio.run(setup_db())
+
+    # 1. Output to stdout with CSV and account-id filter
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "export_evaluation",
+            "--database-url",
+            db_url,
+            "--account-id",
+            str(account_id),
+            "--format",
+            "csv",
+        ],
+    )
+    exit_code = main()
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "participant_code" in captured.out
+
+    # 2. Database URL fallback from environment/settings
+    from unittest.mock import MagicMock
+
+    mock_settings = MagicMock()
+    mock_settings.database_url.get_secret_value.return_value = db_url
+    monkeypatch.setattr("studyflow.cli.export_evaluation.Settings", lambda: mock_settings)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "export_evaluation",
+            "--format",
+            "json",
+        ],
+    )
+    exit_code2 = main()
+    assert exit_code2 == 0
+    captured2 = capsys.readouterr()
+    assert '"participant_count": 1' in captured2.out
