@@ -554,8 +554,9 @@ async def test_registration_begin_handles_race_recheck_and_verified_pending_chal
 
 
 @pytest.mark.anyio
-async def test_registration_begin_returns_false_for_verified_pending_after_integrity_error(
-) -> None:
+async def test_registration_begin_returns_false_for_verified_pending_after_integrity_error() -> (
+    None
+):
     now = datetime(2026, 7, 28, 12, tzinfo=UTC)
     pending = PendingRegistration(
         email="student@example.com",

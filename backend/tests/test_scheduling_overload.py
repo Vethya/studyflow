@@ -791,13 +791,16 @@ def test_overload_break_credit_and_zero_break_capacity_branches(
     )
     assert options == ()
 
-    assert _credit_options(
-        duration_minutes=1,
-        candidate_intervals=[[0, 10]],
-        scheduling_windows=((0, 5),),
-        availability_windows=((0, 10),),
-        minimum_break_minutes=5,
-    ) == ()
+    assert (
+        _credit_options(
+            duration_minutes=1,
+            candidate_intervals=[[0, 10]],
+            scheduling_windows=((0, 5),),
+            availability_windows=((0, 10),),
+            minimum_break_minutes=5,
+        )
+        == ()
+    )
 
     # 2. _has_zero_break_capacity when durations <= 1 (line 279)
     single_session_task = _TaskInput(
@@ -886,9 +889,12 @@ def test_overload_policy_helper_fallbacks_and_uniform_guards(
         return [[0, 2]] if session.session_id == "latest" else [[0, 0], [2, 2]]
 
     monkeypatch.setattr(overload_module, "candidate_start_intervals", discontinuous_candidates)
-    assert overload_module._uniform_allocation(
-        overload_problem((early, latest), 0), discontinuous_tasks
-    ) is None
+    assert (
+        overload_module._uniform_allocation(
+            overload_problem((early, latest), 0), discontinuous_tasks
+        )
+        is None
+    )
 
     import builtins
 
@@ -908,9 +914,7 @@ def test_overload_policy_helper_fallbacks_and_uniform_guards(
     def reverse_selected_jobs(iterable: object, *args: object, **kwargs: object) -> list[object]:
         result = original_sorted(iterable, *args, **kwargs)  # type: ignore[call-overload]
         if result and all(
-            isinstance(item, tuple)
-            and len(item) == 3
-            and isinstance(item[2], SessionDemand)
+            isinstance(item, tuple) and len(item) == 3 and isinstance(item[2], SessionDemand)
             for item in result
         ):
             result.reverse()
@@ -1025,19 +1029,24 @@ def test_overload_flow_and_witness_placement_failures(
             return 0
 
     monkeypatch.setattr(min_cost_flow, "SimpleMinCostFlow", InfeasibleFlow)
-    assert overload_module._uniform_flow_policy_witness(
-        problem,
-        overload_module._UniformAllocation({"task": 1}, {}, (0,), {"task": 1}),
-    ) is None
+    assert (
+        overload_module._uniform_flow_policy_witness(
+            problem,
+            overload_module._UniformAllocation({"task": 1}, {}, (0,), {"task": 1}),
+        )
+        is None
+    )
 
     sessions = (
         demand("a", "task", 2, (0, 8), deadline=10),
         demand("b", "task", 2, (0, 8), deadline=10),
     )
     placement_problem = overload_problem(sessions, 0)
-    placement_tasks = (overload_module._TaskDemand(
-        "task", 10, TaskPriority.MEDIUM, sessions[0].allowed_windows, 4, 0, 10
-    ),)
+    placement_tasks = (
+        overload_module._TaskDemand(
+            "task", 10, TaskPriority.MEDIUM, sessions[0].allowed_windows, 4, 0, 10
+        ),
+    )
     candidates = {"a": [[0, 8]], "b": [[0, 8]]}
     day_options: dict[str, tuple[_DayStartOption, ...]] = {
         "a": (_DayStartOption(0, 0, 8),),
@@ -1106,9 +1115,11 @@ def test_overload_uniform_spread_placement_failures(
     )
     planning_days = (PlanningDay(0, 0, 50), PlanningDay(1, 50, 100))
     problem = FeasibilityProblem(sessions, 0, 0, 4.0, planning_days)
-    tasks = (overload_module._TaskDemand(
-        "task", 99, TaskPriority.MEDIUM, sessions[0].allowed_windows, 2, 0, 99
-    ),)
+    tasks = (
+        overload_module._TaskDemand(
+            "task", 99, TaskPriority.MEDIUM, sessions[0].allowed_windows, 2, 0, 99
+        ),
+    )
     allocation = overload_module._UniformAllocation({"task": 2}, {}, (0, 50), {"task": 2})
     candidates = {"a": [[0, 99]], "b": [[0, 99]]}
     day_options: dict[str, tuple[_DayStartOption, ...]] = {
@@ -1241,9 +1252,7 @@ def test_overload_main_policy_uses_packed_greedy_fallback(
 ) -> None:
     from studyflow.scheduling import overload as overload_module
 
-    problem = overload_problem(
-        (demand("a", "a", 2, (0, 10)), demand("b", "b", 1, (0, 10))), 0
-    )
+    problem = overload_problem((demand("a", "a", 2, (0, 10)), demand("b", "b", 1, (0, 10))), 0)
 
     def greedy_hint(*_args: object, spread_across_days: bool) -> dict[str, int]:
         return {"a": 0} if spread_across_days else {"a": 0, "b": 2}
@@ -1262,9 +1271,7 @@ def test_overload_main_policy_reports_invalid_capacity_cut_model(
 ) -> None:
     from studyflow.scheduling import overload as overload_module
 
-    problem = overload_problem(
-        (demand("a", "a", 2, (0, 10)), demand("b", "b", 1, (0, 10))), 0
-    )
+    problem = overload_problem((demand("a", "a", 2, (0, 10)), demand("b", "b", 1, (0, 10))), 0)
     monkeypatch.setattr(overload_module, "_greedy_policy_hint", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(overload_module, "_uniform_allocation", lambda *_args: None)
     validations = iter(("", "invalid capacity cuts"))
@@ -1285,9 +1292,7 @@ def test_overload_main_policy_probe_and_allocation_completion(
 ) -> None:
     from studyflow.scheduling import overload as overload_module
 
-    problem = overload_problem(
-        (demand("a", "a", 2, (0, 10)), demand("b", "b", 1, (0, 10))), 0
-    )
+    problem = overload_problem((demand("a", "a", 2, (0, 10)), demand("b", "b", 1, (0, 10))), 0)
     monkeypatch.setattr(overload_module, "_greedy_policy_hint", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(overload_module, "_uniform_allocation", lambda *_args: None)
     monkeypatch.setattr(overload_module, "_replace_solution_hints", lambda *_args: None)
@@ -1393,9 +1398,11 @@ def test_overload_uniform_spread_skips_an_empty_synthetic_day_count(
         4.0,
         (PlanningDay(0, 0, 50), PlanningDay(1, 50, 100)),
     )
-    tasks = (overload_module._TaskDemand(
-        "task", 99, TaskPriority.MEDIUM, sessions[0].allowed_windows, 2, 0, 99
-    ),)
+    tasks = (
+        overload_module._TaskDemand(
+            "task", 99, TaskPriority.MEDIUM, sessions[0].allowed_windows, 2, 0, 99
+        ),
+    )
     allocation = overload_module._UniformAllocation({"task": 2}, {}, (0, 50), {"task": 2})
     candidates = {"a": [[0, 99]], "b": [[0, 99]]}
     day_options: dict[str, tuple[_DayStartOption, ...]] = {
