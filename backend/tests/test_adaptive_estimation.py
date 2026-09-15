@@ -8,6 +8,7 @@ import pytest
 from studyflow.estimation import (
     AdaptiveEstimateUnavailableError,
     AdaptiveEstimator,
+    AdaptivePredictionCaptureError,
     AdaptivePredictionRepository,
     CorrectionPrediction,
     HistoryRecord,
@@ -548,3 +549,86 @@ async def test_recalculate_after_deletion_reconciles_drifted_or_bounded_acknowle
 
     assert status.is_qualified is True
     assert repository.acknowledgments == {TaskCategory.OTHER: Decimal("2.1")}
+
+
+@pytest.mark.anyio
+async def test_adaptive_estimation_service_and_model_edge_cases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 1. qualifies() with defensive actual_minutes is None in selected (model.py line 104)
+    evals = [
+        PredictionEvaluation(
+            task_id=UUID(int=1),
+            original_minutes=100,
+            adaptive_minutes=90,
+            actual_minutes=None,
+            completed_at=NOW,
+        )
+    ]
+    import studyflow.estimation.model as model_mod
+
+    monkeypatch.setattr(model_mod, "sorted", lambda seq, key: evals * 5, raising=False)
+    assert qualifies([PredictionEvaluation(UUID(int=1), 100, 90, 100, NOW)] * 5) is False
+    monkeypatch.undo()
+
+    # 2. acknowledge() when history is empty raises AdaptiveEstimateUnavailableError
+    # (service.py line 115)
+    empty_repo = InMemoryAdaptivePredictionRepository()
+    estimator = AdaptiveEstimator(empty_repo, clock=lambda: NOW)
+    account_id = UUID(int=1)
+    with pytest.raises(AdaptiveEstimateUnavailableError):
+        await estimator.acknowledge(account_id, TaskCategory.READING)
+
+    # 3. capture_for_task when prediction is None, replace=True, remove_prediction returns False
+    # (service.py line 99)
+    class FailingRemoveRepo(InMemoryAdaptivePredictionRepository):
+        async def remove_prediction(self, acc_id: UUID, t_id: UUID) -> bool:
+            return False
+
+    failing_remove = FailingRemoveRepo()
+    estimator_remove = AdaptiveEstimator(failing_remove, clock=lambda: NOW)
+    with pytest.raises(AdaptivePredictionCaptureError):
+        await estimator_remove.capture_for_task(
+            account_id,
+            UUID(int=2),
+            TaskCategory.READING,
+            60,
+            replace=True,
+        )
+
+    # 4. capture_for_task when prediction is not None, save returns False (service.py line 107)
+    class FailingSaveRepo(InMemoryAdaptivePredictionRepository):
+        async def save_prediction(
+            self, acc_id: UUID, t_id: UUID, prediction: CorrectionPrediction, *, exposed: bool
+        ) -> bool:
+            return False
+
+    failing_save = FailingSaveRepo(
+        history_records=_history([Decimal("1.25")] * 5),
+        prediction_evaluations=[
+            _evaluation(i, adaptive_minutes=95, actual_minutes=95) for i in range(5)
+        ],
+    )
+    estimator_save = AdaptiveEstimator(failing_save, clock=lambda: NOW)
+    with pytest.raises(AdaptivePredictionCaptureError):
+        await estimator_save.capture_for_task(
+            account_id,
+            UUID(int=3),
+            TaskCategory.READING,
+            60,
+            replace=False,
+        )
+
+    # 5. is_qualified (service.py line 125)
+    assert await estimator_save.is_qualified(account_id) is True
+    assert await estimator.is_qualified(account_id) is False
+
+    # 6. capture_for_task when prediction is None and not replace (service.py line 100)
+    preview_none = await estimator.capture_for_task(
+        account_id,
+        UUID(int=4),
+        TaskCategory.READING,
+        60,
+        replace=False,
+    )
+    assert preview_none is not None and preview_none.planned_source == "original"

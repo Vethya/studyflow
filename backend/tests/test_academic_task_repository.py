@@ -15,10 +15,12 @@ from studyflow.database.models import StudySessionOutcome as OutcomeRow
 from studyflow.estimation import AdaptiveEstimateUnavailableError, AdaptiveEstimator
 from studyflow.estimation.repositories import SqlAlchemyAdaptivePredictionRepository
 from studyflow.tasks.repositories import (
+    NoTaskDeadlineSessions,
     SqlAlchemyAcademicTaskRepository,
     SqlAlchemyTaskDeadlineSessionInvalidator,
 )
 from studyflow.tasks.service import (
+    InvalidTaskDeadlineError,
     NewAcademicTask,
     PlannedDurationSource,
     TaskCategory,
@@ -626,5 +628,180 @@ async def test_list_snapshot_and_query_filters() -> None:
         )
         assert len(to_filtered) == 1
         assert to_filtered[0].id == t1.id
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_task_repository_edge_cases() -> None:
+    from studyflow.estimation import AdaptiveEstimatePreview
+
+    # 1. NoTaskDeadlineSessions stub coverage (line 81)
+    stub_sessions = NoTaskDeadlineSessions()
+    now = datetime.now(UTC)
+    assert (
+        await stub_sessions.remove_sessions_after_deadline(
+            None,  # type: ignore[arg-type]
+            uuid4(),
+            uuid4(),
+            now,
+            now,
+        )
+        == []
+    )
+
+    # 2. _apply_snapshot raises ValueError when adaptive_minutes is None (line 562)
+    preview = AdaptiveEstimatePreview(
+        category=TaskCategory.READING,
+        original_minutes=60,
+        adaptive_minutes=None,
+        correction_factor=None,
+        history_scope=None,
+        history_count=None,
+        available=True,
+        planned_source="adaptive",
+        acknowledgment_required=False,
+    )
+    dummy_task = AcademicTask(
+        account_id=uuid4(),
+        title="Task",
+        category="reading",
+        priority="medium",
+        deadline_at=now + timedelta(days=1),
+        original_estimate_minutes=60,
+        adaptive_estimate_minutes=None,
+        planned_source="original",
+        planned_duration_minutes=60,
+    )
+    with pytest.raises(ValueError, match="Adaptive source requires an adaptive estimate"):
+        SqlAlchemyAcademicTaskRepository._apply_snapshot(dummy_task, 60, preview)
+
+    # 3. DB-backed edge cases
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    account_id = uuid4()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(lambda sync: Base.metadata.create_all(sync.connection()))
+            session.add(
+                StudentAccount(
+                    id=account_id,
+                    email="student@example.com",
+                    name="Student",
+                    timezone="UTC",
+                )
+            )
+
+        repository = SqlAlchemyAcademicTaskRepository(database)
+
+        # create with nonexistent account raises ValueError (line 215)
+        with pytest.raises(ValueError, match="Account not found"):
+            await repository.create(
+                uuid4(),
+                NewAcademicTask(
+                    "Task",
+                    TaskCategory.READING,
+                    TaskPriority.MEDIUM,
+                    None,
+                    None,
+                    now + timedelta(days=1),
+                    60,
+                ),
+            )
+
+        # _capture_estimate without estimator raises AdaptiveEstimateUnavailableError (line 535)
+        async with database.transaction() as session:
+            with pytest.raises(AdaptiveEstimateUnavailableError):
+                await repository._capture_estimate(
+                    session,
+                    account_id,
+                    uuid4(),
+                    TaskCategory.READING,
+                    60,
+                    PlannedDurationSource.ADAPTIVE,
+                )
+
+        # Create a valid task
+        created = await repository.create(
+            account_id,
+            NewAcademicTask(
+                "Valid Task",
+                TaskCategory.READING,
+                TaskPriority.MEDIUM,
+                None,
+                None,
+                now + timedelta(days=2),
+                60,
+            ),
+        )
+
+        # update with nonexistent task_id returns None (lines 347->348, 349)
+        assert (
+            await repository.update(
+                account_id,
+                uuid4(),
+                NewAcademicTask(
+                    "Updated",
+                    TaskCategory.READING,
+                    TaskPriority.MEDIUM,
+                    None,
+                    None,
+                    now + timedelta(days=3),
+                    60,
+                ),
+                now,
+            )
+            is None
+        )
+
+        # update with deadline_changed and deadline_at <= now raises InvalidTaskDeadlineError
+        # (line 361)
+        with pytest.raises(InvalidTaskDeadlineError):
+            await repository.update(
+                account_id,
+                created.id,
+                NewAcademicTask(
+                    "Past Deadline Task",
+                    TaskCategory.READING,
+                    TaskPriority.MEDIUM,
+                    None,
+                    None,
+                    now - timedelta(days=1),
+                    60,
+                ),
+                now,
+            )
+
+        # mark_started with nonexistent task_id returns False (line 459)
+        assert await repository.mark_started(account_id, uuid4(), now) is False
+
+        # delete with nonexistent task_id returns False (line 413)
+        assert await repository.delete(account_id, uuid4()) is False
+
+        # Test _reconcile_overdue when invalidator remediates overdue tasks (line 210)
+        overdue_task_id = uuid4()
+
+        class StubOverdueInvalidator:
+            async def remediate_overdue_tasks(
+                self, session: object, acc_id: UUID, current_time: datetime
+            ) -> list[UUID]:
+                return [overdue_task_id]
+
+        class StubRecoveryInvalidator:
+            def __init__(self) -> None:
+                self.invalidated: list[UUID] = []
+
+            async def invalidate_for_task(self, session: object, acc_id: UUID, t_id: UUID) -> None:
+                self.invalidated.append(t_id)
+
+        recovery_stub = StubRecoveryInvalidator()
+        repo_with_stubs = SqlAlchemyAcademicTaskRepository(
+            database,
+            invalidator=StubOverdueInvalidator(),  # type: ignore[arg-type]
+            recovery_invalidator=recovery_stub,
+        )
+        async with database.transaction() as session:
+            await repo_with_stubs._reconcile_overdue(session, account_id, now)
+        assert recovery_stub.invalidated == [overdue_task_id]
     finally:
         await database.stop()

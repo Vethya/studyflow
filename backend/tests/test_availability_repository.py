@@ -558,3 +558,34 @@ def test_calendar_revalidation_sweep_does_not_skip_later_sessions() -> None:
     )
 
     assert [row.id for row in invalidated] == [rows[0].id, rows[2].id]
+
+
+@pytest.mark.anyio
+async def test_availability_repository_missing_account_branches() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+
+        invalidator = SqlAlchemyFutureSessionInvalidator(clock=lambda: NOW)
+        repository = SqlAlchemyAvailabilityWindowRepository(database, invalidator)
+
+        missing_id = uuid4()
+        # 1. remove_sessions_outside_availability returns [] when account missing (line 124)
+        async with database.transaction() as session:
+            assert (
+                await invalidator.remove_sessions_outside_availability(session, missing_id, [])
+                == []
+            )
+
+        # 2. replace returns empty change when account missing (line 265)
+        res_replace = await repository.replace(missing_id, [])
+        assert res_replace.windows == [] and res_replace.invalidated_future_session_ids == []
+
+        # 3. confirm_timezone returns None when account missing (line 291)
+        assert await repository.confirm_timezone(missing_id) is None
+    finally:
+        await database.stop()

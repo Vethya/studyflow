@@ -462,3 +462,63 @@ async def test_task_lifecycle_maps_confirmation_csrf_missing_and_frozen_failures
     assert missing_start.status_code == 404
     assert missing_finish.status_code == 404
     assert missing_delete.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_tasks_api_deadline_validation() -> None:
+    @dataclass
+    class DeadlineFailingTasksStub(TasksStub):
+        async def update(
+            self, account_id: UUID, task_id: UUID, task: NewAcademicTask
+        ) -> AcademicTaskRecord | None:
+            raise InvalidTaskDeadlineError()
+
+    tasks = DeadlineFailingTasksStub(records=[])
+    app = create_app(
+        session_authentication=AuthenticationStub(),
+        academic_tasks=tasks,
+    )
+    cookies = {"studyflow_session": "session-token"}
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="https://test", cookies=cookies
+    ) as client:
+        # Naive deadline_from returns 422
+        res_naive = await client.get(
+            "/api/v1/tasks",
+            params={"deadline_from": "2026-07-28T12:00:00"},
+        )
+        assert res_naive.status_code == 422
+        assert res_naive.json()["detail"] == "Deadline filters must include a UTC offset"
+
+        # deadline_from > deadline_to returns 422
+        res_order = await client.get(
+            "/api/v1/tasks",
+            params={
+                "deadline_from": "2026-07-28T12:00:00Z",
+                "deadline_to": "2026-07-20T12:00:00Z",
+            },
+        )
+        assert res_order.status_code == 422
+        assert res_order.json()["detail"] == "deadline_from must not be after deadline_to"
+
+        # PUT raising InvalidTaskDeadlineError returns 422
+        res_put = await client.put(
+            f"/api/v1/tasks/{TASK_ID}",
+            headers={"X-CSRF-Token": "csrf-token"},
+            json={
+                "title": "Task",
+                "category": "assignment",
+                "priority": "medium",
+                "deadline_at": "2026-07-20T12:00:00Z",
+                "original_estimate_minutes": 60,
+            },
+        )
+        assert res_put.status_code == 422
+        assert res_put.json()["detail"] == "Deadline must be a future absolute date and time"
+
+    from studyflow.api.tasks import AcademicTaskRequest, normalize_course
+
+    assert normalize_course(None) is None
+    assert normalize_course("   ") is None
+    assert AcademicTaskRequest.normalize_course_field(None) is None
+    assert AcademicTaskRequest.normalize_course_field(" CS101 ") == "CS101"

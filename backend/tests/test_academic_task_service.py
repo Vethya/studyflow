@@ -239,10 +239,15 @@ async def test_task_service_and_snapshot_dispatch() -> None:
     assert result[0].title == "Snapshot task"
 
     # 2. list_task_snapshot without AcademicTaskSnapshots
-    plain_repo = RepositoryStub(task_records=[task])
-    plain_service = AcademicTaskService(plain_repo, clock=lambda: now)
-    result_plain = await list_task_snapshot(plain_service, account_id)
-    assert result_plain == [task]
+    class NonSnapshotTasksStub:
+        async def list(
+            self, account_id: UUID, filters: TaskFilters | None = None
+        ) -> list[AcademicTaskRecord]:
+            return [task]
+
+    assert await list_task_snapshot(cast(AcademicTasks, NonSnapshotTasksStub()), account_id) == [
+        task
+    ]
 
     # 3. AcademicTaskService.list_snapshot with AcademicTaskRepositorySnapshots
     snap_repo = SnapshotRepositoryStub(snapshot_records=[task])
@@ -250,4 +255,6 @@ async def test_task_service_and_snapshot_dispatch() -> None:
     assert await snap_service.list_snapshot(account_id) == [task]
 
     # 4. AcademicTaskService.list_snapshot without AcademicTaskRepositorySnapshots
+    plain_repo = RepositoryStub(task_records=[task])
+    plain_service = AcademicTaskService(plain_repo, clock=lambda: now)
     assert await plain_service.list_snapshot(account_id) == [task]

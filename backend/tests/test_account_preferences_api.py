@@ -161,3 +161,18 @@ async def test_study_preferences_require_authentication_and_csrf() -> None:
     assert unauthenticated.status_code == 401
     assert missing_csrf.status_code == 403
     assert preferences.updates == []
+
+
+@pytest.mark.anyio
+async def test_study_preferences_service_delegation() -> None:
+    from studyflow.accounts.preferences import StudyPreferencesService
+
+    stub = PreferencesStub(StudyPreferences("UTC", 60, 10, False))
+    service = StudyPreferencesService(stub)
+    account_id = UUID("5b15bfef-8c44-45d5-a70e-574beb999fb3")
+    assert await service.get(account_id) == stub.preferences
+    assert (
+        await service.update(account_id, "UTC", 45, 15)
+        == StudyPreferences("UTC", 45, 15, False)
+    )
+    assert stub.updates == [(account_id, "UTC", 45, 15)]

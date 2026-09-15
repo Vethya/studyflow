@@ -561,3 +561,21 @@ async def test_simulate_maps_missing_account() -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Account not found"
+
+
+@pytest.mark.anyio
+async def test_simulate_requires_scenario() -> None:
+    application = _app(GenerationStub(result=None), ProposalsStub(None))
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        response = await client.post(
+            "/api/v1/schedule-proposals/simulate",
+            headers={"X-CSRF-Token": "csrf"},
+            json={},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "A scenario is required for simulation"

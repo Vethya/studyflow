@@ -46,5 +46,6 @@ async def test_profile_repository_cannot_read_or_update_another_account() -> Non
         assert updated is not None and updated.name == "Updated First"
         assert (await repository.get(second_id)).name == "Second Student"  # type: ignore[union-attr]
         assert await repository.get(uuid4()) is None
+        assert await repository.update_name(uuid4(), "Missing") is None
     finally:
         await database.stop()
