@@ -48,9 +48,7 @@ class AvailabilityStub:
         self.replacements.append((account_id, windows))
         return AvailabilityWindowChange(self.windows, self.invalidated_future_session_ids)
 
-    async def confirm_timezone(
-        self, account_id: UUID
-    ) -> AvailabilityTimezoneConfirmation | None:
+    async def confirm_timezone(self, account_id: UUID) -> AvailabilityTimezoneConfirmation | None:
         self.confirmations.append(account_id)
         return AvailabilityTimezoneConfirmation(self.invalidated_future_session_ids)
 

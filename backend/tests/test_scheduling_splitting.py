@@ -88,3 +88,40 @@ def test_rejects_non_integer_minute_values(
 ) -> None:
     with pytest.raises(TypeError):
         split_task_sessions("task", remaining_minutes, preferred_session_length)  # type: ignore[arg-type]
+
+
+def test_session_draft_validates_inputs() -> None:
+    with pytest.raises(ValueError, match="session_id must not be empty"):
+        SessionDraft("", "task", 60, 0)
+    with pytest.raises(ValueError, match="task_id must not be empty"):
+        SessionDraft("session-1", "", 60, 0)
+    with pytest.raises(ValueError, match="duration_minutes must be positive"):
+        SessionDraft("session-1", "task", 0, 0)
+    with pytest.raises(ValueError, match="duration_minutes must be positive"):
+        SessionDraft("session-1", "task", -10, 0)
+    with pytest.raises(ValueError, match="session_index must not be negative"):
+        SessionDraft("session-1", "task", 60, -1)
+    with pytest.raises(TypeError, match="duration_minutes must be an integer"):
+        SessionDraft("session-1", "task", "60", 0)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="session_index must be an integer"):
+        SessionDraft("session-1", "task", 60, "0")  # type: ignore[arg-type]
+
+
+def test_session_split_supports_slicing_and_rejects_invalid_index() -> None:
+    split = split_task_sessions("task", remaining_minutes=150, preferred_session_length=60)
+    # len is 3: 60, 60, 30
+
+    sliced = split[0:2]
+    assert isinstance(sliced, tuple)
+    assert len(sliced) == 2
+    assert sliced[0].duration_minutes == 60
+    assert sliced[1].duration_minutes == 60
+
+    with pytest.raises(TypeError, match="session index must be an integer or slice"):
+        split["0"]  # type: ignore[call-overload]
+
+    with pytest.raises(IndexError, match="session index out of range"):
+        split[5]
+
+    with pytest.raises(IndexError, match="session index out of range"):
+        split[-10]
