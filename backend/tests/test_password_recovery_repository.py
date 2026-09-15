@@ -1,4 +1,6 @@
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -134,3 +136,50 @@ async def test_password_reset_tokens_expire_and_replacement_invalidates_prior_to
         )
     finally:
         await database.stop()
+
+
+@pytest.mark.anyio
+async def test_password_reset_orphaned_token_returns_false() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    now = datetime.now(UTC)
+    missing_account_id = uuid4()
+    token_hash = hash_verification_token("orphaned-reset-token")
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            session.add(
+                AuthenticationEmailToken(
+                    account_id=missing_account_id,
+                    purpose="password_reset",
+                    token_hash=token_hash,
+                    expires_at=now + timedelta(hours=1),
+                )
+            )
+        repository = SqlAlchemyPasswordRecoveryRepository(database)
+        assert not await repository.reset_password(token_hash, "$argon2id$new-hash", now)
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_password_reset_returns_false_when_token_disappears_after_account_lock() -> None:
+    account_id = uuid4()
+    session = MagicMock()
+    session.scalar = AsyncMock(side_effect=[account_id, None])
+    session.get = AsyncMock(return_value=object())
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=session)
+    transaction.__aexit__ = AsyncMock(return_value=False)
+    database = MagicMock()
+    database.transaction.return_value = transaction
+
+    repository = SqlAlchemyPasswordRecoveryRepository(cast(Any, database))
+
+    assert not await repository.reset_password(
+        "a" * 64,
+        "$argon2id$new-hash",
+        datetime(2026, 7, 28, 12, tzinfo=UTC),
+    )

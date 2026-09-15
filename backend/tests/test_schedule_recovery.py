@@ -667,3 +667,51 @@ async def test_recovery_technical_failure_persists_nothing() -> None:
         assert snapshot_count == 0
     finally:
         await harness.database.stop()
+
+
+@pytest.mark.anyio
+async def test_recovery_repository_edge_cases() -> None:
+    harness = await _harness(deadline=NOW + timedelta(days=1))
+    try:
+        repo = SqlAlchemyRecoverySnapshotRepository(harness.database)
+
+        # 1. capture when account is None -> returns None (line 43)
+        assert await repo.capture(uuid4(), harness.missed_session_id, NOW, 0) is None
+
+        # 2. capture when trigger is None -> returns None (line 50)
+        assert await repo.capture(harness.account_id, uuid4(), NOW, 0) is None
+
+        # 3. capture when accepted session has invalidated_at set,
+        # but outcome.remaining <= 0
+        async with harness.database.transaction() as session:
+            inv_session_id = uuid4()
+            session.add(
+                SessionRow(
+                    id=inv_session_id,
+                    account_id=harness.account_id,
+                    task_id=harness.task_id,
+                    proposal_id=None,
+                    starts_at=NOW - timedelta(hours=5),
+                    ends_at=NOW - timedelta(hours=4),
+                    planned_duration_minutes=60,
+                    invalidated_at=NOW - timedelta(hours=3),
+                )
+            )
+            session.add(
+                OutcomeRow(
+                    session_id=inv_session_id,
+                    kind="delayed",
+                    actual_minutes=60,
+                    remaining_minutes=0,
+                    recorded_at=NOW - timedelta(hours=3),
+                )
+            )
+        snapshot = await repo.capture(harness.account_id, harness.missed_session_id, NOW, 0)
+        assert snapshot is not None
+
+        # 4. SqlAlchemyTaskRecoveryProposalInvalidator when proposal_ids is empty (line 259)
+        invalidator = SqlAlchemyTaskRecoveryProposalInvalidator()
+        async with harness.database.transaction() as session:
+            await invalidator.invalidate_for_task(session, harness.account_id, uuid4())
+    finally:
+        await harness.database.stop()

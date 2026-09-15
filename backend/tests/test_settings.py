@@ -115,6 +115,30 @@ def test_google_oidc_configuration_is_secret_and_all_or_nothing() -> None:
         Settings(google_oidc_client_id="google-client")
 
 
+def test_blank_google_oidc_settings_are_normalized_to_none() -> None:
+    settings = Settings(google_oidc_client_id="", google_oidc_client_secret=SecretStr(""))
+
+    assert settings.google_oidc_client_id is None
+    assert settings.google_oidc_client_secret is None
+
+
+def test_google_oidc_redirect_uri_requires_http_or_https() -> None:
+    with raises(ValidationError, match="Google OIDC redirect URI must use HTTP or HTTPS"):
+        Settings(google_oidc_redirect_uri="javascript:alert(1)")
+
+
+@mark.parametrize(
+    "redirect_uri",
+    ["https://studyflow.example/callback?tenant=1", "https://studyflow.example/callback#fragment"],
+)
+def test_google_oidc_redirect_uri_rejects_query_or_fragment(redirect_uri: str) -> None:
+    with raises(
+        ValidationError,
+        match="Google OIDC redirect URI must not include a query or fragment",
+    ):
+        Settings(google_oidc_redirect_uri=redirect_uri)
+
+
 def test_settings_reject_an_unsafe_public_app_url() -> None:
     with raises(ValidationError, match="Public app URL must use HTTP or HTTPS"):
         Settings(public_app_url="javascript:alert(1)")
@@ -205,4 +229,21 @@ def test_production_requires_tls_for_authentication_email() -> None:
             database_url=database_url,
             public_app_url="https://studyflow.example.com",
             smtp_start_tls=False,
+        )
+
+
+def test_production_requires_https_for_google_oidc_redirect_uri() -> None:
+    database_url = SecretStr(
+        "postgresql+psycopg://studyflow:secret@database/studyflow?sslmode=require"
+    )
+
+    with raises(ValidationError, match="Production Google OIDC redirect URI must use HTTPS"):
+        Settings(
+            environment=Environment.PRODUCTION,
+            database_url=database_url,
+            public_app_url="https://studyflow.example.com",
+            smtp_start_tls=True,
+            google_oidc_client_id="google-client",
+            google_oidc_client_secret=SecretStr("google-secret"),
+            google_oidc_redirect_uri="http://studyflow.example.com/callback",
         )

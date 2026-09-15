@@ -270,3 +270,67 @@ async def test_overload_missed_recovery_is_exact_and_rejection_preserves_unfinis
         assert unresolved.rescheduled_at is None
     finally:
         await workflow.database.stop()
+
+
+@pytest.mark.anyio
+async def test_recovery_service_snapshot_failure_and_edge_branches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from typing import cast
+
+    from studyflow.scheduling import KernelStatus
+    from studyflow.scheduling.contracts import OverloadResult, SolverDiagnostics
+    from studyflow.scheduling.service import ScheduleGenerationFailedError
+    from studyflow.tasks.service import AcademicTaskRecord
+
+    workflow = await _workflow(
+        deadline=datetime(2026, 8, 24, 15, tzinfo=UTC),
+        availability_end=time(15),
+        minimum_break_minutes=0,
+        future_start=datetime(2026, 8, 24, 13, tzinfo=UTC),
+    )
+    try:
+        await workflow.outcomes.record_missed(workflow.account_id, workflow.past_session_id)
+
+        # 1. Snapshot capture returns None -> propose returns None (line 189)
+        async def mock_capture_none(*args: object, **kwargs: object) -> None:
+            return None
+
+        monkeypatch.setattr(workflow.recovery._snapshots, "capture", mock_capture_none)
+        proposal = await workflow.recovery.propose(workflow.account_id, workflow.past_session_id)
+        assert proposal is None
+
+        # 2. Proposals replace returns None -> propose returns None (line 234)
+        monkeypatch.undo()
+
+        async def mock_replace_none(*args: object, **kwargs: object) -> None:
+            return None
+
+        monkeypatch.setattr(workflow.recovery._proposals, "replace", mock_replace_none)
+        proposal2 = await workflow.recovery.propose(workflow.account_id, workflow.past_session_id)
+        assert proposal2 is None
+
+        # 3. Snapshot save returns False -> raises ScheduleGenerationFailedError (line 236)
+        monkeypatch.undo()
+
+        async def mock_save_false(*args: object, **kwargs: object) -> bool:
+            return False
+
+        monkeypatch.setattr(workflow.recovery._snapshots, "save", mock_save_false)
+        with pytest.raises(
+            ScheduleGenerationFailedError, match="Recovery snapshot could not be persisted"
+        ):
+            await workflow.recovery.propose(workflow.account_id, workflow.past_session_id)
+
+        # 4. _include_overdue with technical failure status -> returns result untouched (line 246)
+        tech_result = OverloadResult(
+            KernelStatus.TECHNICAL_FAILURE,
+            (),
+            (),
+            SolverDiagnostics("FAIL", 0.0, 0, 0),
+            "failure",
+        )
+        fake_task = cast(AcademicTaskRecord, object())
+        assert ScheduleRecoveryService._include_overdue(tech_result, [fake_task]) == tech_result
+    finally:
+        await workflow.database.stop()

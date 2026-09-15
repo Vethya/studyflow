@@ -269,3 +269,63 @@ async def test_preview_and_acknowledgment_are_scoped_to_the_authenticated_accoun
     assert other_preview.json()["available"] is True
     assert other_acknowledgment.status_code == 204
     assert estimator.acknowledgments == [(OTHER_ACCOUNT_ID, TaskCategory.READING)]
+
+
+@pytest.mark.anyio
+async def test_acknowledgment_maps_unavailable_and_unauthenticated() -> None:
+    estimator = EstimatorStub(
+        {
+            ACCOUNT_ID: preview(available=False),
+        }
+    )
+    app = create_app(session_authentication=AuthenticationStub(), adaptive_estimator=estimator)  # type: ignore[arg-type]
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://test",
+        cookies={"studyflow_session": "session-token"},
+    ) as client:
+        unavailable_resp = await client.post(
+            "/api/v1/adaptive-estimates/acknowledgments",
+            headers={"X-CSRF-Token": "csrf-token"},
+            json={"category": "reading"},
+        )
+
+    assert unavailable_resp.status_code == 422
+    assert unavailable_resp.json()["detail"] == "Adaptive estimate is unavailable"
+
+    unauthenticated_app = create_app(
+        session_authentication=AuthenticationStub(authenticated=False),
+        adaptive_estimator=estimator,  # type: ignore[arg-type]
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=unauthenticated_app),
+        base_url="https://test",
+    ) as client:
+        unauth_resp = await client.post(
+            "/api/v1/adaptive-estimates/acknowledgments",
+            headers={"X-CSRF-Token": "csrf-token"},
+            json={"category": "reading"},
+        )
+
+    assert unauth_resp.status_code == 401
+
+    class RejectingEstimator(EstimatorStub):
+        async def acknowledge(self, account_id: UUID, category: TaskCategory) -> bool:
+            return False
+
+    rejecting_app = create_app(
+        session_authentication=AuthenticationStub(),
+        adaptive_estimator=RejectingEstimator({ACCOUNT_ID: preview(available=True)}),  # type: ignore[arg-type]
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=rejecting_app),
+        base_url="https://test",
+        cookies={"studyflow_session": "session-token"},
+    ) as client:
+        rejected_resp = await client.post(
+            "/api/v1/adaptive-estimates/acknowledgments",
+            headers={"X-CSRF-Token": "csrf-token"},
+            json={"category": "reading"},
+        )
+    assert rejected_resp.status_code == 401

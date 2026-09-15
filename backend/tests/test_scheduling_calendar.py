@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -435,3 +436,303 @@ def test_date_max_does_not_overflow_positive_offset_timezone() -> None:
 def test_rejects_invalid_calendar_inputs(call: object) -> None:
     with pytest.raises(ValueError):
         call()  # type: ignore[operator]
+
+
+def test_calendar_windows_and_planning_days_sequence_operations() -> None:
+    start = datetime(2026, 1, 5, tzinfo=UTC)
+    end = datetime(2026, 1, 12, tzinfo=UTC)
+    result = _run([AvailabilityWindowDraft(0, time(9), time(11))], start, end)
+
+    # 1. CalendarWindows equality with non-Sequence
+    assert result.windows != "not-a-sequence"
+
+    # 2. CalendarWindows slicing
+    sliced = result.windows[0:1]
+    assert len(sliced) == 1
+    assert isinstance(sliced, tuple)
+
+    # 3. CalendarWindows invalid index type
+    with pytest.raises(TypeError, match="window index must be an integer or slice"):
+        _ = result.windows[cast(Any, "bad")]
+
+    # 4. CalendarWindows out of range indices
+    with pytest.raises(IndexError, match="calendar window index out of range"):
+        _ = result.windows[100]
+    with pytest.raises(IndexError, match="calendar window index out of range"):
+        _ = result.windows[-100]
+
+    # 5. PlanningDays equality with non-Sequence
+    assert result.planning_days != "not-a-sequence"
+
+    # 6. PlanningDays slicing
+    days_slice = result.planning_days[0:2]
+    assert len(days_slice) == 2
+    assert isinstance(days_slice, tuple)
+
+    # 7. PlanningDays invalid index type
+    with pytest.raises(TypeError, match="planning day index must be an integer or slice"):
+        _ = result.planning_days[cast(Any, "bad")]
+
+    # 8. PlanningDays out of range indices
+    with pytest.raises(IndexError, match="planning day index out of range"):
+        _ = result.planning_days[100]
+    with pytest.raises(IndexError, match="planning day index out of range"):
+        _ = result.planning_days[-100]
+
+
+def test_calendar_zoned_windows_indexing_and_iteration() -> None:
+    start = datetime(2026, 1, 5, tzinfo=UTC)
+    end = datetime(2026, 1, 12, tzinfo=UTC)
+    result = _run(
+        [
+            AvailabilityWindowDraft(0, time(9), time(11)),
+            AvailabilityWindowDraft(0, time(13), time(15)),
+        ],
+        start,
+        end,
+        timezone_name="America/New_York",
+    )
+    assert len(result.windows) >= 1
+    first = result.windows[0]
+    assert isinstance(first, MinuteWindow)
+    if len(result.windows) > 1:
+        second = result.windows[1]
+        assert isinstance(second, MinuteWindow)
+    last = result.windows[-1]
+    assert isinstance(last, MinuteWindow)
+    with pytest.raises(IndexError, match="calendar window index out of range"):
+        _ = result.windows[999]
+
+
+def test_calendar_utc_boundary_empty_fragments_raises_index_error() -> None:
+    start = datetime(2026, 1, 5, tzinfo=UTC)
+    end = datetime(2026, 1, 12, tzinfo=UTC)
+    always_available = [AvailabilityWindowDraft(day, time(0), time(0)) for day in range(7)]
+    result = _run(
+        always_available,
+        start,
+        end,
+        unavailable=[UnavailablePeriodDraft(start, end)],
+    )
+    assert len(result.windows) == 0
+    with pytest.raises(IndexError, match="calendar window index out of range"):
+        _ = result.windows[0]
+
+
+def test_calendar_cross_midnight_at_date_max() -> None:
+    from zoneinfo import ZoneInfo
+
+    from studyflow.scheduling.calendar import _local_interval
+
+    interval = _local_interval(
+        date.max,
+        time(22),
+        time(2),
+        crosses_midnight=True,
+        zone=ZoneInfo("UTC"),
+    )
+    assert interval is not None
+    assert interval[1] == datetime.max.replace(tzinfo=UTC)
+
+
+def test_calendar_input_validation_edge_cases() -> None:
+    from studyflow.scheduling.calendar import _merge_intervals
+
+    # _merge_intervals with end <= start
+    merged = _merge_intervals([(10, 10), (10, 5), (0, 10), (5, 15)])
+    assert merged == [(0, 15)]
+
+    # crosses_midnight non-boolean
+    class BadWindow:
+        weekday = 0
+        start_time = time(9)
+        end_time = time(10)
+        crosses_midnight = "not-a-bool"
+
+    with pytest.raises(ValueError, match="crosses_midnight must be a boolean"):
+        _run(
+            [cast(Any, BadWindow())],
+            datetime(2026, 1, 5, tzinfo=UTC),
+            datetime(2026, 1, 6, tzinfo=UTC),
+        )
+
+
+def test_calendar_lazy_helpers_cover_empty_and_blocked_boundaries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from studyflow.scheduling.calendar import CalendarWindows, _run_contains, _UtcRun
+
+    assert _run_contains(_UtcRun(10_000, 11_000), 4 * 1_440 + 30)
+
+    epoch_monday = 4 * 1_440
+    planning_start = epoch_monday + 600
+    horizon_end = planning_start + 10_080
+    windows = CalendarWindows(
+        ((0, time(9), time(11), False),),
+        ((epoch_monday + 530, planning_start + 20), (horizon_end + 1, horizon_end + 2)),
+        "UTC",
+        planning_start,
+        horizon_end,
+        date(1970, 1, 5),
+        date(1970, 1, 12),
+    )
+    windows._utc_count()
+
+    continuous = _run(
+        [AvailabilityWindowDraft(day, time(), time()) for day in range(7)],
+        datetime(2026, 1, 5, tzinfo=UTC),
+        datetime(2026, 1, 12, tzinfo=UTC),
+        [
+            UnavailablePeriodDraft(
+                datetime(2026, 1, 5, tzinfo=UTC), datetime(2026, 1, 12, tzinfo=UTC)
+            )
+        ],
+    ).windows
+    with pytest.raises(IndexError, match="calendar window index out of range"):
+        continuous._utc_boundary(first=True)
+    with pytest.raises(IndexError, match="calendar window index out of range"):
+        continuous._utc_boundary(first=False)
+
+    partially_blocked = _run(
+        [AvailabilityWindowDraft(day, time(), time()) for day in range(7)],
+        datetime(2026, 1, 5, tzinfo=UTC),
+        datetime(2026, 1, 12, tzinfo=UTC),
+        [
+            UnavailablePeriodDraft(
+                datetime(2026, 1, 5, tzinfo=UTC),
+                datetime(2026, 1, 5, 1, tzinfo=UTC),
+            )
+        ],
+    ).windows
+    assert partially_blocked._utc_boundary(first=True).start > 0
+    assert partially_blocked._utc_boundary(first=False).end > 0
+
+    adjacent_blocks = CalendarWindows(
+        ((0, time(9), time(10), False),),
+        ((epoch_monday + 540, epoch_monday + 570), (epoch_monday + 570, epoch_monday + 600)),
+        "UTC",
+        epoch_monday,
+        horizon_end,
+        date(1970, 1, 5),
+        date(1970, 1, 12),
+    )
+    assert adjacent_blocks._utc_boundary(first=True).start > epoch_monday
+
+    blocked = CalendarWindows(
+        ((0, time(9), time(10), False),),
+        ((epoch_monday, horizon_end),),
+        "UTC",
+        epoch_monday,
+        horizon_end,
+        date(1970, 1, 5),
+        date(1970, 1, 12),
+    )
+    with pytest.raises(IndexError, match="calendar window index out of range"):
+        blocked._utc_boundary(first=True)
+    with pytest.raises(IndexError, match="calendar window index out of range"):
+        blocked._utc_boundary(first=False)
+
+    result = _run(
+        [AvailabilityWindowDraft(0, time(9), time(10))],
+        datetime(2026, 1, 5, 12, tzinfo=UTC),
+        datetime(2026, 1, 6, tzinfo=UTC),
+        timezone_name="America/New_York",
+    )
+    assert result.windows != object()
+    monkeypatch.setattr(CalendarWindows, "window_count", property(lambda _self: 1))
+    monkeypatch.setattr(CalendarWindows, "__iter__", lambda _self: iter(()))
+    with pytest.raises(IndexError, match="calendar window index out of range"):
+        result.windows[0]
+
+
+def test_calendar_zoned_expansion_merges_and_skips_clipped_intervals() -> None:
+    start = datetime(2026, 1, 5, 15, tzinfo=UTC)
+    end = datetime(2026, 1, 6, 12, tzinfo=UTC)
+    clipped = _run(
+        [AvailabilityWindowDraft(0, time(9), time(10))],
+        start,
+        end,
+        timezone_name="America/New_York",
+    )
+    assert tuple(clipped.windows) == ()
+
+    merged = _run(
+        [
+            AvailabilityWindowDraft(6, time(23), time(2)),
+            AvailabilityWindowDraft(0, time(1), time(3)),
+        ],
+        datetime(2026, 1, 4, tzinfo=UTC),
+        datetime(2026, 1, 6, tzinfo=UTC),
+        timezone_name="America/New_York",
+    )
+    assert len(merged.windows) == 1
+
+
+def test_calendar_local_resolution_reports_unresolvable_wall_times(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from zoneinfo import ZoneInfo
+
+    from studyflow.scheduling.calendar import _local_interval, _resolve_local
+
+    class NoOffset(tzinfo):
+        def utcoffset(self, _dt: datetime | None) -> timedelta | None:
+            return None
+
+        def dst(self, _dt: datetime | None) -> timedelta | None:
+            return None
+
+        def tzname(self, _dt: datetime | None) -> str | None:
+            return None
+
+    monkeypatch.setattr(
+        "studyflow.scheduling.calendar._valid_local_candidates",
+        lambda _value, _zone: (),
+    )
+    value = datetime(2026, 1, 1, 2, 30)
+    with pytest.raises(ValueError, match="Could not resolve local wall time"):
+        _resolve_local(value, NoOffset())
+    with pytest.raises(ValueError, match="Could not resolve local wall time"):
+        _resolve_local(value, ZoneInfo("UTC"))
+    with pytest.raises(ValueError, match="after a DST gap"):
+        _resolve_local(datetime(2026, 3, 8, 2, 30), ZoneInfo("America/New_York"))
+
+    monkeypatch.undo()
+    with pytest.raises(ValueError, match="positive duration"):
+        _local_interval(date(2026, 1, 1), time(10), time(9), False, ZoneInfo("UTC"))
+
+
+def test_calendar_ignores_unavailable_periods_after_the_horizon() -> None:
+    start = datetime(2026, 1, 5, tzinfo=UTC)
+    end = datetime(2026, 1, 6, tzinfo=UTC)
+    result = _run(
+        [],
+        start,
+        end,
+        [UnavailablePeriodDraft(end + timedelta(hours=1), end + timedelta(hours=2))],
+    )
+    assert tuple(result.windows) == ()
+
+
+def test_calendar_sequences_compare_against_non_sequences() -> None:
+    result = _run(
+        [],
+        datetime(2026, 1, 5, tzinfo=UTC),
+        datetime(2026, 1, 6, tzinfo=UTC),
+    )
+    assert result.windows != object()
+    assert result.planning_days != object()
+
+    # unavailable period ends_at <= starts_at
+    with pytest.raises(ValueError, match="Unavailable period ends_at must be after starts_at"):
+        _run(
+            [],
+            datetime(2026, 1, 5, tzinfo=UTC),
+            datetime(2026, 1, 6, tzinfo=UTC),
+            unavailable=[
+                UnavailablePeriodDraft(
+                    datetime(2026, 1, 5, 12, tzinfo=UTC),
+                    datetime(2026, 1, 5, 12, tzinfo=UTC),
+                )
+            ],
+        )

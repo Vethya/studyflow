@@ -319,6 +319,13 @@ async def test_timezone_change_requires_confirmation_and_unknown_period_rolls_ba
         )
         assert changed is not None and changed.planning_preferences is not None
         assert changed.planning_preferences.availability_confirmation_required
+
+        # Test updating planning preferences without changing timezone (line 277->279)
+        same_tz = await service.apply(
+            account_id, StudyTimeChanges(planning_preferences=("Europe/London", 60, 15))
+        )
+        assert same_tz is not None and same_tz.planning_preferences is not None
+        assert same_tz.planning_preferences.preferred_session_length_minutes == 60
         with pytest.raises(StudyTimePeriodNotFoundError):
             await service.apply(
                 account_id,

@@ -186,3 +186,42 @@ async def test_completion_handles_password_safety_failures(
             },
         )
     assert response.status_code == status_code
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("payload", "expected_detail"),
+    [
+        (
+            {
+                "signup_token": "short-lived-verified-signup-token",
+                "name": "   ",
+                "password": "correct horse battery staple",
+                "timezone": "UTC",
+            },
+            "Name is required",
+        ),
+        (
+            {
+                "signup_token": "short-lived-verified-signup-token",
+                "name": "Student",
+                "password": "correct horse battery staple",
+                "timezone": "Invalid/Timezone",
+            },
+            "Timezone must be a valid IANA timezone",
+        ),
+    ],
+)
+async def test_completion_validates_name_and_timezone(
+    payload: dict[str, str], expected_detail: str
+) -> None:
+    registration = RegistrationStub()
+    async with AsyncClient(
+        transport=ASGITransport(app=app(registration)), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/v1/auth/complete-registration",
+            json=payload,
+        )
+    assert response.status_code == 422
+    assert expected_detail in response.text

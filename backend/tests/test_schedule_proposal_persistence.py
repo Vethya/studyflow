@@ -361,3 +361,46 @@ async def test_accept_enforces_break_after_latest_preserved_session() -> None:
         assert accepted is not None
     finally:
         await database.stop()
+
+
+@pytest.mark.anyio
+async def test_schedule_proposal_repository_edge_cases() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        owner_id, _, task_id, _ = await _seed(database)
+        repository = SqlAlchemyScheduleProposalRepository(database)
+        now = datetime(2026, 8, 25, 10, tzinfo=UTC)
+        draft = _proposal(task_id, now + timedelta(hours=1), 30)
+
+        # 1. replace with nonexistent account -> None (line 46)
+        assert await repository.replace(uuid4(), draft) is None
+
+        # 2. reject with nonexistent account -> False (line 228)
+        assert await repository.reject(uuid4(), uuid4()) is False
+
+        # 3. accept with nonexistent account -> None (line 140)
+        assert await repository.accept(uuid4(), uuid4(), now, 0) is None
+
+        # 4. accept with nonexistent proposal -> None (line 147)
+        assert await repository.accept(owner_id, uuid4(), now, 0) is None
+
+        # 5. accept with NO preserved sessions -> covers line 183->192 when preserved is empty
+        proposal = await repository.replace(owner_id, draft)
+        assert proposal is not None
+        accepted = await repository.accept(owner_id, proposal.id, now, 0)
+        assert accepted is not None and len(accepted) == 1
+
+        # 6. replace with empty proposal (0 sessions, 0 allocations)
+        # -> covers if task_ids branch (line 51->63)
+        empty_proposal = NewScheduleProposal(
+            ProposalKind.GENERATION,
+            None,
+            ProposalStatus.FEASIBLE,
+            FINGERPRINT,
+            (),
+            (),
+        )
+        assert await repository.replace(owner_id, empty_proposal) is not None
+    finally:
+        await database.stop()

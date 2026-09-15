@@ -356,3 +356,50 @@ def test_create_adaptive_problem_resplits_with_preferred_length() -> None:
         "t1-session-1",
         "t1-session-2",
     ]
+
+
+def test_count_violations_edge_cases() -> None:
+    from studyflow.evaluation.comparison import check_hard_constraint_violations
+    from studyflow.scheduling.contracts import (
+        FeasibilityProblem,
+        MinuteWindow,
+        ScheduledSession,
+        SessionDemand,
+        TaskPriority,
+    )
+
+    demand = SessionDemand(
+        session_id="s1",
+        task_id="t1",
+        duration_minutes=60,
+        deadline_minute=100,
+        allowed_windows=(MinuteWindow(0, 100),),
+        priority=TaskPriority.MEDIUM,
+    )
+    problem = FeasibilityProblem(
+        sessions=(demand,),
+        planning_start_minute=0,
+        minimum_break_minutes=10,
+    )
+
+    # 1. Unknown session_id not in demands (lines 178-179)
+    assert (
+        check_hard_constraint_violations([ScheduledSession("unknown_s", "t1", 0, 60)], problem) == 1
+    )
+
+    # 2. Session finishes after deadline (line 185)
+    assert check_hard_constraint_violations([ScheduledSession("s1", "t1", 50, 110)], problem) == 2
+
+    # 3. Session not contained in allowed windows (line 192)
+    demand2 = SessionDemand(
+        session_id="s2",
+        task_id="t1",
+        duration_minutes=60,
+        deadline_minute=200,
+        allowed_windows=(MinuteWindow(0, 50),),
+        priority=TaskPriority.MEDIUM,
+    )
+    problem2 = FeasibilityProblem(
+        sessions=(demand2,), planning_start_minute=0, minimum_break_minutes=10
+    )
+    assert check_hard_constraint_violations([ScheduledSession("s2", "t1", 10, 70)], problem2) == 1

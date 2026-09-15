@@ -1,21 +1,34 @@
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.rate_limits import (
+    AccountPasswordChangeRateLimitExceeded,
+    DatabaseAccountPasswordChangeRateLimiter,
     DatabaseEmailVerificationRateLimiter,
     DatabaseLoginRateLimiter,
     DatabaseOIDCLinkRateLimiter,
     DatabaseOIDCStartRateLimiter,
+    DatabasePasswordResetAttemptRateLimiter,
+    DatabasePasswordResetRequestRateLimiter,
     DatabaseRegistrationCompletionRateLimiter,
     DatabaseRegistrationRateLimiter,
+    DatabaseVerificationResendRateLimiter,
     EmailVerificationRateLimitExceeded,
     LoginRateLimitExceeded,
     OIDCLinkRateLimitExceeded,
     OIDCStartRateLimitExceeded,
+    PasswordResetAttemptRateLimitExceeded,
+    PasswordResetRequestRateLimitExceeded,
     RegistrationCompletionRateLimitExceeded,
     RegistrationRateLimitExceeded,
+    VerificationResendRateLimitExceeded,
 )
 from studyflow.database import Base, Database
 from studyflow.database.models import AuthenticationRateLimit
@@ -259,3 +272,296 @@ async def test_newer_login_reservations_keep_their_own_expiry() -> None:
             await limiter.check("203.0.113.99", "student@example.com")
     finally:
         await database.stop()
+
+
+@pytest.mark.anyio
+async def test_verification_resend_rate_limit_bounds_ip_and_email() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        limiter = DatabaseVerificationResendRateLimiter(database)
+        for _ in range(5):
+            await limiter.check("203.0.113.10", "student@example.com")
+        with pytest.raises(VerificationResendRateLimitExceeded):
+            await limiter.check("203.0.113.10", "student@example.com")
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_password_reset_request_rate_limit_bounds_ip_and_email() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        limiter = DatabasePasswordResetRequestRateLimiter(database)
+        for _ in range(5):
+            await limiter.check("203.0.113.10", "student@example.com")
+        with pytest.raises(PasswordResetRequestRateLimitExceeded):
+            await limiter.check("203.0.113.10", "student@example.com")
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_password_reset_attempt_rate_limit_bounds_ip_and_token() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        limiter = DatabasePasswordResetAttemptRateLimiter(database)
+        for _ in range(5):
+            await limiter.check("203.0.113.10", "reset-token")
+        with pytest.raises(PasswordResetAttemptRateLimitExceeded):
+            await limiter.check("203.0.113.10", "reset-token")
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_account_password_change_rate_limit_bounds_ip_and_account() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        limiter = DatabaseAccountPasswordChangeRateLimiter(database)
+        for _ in range(5):
+            await limiter.check("203.0.113.10", "account-123")
+        with pytest.raises(AccountPasswordChangeRateLimitExceeded):
+            await limiter.check("203.0.113.10", "account-123")
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_registration_rate_limiter_integrity_error_and_window_reset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import asynccontextmanager
+
+    from sqlalchemy.exc import IntegrityError
+
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    current_time = datetime(2026, 7, 28, 12, tzinfo=UTC)
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        limiter = DatabaseRegistrationRateLimiter(database, clock=lambda: current_time)
+        await limiter.check("203.0.113.10", "student@example.com")
+
+        # Window expiration reset
+        current_time += timedelta(seconds=1000)
+        await limiter.check("203.0.113.10", "student@example.com")
+
+        # IntegrityError retry exhaustion
+        orig_tx = database.transaction
+
+        def raise_integrity(*args: object, **kwargs: object) -> None:
+            raise IntegrityError("statement", {}, Exception("orig"))
+
+        @asynccontextmanager
+        async def failing_transaction() -> AsyncIterator[AsyncSession]:
+            async with orig_tx() as session:
+                monkeypatch.setattr(session, "flush", raise_integrity)
+                yield session
+
+        monkeypatch.setattr(database, "transaction", failing_transaction)
+        with pytest.raises(IntegrityError):
+            await limiter.check("203.0.113.10", "student@example.com")
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_login_rate_limiter_edge_cases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import asynccontextmanager
+
+    from sqlalchemy import delete
+    from sqlalchemy.exc import IntegrityError
+
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    current_time = datetime(2026, 7, 28, 12, tzinfo=UTC)
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        limiter = DatabaseLoginRateLimiter(database, clock=lambda: current_time)
+
+        # 1. Release
+        reservation = await limiter.check("203.0.113.10", "student@example.com")
+        await limiter.release("student@example.com", reservation)
+
+        # 2. Record failure and reset failures
+        res2 = await limiter.check("203.0.113.10", "student@example.com")
+        await limiter.record_failure("student@example.com", res2)
+        current_time += timedelta(seconds=1000)
+        res3 = await limiter.check("203.0.113.10", "student@example.com")
+        await limiter.record_failure("student@example.com", res3)
+        await limiter.reset_failures("student@example.com", res3)
+
+        # 3. Expired failures during reservation and finish failure slot
+        key_hash = limiter._hash_key("email:student@example.com")
+        async with database.transaction() as session:
+            session.add(
+                AuthenticationRateLimit(
+                    action="login_failure",
+                    key_hash=key_hash,
+                    window_started_at=current_time - timedelta(seconds=1000),
+                    attempts=1,
+                )
+            )
+        # Hits lines 285-286 (delete expired failures in _reserve_failure_slot)
+        res_expired = await limiter._reserve_failure_slot("student@example.com")
+        await limiter.release("student@example.com", res_expired)
+
+        # Re-add expired failure and hit lines 367-368
+        # (delete and flush expired failure in _finish_failure_slot)
+        async with database.transaction() as session:
+            session.add(
+                AuthenticationRateLimit(
+                    action="login_failure",
+                    key_hash=key_hash,
+                    window_started_at=current_time - timedelta(seconds=1000),
+                    attempts=1,
+                )
+            )
+        await limiter._finish_failure_slot(
+            "student@example.com", "fake_res", failed=True, reset_failures=False
+        )
+
+        # 4. Finish failure slot when guard is missing
+        async with database.transaction() as session:
+            await session.execute(
+                delete(AuthenticationRateLimit).where(
+                    AuthenticationRateLimit.action == "login_guard"
+                )
+            )
+        await limiter._finish_failure_slot(
+            "student@example.com", "fake_res", failed=False, reset_failures=False
+        )
+
+        # 5. Reserve failure slot IntegrityError exhaustion (lines 311-312)
+        orig_tx = database.transaction
+
+        def raise_integrity(*args: object, **kwargs: object) -> None:
+            raise IntegrityError("statement", {}, Exception("orig"))
+
+        @asynccontextmanager
+        async def failing_tx() -> AsyncIterator[AsyncSession]:
+            async with orig_tx() as session:
+                monkeypatch.setattr(session, "flush", raise_integrity)
+                yield session
+
+        monkeypatch.setattr(database, "transaction", failing_tx)
+        with pytest.raises(IntegrityError):
+            await limiter._reserve_failure_slot("student@example.com")
+
+        # 6. Finish failure slot IntegrityError exhaustion
+        @asynccontextmanager
+        async def failing_tx_exec() -> AsyncIterator[AsyncSession]:
+            async with orig_tx() as session:
+                monkeypatch.setattr(session, "execute", raise_integrity)
+                yield session
+
+        monkeypatch.setattr(database, "transaction", failing_tx_exec)
+        with pytest.raises(IntegrityError):
+            await limiter._finish_failure_slot(
+                "student@example.com", "fake_res", failed=True, reset_failures=False
+            )
+
+        monkeypatch.undo()
+    finally:
+        await database.stop()
+
+
+def test_rate_limiter_is_expired_tzinfo_handling() -> None:
+    limiter = DatabaseLoginRateLimiter(None)  # type: ignore[arg-type]
+    now = datetime(2026, 7, 28, 12, tzinfo=UTC)
+    aware_row = AuthenticationRateLimit(
+        action="login_failure",
+        key_hash="key",
+        window_started_at=now - timedelta(seconds=1000),
+        attempts=1,
+    )
+    assert limiter._is_expired(aware_row, now) is True
+
+    naive_row = AuthenticationRateLimit(
+        action="login_failure",
+        key_hash="key",
+        window_started_at=datetime(2026, 7, 28, 11, 0, 0),
+        attempts=1,
+    )
+    assert limiter._is_expired(naive_row, now) is True
+
+
+@pytest.mark.anyio
+async def test_rate_limiter_handles_aware_expiry_and_exhausted_retry_loops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import studyflow.auth.rate_limits as rate_limits_module
+
+    now = datetime(2026, 7, 28, 12, tzinfo=UTC)
+    limiter_key = DatabaseRegistrationRateLimiter
+    row = AuthenticationRateLimit(
+        action="registration",
+        key_hash=limiter_key._hash_key("ip:203.0.113.10"),
+        window_started_at=now - timedelta(seconds=1000),
+        attempts=5,
+    )
+    session = MagicMock()
+    session.execute = AsyncMock()
+    session.scalars = AsyncMock(return_value=[row])
+    session.flush = AsyncMock()
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=session)
+    transaction.__aexit__ = AsyncMock(return_value=False)
+    database = MagicMock()
+    database.transaction.return_value = transaction
+
+    await limiter_key(cast(Any, database), clock=lambda: now).check(
+        "203.0.113.10", "student@example.com"
+    )
+
+    assert row.window_started_at == now
+    assert row.attempts == 1
+
+    class FailingTransaction:
+        async def __aenter__(self) -> Any:
+            raise IntegrityError("statement", {}, Exception("conflict"))
+
+        async def __aexit__(self, *args: object) -> bool:
+            return False
+
+    failing_database = MagicMock()
+    failing_database.transaction.return_value = FailingTransaction()
+    monkeypatch.setattr(rate_limits_module, "range", lambda _length: (0, 1), raising=False)
+    login_limiter = DatabaseLoginRateLimiter(cast(Any, failing_database))
+
+    await DatabaseRegistrationRateLimiter(cast(Any, failing_database)).check(
+        "203.0.113.10", "student@example.com"
+    )
+    with pytest.raises(RuntimeError, match="retry exhausted"):
+        await login_limiter._reserve_failure_slot("student@example.com")
+    await login_limiter._finish_failure_slot(
+        "student@example.com", "reservation", failed=True, reset_failures=False
+    )

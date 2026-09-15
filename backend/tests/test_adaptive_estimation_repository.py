@@ -478,5 +478,43 @@ async def test_acknowledgment_replaces_a_category_specific_factor_for_its_accoun
 
         assert await repository.acknowledgment(owner_id, TaskCategory.READING) == Decimal("1.5")
         assert await repository.acknowledgment(other_id, TaskCategory.READING) == Decimal("2.5")
+
+        # remove_acknowledgment (lines 271-278)
+        assert await repository.remove_acknowledgment(owner_id, TaskCategory.READING) is True
+        assert await repository.remove_acknowledgment(owner_id, TaskCategory.READING) is False
+
+        # clear_acknowledgments (lines 281-282)
+        await repository.clear_acknowledgments(other_id)
+        assert await repository.acknowledgment(other_id, TaskCategory.READING) is None
+
+        # Bound repository edge cases (lines 314-340, 481-483, 486)
+        async with database.transaction() as session:
+            bound = repository.with_session(session)
+            assert await bound.history(owner_id) == []
+            assert await bound.remove_acknowledgment(owner_id, TaskCategory.READING) is False
+            assert (
+                await bound.acknowledge(owner_id, TaskCategory.READING, Decimal("2.0"), NOW) is True
+            )
+            assert await bound.remove_acknowledgment(owner_id, TaskCategory.READING) is True
+            await bound.clear_acknowledgments(owner_id)
+
+        # replace_prediction when existing is not None and when existing is None (lines 210-213)
+        task = _task(owner_id)
+        task_fresh = _task(owner_id)
+        async with database.transaction() as session:
+            session.add_all([task, task_fresh])
+        prediction1 = _prediction(minutes=125)
+        prediction2 = _prediction(minutes=150)
+        assert (
+            await repository.replace_prediction(owner_id, task_fresh.id, prediction1, exposed=True)
+            is True
+        )
+        assert (
+            await repository.save_prediction(owner_id, task.id, prediction1, exposed=True) is True
+        )
+        assert (
+            await repository.replace_prediction(owner_id, task.id, prediction2, exposed=True)
+            is True
+        )
     finally:
         await database.stop()
