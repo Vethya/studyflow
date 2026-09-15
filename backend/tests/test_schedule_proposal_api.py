@@ -4,7 +4,7 @@ from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
 
 from studyflow.app import create_app
@@ -579,3 +579,27 @@ async def test_simulate_requires_scenario() -> None:
 
     assert response.status_code == 422
     assert response.json()["detail"] == "A scenario is required for simulation"
+
+
+@pytest.mark.anyio
+async def test_simulate_defensive_guard_rejects_a_none_scenario(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from studyflow.api.schedule_proposals import simulate_schedule
+
+    monkeypatch.setattr(
+        "studyflow.api.schedule_proposals._scenario_from_request",
+        lambda _payload, *, required=False: None,
+    )
+
+    with pytest.raises(HTTPException) as error:
+        await simulate_schedule(
+            SessionPrincipal(ACCOUNT_ID, "student@example.com", "Student"),
+            cast(ScheduleGeneration, GenerationStub()),
+            cast(AcademicTasks, TasksStub([])),
+            cast(UnavailablePeriods, UnavailablePeriodsStub([])),
+            None,
+        )
+
+    assert error.value.status_code == 422
+    assert error.value.detail == "A scenario is required for simulation"

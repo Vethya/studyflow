@@ -818,6 +818,43 @@ async def test_study_session_api_maps_none_recovery_proposal_to_503() -> None:
 
 
 @pytest.mark.anyio
+async def test_study_session_api_returns_404_when_details_disappear_after_recording() -> None:
+    completed = StudySessionOutcomeRecord(
+        SESSION_ID,
+        SessionOutcomeKind.COMPLETED,
+        55,
+        0,
+        NOW,
+        None,
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=_api(StudySessionsStub(None, completed))),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        completed_response = await client.post(
+            f"/api/v1/study-sessions/{SESSION_ID}/outcomes",
+            json={"outcome": "completed", "actual_minutes": 55},
+            headers={"X-CSRF-Token": "csrf"},
+        )
+
+    missed = StudySessionOutcomeRecord(SESSION_ID, SessionOutcomeKind.MISSED, 0, 60, NOW, None)
+    async with AsyncClient(
+        transport=ASGITransport(app=_api(StudySessionsStub(None, missed))),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        missed_response = await client.post(
+            f"/api/v1/study-sessions/{SESSION_ID}/outcomes",
+            json={"outcome": "missed"},
+            headers={"X-CSRF-Token": "csrf"},
+        )
+
+    assert completed_response.status_code == 404
+    assert missed_response.status_code == 404
+
+
+@pytest.mark.anyio
 async def test_study_session_api_rejects_duplicate_outcome_on_already_completed_session() -> None:
     session = StudySessionRecord(
         SESSION_ID,

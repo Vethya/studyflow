@@ -1,8 +1,11 @@
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.rate_limits import (
@@ -509,3 +512,56 @@ def test_rate_limiter_is_expired_tzinfo_handling() -> None:
         attempts=1,
     )
     assert limiter._is_expired(naive_row, now) is True
+
+
+@pytest.mark.anyio
+async def test_rate_limiter_handles_aware_expiry_and_exhausted_retry_loops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import studyflow.auth.rate_limits as rate_limits_module
+
+    now = datetime(2026, 7, 28, 12, tzinfo=UTC)
+    limiter_key = DatabaseRegistrationRateLimiter
+    row = AuthenticationRateLimit(
+        action="registration",
+        key_hash=limiter_key._hash_key("ip:203.0.113.10"),
+        window_started_at=now - timedelta(seconds=1000),
+        attempts=5,
+    )
+    session = MagicMock()
+    session.execute = AsyncMock()
+    session.scalars = AsyncMock(return_value=[row])
+    session.flush = AsyncMock()
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=session)
+    transaction.__aexit__ = AsyncMock(return_value=False)
+    database = MagicMock()
+    database.transaction.return_value = transaction
+
+    await limiter_key(cast(Any, database), clock=lambda: now).check(
+        "203.0.113.10", "student@example.com"
+    )
+
+    assert row.window_started_at == now
+    assert row.attempts == 1
+
+    class FailingTransaction:
+        async def __aenter__(self) -> Any:
+            raise IntegrityError("statement", {}, Exception("conflict"))
+
+        async def __aexit__(self, *args: object) -> bool:
+            return False
+
+    failing_database = MagicMock()
+    failing_database.transaction.return_value = FailingTransaction()
+    monkeypatch.setattr(rate_limits_module, "range", lambda _length: (0, 1), raising=False)
+    login_limiter = DatabaseLoginRateLimiter(cast(Any, failing_database))
+
+    await DatabaseRegistrationRateLimiter(cast(Any, failing_database)).check(
+        "203.0.113.10", "student@example.com"
+    )
+    with pytest.raises(RuntimeError, match="retry exhausted"):
+        await login_limiter._reserve_failure_slot("student@example.com")
+    await login_limiter._finish_failure_slot(
+        "student@example.com", "reservation", failed=True, reset_failures=False
+    )

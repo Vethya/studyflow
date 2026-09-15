@@ -3,8 +3,10 @@ from uuid import UUID
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
 
 from studyflow.accounts.profile import AccountProfile
+from studyflow.api.account import AccountProfileUpdate
 from studyflow.app import create_app
 from studyflow.auth.session_authentication import SessionPrincipal
 
@@ -35,6 +37,11 @@ class AccountProfileStub:
     async def update_name(self, account_id: UUID, name: str) -> AccountProfile | None:
         self.updates.append((account_id, name))
         return AccountProfile(account_id, self.profile.email, name)
+
+
+def test_account_profile_update_rejects_blank_names() -> None:
+    with pytest.raises(ValidationError, match="Name is required"):
+        AccountProfileUpdate(name="   ")
 
 
 @pytest.mark.anyio

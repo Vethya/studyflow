@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from itertools import pairwise
+from time import monotonic
 from typing import Any, cast
 
 import pytest
+from ortools.graph.python import min_cost_flow  # type: ignore[import-untyped]
 from ortools.sat.python import cp_model
 
 from studyflow.scheduling import (
@@ -17,6 +19,7 @@ from studyflow.scheduling import (
     classify_overload_status,
     solve_with_overload,
 )
+from studyflow.scheduling.overload import _DayStartOption
 
 DEFAULT_PLANNING_DAYS = (PlanningDay(0, -1_000_000, 1_000_000),)
 
@@ -769,7 +772,9 @@ def test_overload_placement_exceptions_and_budget_exhaustion(
     assert "exhausted its shared solve budget" in str(result4.detail)
 
 
-def test_overload_break_credit_and_zero_break_capacity_branches() -> None:
+def test_overload_break_credit_and_zero_break_capacity_branches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from studyflow.scheduling.overload import (
         _credit_options,
         _has_zero_break_capacity,
@@ -785,6 +790,14 @@ def test_overload_break_credit_and_zero_break_capacity_branches() -> None:
         minimum_break_minutes=5,
     )
     assert options == ()
+
+    assert _credit_options(
+        duration_minutes=1,
+        candidate_intervals=[[0, 10]],
+        scheduling_windows=((0, 5),),
+        availability_windows=((0, 10),),
+        minimum_break_minutes=5,
+    ) == ()
 
     # 2. _has_zero_break_capacity when durations <= 1 (line 279)
     single_session_task = _TaskInput(
@@ -812,3 +825,713 @@ def test_overload_break_credit_and_zero_break_capacity_branches() -> None:
         calendar_capacity_minutes=100,
     )
     assert _has_zero_break_capacity(multi_session_task, ((0, 100),), 10) is False
+
+    no_final_fit_task = _TaskInput(
+        task_id="t3",
+        deadline_minute=30,
+        priority=TaskPriority.MEDIUM,
+        allowed_windows=(MinuteWindow(0, 10), MinuteWindow(20, 30)),
+        sessions=(
+            demand("s1", "t3", 2, (0, 10), (20, 30), deadline=30),
+            demand("s2", "t3", 2, (0, 10), (20, 30), deadline=30),
+        ),
+        required_minutes=4,
+        calendar_capacity_minutes=20,
+    )
+    import studyflow.scheduling.overload as overload_module
+
+    monkeypatch.setattr(overload_module, "candidate_start_intervals", lambda *_args: [[0, 1]])
+    assert _has_zero_break_capacity(no_final_fit_task, ((0, 10), (20, 30)), 5) is False
+
+
+def test_overload_policy_helper_fallbacks_and_uniform_guards(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from studyflow.scheduling import overload as overload_module
+
+    task = overload_module._TaskDemand(
+        "task",
+        100,
+        TaskPriority.MEDIUM,
+        (MinuteWindow(0, 100),),
+        1,
+        0,
+        100,
+    )
+    model = cp_model.CpModel()
+    variable = model.new_int_var(0, 1, "objective")
+    objective = overload_module._AllocationObjective(task, variable, cp_model.INT_MAX)
+    assert overload_module._lexicographic_weights((cp_model.INT_MAX,), 0) is None
+    monkeypatch.setattr(overload_module, "_lexicographic_weights", lambda *_args: None)
+    assert overload_module._next_allocation_batch([objective], 0) == (1, variable)
+
+    solver = cast(Any, type("ValueSolver", (), {"value": lambda _self, _value: 1})())
+    overload_module._replace_solution_hints(model, solver, [variable, variable])
+
+    huge_problem = overload_problem((demand("s", "task", 1, (0, 2_001), deadline=2_001),), 0)
+    assert overload_module._uniform_allocation(huge_problem, (task,)) is None
+
+    early = demand("early", "early", 1, (0, 2), deadline=2)
+    latest = demand("latest", "latest", 1, (0, 2), deadline=10)
+    discontinuous_tasks = (
+        overload_module._TaskDemand(
+            "early", 2, TaskPriority.MEDIUM, early.allowed_windows, 1, 0, 2
+        ),
+        overload_module._TaskDemand(
+            "latest", 10, TaskPriority.MEDIUM, latest.allowed_windows, 1, 0, 10
+        ),
+    )
+
+    def discontinuous_candidates(session: SessionDemand, _planning_start: int) -> list[list[int]]:
+        return [[0, 2]] if session.session_id == "latest" else [[0, 0], [2, 2]]
+
+    monkeypatch.setattr(overload_module, "candidate_start_intervals", discontinuous_candidates)
+    assert overload_module._uniform_allocation(
+        overload_problem((early, latest), 0), discontinuous_tasks
+    ) is None
+
+    import builtins
+
+    first = demand("first", "first", 1, (0, 2), deadline=1)
+    second = demand("second", "second", 1, (0, 2), deadline=2)
+    duplicate_problem = overload_problem((first, second), 0)
+    duplicate_tasks = (
+        overload_module._TaskDemand(
+            "first", 1, TaskPriority.MEDIUM, first.allowed_windows, 1, 0, 2
+        ),
+        overload_module._TaskDemand(
+            "second", 2, TaskPriority.MEDIUM, second.allowed_windows, 1, 0, 2
+        ),
+    )
+    original_sorted = builtins.sorted
+
+    def reverse_selected_jobs(iterable: object, *args: object, **kwargs: object) -> list[object]:
+        result = original_sorted(iterable, *args, **kwargs)  # type: ignore[call-overload]
+        if result and all(
+            isinstance(item, tuple)
+            and len(item) == 3
+            and isinstance(item[2], SessionDemand)
+            for item in result
+        ):
+            result.reverse()
+        return cast(list[object], result)
+
+    def duplicate_candidates(session: SessionDemand, _planning_start: int) -> list[list[int]]:
+        return [[0, 0]] if session.session_id == "first" else [[0, 2]]
+
+    monkeypatch.setattr(overload_module, "candidate_start_intervals", duplicate_candidates)
+    monkeypatch.setattr(overload_module, "sorted", reverse_selected_jobs, raising=False)
+    assert overload_module._uniform_allocation(duplicate_problem, duplicate_tasks) is None
+
+
+def test_overload_break_capacity_preparation_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from studyflow.scheduling import overload as overload_module
+
+    sessions = (
+        demand("a", "task", 2, (0, 4), (10, 14), deadline=14),
+        demand("b", "task", 2, (0, 4), (10, 14), deadline=14),
+    )
+    task = overload_module._TaskInput(
+        "task",
+        14,
+        TaskPriority.MEDIUM,
+        sessions[0].allowed_windows,
+        sessions,
+        4,
+        8,
+    )
+    problem = overload_problem(sessions, 0, minimum_break_minutes=5)
+
+    monkeypatch.setattr(overload_module, "_has_zero_break_capacity", lambda *_args: False)
+    monkeypatch.setattr(overload_module, "_credit_options", lambda *_args: ())
+    assert overload_module._minimum_break_capacity(task, problem, monotonic() + 10_000.0) == 5
+
+    def empty_candidates(session: SessionDemand, _start: int) -> list[list[int]]:
+        return [] if session.session_id == "b" else [[0, 2]]
+
+    monkeypatch.setattr(overload_module, "candidate_start_intervals", empty_candidates)
+    assert overload_module._minimum_break_capacity(task, problem, monotonic() + 10_000.0) == 5
+
+    monkeypatch.setattr(overload_module, "candidate_start_intervals", lambda *_args: [[0, 2]])
+    monkeypatch.setattr(
+        cp_model.CpModel,
+        "validate",
+        lambda _self: "invalid break model",
+    )
+    with pytest.raises(overload_module._PolicyPreparationError, match="invalid break model"):
+        overload_module._minimum_break_capacity(task, problem, monotonic() + 10_000.0)
+
+    monkeypatch.undo()
+    monkeypatch.setattr(overload_module, "_has_zero_break_capacity", lambda *_args: False)
+    monkeypatch.setattr(overload_module, "_credit_options", lambda *_args: ())
+    monkeypatch.setattr(overload_module, "monotonic", lambda: 20.0)
+    with pytest.raises(overload_module._PolicyPreparationError, match="shared solve budget"):
+        overload_module._minimum_break_capacity(task, problem, 10.0)
+
+    class FailingSolver:
+        def solve(self, _model: object) -> int:
+            raise RuntimeError("break solver failed")
+
+    monkeypatch.undo()
+    monkeypatch.setattr(overload_module, "_has_zero_break_capacity", lambda *_args: False)
+    monkeypatch.setattr(overload_module, "_credit_options", lambda *_args: ())
+    monkeypatch.setattr(overload_module, "configured_solver", lambda _seconds: FailingSolver())
+    with pytest.raises(overload_module._PolicyPreparationError, match="break solver failed"):
+        overload_module._minimum_break_capacity(task, problem, monotonic() + 10_000.0)
+
+    class NonOptimalSolver:
+        def solve(self, _model: object) -> int:
+            return int(cp_model.FEASIBLE)
+
+        def status_name(self, _status: int) -> str:
+            return "FEASIBLE"
+
+    monkeypatch.setattr(overload_module, "configured_solver", lambda _seconds: NonOptimalSolver())
+    with pytest.raises(overload_module._PolicyPreparationError, match="not proven"):
+        overload_module._minimum_break_capacity(task, problem, monotonic() + 10_000.0)
+
+
+def test_overload_flow_and_witness_placement_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from studyflow.scheduling import overload as overload_module
+
+    session = demand("s", "task", 1, (0, 10), deadline=10)
+    problem = overload_problem((session,), 0)
+    allocation = overload_module._UniformAllocation({"task": 1}, {}, (), {"task": 0})
+    assert overload_module._uniform_flow_policy_witness(problem, allocation) is None
+    witness_day_options: dict[str, tuple[_DayStartOption, ...]] = {
+        "s": (_DayStartOption(0, 0, 10),)
+    }
+    assert not overload_module._uniform_witness_is_policy_optimal(
+        problem,
+        overload_module._UniformAllocation({"task": 1}, {}, (0,), {"task": 1}),
+        {},
+        witness_day_options,
+    )
+
+    class InfeasibleFlow:
+        OPTIMAL = 1
+
+        def add_arc_with_capacity_and_unit_cost(self, *_args: object) -> int:
+            return 0
+
+        def set_node_supply(self, *_args: object) -> None:
+            return None
+
+        def solve(self) -> int:
+            return 0
+
+    monkeypatch.setattr(min_cost_flow, "SimpleMinCostFlow", InfeasibleFlow)
+    assert overload_module._uniform_flow_policy_witness(
+        problem,
+        overload_module._UniformAllocation({"task": 1}, {}, (0,), {"task": 1}),
+    ) is None
+
+    sessions = (
+        demand("a", "task", 2, (0, 8), deadline=10),
+        demand("b", "task", 2, (0, 8), deadline=10),
+    )
+    placement_problem = overload_problem(sessions, 0)
+    placement_tasks = (overload_module._TaskDemand(
+        "task", 10, TaskPriority.MEDIUM, sessions[0].allowed_windows, 4, 0, 10
+    ),)
+    candidates = {"a": [[0, 8]], "b": [[0, 8]]}
+    day_options: dict[str, tuple[_DayStartOption, ...]] = {
+        "a": (_DayStartOption(0, 0, 8),),
+        "b": (_DayStartOption(0, 0, 8),),
+    }
+    witness = {"a": 0, "b": 1}
+
+    monkeypatch.setattr(cp_model.CpModel, "validate", lambda _self: "bad placement")
+    invalid = overload_module._solve_witness_day_placement(
+        placement_problem,
+        placement_tasks,
+        KernelStatus.OVERLOAD,
+        set(witness),
+        candidates,
+        day_options,
+        witness,
+        monotonic() + 10_000.0,
+    )
+    assert invalid.diagnostics.solver_status == "MODEL_INVALID"
+
+    monkeypatch.undo()
+    monkeypatch.setattr(overload_module, "monotonic", lambda: 20.0)
+    timed_out = overload_module._solve_witness_day_placement(
+        placement_problem,
+        placement_tasks,
+        KernelStatus.OVERLOAD,
+        set(witness),
+        candidates,
+        day_options,
+        witness,
+        10.0,
+    )
+    assert timed_out.diagnostics.solver_status == "TIME_LIMIT"
+
+    class FailingSolver:
+        wall_time = 0.0
+        num_conflicts = 0
+        num_branches = 0
+
+        def solve(self, _model: object) -> int:
+            raise ValueError("placement failed")
+
+    monkeypatch.undo()
+    monkeypatch.setattr(overload_module, "configured_solver", lambda _seconds: FailingSolver())
+    failed = overload_module._solve_witness_day_placement(
+        placement_problem,
+        placement_tasks,
+        KernelStatus.OVERLOAD,
+        set(witness),
+        candidates,
+        day_options,
+        witness,
+        monotonic() + 10_000.0,
+    )
+    assert failed.diagnostics.solver_status == "EXCEPTION"
+
+
+def test_overload_uniform_spread_placement_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from studyflow.scheduling import overload as overload_module
+
+    sessions = (
+        demand("a", "task", 1, (0, 99), deadline=99),
+        demand("b", "task", 1, (0, 99), deadline=99),
+    )
+    planning_days = (PlanningDay(0, 0, 50), PlanningDay(1, 50, 100))
+    problem = FeasibilityProblem(sessions, 0, 0, 4.0, planning_days)
+    tasks = (overload_module._TaskDemand(
+        "task", 99, TaskPriority.MEDIUM, sessions[0].allowed_windows, 2, 0, 99
+    ),)
+    allocation = overload_module._UniformAllocation({"task": 2}, {}, (0, 50), {"task": 2})
+    candidates = {"a": [[0, 99]], "b": [[0, 99]]}
+    day_options: dict[str, tuple[_DayStartOption, ...]] = {
+        "a": (
+            _DayStartOption(0, 0, 49),
+            _DayStartOption(1, 50, 99),
+        ),
+        "b": (
+            _DayStartOption(0, 0, 49),
+            _DayStartOption(1, 50, 99),
+        ),
+    }
+
+    monkeypatch.setattr(cp_model.CpModel, "validate", lambda _self: "bad spread")
+    invalid = overload_module._solve_uniform_spread_placement(
+        problem, tasks, allocation, candidates, day_options, monotonic() + 10_000.0
+    )
+    assert invalid.diagnostics.solver_status == "MODEL_INVALID"
+
+    monkeypatch.undo()
+    monkeypatch.setattr(overload_module, "monotonic", lambda: 20.0)
+    timed_out = overload_module._solve_uniform_spread_placement(
+        problem, tasks, allocation, candidates, day_options, 10.0
+    )
+    assert timed_out.diagnostics.solver_status == "TIME_LIMIT"
+
+    class FailingSolver:
+        wall_time = 0.0
+        num_conflicts = 0
+        num_branches = 0
+
+        def solve(self, _model: object) -> int:
+            raise RuntimeError("spread failed")
+
+    monkeypatch.undo()
+    monkeypatch.setattr(overload_module, "configured_solver", lambda _seconds: FailingSolver())
+    failed = overload_module._solve_uniform_spread_placement(
+        problem, tasks, allocation, candidates, day_options, monotonic() + 10_000.0
+    )
+    assert failed.diagnostics.solver_status == "EXCEPTION"
+
+    class Solver:
+        wall_time = 0.0
+        num_conflicts = 0
+        num_branches = 0
+
+        def __init__(self, status: int) -> None:
+            self.status = status
+
+        def solve(self, _model: object) -> int:
+            return self.status
+
+        def value(self, _expression: object) -> int:
+            return 1
+
+        def boolean_value(self, _variable: object) -> bool:
+            return True
+
+    monkeypatch.undo()
+    monkeypatch.setattr(overload_module, "_SAFE_OBJECTIVE_MAX", 0)
+    monkeypatch.setattr(
+        overload_module,
+        "configured_solver",
+        lambda _seconds: Solver(int(cp_model.OPTIMAL)),
+    )
+    monkeypatch.setattr(
+        cp_model.CpModel,
+        "validate",
+        iter(("", "bad assignment")).__next__,
+    )
+    second_invalid = overload_module._solve_uniform_spread_placement(
+        problem, tasks, allocation, candidates, day_options, monotonic() + 10_000.0
+    )
+    assert second_invalid.diagnostics.solver_status == "MODEL_INVALID"
+
+    monkeypatch.undo()
+    monkeypatch.setattr(overload_module, "_SAFE_OBJECTIVE_MAX", 0)
+    monkeypatch.setattr(
+        overload_module,
+        "configured_solver",
+        lambda _seconds: Solver(int(cp_model.OPTIMAL)),
+    )
+    clock = iter((0.0, 20.0))
+    monkeypatch.setattr(overload_module, "monotonic", lambda: next(clock))
+    second_timeout = overload_module._solve_uniform_spread_placement(
+        problem, tasks, allocation, candidates, day_options, 10.0
+    )
+    assert second_timeout.diagnostics.solver_status == "TIME_LIMIT"
+
+    class TwoStageExceptionSolver(Solver):
+        calls = 0
+
+        def solve(self, _model: object) -> int:
+            self.calls += 1
+            if self.calls == 1:
+                return int(cp_model.OPTIMAL)
+            raise ValueError("assignment failed")
+
+    monkeypatch.undo()
+    monkeypatch.setattr(overload_module, "_SAFE_OBJECTIVE_MAX", 0)
+    exception_solver = TwoStageExceptionSolver(0)
+    monkeypatch.setattr(overload_module, "configured_solver", lambda _seconds: exception_solver)
+    second_failed = overload_module._solve_uniform_spread_placement(
+        problem, tasks, allocation, candidates, day_options, monotonic() + 10_000.0
+    )
+    assert second_failed.diagnostics.solver_status == "EXCEPTION"
+
+    class TwoStageNonOptimalSolver(TwoStageExceptionSolver):
+        def solve(self, _model: object) -> int:
+            self.calls += 1
+            return int(cp_model.OPTIMAL if self.calls == 1 else cp_model.FEASIBLE)
+
+    monkeypatch.undo()
+    monkeypatch.setattr(overload_module, "_SAFE_OBJECTIVE_MAX", 0)
+    nonoptimal_solver = TwoStageNonOptimalSolver(0)
+    monkeypatch.setattr(overload_module, "configured_solver", lambda _seconds: nonoptimal_solver)
+    monkeypatch.setattr(
+        overload_module,
+        "solver_diagnostics",
+        lambda _solver, _status: SolverDiagnostics("FEASIBLE", 0.0, 0, 0),
+    )
+    second_nonoptimal = overload_module._solve_uniform_spread_placement(
+        problem, tasks, allocation, candidates, day_options, monotonic() + 10_000.0
+    )
+    assert second_nonoptimal.diagnostics.solver_status == "FEASIBLE"
+
+
+def test_overload_main_policy_uses_packed_greedy_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from studyflow.scheduling import overload as overload_module
+
+    problem = overload_problem(
+        (demand("a", "a", 2, (0, 10)), demand("b", "b", 1, (0, 10))), 0
+    )
+
+    def greedy_hint(*_args: object, spread_across_days: bool) -> dict[str, int]:
+        return {"a": 0} if spread_across_days else {"a": 0, "b": 2}
+
+    monkeypatch.setattr(overload_module, "_greedy_policy_hint", greedy_hint)
+    monkeypatch.setattr(overload_module, "_uniform_allocation", lambda *_args: None)
+
+    result = solve_with_overload(problem)
+
+    assert result.status is KernelStatus.FEASIBLE
+    assert {item.session_id for item in result.sessions} == {"a", "b"}
+
+
+def test_overload_main_policy_reports_invalid_capacity_cut_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from studyflow.scheduling import overload as overload_module
+
+    problem = overload_problem(
+        (demand("a", "a", 2, (0, 10)), demand("b", "b", 1, (0, 10))), 0
+    )
+    monkeypatch.setattr(overload_module, "_greedy_policy_hint", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(overload_module, "_uniform_allocation", lambda *_args: None)
+    validations = iter(("", "invalid capacity cuts"))
+    monkeypatch.setattr(
+        cp_model.CpModel,
+        "validate",
+        lambda _self: next(validations),
+    )
+
+    result = solve_with_overload(problem)
+
+    assert result.diagnostics.solver_status == "MODEL_INVALID"
+    assert result.detail == "invalid capacity cuts"
+
+
+def test_overload_main_policy_probe_and_allocation_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from studyflow.scheduling import overload as overload_module
+
+    problem = overload_problem(
+        (demand("a", "a", 2, (0, 10)), demand("b", "b", 1, (0, 10))), 0
+    )
+    monkeypatch.setattr(overload_module, "_greedy_policy_hint", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(overload_module, "_uniform_allocation", lambda *_args: None)
+    monkeypatch.setattr(overload_module, "_replace_solution_hints", lambda *_args: None)
+
+    class Solver:
+        wall_time = 0.0
+        num_conflicts = 0
+        num_branches = 0
+
+        def __init__(self, statuses: list[int]) -> None:
+            self.statuses = statuses
+
+        def solve(self, _model: object) -> int:
+            return self.statuses.pop(0)
+
+        def boolean_value(self, _variable: object) -> bool:
+            return True
+
+        def value(self, _expression: object) -> int:
+            return 0
+
+        def status_name(self, _status: int) -> str:
+            return "OPTIMAL"
+
+    solver = Solver([int(cp_model.OPTIMAL), int(cp_model.OPTIMAL)])
+    monkeypatch.setattr(overload_module, "configured_solver", lambda _seconds: solver)
+    result = solve_with_overload(problem)
+
+    assert result.status is KernelStatus.FEASIBLE
+    assert len(result.sessions) == 2
+
+
+def test_overload_main_policy_allocation_budget_can_expire(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from studyflow.scheduling import overload as overload_module
+
+    problem = overload_problem(
+        (
+            demand("fits", "fits", 2, (0, 10)),
+            demand("impossible", "impossible", 20, (0, 10)),
+        ),
+        0,
+        max_solve_seconds=1.0,
+    )
+    monkeypatch.setattr(overload_module, "_greedy_policy_hint", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(overload_module, "_uniform_allocation", lambda *_args: None)
+    clock = iter((0.0, 2.0))
+    monkeypatch.setattr(overload_module, "monotonic", lambda: next(clock))
+
+    result = solve_with_overload(problem)
+
+    assert result.diagnostics.solver_status == "TIME_LIMIT"
+    assert "exhausted its shared solve budget" in str(result.detail)
+
+
+def test_overload_main_policy_placement_validation_and_day_spread_branches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from studyflow.scheduling import overload as overload_module
+
+    sessions = (
+        demand("a1", "a", 1, (0, 10)),
+        demand("a2", "a", 1, (0, 10)),
+        demand("b", "b", 1, (0, 10)),
+    )
+    planning_days = (PlanningDay(0, 0, 5), PlanningDay(1, 5, 10))
+    problem = FeasibilityProblem(sessions, 0, 0, 4.0, planning_days)
+    monkeypatch.setattr(overload_module, "_uniform_allocation", lambda *_args: None)
+    monkeypatch.setattr(
+        overload_module,
+        "_greedy_policy_hint",
+        lambda *_args, **_kwargs: {"a1": 0, "a2": 5, "b": 1},
+    )
+    validations = iter(("", "invalid placement model"))
+    monkeypatch.setattr(
+        cp_model.CpModel,
+        "validate",
+        lambda _self: next(validations),
+    )
+
+    result = solve_with_overload(problem)
+
+    assert result.diagnostics.solver_status == "MODEL_INVALID"
+    assert result.detail == "invalid placement model"
+
+
+def test_overload_uniform_spread_skips_an_empty_synthetic_day_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import builtins
+
+    from studyflow.scheduling import overload as overload_module
+
+    sessions = (
+        demand("a", "task", 1, (0, 99), deadline=99),
+        demand("b", "task", 1, (0, 99), deadline=99),
+    )
+    problem = FeasibilityProblem(
+        sessions,
+        0,
+        0,
+        4.0,
+        (PlanningDay(0, 0, 50), PlanningDay(1, 50, 100)),
+    )
+    tasks = (overload_module._TaskDemand(
+        "task", 99, TaskPriority.MEDIUM, sessions[0].allowed_windows, 2, 0, 99
+    ),)
+    allocation = overload_module._UniformAllocation({"task": 2}, {}, (0, 50), {"task": 2})
+    candidates = {"a": [[0, 99]], "b": [[0, 99]]}
+    day_options: dict[str, tuple[_DayStartOption, ...]] = {
+        "a": (
+            _DayStartOption(0, 0, 49),
+            _DayStartOption(1, 50, 99),
+        ),
+        "b": (
+            _DayStartOption(0, 0, 49),
+            _DayStartOption(1, 50, 99),
+        ),
+    }
+    original_range = builtins.range
+
+    def range_with_empty_extra_day(*args: int) -> range | tuple[int, ...]:
+        result = original_range(*args)
+        if args == (2, 3):
+            return (*result, 3)
+        return result
+
+    monkeypatch.setattr(overload_module, "range", range_with_empty_extra_day, raising=False)
+    monkeypatch.setattr(cp_model.CpModel, "validate", lambda _self: "synthetic day")
+
+    result = overload_module._solve_uniform_spread_placement(
+        problem, tasks, allocation, candidates, day_options, monotonic() + 10_000.0
+    )
+
+    assert result.diagnostics.solver_status == "MODEL_INVALID"
+
+
+def test_overload_main_policy_handles_missing_spread_witness_and_empty_day_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import builtins
+
+    from studyflow.scheduling import overload as overload_module
+
+    sessions = (
+        demand("a", "task", 1, (0, 10)),
+        demand("b", "task", 1, (0, 10)),
+    )
+    problem = FeasibilityProblem(
+        sessions,
+        0,
+        0,
+        4.0,
+        (PlanningDay(0, 0, 5), PlanningDay(1, 5, 10)),
+    )
+    monkeypatch.setattr(overload_module, "_uniform_allocation", lambda *_args: None)
+    monkeypatch.setattr(overload_module, "_greedy_policy_hint", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(overload_module, "_replace_solution_hints", lambda *_args: None)
+
+    class Solver:
+        wall_time = 0.0
+        num_conflicts = 0
+        num_branches = 0
+        objective_value = 0.0
+
+        def __init__(self) -> None:
+            self.statuses = [
+                int(cp_model.INFEASIBLE),
+                int(cp_model.OPTIMAL),
+                int(cp_model.OPTIMAL),
+                int(cp_model.OPTIMAL),
+            ]
+
+        def solve(self, _model: object) -> int:
+            return self.statuses.pop(0)
+
+        def boolean_value(self, _variable: object) -> bool:
+            return True
+
+        def value(self, _expression: object) -> int:
+            return 0
+
+        def status_name(self, _status: int) -> str:
+            return "OPTIMAL"
+
+    solver = Solver()
+    monkeypatch.setattr(overload_module, "configured_solver", lambda _seconds: solver)
+    original_range = builtins.range
+
+    def range_with_empty_extra_day(*args: int) -> range | tuple[int, ...]:
+        result = original_range(*args)
+        if args == (2, 3):
+            return (*result, 3)
+        return result
+
+    monkeypatch.setattr(overload_module, "range", range_with_empty_extra_day, raising=False)
+    result = solve_with_overload(problem)
+
+    assert result.status is KernelStatus.FEASIBLE
+
+
+def test_overload_main_policy_preserves_a_valid_session_when_another_has_no_domain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from studyflow.scheduling import overload as overload_module
+
+    valid = demand("valid", "valid", 1, (0, 10))
+    invalid = demand("invalid", "invalid", 20, (0, 10))
+
+    class LyingSessions(tuple[SessionDemand, ...]):
+        def __len__(self) -> int:
+            return 1
+
+    problem = FeasibilityProblem(
+        LyingSessions((valid, invalid)),
+        0,
+        0,
+        4.0,
+        DEFAULT_PLANNING_DAYS,
+    )
+    monkeypatch.setattr(overload_module, "_uniform_allocation", lambda *_args: None)
+    monkeypatch.setattr(overload_module, "_greedy_policy_hint", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(overload_module, "_replace_solution_hints", lambda *_args: None)
+
+    class Solver:
+        wall_time = 0.0
+        num_conflicts = 0
+        num_branches = 0
+
+        def solve(self, _model: object) -> int:
+            return int(cp_model.OPTIMAL)
+
+        def boolean_value(self, _variable: object) -> bool:
+            return True
+
+        def value(self, _expression: object) -> int:
+            return 0
+
+        def status_name(self, _status: int) -> str:
+            return "OPTIMAL"
+
+    monkeypatch.setattr(overload_module, "configured_solver", lambda _seconds: Solver())
+    result = solve_with_overload(problem)
+
+    assert result.status is KernelStatus.FEASIBLE
+    assert [item.session_id for item in result.sessions] == ["valid"]

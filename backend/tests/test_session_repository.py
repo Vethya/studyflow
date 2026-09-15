@@ -1,4 +1,7 @@
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -332,6 +335,37 @@ async def test_session_auth_repository_revoke_and_timezone_edge_cases() -> None:
         assert await repository.authenticate(token_hash, now, now + timedelta(hours=1)) is None
     finally:
         await database.stop()
+
+
+@pytest.mark.anyio
+async def test_session_auth_repository_accepts_aware_expiry_values_from_storage() -> None:
+    now = datetime(2026, 7, 28, 12, tzinfo=UTC)
+    account_id = uuid4()
+    authentication_session = SimpleNamespace(
+        absolute_expires_at=now + timedelta(hours=4),
+        idle_expires_at=now + timedelta(hours=1),
+    )
+    account = SimpleNamespace(id=account_id, email="student@example.com", name="Student")
+    result = MagicMock()
+    result.one_or_none.return_value = (authentication_session, account)
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=result)
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=session)
+    transaction.__aexit__ = AsyncMock(return_value=False)
+    database = MagicMock()
+    database.transaction.return_value = transaction
+
+    repository = SqlAlchemySessionAuthenticationRepository(cast(Any, database))
+    principal = await repository.authenticate(
+        "token-hash",
+        now,
+        now + timedelta(hours=2),
+    )
+
+    assert principal is not None
+    assert principal.account_id == account_id
+    assert authentication_session.idle_expires_at == now + timedelta(hours=2)
 
 
 @pytest.mark.anyio

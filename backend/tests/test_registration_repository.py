@@ -3,9 +3,14 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.registration import (
@@ -472,6 +477,185 @@ async def test_complete_re_raises_integrity_error_when_account_missing(
             await repository.complete(completion, now)
     finally:
         await db.stop()
+
+
+@pytest.mark.anyio
+async def test_registration_begin_rechecks_verified_accounts_after_races() -> None:
+    now = datetime(2026, 7, 28, 12, tzinfo=UTC)
+    pending = PendingRegistration(
+        email="student@example.com",
+        verification_token_hash="a" * 64,
+        verification_expires_at=now + timedelta(hours=1),
+        requested_at=now,
+    )
+    verified_account = SimpleNamespace(email_verified_at=now)
+    session = MagicMock()
+    session.scalar = AsyncMock(side_effect=[None, None, verified_account])
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=session)
+    transaction.__aexit__ = AsyncMock(return_value=False)
+    database = MagicMock()
+    database.transaction.return_value = transaction
+
+    repository = SqlAlchemyRegistrationRepository(cast(Any, database))
+
+    assert await repository.begin(pending) is False
+
+
+@pytest.mark.anyio
+async def test_registration_begin_handles_race_recheck_and_verified_pending_challenge() -> None:
+    now = datetime(2026, 7, 28, 12, tzinfo=UTC)
+    pending = PendingRegistration(
+        email="student@example.com",
+        verification_token_hash="a" * 64,
+        verification_expires_at=now + timedelta(hours=1),
+        requested_at=now,
+    )
+
+    class FailingTransaction:
+        async def __aenter__(self) -> Any:
+            raise IntegrityError("statement", {}, Exception("conflict"))
+
+        async def __aexit__(self, *args: object) -> bool:
+            return False
+
+    verified_account = SimpleNamespace(email_verified_at=now)
+    registration = SimpleNamespace(
+        verified_at=now,
+        signup_expires_at=now + timedelta(hours=1),
+        verification_token_hash="b" * 64,
+        verification_expires_at=now + timedelta(hours=1),
+        signup_token_hash="c" * 64,
+    )
+    session = MagicMock()
+    session.scalar = AsyncMock(side_effect=[None, registration, verified_account])
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=session)
+    transaction.__aexit__ = AsyncMock(return_value=False)
+    database = MagicMock()
+    transaction_calls = 0
+
+    def transaction_factory() -> Any:
+        nonlocal transaction_calls
+        transaction_calls += 1
+        return FailingTransaction() if transaction_calls in {1, 3} else transaction
+
+    database.transaction.side_effect = transaction_factory
+    repository = SqlAlchemyRegistrationRepository(cast(Any, database))
+
+    assert await repository.begin(pending) is False
+
+    session.scalar = AsyncMock(
+        side_effect=[None, registration, verified_account, None, registration, None]
+    )
+    registration.signup_expires_at = now + timedelta(hours=1)
+    registration.verified_at = now
+    assert await repository.begin(pending) is False
+
+
+@pytest.mark.anyio
+async def test_registration_begin_returns_false_for_verified_pending_after_integrity_error(
+) -> None:
+    now = datetime(2026, 7, 28, 12, tzinfo=UTC)
+    pending = PendingRegistration(
+        email="student@example.com",
+        verification_token_hash="a" * 64,
+        verification_expires_at=now + timedelta(hours=1),
+        requested_at=now,
+    )
+
+    class FailingTransaction:
+        async def __aenter__(self) -> Any:
+            raise IntegrityError("statement", {}, Exception("conflict"))
+
+        async def __aexit__(self, *args: object) -> bool:
+            return False
+
+    registration = SimpleNamespace(
+        verified_at=now,
+        signup_expires_at=now + timedelta(hours=1),
+        verification_token_hash="b" * 64,
+        verification_expires_at=now + timedelta(hours=1),
+        signup_token_hash="c" * 64,
+    )
+    session = MagicMock()
+    session.scalar = AsyncMock(side_effect=[None, registration, None])
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=session)
+    transaction.__aexit__ = AsyncMock(return_value=False)
+    database = MagicMock()
+    database.transaction.side_effect = [FailingTransaction(), transaction]
+
+    repository = SqlAlchemyRegistrationRepository(cast(Any, database))
+
+    assert await repository.begin(pending) is False
+
+
+@pytest.mark.anyio
+async def test_registration_completion_returns_false_when_challenge_disappears() -> None:
+    now = datetime(2026, 7, 28, 12, tzinfo=UTC)
+    result = MagicMock()
+    result.one_or_none.return_value = (uuid4(), "student@example.com")
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=result)
+    session.scalar = AsyncMock(side_effect=[None, None])
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=session)
+    transaction.__aexit__ = AsyncMock(return_value=False)
+    database = MagicMock()
+    database.transaction.return_value = transaction
+
+    repository = SqlAlchemyRegistrationRepository(cast(Any, database))
+    completion = RegistrationCompletion(
+        signup_token_hash="a" * 64,
+        name="Student",
+        password_hash="$argon2id$hash",
+        timezone="UTC",
+    )
+
+    assert await repository.complete(completion, now) is False
+
+
+@pytest.mark.anyio
+async def test_registration_completion_updates_unverified_race_account() -> None:
+    now = datetime(2026, 7, 28, 12, tzinfo=UTC)
+    registration = SimpleNamespace(email="student@example.com")
+    raced_account = SimpleNamespace(
+        email_verified_at=None,
+        name="Concurrent",
+        password_hash="$argon2id$old",
+        timezone="UTC",
+    )
+    result = MagicMock()
+    result.one_or_none.return_value = (uuid4(), registration.email)
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=result)
+    session.scalar = AsyncMock(side_effect=[None, registration, None, raced_account])
+    session.add = MagicMock()
+    session.flush = AsyncMock(side_effect=IntegrityError("statement", {}, Exception("conflict")))
+    session.delete = AsyncMock()
+    nested = MagicMock()
+    nested.__aenter__ = AsyncMock(return_value=object())
+    nested.__aexit__ = AsyncMock(return_value=False)
+    session.begin_nested.return_value = nested
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=session)
+    transaction.__aexit__ = AsyncMock(return_value=False)
+    database = MagicMock()
+    database.transaction.return_value = transaction
+
+    repository = SqlAlchemyRegistrationRepository(cast(Any, database))
+    completion = RegistrationCompletion(
+        signup_token_hash="a" * 64,
+        name="Student",
+        password_hash="$argon2id$new",
+        timezone="Asia/Phnom_Penh",
+    )
+
+    assert await repository.complete(completion, now) is True
+    assert raced_account.name == "Student"
+    assert raced_account.password_hash == "$argon2id$new"
+    assert raced_account.timezone == "Asia/Phnom_Penh"
 
 
 @pytest.mark.anyio

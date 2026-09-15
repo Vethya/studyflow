@@ -1,4 +1,6 @@
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -160,3 +162,24 @@ async def test_password_reset_orphaned_token_returns_false() -> None:
         assert not await repository.reset_password(token_hash, "$argon2id$new-hash", now)
     finally:
         await database.stop()
+
+
+@pytest.mark.anyio
+async def test_password_reset_returns_false_when_token_disappears_after_account_lock() -> None:
+    account_id = uuid4()
+    session = MagicMock()
+    session.scalar = AsyncMock(side_effect=[account_id, None])
+    session.get = AsyncMock(return_value=object())
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=session)
+    transaction.__aexit__ = AsyncMock(return_value=False)
+    database = MagicMock()
+    database.transaction.return_value = transaction
+
+    repository = SqlAlchemyPasswordRecoveryRepository(cast(Any, database))
+
+    assert not await repository.reset_password(
+        "a" * 64,
+        "$argon2id$new-hash",
+        datetime(2026, 7, 28, 12, tzinfo=UTC),
+    )

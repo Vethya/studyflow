@@ -10,6 +10,7 @@ from studyflow.auth.sessions import PendingSession
 from studyflow.database import Base, Database
 from studyflow.database.models import (
     AuthenticationIdentity,
+    AuthenticationOIDCLinkChallenge,
     AuthenticationSession,
     StudentAccount,
 )
@@ -155,6 +156,15 @@ async def test_oidc_linking_repository_edge_cases() -> None:
                 timezone="UTC",
             )
             session.add(no_password_account)
+            session.add(
+                AuthenticationOIDCLinkChallenge(
+                    account_id=account_id,
+                    subject="no-password-subject",
+                    email="nopass@example.com",
+                    token_hash="n" * 64,
+                    expires_at=now + timedelta(minutes=10),
+                )
+            )
 
         repository = SqlAlchemyOIDCRepository(database)
 
@@ -180,6 +190,7 @@ async def test_oidc_linking_repository_edge_cases() -> None:
         # 2. get_link_challenge returns None when token not found
         # or account has no password (line 591)
         assert await repository.get_link_challenge("missing-token-hash", now) is None
+        assert await repository.get_link_challenge("n" * 64, now) is None
 
         # 3. link_identity_and_create_session with missing challenge row returns None (line 619)
         fake_challenge_id = uuid4()

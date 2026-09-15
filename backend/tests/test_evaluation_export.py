@@ -2,9 +2,11 @@
 
 import csv
 import json
+import runpy
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -571,3 +573,30 @@ def test_cli_main_stdout_and_account_id(
     assert exit_code2 == 0
     captured2 = capsys.readouterr()
     assert '"participant_count": 1' in captured2.out
+
+
+def test_cli_module_entrypoint_exits_with_main_result(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import asyncio
+
+    def fake_asyncio_run(coroutine: object) -> str:
+        cast(Any, coroutine).close()
+        return "{}"
+
+    monkeypatch.setattr(asyncio, "run", fake_asyncio_run)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["export_evaluation", "--database-url", "postgresql+psycopg://user:pass@host/db"],
+    )
+
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_path(
+            str(Path(__file__).parents[1] / "src/studyflow/cli/export_evaluation.py"),
+            run_name="__main__",
+        )
+
+    assert exit_info.value.code == 0
+    assert capsys.readouterr().out.strip() == "{}"
