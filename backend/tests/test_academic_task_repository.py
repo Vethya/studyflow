@@ -14,7 +14,10 @@ from studyflow.database.models import StudySession as SessionRow
 from studyflow.database.models import StudySessionOutcome as OutcomeRow
 from studyflow.estimation import AdaptiveEstimateUnavailableError, AdaptiveEstimator
 from studyflow.estimation.repositories import SqlAlchemyAdaptivePredictionRepository
-from studyflow.tasks.repositories import SqlAlchemyAcademicTaskRepository
+from studyflow.tasks.repositories import (
+    SqlAlchemyAcademicTaskRepository,
+    SqlAlchemyTaskDeadlineSessionInvalidator,
+)
 from studyflow.tasks.service import (
     NewAcademicTask,
     PlannedDurationSource,
@@ -463,5 +466,165 @@ async def test_unqualified_recapture_removes_the_prior_prediction_snapshot() -> 
             updated.planned_duration_minutes,
         ) == (None, PlannedDurationSource.ORIGINAL, 60)
         assert prediction is None
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_invalidate_future_sessions_for_overdue_tasks() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    account_id = uuid4()
+    now = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            session.add(
+                StudentAccount(
+                    id=account_id,
+                    email="student@example.com",
+                    name="Student",
+                    password_hash="$argon2id$hash",
+                    email_verified_at=now,
+                    timezone="UTC",
+                )
+            )
+            task = AcademicTask(
+                account_id=account_id,
+                title="Overdue task",
+                category="assignment",
+                priority="high",
+                deadline_at=now - timedelta(hours=2),
+                original_estimate_minutes=60,
+                planned_duration_minutes=60,
+            )
+            session.add(task)
+            await session.flush()
+            session.add(
+                SessionRow(
+                    account_id=account_id,
+                    task_id=task.id,
+                    proposal_id=None,
+                    starts_at=now + timedelta(hours=1),
+                    ends_at=now + timedelta(hours=2),
+                    planned_duration_minutes=60,
+                )
+            )
+
+        invalidator = SqlAlchemyTaskDeadlineSessionInvalidator()
+        async with database.transaction() as session:
+            overdue_ids = await invalidator.remediate_overdue_tasks(session, account_id, now)
+            assert len(overdue_ids) == 1
+            assert overdue_ids[0] == task.id
+
+        async with database.transaction() as session:
+            session_row = await session.scalar(
+                select(SessionRow).where(SessionRow.account_id == account_id)
+            )
+            assert session_row is not None
+            assert session_row.invalidated_at is not None
+            task_row = await session.get(AcademicTask, task.id)
+            assert task_row is not None
+            assert task_row.overdue_remediated_deadline_at == task_row.deadline_at
+
+            # Calling again returns [] because task is already remediated
+            overdue_again = await invalidator.remediate_overdue_tasks(session, account_id, now)
+            assert overdue_again == []
+
+            # Also test remove_sessions_after_deadline
+            # Add a future session that ends after deadline
+            new_session = SessionRow(
+                account_id=account_id,
+                task_id=task.id,
+                proposal_id=None,
+                starts_at=now + timedelta(hours=3),
+                ends_at=now + timedelta(hours=4),
+                planned_duration_minutes=60,
+            )
+            session.add(new_session)
+            await session.flush()
+            removed = await invalidator.remove_sessions_after_deadline(
+                session, account_id, task.id, now + timedelta(hours=2), now
+            )
+            assert removed == [new_session.id]
+            assert new_session.invalidated_at is not None
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_list_snapshot_and_query_filters() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    account_id = uuid4()
+    now = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            session.add(
+                StudentAccount(
+                    id=account_id,
+                    email="student@example.com",
+                    name="Student",
+                    password_hash="$argon2id$hash",
+                    email_verified_at=now,
+                    timezone="UTC",
+                )
+            )
+
+        repository = SqlAlchemyAcademicTaskRepository(database, clock=lambda: now)
+        t1 = await repository.create(
+            account_id,
+            NewAcademicTask(
+                "Task 1",
+                TaskCategory.ASSIGNMENT,
+                TaskPriority.HIGH,
+                None,
+                None,
+                now + timedelta(days=1),
+                60,
+            ),
+        )
+        t2 = await repository.create(
+            account_id,
+            NewAcademicTask(
+                "Task 2",
+                TaskCategory.EXAM_PREPARATION,
+                TaskPriority.LOW,
+                None,
+                None,
+                now + timedelta(days=4),
+                90,
+            ),
+        )
+
+        # list_snapshot without filters
+        all_tasks = await repository.list_snapshot(account_id)
+        assert len(all_tasks) == 2
+
+        # Filter by category
+        cat_filtered = await repository.list_snapshot(
+            account_id, TaskFilters(category=TaskCategory.EXAM_PREPARATION)
+        )
+        assert len(cat_filtered) == 1
+        assert cat_filtered[0].id == t2.id
+
+        # Filter by deadline_from
+        from_filtered = await repository.list(
+            account_id, TaskFilters(deadline_from=now + timedelta(days=2))
+        )
+        assert len(from_filtered) == 1
+        assert from_filtered[0].id == t2.id
+
+        # Filter by deadline_to
+        to_filtered = await repository.list(
+            account_id, TaskFilters(deadline_to=now + timedelta(days=2))
+        )
+        assert len(to_filtered) == 1
+        assert to_filtered[0].id == t1.id
     finally:
         await database.stop()

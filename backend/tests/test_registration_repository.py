@@ -1,4 +1,6 @@
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -324,5 +326,148 @@ async def test_expired_signup_token_cannot_create_account() -> None:
             ),
             now + timedelta(minutes=31),
         )
+    finally:
+        await db.stop()
+
+
+@pytest.mark.anyio
+async def test_signup_is_valid_validates_token_and_expiry() -> None:
+    db = await database()
+    now = datetime.now(UTC)
+    repository = SqlAlchemyRegistrationRepository(db)
+    try:
+        await repository.begin(
+            PendingRegistration(
+                email="student@example.com",
+                verification_token_hash=hash_verification_token("email-token"),
+                verification_expires_at=now + timedelta(hours=8),
+                requested_at=now,
+            )
+        )
+        verification = EmailVerificationService(
+            SqlAlchemyEmailVerificationRepository(db),
+            token_factory=lambda: "signup-token",
+            clock=lambda: now,
+        )
+        await verification.verify("email-token")
+
+        valid_hash = hash_verification_token("signup-token")
+        assert await repository.signup_is_valid(valid_hash, now)
+        assert not await repository.signup_is_valid(valid_hash, now + timedelta(minutes=31))
+        assert not await repository.signup_is_valid(hash_verification_token("unknown"), now)
+    finally:
+        await db.stop()
+
+
+@pytest.mark.anyio
+async def test_complete_handles_integrity_error_race_condition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from uuid import uuid4
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    db = await database()
+    now = datetime.now(UTC)
+    repository = SqlAlchemyRegistrationRepository(db)
+    try:
+        await repository.begin(
+            PendingRegistration(
+                email="student@example.com",
+                verification_token_hash=hash_verification_token("email-token"),
+                verification_expires_at=now + timedelta(hours=8),
+                requested_at=now,
+            )
+        )
+        verification = EmailVerificationService(
+            SqlAlchemyEmailVerificationRepository(db),
+            token_factory=lambda: "signup-token",
+            clock=lambda: now,
+        )
+        await verification.verify("email-token")
+
+        original_begin_nested = AsyncSession.begin_nested
+
+        @asynccontextmanager
+        async def mock_begin_nested(
+            session: AsyncSession, *args: object, **kwargs: object
+        ) -> AsyncIterator[object]:
+            conn = await session.connection()
+            await conn.execute(
+                text(
+                    "INSERT INTO student_accounts "
+                    "(id, email, name, password_hash, email_verified_at, timezone) "
+                    "VALUES (:id, :email, :name, :password_hash, :verified_at, :tz)"
+                ),
+                {
+                    "id": str(uuid4()),
+                    "email": "student@example.com",
+                    "name": "Concurrent User",
+                    "password_hash": "$argon2id$hash",
+                    "verified_at": now.isoformat(),
+                    "tz": "UTC",
+                },
+            )
+            async with original_begin_nested(session, *args, **kwargs) as tx:
+                yield tx
+
+        monkeypatch.setattr(AsyncSession, "begin_nested", mock_begin_nested)
+
+        completion = RegistrationCompletion(
+            signup_token_hash=hash_verification_token("signup-token"),
+            name="Student",
+            password_hash="$argon2id$hash",
+            timezone="UTC",
+        )
+        result = await repository.complete(completion, now)
+        assert result is False
+
+        # Registration should be pruned
+        async with db.transaction() as session:
+            assert list(await session.scalars(select(AuthenticationRegistration))) == []
+    finally:
+        await db.stop()
+
+
+@pytest.mark.anyio
+async def test_complete_re_raises_integrity_error_when_account_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    db = await database()
+    now = datetime.now(UTC)
+    repository = SqlAlchemyRegistrationRepository(db)
+    try:
+        await repository.begin(
+            PendingRegistration(
+                email="student@example.com",
+                verification_token_hash=hash_verification_token("email-token"),
+                verification_expires_at=now + timedelta(hours=8),
+                requested_at=now,
+            )
+        )
+        verification = EmailVerificationService(
+            SqlAlchemyEmailVerificationRepository(db),
+            token_factory=lambda: "signup-token",
+            clock=lambda: now,
+        )
+        await verification.verify("email-token")
+
+        async def mock_flush_error(session: AsyncSession, *args: object, **kwargs: object) -> None:
+            raise IntegrityError("stmt", {}, Exception("constraint failed"))
+
+        monkeypatch.setattr(AsyncSession, "flush", mock_flush_error)
+
+        completion = RegistrationCompletion(
+            signup_token_hash=hash_verification_token("signup-token"),
+            name="Student",
+            password_hash="$argon2id$hash",
+            timezone="UTC",
+        )
+        with pytest.raises(IntegrityError):
+            await repository.complete(completion, now)
     finally:
         await db.stop()

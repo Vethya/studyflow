@@ -1195,3 +1195,150 @@ async def test_read_task_schedule_adjustments_and_snapshots() -> None:
     service_plain = StudySessionService(cast(Any, RepoStub()))
     assert await service_plain.task_schedule_adjustments(account_id) == {task_id: 50}
     assert await service_plain.task_schedule_adjustments_snapshot(account_id) == {task_id: 50}
+
+
+@pytest.mark.anyio
+async def test_sqlalchemy_outcome_repository_task_schedule_adjustments_snapshot() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        account_id, task_id, session_id = uuid4(), uuid4(), uuid4()
+        async with database.transaction() as db_session:
+            await db_session.run_sync(lambda sync: Base.metadata.create_all(sync.connection()))
+            db_session.add_all(
+                [
+                    StudentAccount(
+                        id=account_id,
+                        email="student@example.com",
+                        name="Student",
+                        password_hash="$argon2id$hash",
+                        email_verified_at=NOW,
+                        timezone="UTC",
+                    ),
+                    AcademicTask(
+                        id=task_id,
+                        account_id=account_id,
+                        title="Essay",
+                        category="assignment",
+                        deadline_at=NOW + timedelta(days=1),
+                        original_estimate_minutes=60,
+                        planned_duration_minutes=60,
+                    ),
+                    SessionRow(
+                        id=session_id,
+                        account_id=account_id,
+                        task_id=task_id,
+                        proposal_id=None,
+                        starts_at=NOW - timedelta(hours=2),
+                        ends_at=NOW - timedelta(hours=1),
+                        planned_duration_minutes=60,
+                    ),
+                    OutcomeRow(
+                        session_id=session_id,
+                        kind=SessionOutcomeKind.DELAYED.value,
+                        actual_minutes=40,
+                        remaining_minutes=20,
+                        recorded_at=NOW - timedelta(minutes=30),
+                        rescheduled_at=None,
+                    ),
+                ]
+            )
+        repo = SqlAlchemyStudySessionOutcomeRepository(database, clock=lambda: NOW)
+        adjustments = await repo.task_schedule_adjustments_snapshot(account_id)
+        assert adjustments == {task_id: 40}
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_sqlalchemy_outcome_repository_has_unfinished_work_branches() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        account_id, task_id, session_id = uuid4(), uuid4(), uuid4()
+        async with database.transaction() as db_session:
+            await db_session.run_sync(lambda sync: Base.metadata.create_all(sync.connection()))
+            db_session.add_all(
+                [
+                    StudentAccount(
+                        id=account_id,
+                        email="student@example.com",
+                        name="Student",
+                        password_hash="$argon2id$hash",
+                        email_verified_at=NOW,
+                        timezone="UTC",
+                    ),
+                    AcademicTask(
+                        id=task_id,
+                        account_id=account_id,
+                        title="Project",
+                        category="assignment",
+                        deadline_at=NOW + timedelta(days=2),
+                        original_estimate_minutes=60,
+                        planned_duration_minutes=60,
+                    ),
+                    SessionRow(
+                        id=session_id,
+                        account_id=account_id,
+                        task_id=task_id,
+                        proposal_id=None,
+                        starts_at=NOW - timedelta(hours=3),
+                        ends_at=NOW - timedelta(hours=2),
+                        planned_duration_minutes=60,
+                        invalidated_at=NOW - timedelta(hours=1),
+                    ),
+                    OutcomeRow(
+                        session_id=session_id,
+                        kind=SessionOutcomeKind.DELAYED.value,
+                        actual_minutes=30,
+                        remaining_minutes=30,
+                        recorded_at=NOW - timedelta(hours=1, minutes=30),
+                        rescheduled_at=None,
+                    ),
+                ]
+            )
+
+        # 1. Invalidated session with remaining > 0 and rescheduled_at is None
+        # -> has unfinished work
+        async with database.transaction() as db_session:
+            has_work = await SqlAlchemyStudySessionOutcomeRepository._has_unfinished_work(
+                db_session, account_id, task_id, planned_duration_minutes=60
+            )
+            assert has_work is True
+
+        # 2. Invalidated session with remaining > 0 but rescheduled_at is set
+        # -> no unfinished work (since planned <= scheduled)
+        async with database.transaction() as db_session:
+            outcome = await db_session.get(OutcomeRow, session_id)
+            assert outcome is not None
+            outcome.rescheduled_at = NOW
+            await db_session.flush()
+            has_work = await SqlAlchemyStudySessionOutcomeRepository._has_unfinished_work(
+                db_session, account_id, task_id, planned_duration_minutes=60
+            )
+            assert has_work is False
+
+        # 3. Invalidated session with remaining == 0 -> no unfinished work
+        async with database.transaction() as db_session:
+            outcome = await db_session.get(OutcomeRow, session_id)
+            assert outcome is not None
+            outcome.rescheduled_at = None
+            outcome.remaining_minutes = 0
+            await db_session.flush()
+            has_work = await SqlAlchemyStudySessionOutcomeRepository._has_unfinished_work(
+                db_session, account_id, task_id, planned_duration_minutes=60
+            )
+            assert has_work is False
+
+        # 4. Invalidated session with no outcome row -> continue (False if planned <= scheduled)
+        async with database.transaction() as db_session:
+            outcome = await db_session.get(OutcomeRow, session_id)
+            assert outcome is not None
+            await db_session.delete(outcome)
+            await db_session.flush()
+            has_work = await SqlAlchemyStudySessionOutcomeRepository._has_unfinished_work(
+                db_session, account_id, task_id, planned_duration_minutes=60
+            )
+            assert has_work is False
+    finally:
+        await database.stop()

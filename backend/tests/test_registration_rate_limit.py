@@ -4,18 +4,26 @@ import pytest
 from sqlalchemy import select
 
 from studyflow.auth.rate_limits import (
+    AccountPasswordChangeRateLimitExceeded,
+    DatabaseAccountPasswordChangeRateLimiter,
     DatabaseEmailVerificationRateLimiter,
     DatabaseLoginRateLimiter,
     DatabaseOIDCLinkRateLimiter,
     DatabaseOIDCStartRateLimiter,
+    DatabasePasswordResetAttemptRateLimiter,
+    DatabasePasswordResetRequestRateLimiter,
     DatabaseRegistrationCompletionRateLimiter,
     DatabaseRegistrationRateLimiter,
+    DatabaseVerificationResendRateLimiter,
     EmailVerificationRateLimitExceeded,
     LoginRateLimitExceeded,
     OIDCLinkRateLimitExceeded,
     OIDCStartRateLimitExceeded,
+    PasswordResetAttemptRateLimitExceeded,
+    PasswordResetRequestRateLimitExceeded,
     RegistrationCompletionRateLimitExceeded,
     RegistrationRateLimitExceeded,
+    VerificationResendRateLimitExceeded,
 )
 from studyflow.database import Base, Database
 from studyflow.database.models import AuthenticationRateLimit
@@ -257,5 +265,77 @@ async def test_newer_login_reservations_keep_their_own_expiry() -> None:
             await limiter.check(f"203.0.113.{attempt + 3}", "student@example.com")
         with pytest.raises(LoginRateLimitExceeded):
             await limiter.check("203.0.113.99", "student@example.com")
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_verification_resend_rate_limit_bounds_ip_and_email() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        limiter = DatabaseVerificationResendRateLimiter(database)
+        for _ in range(5):
+            await limiter.check("203.0.113.10", "student@example.com")
+        with pytest.raises(VerificationResendRateLimitExceeded):
+            await limiter.check("203.0.113.10", "student@example.com")
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_password_reset_request_rate_limit_bounds_ip_and_email() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        limiter = DatabasePasswordResetRequestRateLimiter(database)
+        for _ in range(5):
+            await limiter.check("203.0.113.10", "student@example.com")
+        with pytest.raises(PasswordResetRequestRateLimitExceeded):
+            await limiter.check("203.0.113.10", "student@example.com")
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_password_reset_attempt_rate_limit_bounds_ip_and_token() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        limiter = DatabasePasswordResetAttemptRateLimiter(database)
+        for _ in range(5):
+            await limiter.check("203.0.113.10", "reset-token")
+        with pytest.raises(PasswordResetAttemptRateLimitExceeded):
+            await limiter.check("203.0.113.10", "reset-token")
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_account_password_change_rate_limit_bounds_ip_and_account() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        limiter = DatabaseAccountPasswordChangeRateLimiter(database)
+        for _ in range(5):
+            await limiter.check("203.0.113.10", "account-123")
+        with pytest.raises(AccountPasswordChangeRateLimitExceeded):
+            await limiter.check("203.0.113.10", "account-123")
     finally:
         await database.stop()
