@@ -588,6 +588,33 @@ class StudySessionsStub:
         self.recorded = True
         return self.outcome
 
+    async def record_completed(
+        self,
+        account_id: UUID,
+        session_id: UUID,
+        actual_minutes: int,
+        *,
+        large_actual_confirmed: bool = False,
+    ) -> StudySessionOutcomeRecord | None:
+        if self.error is not None:
+            raise self.error
+        self.recorded = True
+        return self.outcome
+
+    async def record_delayed(
+        self,
+        account_id: UUID,
+        session_id: UUID,
+        actual_minutes: int,
+        remaining_minutes: int | None = None,
+        *,
+        large_actual_confirmed: bool = False,
+    ) -> StudySessionOutcomeRecord | None:
+        if self.error is not None:
+            raise self.error
+        self.recorded = True
+        return self.outcome
+
 
 @dataclass
 class RecoveryStub:
@@ -676,6 +703,148 @@ async def test_study_session_api_gets_and_records_missed_with_csrf() -> None:
     assert recorded.json()["outcome"]["kind"] == "missed"
     assert recorded.json()["outcome"]["remaining_minutes"] == 60
     assert recorded.json()["revision"]["kind"] == "revision"
+
+
+@pytest.mark.anyio
+async def test_study_session_api_records_completed_and_delayed_outcomes() -> None:
+    session = StudySessionRecord(
+        SESSION_ID,
+        ACCOUNT_ID,
+        uuid4(),
+        None,
+        NOW - timedelta(hours=2),
+        NOW - timedelta(hours=1),
+        60,
+    )
+    completed_outcome = StudySessionOutcomeRecord(
+        SESSION_ID, SessionOutcomeKind.COMPLETED, 55, 0, NOW, None
+    )
+    application = _api(StudySessionsStub(StudySessionDetails(session, None), completed_outcome))
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        completed_resp = await client.post(
+            f"/api/v1/study-sessions/{SESSION_ID}/outcomes",
+            json={"outcome": "completed", "actual_minutes": 55},
+            headers={"X-CSRF-Token": "csrf"},
+        )
+    assert completed_resp.status_code == 201
+    assert completed_resp.headers["location"] == f"/api/v1/study-sessions/{SESSION_ID}"
+    assert completed_resp.json()["outcome"]["kind"] == "completed"
+    assert completed_resp.json()["outcome"]["actual_minutes"] == 55
+    assert completed_resp.json()["revision"] is None
+
+    delayed_outcome = StudySessionOutcomeRecord(
+        SESSION_ID, SessionOutcomeKind.DELAYED, 30, 30, NOW, None
+    )
+    delayed_app = _api(StudySessionsStub(StudySessionDetails(session, None), delayed_outcome))
+    async with AsyncClient(
+        transport=ASGITransport(app=delayed_app),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        delayed_resp = await client.post(
+            f"/api/v1/study-sessions/{SESSION_ID}/outcomes",
+            json={"outcome": "delayed", "actual_minutes": 30, "remaining_minutes": 30},
+            headers={"X-CSRF-Token": "csrf"},
+        )
+    assert delayed_resp.status_code == 201
+    assert delayed_resp.headers["location"] == "/api/v1/schedule-proposals/current"
+    assert delayed_resp.json()["outcome"]["kind"] == "delayed"
+    assert delayed_resp.json()["outcome"]["actual_minutes"] == 30
+    assert delayed_resp.json()["outcome"]["remaining_minutes"] == 30
+    assert delayed_resp.json()["revision"]["kind"] == "revision"
+
+
+@pytest.mark.anyio
+async def test_study_session_api_maps_invalid_outcome_to_422() -> None:
+    session = StudySessionRecord(
+        SESSION_ID,
+        ACCOUNT_ID,
+        uuid4(),
+        None,
+        NOW - timedelta(hours=2),
+        NOW - timedelta(hours=1),
+        60,
+    )
+    sessions = StudySessionsStub(
+        StudySessionDetails(session, None),
+        None,
+        error=InvalidSessionOutcomeError("Outcome invalid"),
+    )
+    application = _api(sessions)
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        response = await client.post(
+            f"/api/v1/study-sessions/{SESSION_ID}/outcomes",
+            json={"outcome": "missed"},
+            headers={"X-CSRF-Token": "csrf"},
+        )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Outcome invalid"
+
+
+@pytest.mark.anyio
+async def test_study_session_api_maps_none_recovery_proposal_to_503() -> None:
+    session = StudySessionRecord(
+        SESSION_ID,
+        ACCOUNT_ID,
+        uuid4(),
+        None,
+        NOW - timedelta(hours=2),
+        NOW - timedelta(hours=1),
+        60,
+    )
+    outcome = StudySessionOutcomeRecord(SESSION_ID, SessionOutcomeKind.MISSED, 0, 60, NOW, None)
+    sessions = StudySessionsStub(StudySessionDetails(session, None), outcome)
+    application = _api(sessions, recovery=RecoveryStub(None))
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        response = await client.post(
+            f"/api/v1/study-sessions/{SESSION_ID}/outcomes",
+            json={"outcome": "missed"},
+            headers={"X-CSRF-Token": "csrf"},
+        )
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Recovery proposal could not be generated"
+
+
+@pytest.mark.anyio
+async def test_study_session_api_rejects_duplicate_outcome_on_already_completed_session() -> None:
+    session = StudySessionRecord(
+        SESSION_ID,
+        ACCOUNT_ID,
+        uuid4(),
+        None,
+        NOW - timedelta(hours=2),
+        NOW - timedelta(hours=1),
+        60,
+    )
+    existing_outcome = StudySessionOutcomeRecord(
+        SESSION_ID, SessionOutcomeKind.COMPLETED, 60, 0, NOW, None
+    )
+    sessions = StudySessionsStub(StudySessionDetails(session, existing_outcome), None)
+    application = _api(sessions)
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        response = await client.post(
+            f"/api/v1/study-sessions/{SESSION_ID}/outcomes",
+            json={"outcome": "missed"},
+            headers={"X-CSRF-Token": "csrf"},
+        )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "The study session already has an outcome"
 
 
 @pytest.mark.anyio

@@ -92,3 +92,65 @@ async def test_account_profile_update_requires_session_and_csrf() -> None:
     assert unauthenticated.status_code == 401
     assert missing_csrf.status_code == 403
     assert profiles.updates == []
+
+
+@pytest.mark.anyio
+async def test_account_profile_returns_401_when_profile_missing() -> None:
+    account_id = UUID("5b15bfef-8c44-45d5-a70e-574beb999fb3")
+    authentication = SessionAuthenticationStub(
+        SessionPrincipal(account_id, "student@example.com", "Student Name")
+    )
+
+    class MissingProfileStub(AccountProfileStub):
+        async def get(self, account_id: UUID) -> AccountProfile | None:
+            return None
+
+        async def update_name(self, account_id: UUID, name: str) -> AccountProfile | None:
+            return None
+
+    app = create_app(
+        session_authentication=authentication,
+        account_profiles=MissingProfileStub(
+            AccountProfile(account_id, "student@example.com", "Student Name")
+        ),
+    )
+    cookies = {"studyflow_session": "opaque-session-token"}
+    headers = {"X-CSRF-Token": "csrf-request-token"}
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="https://test", cookies=cookies
+    ) as client:
+        get_res = await client.get("/api/v1/account/profile")
+        patch_res = await client.patch(
+            "/api/v1/account/profile", json={"name": "New Name"}, headers=headers
+        )
+
+    assert get_res.status_code == 401
+    assert patch_res.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_csrf_session_rejects_missing_cookie_or_invalid_principal() -> None:
+    account_id = UUID("5b15bfef-8c44-45d5-a70e-574beb999fb3")
+    app = create_app(
+        session_authentication=SessionAuthenticationStub(None),
+        account_profiles=AccountProfileStub(
+            AccountProfile(account_id, "student@example.com", "Student Name")
+        ),
+    )
+    headers = {"X-CSRF-Token": "csrf-request-token"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
+        no_cookie = await client.patch(
+            "/api/v1/account/profile", json={"name": "New Name"}, headers=headers
+        )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://test",
+        cookies={"studyflow_session": "opaque-session-token"},
+    ) as client:
+        auth_failed = await client.patch(
+            "/api/v1/account/profile", json={"name": "New Name"}, headers=headers
+        )
+
+    assert no_cookie.status_code == 401
+    assert auth_failed.status_code == 403
