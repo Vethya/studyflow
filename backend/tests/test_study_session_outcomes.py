@@ -1342,3 +1342,156 @@ async def test_sqlalchemy_outcome_repository_has_unfinished_work_branches() -> N
             assert has_work is False
     finally:
         await database.stop()
+
+
+@pytest.mark.anyio
+async def test_outcome_repository_edge_cases() -> None:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    account_id = uuid4()
+    task_id = uuid4()
+    session_id = uuid4()
+
+    class StubRemediator:
+        def __init__(self, t_ids: list[UUID]) -> None:
+            self.t_ids = t_ids
+
+        async def remediate_overdue_tasks(
+            self, session: AsyncSession, acc_id: UUID, now: datetime
+        ) -> list[UUID]:
+            return self.t_ids
+
+    class StubInvalidator:
+        def __init__(self) -> None:
+            self.invalidated: list[UUID] = []
+
+        async def invalidate_for_task(
+            self, session: AsyncSession, acc_id: UUID, t_id: UUID
+        ) -> None:
+            self.invalidated.append(t_id)
+
+    try:
+        async with database.transaction() as db_session:
+            await db_session.run_sync(lambda sync: Base.metadata.create_all(sync.connection()))
+            db_session.add(
+                StudentAccount(
+                    id=account_id,
+                    email="student@example.com",
+                    name="Student",
+                    password_hash="$argon2id$hash",
+                    email_verified_at=NOW,
+                    timezone="UTC",
+                )
+            )
+            db_session.add(
+                AcademicTask(
+                    id=task_id,
+                    account_id=account_id,
+                    title="Task",
+                    category="reading",
+                    priority="medium",
+                    original_estimate_minutes=60,
+                    planned_duration_minutes=60,
+                    planned_source="original",
+                    deadline_at=NOW + timedelta(days=1),
+                )
+            )
+            db_session.add(
+                SessionRow(
+                    id=session_id,
+                    account_id=account_id,
+                    task_id=task_id,
+                    starts_at=NOW - timedelta(hours=2),
+                    ends_at=NOW - timedelta(hours=1),
+                    planned_duration_minutes=60,
+                )
+            )
+
+        invalidator_stub = StubInvalidator()
+        repo = SqlAlchemyStudySessionOutcomeRepository(
+            database,
+            overdue_remediator=StubRemediator([task_id]),
+            proposal_invalidator=invalidator_stub,
+            clock=lambda: NOW,
+        )
+
+        # 1. _reconcile_overdue invalidates proposals for overdue tasks
+        async with database.transaction() as db_session:
+            await repo._reconcile_overdue(db_session, account_id, NOW)
+        assert invalidator_stub.invalidated == [task_id]
+
+        # 2. list() with individual filters
+        by_from = await repo.list(
+            account_id, StudySessionFilters(starts_from=NOW - timedelta(hours=3))
+        )
+        assert len(by_from) == 1
+        by_from_empty = await repo.list(account_id, StudySessionFilters(starts_from=NOW))
+        assert len(by_from_empty) == 0
+
+        by_to = await repo.list(account_id, StudySessionFilters(starts_to=NOW))
+        assert len(by_to) == 1
+        by_to_empty = await repo.list(
+            account_id, StudySessionFilters(starts_to=NOW - timedelta(hours=3))
+        )
+        assert len(by_to_empty) == 0
+
+        by_task = await repo.list(account_id, StudySessionFilters(task_id=task_id))
+        assert len(by_task) == 1
+        by_task_empty = await repo.list(account_id, StudySessionFilters(task_id=uuid4()))
+        assert len(by_task_empty) == 0
+
+        # 3. record non-existent account -> None
+        res_no_acc = await repo.record(
+            uuid4(), session_id, SessionOutcomeKind.COMPLETED, 60, None, False, NOW
+        )
+        assert res_no_acc is None
+
+        # record non-existent session -> None
+        res_no_session = await repo.record(
+            account_id, uuid4(), SessionOutcomeKind.COMPLETED, 60, None, False, NOW
+        )
+        assert res_no_session is None
+
+        # record non-existent task -> None
+        orphan_session_id = uuid4()
+        async with database.transaction() as db_session:
+            db_session.add(
+                SessionRow(
+                    id=orphan_session_id,
+                    account_id=account_id,
+                    task_id=uuid4(),  # task doesn't exist
+                    starts_at=NOW - timedelta(hours=3),
+                    ends_at=NOW - timedelta(hours=2),
+                    planned_duration_minutes=60,
+                )
+            )
+        res_no_task = await repo.record(
+            account_id, orphan_session_id, SessionOutcomeKind.COMPLETED, 60, None, False, NOW
+        )
+        assert res_no_task is None
+
+        # 4. task_schedule_adjustments
+        adjustments = await repo.task_schedule_adjustments(account_id)
+        assert isinstance(adjustments, dict)
+
+        # 5. _has_unfinished_work where session not invalidated,
+        # outcome remaining > 0, rescheduled_at is None
+        async with database.transaction() as db_session:
+            db_session.add(
+                OutcomeRow(
+                    session_id=session_id,
+                    kind=SessionOutcomeKind.DELAYED.value,
+                    actual_minutes=30,
+                    remaining_minutes=30,
+                    recorded_at=NOW,
+                    rescheduled_at=None,
+                )
+            )
+            has_unfinished = await SqlAlchemyStudySessionOutcomeRepository._has_unfinished_work(
+                db_session, account_id, task_id, planned_duration_minutes=60
+            )
+            assert has_unfinished is True
+    finally:
+        await database.stop()
