@@ -599,3 +599,216 @@ def test_staged_policy_uses_one_shared_time_budget(monkeypatch: pytest.MonkeyPat
     assert result.status is KernelStatus.TECHNICAL_FAILURE
     assert result.diagnostics.solver_status == "TIME_LIMIT"
     assert result.detail == "The overload policy exhausted its shared solve budget"
+
+
+def test_overload_policy_preparation_error() -> None:
+    from studyflow.scheduling.overload import _PolicyPreparationError
+
+    err = _PolicyPreparationError("MODEL_INVALID", "Validation error detail")
+    assert err.solver_status == "MODEL_INVALID"
+    assert str(err) == "Validation error detail"
+
+
+def test_overload_policy_preparation_error_handling(monkeypatch: pytest.MonkeyPatch) -> None:
+    from studyflow.scheduling.overload import _PolicyPreparationError
+
+    def mock_task_demands(*args: object, **kwargs: object) -> object:
+        raise _PolicyPreparationError("TIME_LIMIT", "prep timeout")
+
+    monkeypatch.setattr("studyflow.scheduling.overload._task_demands", mock_task_demands)
+    result = solve_with_overload(
+        overload_problem(
+            (demand("a", "task", 2, (0, 2)),),
+            planning_start_minute=0,
+        )
+    )
+    assert result.status is KernelStatus.TECHNICAL_FAILURE
+    assert result.diagnostics.solver_status == "TIME_LIMIT"
+    assert result.detail == "prep timeout"
+
+
+def test_overload_phase1_nonstandard_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "studyflow.scheduling.overload.cp_model.CpSolver.solve",
+        lambda _solver, _model: cp_model.MODEL_INVALID,
+    )
+    monkeypatch.setattr(
+        "studyflow.scheduling.overload.solver_diagnostics",
+        lambda _solver, _status: SolverDiagnostics("MODEL_INVALID", 0.0, 0, 0),
+    )
+
+    # 2 conflicting sessions with distinct durations bypass uniform allocation
+    # and force probe solver
+    result = solve_with_overload(
+        overload_problem(
+            (
+                demand("a", "task_a", 2, (0, 2)),
+                demand("b", "task_b", 1, (0, 2)),
+            ),
+            planning_start_minute=0,
+        )
+    )
+    assert result.status is KernelStatus.TECHNICAL_FAILURE
+    assert result.detail == "The solver stopped without a usable feasibility result"
+
+
+def test_overload_phase2_solver_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    solve_call_count = 0
+
+    def mock_solve(_solver: object, _model: object) -> int:
+        nonlocal solve_call_count
+        solve_call_count += 1
+        if solve_call_count == 1:
+            # Phase 1 probe: report infeasible so it proceeds to Phase 2 batch allocation
+            return int(cp_model.INFEASIBLE)
+        # Phase 2 allocation: raise exception
+        raise RuntimeError("allocation failure")
+
+    monkeypatch.setattr("studyflow.scheduling.overload.cp_model.CpSolver.solve", mock_solve)
+
+    result = solve_with_overload(
+        overload_problem(
+            (
+                demand("a", "task_a", 2, (0, 2)),
+                demand("b", "task_b", 1, (0, 2)),
+            ),
+            planning_start_minute=0,
+        )
+    )
+    assert result.status is KernelStatus.TECHNICAL_FAILURE
+    assert result.diagnostics.solver_status == "EXCEPTION"
+    assert result.detail == "allocation failure"
+
+
+def test_overload_placement_exceptions_and_budget_exhaustion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 1. Placement model validation failure (line 1991)
+    monkeypatch.setattr(
+        "studyflow.scheduling.overload.cp_model.CpModel.validate",
+        lambda _self: "Placement model invalid",
+    )
+    result = solve_with_overload(
+        overload_problem(
+            (
+                demand("a", "task_a", 2, (0, 10)),
+                demand("b", "task_b", 3, (0, 10)),
+            ),
+            planning_start_minute=0,
+        )
+    )
+    assert result.status is KernelStatus.TECHNICAL_FAILURE
+    assert result.diagnostics.solver_status == "MODEL_INVALID"
+    assert result.detail == "Placement model invalid"
+
+    # 2. Placement solve exception (lines 2023-2024)
+    monkeypatch.undo()
+
+    def mock_solve_placement(_solver: object, _model: object) -> int:
+        raise ValueError("placement solver crash")
+
+    monkeypatch.setattr(
+        "studyflow.scheduling.overload.cp_model.CpSolver.solve", mock_solve_placement
+    )
+    result2 = solve_with_overload(
+        overload_problem(
+            (
+                demand("a", "task_a", 2, (0, 10)),
+                demand("b", "task_b", 3, (0, 10)),
+            ),
+            planning_start_minute=0,
+        )
+    )
+    assert result2.status is KernelStatus.TECHNICAL_FAILURE
+    assert result2.diagnostics.solver_status == "EXCEPTION"
+    assert result2.detail == "placement solver crash"
+
+    # 3. Placement non-optimal status (line 2033)
+    monkeypatch.undo()
+    monkeypatch.setattr(
+        "studyflow.scheduling.overload.cp_model.CpSolver.solve",
+        lambda _solver, _model: cp_model.FEASIBLE,
+    )
+    monkeypatch.setattr(
+        "studyflow.scheduling.overload.solver_diagnostics",
+        lambda _solver, _status: SolverDiagnostics("FEASIBLE", 0.0, 0, 0),
+    )
+    result3 = solve_with_overload(
+        overload_problem(
+            (
+                demand("a", "task_a", 2, (0, 10)),
+                demand("b", "task_b", 3, (0, 10)),
+            ),
+            planning_start_minute=0,
+        )
+    )
+    assert result3.status is KernelStatus.TECHNICAL_FAILURE
+    assert "placement objective was not proven optimal" in str(result3.detail)
+
+    # 4. Placement solve budget exhaustion (line 2008)
+    monkeypatch.undo()
+    clock = [100.0]
+
+    def mock_monotonic() -> float:
+        clock[0] += 100.0
+        return clock[0]
+
+    monkeypatch.setattr("studyflow.scheduling.overload.monotonic", mock_monotonic)
+    result4 = solve_with_overload(
+        overload_problem(
+            (
+                demand("a", "task_a", 2, (0, 10)),
+                demand("b", "task_b", 3, (0, 10)),
+            ),
+            planning_start_minute=0,
+            max_solve_seconds=1.0,
+        )
+    )
+    assert result4.status is KernelStatus.TECHNICAL_FAILURE
+    assert result4.diagnostics.solver_status == "TIME_LIMIT"
+    assert "exhausted its shared solve budget" in str(result4.detail)
+
+
+def test_overload_break_credit_and_zero_break_capacity_branches() -> None:
+    from studyflow.scheduling.overload import (
+        _credit_options,
+        _has_zero_break_capacity,
+        _TaskInput,
+    )
+
+    # 1. _credit_options when start_minute is outside candidates (line 228)
+    options = _credit_options(
+        duration_minutes=10,
+        candidate_intervals=[[100, 200]],
+        scheduling_windows=((0, 50),),
+        availability_windows=((0, 50),),
+        minimum_break_minutes=5,
+    )
+    assert options == ()
+
+    # 2. _has_zero_break_capacity when durations <= 1 (line 279)
+    single_session_task = _TaskInput(
+        task_id="t1",
+        deadline_minute=100,
+        priority=TaskPriority.MEDIUM,
+        allowed_windows=(MinuteWindow(0, 100),),
+        sessions=(demand("s1", "t1", 30, (0, 100)),),
+        required_minutes=30,
+        calendar_capacity_minutes=100,
+    )
+    assert _has_zero_break_capacity(single_session_task, ((0, 100),), 10) is True
+
+    # 3. _has_zero_break_capacity when len(scheduling_windows) < len(durations) (line 281)
+    multi_session_task = _TaskInput(
+        task_id="t2",
+        deadline_minute=100,
+        priority=TaskPriority.MEDIUM,
+        allowed_windows=(MinuteWindow(0, 100),),
+        sessions=(
+            demand("s1", "t2", 30, (0, 100)),
+            demand("s2", "t2", 30, (0, 100)),
+        ),
+        required_minutes=60,
+        calendar_capacity_minutes=100,
+    )
+    assert _has_zero_break_capacity(multi_session_task, ((0, 100),), 10) is False

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, time, timedelta
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -435,3 +436,136 @@ def test_date_max_does_not_overflow_positive_offset_timezone() -> None:
 def test_rejects_invalid_calendar_inputs(call: object) -> None:
     with pytest.raises(ValueError):
         call()  # type: ignore[operator]
+
+
+def test_calendar_windows_and_planning_days_sequence_operations() -> None:
+    start = datetime(2026, 1, 5, tzinfo=UTC)
+    end = datetime(2026, 1, 12, tzinfo=UTC)
+    result = _run([AvailabilityWindowDraft(0, time(9), time(11))], start, end)
+
+    # 1. CalendarWindows equality with non-Sequence
+    assert result.windows != "not-a-sequence"
+
+    # 2. CalendarWindows slicing
+    sliced = result.windows[0:1]
+    assert len(sliced) == 1
+    assert isinstance(sliced, tuple)
+
+    # 3. CalendarWindows invalid index type
+    with pytest.raises(TypeError, match="window index must be an integer or slice"):
+        _ = result.windows[cast(Any, "bad")]
+
+    # 4. CalendarWindows out of range indices
+    with pytest.raises(IndexError, match="calendar window index out of range"):
+        _ = result.windows[100]
+    with pytest.raises(IndexError, match="calendar window index out of range"):
+        _ = result.windows[-100]
+
+    # 5. PlanningDays equality with non-Sequence
+    assert result.planning_days != "not-a-sequence"
+
+    # 6. PlanningDays slicing
+    days_slice = result.planning_days[0:2]
+    assert len(days_slice) == 2
+    assert isinstance(days_slice, tuple)
+
+    # 7. PlanningDays invalid index type
+    with pytest.raises(TypeError, match="planning day index must be an integer or slice"):
+        _ = result.planning_days[cast(Any, "bad")]
+
+    # 8. PlanningDays out of range indices
+    with pytest.raises(IndexError, match="planning day index out of range"):
+        _ = result.planning_days[100]
+    with pytest.raises(IndexError, match="planning day index out of range"):
+        _ = result.planning_days[-100]
+
+
+def test_calendar_zoned_windows_indexing_and_iteration() -> None:
+    start = datetime(2026, 1, 5, tzinfo=UTC)
+    end = datetime(2026, 1, 12, tzinfo=UTC)
+    result = _run(
+        [
+            AvailabilityWindowDraft(0, time(9), time(11)),
+            AvailabilityWindowDraft(0, time(13), time(15)),
+        ],
+        start,
+        end,
+        timezone_name="America/New_York",
+    )
+    assert len(result.windows) >= 1
+    first = result.windows[0]
+    assert isinstance(first, MinuteWindow)
+    if len(result.windows) > 1:
+        second = result.windows[1]
+        assert isinstance(second, MinuteWindow)
+    last = result.windows[-1]
+    assert isinstance(last, MinuteWindow)
+    with pytest.raises(IndexError, match="calendar window index out of range"):
+        _ = result.windows[999]
+
+
+def test_calendar_utc_boundary_empty_fragments_raises_index_error() -> None:
+    start = datetime(2026, 1, 5, tzinfo=UTC)
+    end = datetime(2026, 1, 12, tzinfo=UTC)
+    always_available = [AvailabilityWindowDraft(day, time(0), time(0)) for day in range(7)]
+    result = _run(
+        always_available,
+        start,
+        end,
+        unavailable=[UnavailablePeriodDraft(start, end)],
+    )
+    assert len(result.windows) == 0
+    with pytest.raises(IndexError, match="calendar window index out of range"):
+        _ = result.windows[0]
+
+
+def test_calendar_cross_midnight_at_date_max() -> None:
+    from zoneinfo import ZoneInfo
+
+    from studyflow.scheduling.calendar import _local_interval
+
+    interval = _local_interval(
+        date.max,
+        time(22),
+        time(2),
+        crosses_midnight=True,
+        zone=ZoneInfo("UTC"),
+    )
+    assert interval is not None
+    assert interval[1] == datetime.max.replace(tzinfo=UTC)
+
+
+def test_calendar_input_validation_edge_cases() -> None:
+    from studyflow.scheduling.calendar import _merge_intervals
+
+    # _merge_intervals with end <= start
+    merged = _merge_intervals([(10, 10), (10, 5), (0, 10), (5, 15)])
+    assert merged == [(0, 15)]
+
+    # crosses_midnight non-boolean
+    class BadWindow:
+        weekday = 0
+        start_time = time(9)
+        end_time = time(10)
+        crosses_midnight = "not-a-bool"
+
+    with pytest.raises(ValueError, match="crosses_midnight must be a boolean"):
+        _run(
+            [cast(Any, BadWindow())],
+            datetime(2026, 1, 5, tzinfo=UTC),
+            datetime(2026, 1, 6, tzinfo=UTC),
+        )
+
+    # unavailable period ends_at <= starts_at
+    with pytest.raises(ValueError, match="Unavailable period ends_at must be after starts_at"):
+        _run(
+            [],
+            datetime(2026, 1, 5, tzinfo=UTC),
+            datetime(2026, 1, 6, tzinfo=UTC),
+            unavailable=[
+                UnavailablePeriodDraft(
+                    datetime(2026, 1, 5, 12, tzinfo=UTC),
+                    datetime(2026, 1, 5, 12, tzinfo=UTC),
+                )
+            ],
+        )
