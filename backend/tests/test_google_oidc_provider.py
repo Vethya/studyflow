@@ -284,3 +284,25 @@ async def test_google_provider_decode_id_token_and_exchange_edge_cases() -> None
         provider = GoogleOIDCProvider(client, "client-id", "client-secret", "https://app/callback")
         with pytest.raises(InvalidOIDCResponseError):
             await provider.exchange("code", nonce_hash)
+
+
+@pytest.mark.anyio
+async def test_google_provider_rejects_non_rsa_public_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token, jwk, nonce = signed_google_token()
+    nonce_hash = hashlib.sha256(nonce.encode()).hexdigest()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/token"):
+            return httpx.Response(200, json={"id_token": token})
+        return httpx.Response(200, json={"keys": [jwk]})
+
+    monkeypatch.setattr(
+        "studyflow.auth.oidc.RSAAlgorithm.from_jwk",
+        lambda _jwk: "not-an-rsa-public-key",
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = GoogleOIDCProvider(client, "client-id", "client-secret", "https://app/callback")
+        with pytest.raises(InvalidOIDCResponseError):
+            await provider.exchange("code", nonce_hash)

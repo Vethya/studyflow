@@ -59,7 +59,18 @@ async def test_upstream_timeout_is_not_treated_as_a_safe_password() -> None:
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("body", ["", "not-a-range-response", "A" * 35 + ":unknown"])
+@pytest.mark.parametrize(
+    "body",
+    [
+        "",
+        "not-a-range-response",
+        "A" * 35 + ":unknown",
+        "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ:1",
+        "A" * 35 + ":-1",
+        "A" * 34 + ":1",
+        "A" * 36 + ":1",
+    ],
+)
 async def test_malformed_upstream_response_is_not_treated_as_safe(body: str) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text=body, request=request)

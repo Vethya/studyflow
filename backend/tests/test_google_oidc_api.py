@@ -4,14 +4,21 @@ from uuid import UUID
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from studyflow.api.auth import (
+    _accepted_quality,
+    _wants_html,
+    handle_google_callback_validation_error,
+)
 from studyflow.app import create_app
 from studyflow.auth.oidc import (
     AccountLinkRequiredError,
     InvalidOIDCResponseError,
     OIDCLoginResult,
+    OIDCNotConfiguredError,
     OIDCProviderUnavailableError,
     OIDCStart,
 )
+from studyflow.auth.rate_limits import OIDCStartRateLimitExceeded
 
 
 @dataclass
@@ -287,3 +294,74 @@ async def test_google_oidc_browser_provider_outage_redirects_and_clears_callback
     )
     assert response.headers["retry-after"] == "60"
     assert "studyflow_oidc_state=" in response.headers["set-cookie"]
+
+
+def test_wants_html_and_accepted_quality_edge_cases() -> None:
+    from starlette.requests import Request
+
+    scope = {"type": "http", "headers": []}
+    req_no_accept = Request(scope)
+    assert _wants_html(req_no_accept) is False
+
+    accept = "invalid, text/html;charset=utf-8;q=notafloat, text/*;q=0.5, text/html;q=0.9"
+    assert _accepted_quality(accept, "text/html") == 0.9
+
+
+@pytest.mark.anyio
+async def test_handle_google_callback_validation_error_reraises_non_validation_error() -> None:
+    from starlette.requests import Request
+
+    req = Request({"type": "http", "path": "/api/v1/auth/google/callback", "headers": []})
+    with pytest.raises(RuntimeError, match="other error"):
+        await handle_google_callback_validation_error(req, RuntimeError("other error"))
+
+
+@pytest.mark.anyio
+async def test_start_google_oidc_validation_and_errors() -> None:
+    # 1. Invalid timezone -> 422 (line 360)
+    app = create_app(oidc_login=OIDCStub(), oidc_start_rate_limiter=RateLimitStub())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
+        res = await client.get("/api/v1/auth/google/start?timezone=Invalid/Zone")
+        assert res.status_code == 422
+        assert "Timezone must be a valid IANA timezone" in res.text
+
+    # 2. Rate limit exceeded -> 429 (lines 364-369)
+    class ExceededStartRateLimitStub:
+        async def check(self, client_ip: str) -> None:
+            raise OIDCStartRateLimitExceeded()
+
+    app2 = create_app(oidc_login=OIDCStub(), oidc_start_rate_limiter=ExceededStartRateLimitStub())
+    async with AsyncClient(transport=ASGITransport(app=app2), base_url="https://test") as client:
+        res2 = await client.get("/api/v1/auth/google/start?timezone=UTC")
+        assert res2.status_code == 429
+        assert "Too many Google sign-in attempts" in res2.text
+
+    # 3. Not configured -> 503 (lines 370-371, 435-440)
+    class NotConfiguredOIDCStub:
+        async def start(self, timezone: str) -> OIDCStart:
+            raise OIDCNotConfiguredError()
+
+        async def complete(self, *args: object, **kwargs: object) -> OIDCLoginResult:
+            raise OIDCNotConfiguredError()
+
+    app3 = create_app(oidc_login=NotConfiguredOIDCStub(), oidc_start_rate_limiter=RateLimitStub())
+    async with AsyncClient(transport=ASGITransport(app=app3), base_url="https://test") as client:
+        res3 = await client.get("/api/v1/auth/google/start?timezone=UTC")
+        assert res3.status_code == 503
+        assert "Google sign-in is not configured" in res3.text
+
+        # Callback NotConfigured JSON -> 503
+        client.cookies.set("studyflow_oidc_state", "validstate1234567890")
+        res4 = await client.get(
+            "/api/v1/auth/google/callback?code=validcode&state=validstate1234567890"
+        )
+        assert res4.status_code == 503
+        assert "Google sign-in is not configured" in res4.text
+
+        # Callback NotConfigured HTML -> 303 redirect
+        res5 = await client.get(
+            "/api/v1/auth/google/callback?code=validcode&state=validstate1234567890",
+            headers={"Accept": "text/html"},
+        )
+        assert res5.status_code == 303
+        assert res5.headers["location"] == "http://localhost:5173/login/google-error/not-configured"

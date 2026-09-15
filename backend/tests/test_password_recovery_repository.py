@@ -134,3 +134,29 @@ async def test_password_reset_tokens_expire_and_replacement_invalidates_prior_to
         )
     finally:
         await database.stop()
+
+
+@pytest.mark.anyio
+async def test_password_reset_orphaned_token_returns_false() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    now = datetime.now(UTC)
+    missing_account_id = uuid4()
+    token_hash = hash_verification_token("orphaned-reset-token")
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            session.add(
+                AuthenticationEmailToken(
+                    account_id=missing_account_id,
+                    purpose="password_reset",
+                    token_hash=token_hash,
+                    expires_at=now + timedelta(hours=1),
+                )
+            )
+        repository = SqlAlchemyPasswordRecoveryRepository(database)
+        assert not await repository.reset_password(token_hash, "$argon2id$new-hash", now)
+    finally:
+        await database.stop()

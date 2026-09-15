@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.registration import (
     PendingRegistration,
@@ -471,3 +472,139 @@ async def test_complete_re_raises_integrity_error_when_account_missing(
             await repository.complete(completion, now)
     finally:
         await db.stop()
+
+
+@pytest.mark.anyio
+async def test_registration_create_and_complete_edge_cases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    db = await database()
+    now = datetime.now(UTC)
+    repository = SqlAlchemyRegistrationRepository(db)
+    try:
+        # 1. create returns False if verified account already exists (line 64)
+        async with db.transaction() as session:
+            session.add(
+                StudentAccount(
+                    email="verified@example.com",
+                    name="Verified Student",
+                    password_hash="$argon2id$hash",
+                    timezone="UTC",
+                    email_verified_at=now,
+                )
+            )
+        assert (
+            await repository.begin(
+                PendingRegistration(
+                    email="verified@example.com",
+                    verification_token_hash=hash_verification_token("tok1"),
+                    verification_expires_at=now + timedelta(hours=8),
+                    requested_at=now,
+                )
+            )
+            is False
+        )
+
+        # 2. complete returns False if registration is None (line 163)
+        completion = RegistrationCompletion(
+            signup_token_hash=hash_verification_token("nonexistent-token"),
+            name="Student",
+            password_hash="$argon2id$hash",
+            timezone="UTC",
+        )
+        assert await repository.complete(completion, now) is False
+
+        # 3. complete with existing unverified account updates it (lines 193->196)
+        async with db.transaction() as session:
+            session.add(
+                StudentAccount(
+                    email="unverified@example.com",
+                    name="Old Name",
+                    password_hash="$argon2id$old",
+                    timezone="UTC",
+                    email_verified_at=None,
+                )
+            )
+        await repository.begin(
+            PendingRegistration(
+                email="unverified@example.com",
+                verification_token_hash=hash_verification_token("unverified-email-tok"),
+                verification_expires_at=now + timedelta(hours=8),
+                requested_at=now,
+            )
+        )
+        verification = EmailVerificationService(
+            SqlAlchemyEmailVerificationRepository(db),
+            token_factory=lambda: "unverified-signup-tok",
+            clock=lambda: now,
+        )
+        await verification.verify("unverified-email-tok")
+        unverified_completion = RegistrationCompletion(
+            signup_token_hash=hash_verification_token("unverified-signup-tok"),
+            name="New Name",
+            password_hash="$argon2id$new",
+            timezone="America/New_York",
+        )
+        assert await repository.complete(unverified_completion, now) is True
+
+        # 4. Fallback transaction branches on IntegrityError (lines 75-100)
+        # Test line 97: IntegrityError re-raised when registration is None in fallback
+        orig_tx = db.transaction
+        call_count = 0
+
+        @asynccontextmanager
+        async def failing_first_tx() -> AsyncIterator[AsyncSession]:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise IntegrityError("first_tx", {}, Exception("constraint"))
+            async with orig_tx() as session:
+                yield session
+
+        monkeypatch.setattr(db, "transaction", failing_first_tx)
+        with pytest.raises(IntegrityError):
+            await repository.begin(
+                PendingRegistration(
+                    email="missing-reg@example.com",
+                    verification_token_hash=hash_verification_token("tok-missing"),
+                    verification_expires_at=now + timedelta(hours=8),
+                    requested_at=now,
+                )
+            )
+
+        # Test line 83/95: returns False when verified account exists in fallback
+        call_count = 0
+        assert (
+            await repository.begin(
+                PendingRegistration(
+                    email="verified@example.com",
+                    verification_token_hash=hash_verification_token("tok-ver"),
+                    verification_expires_at=now + timedelta(hours=8),
+                    requested_at=now,
+                )
+            )
+            is False
+        )
+    finally:
+        await db.stop()
+
+
+def test_rotate_pending_handles_naive_signup_expires_at() -> None:
+    now = datetime.now(UTC)
+    reg = AuthenticationRegistration(
+        email="test@example.com",
+        verification_token_hash="hash",
+        verification_expires_at=now,
+        verified_at=now - timedelta(minutes=5),
+        signup_token_hash="signup-hash",
+        signup_expires_at=datetime(2026, 7, 28, 12, 0, 0),  # naive
+    )
+    pending = PendingRegistration(
+        email="test@example.com",
+        verification_token_hash="new-hash",
+        verification_expires_at=now + timedelta(hours=8),
+        requested_at=datetime(2026, 7, 28, 11, 0, 0, tzinfo=UTC),
+    )
+    assert SqlAlchemyRegistrationRepository._rotate_pending(reg, pending) is False

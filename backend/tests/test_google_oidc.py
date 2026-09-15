@@ -176,6 +176,30 @@ async def test_google_oidc_marks_outage_nonretryable_when_state_cannot_be_restor
 
 
 @pytest.mark.anyio
+async def test_google_oidc_nonretryable_outage_does_not_restore_state() -> None:
+    class NonRetryableProviderStub(ProviderStub):
+        async def exchange(self, code: str, expected_nonce_hash: str) -> GoogleClaims:
+            raise OIDCProviderUnavailableError(retry_same_callback=False)
+
+    repository = RepositoryStub()
+    service = OIDCLoginService(
+        repository,
+        NonRetryableProviderStub(),
+        SessionsStub(),
+        client_id="client-id",
+        redirect_uri="https://studyflow.example/api/v1/auth/google/callback",
+        token_factory=iter(["state-secret", "nonce-secret"]).__next__,
+    )
+    started = await service.start("Asia/Phnom_Penh")
+
+    with pytest.raises(OIDCProviderUnavailableError) as raised:
+        await service.complete("authorization-code", started.state, started.state)
+
+    assert raised.value.retry_same_callback is False
+    assert repository.restored == 0
+
+
+@pytest.mark.anyio
 async def test_unconfigured_oidc_login_raises_error() -> None:
     service = UnconfiguredOIDCLogin()
     with pytest.raises(OIDCNotConfiguredError):
