@@ -12,6 +12,7 @@ import { ApiError, auth } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
 import { detectTimezone } from "@/lib/timezones";
 import { useSession } from "@/hooks/use-session";
+import { GuestOnly } from "@/components/auth/guest-only";
 
 const GoogleIcon = () => (
   <svg className="h-4 w-4" viewBox="0 0 48 48" aria-hidden="true">
@@ -26,15 +27,17 @@ const GoogleIcon = () => (
 // component behind a boundary.
 export default function LoginPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex justify-center py-16">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-        </div>
-      }
-    >
-      <LoginForm />
-    </Suspense>
+    <GuestOnly>
+      <Suspense
+        fallback={
+          <div className="flex justify-center py-16">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        }
+      >
+        <LoginForm />
+      </Suspense>
+    </GuestOnly>
   );
 }
 

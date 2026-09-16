@@ -7,6 +7,7 @@ import { Calendar, BarChart3, Clock, Sparkles, BookOpen, Target, GraduationCap, 
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { ScrollTrigger } from "gsap/dist/ScrollTrigger";
+import { useSession } from "@/hooks/use-session";
 
 if (typeof window !== "undefined") {
   gsap.registerPlugin(ScrollTrigger, useGSAP);
@@ -85,6 +86,7 @@ function FloatingElements() {
 /* ─── Navigation (transparent over gradient) ─── */
 function Navigation() {
   const navRef = useRef(null);
+  const { status } = useSession();
 
   useGSAP(() => {
     gsap.from(navRef.current, {
@@ -124,14 +126,26 @@ function Navigation() {
 
         {/* Right auth */}
         <div className="flex items-center gap-4">
-          <Link href="/login" className="text-[14px] font-medium tracking-[-0.01em] text-white hover:text-white/80 transition-colors">
-            Login
-          </Link>
-          <Link href="/register">
-            <button className="px-5 py-2 rounded-full bg-white text-[#070709] text-[14px] font-medium tracking-[-0.01em] hover:bg-white/90 transition-colors shadow-[rgba(36,36,40,0.1)_0px_1px_2px_0px]">
-              Sign up
-            </button>
-          </Link>
+          {status === "authenticated" ? (
+            <Link href="/dashboard">
+              <button className="px-5 py-2 rounded-full bg-white text-[#070709] text-[14px] font-medium tracking-[-0.01em] hover:bg-white/90 transition-colors shadow-[rgba(36,36,40,0.1)_0px_1px_2px_0px]">
+                Open dashboard
+              </button>
+            </Link>
+          ) : status === "loading" ? (
+            <div aria-hidden className="h-9 w-28" />
+          ) : (
+            <>
+              <Link href="/login" className="text-[14px] font-medium tracking-[-0.01em] text-white hover:text-white/80 transition-colors">
+                Login
+              </Link>
+              <Link href="/register">
+                <button className="px-5 py-2 rounded-full bg-white text-[#070709] text-[14px] font-medium tracking-[-0.01em] hover:bg-white/90 transition-colors shadow-[rgba(36,36,40,0.1)_0px_1px_2px_0px]">
+                  Sign up
+                </button>
+              </Link>
+            </>
+          )}
         </div>
       </div>
     </nav>

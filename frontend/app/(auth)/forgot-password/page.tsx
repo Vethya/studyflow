@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle, ArrowLeft, Send, CheckCircle2, Loader2 } from "lucide-react";
 import { ApiError, auth } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
+import { GuestOnly } from "@/components/auth/guest-only";
 
 export default function ForgotPasswordPage() {
   const [submitted, setSubmitted] = useState(false);
@@ -38,7 +39,8 @@ export default function ForgotPasswordPage() {
 
   if (submitted) {
     return (
-      <div className="space-y-6">
+      <GuestOnly redirectTo="/settings">
+        <div className="space-y-6">
         <div className="flex flex-col items-center text-center space-y-4 py-6">
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-surplus-soft">
             <CheckCircle2 className="h-7 w-7 text-surplus" />
@@ -64,12 +66,14 @@ export default function ForgotPasswordPage() {
           <ArrowLeft className="h-3.5 w-3.5" />
           Back to sign in
         </Link>
-      </div>
+        </div>
+      </GuestOnly>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <GuestOnly redirectTo="/settings">
+      <div className="space-y-6">
       <div className="space-y-1">
         <h1 className="text-2xl font-bold tracking-tight">Set or reset password</h1>
         <p className="text-sm text-muted-foreground">
@@ -116,6 +120,7 @@ export default function ForgotPasswordPage() {
         <ArrowLeft className="h-3.5 w-3.5" />
         Back to sign in
       </Link>
-    </div>
+      </div>
+    </GuestOnly>
   );
 }

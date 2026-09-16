@@ -10,6 +10,7 @@ import { AlertCircle, ArrowLeft, CheckCircle2, Loader2 } from "lucide-react";
 import { ApiError, auth } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
 import { detectTimezone } from "@/lib/timezones";
+import { GuestOnly } from "@/components/auth/guest-only";
 
 const GoogleIcon = () => (
   <svg className="h-4 w-4" viewBox="0 0 48 48" aria-hidden="true">
@@ -64,7 +65,8 @@ export default function RegisterPage() {
 
   if (sent) {
     return (
-      <div className="space-y-6">
+      <GuestOnly>
+        <div className="space-y-6">
         <div className="flex flex-col items-center text-center space-y-4 py-6">
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-surplus-soft">
             <CheckCircle2 className="h-7 w-7 text-surplus" />
@@ -89,14 +91,16 @@ export default function RegisterPage() {
           <ArrowLeft className="h-3.5 w-3.5" />
           Back to sign in
         </Link>
-      </div>
+        </div>
+      </GuestOnly>
     );
   }
 
   const isBusy = isSubmitting || isRedirecting;
 
   return (
-    <div className="space-y-6">
+    <GuestOnly>
+      <div className="space-y-6">
       <div className="space-y-1">
         <h1 className="text-2xl font-bold tracking-tight">Create your account</h1>
         <p className="text-sm text-muted-foreground">
@@ -169,6 +173,7 @@ export default function RegisterPage() {
           Sign in
         </Link>
       </p>
-    </div>
+      </div>
+    </GuestOnly>
   );
 }
