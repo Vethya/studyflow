@@ -5,7 +5,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient, ConnectError, Request
 
 from studyflow.app import create_app
-from studyflow.auth.passwords import BreachedPasswordError
+from studyflow.auth.passwords import KNOWN_BREACH_MESSAGE, BreachedPasswordError
 from studyflow.auth.rate_limits import (
     RegistrationCompletionRateLimitExceeded,
     RegistrationRateLimitExceeded,
@@ -163,14 +163,14 @@ async def test_completion_rate_limit_runs_before_service() -> None:
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
-    ("error", "status_code"),
+    ("error", "status_code", "expected_detail"),
     [
-        (BreachedPasswordError("internal"), 422),
-        (ConnectError("down", request=Request("GET", "https://example.test")), 503),
+        (BreachedPasswordError("internal"), 422, KNOWN_BREACH_MESSAGE),
+        (ConnectError("down", request=Request("GET", "https://example.test")), 503, None),
     ],
 )
 async def test_completion_handles_password_safety_failures(
-    error: Exception, status_code: int
+    error: Exception, status_code: int, expected_detail: str | None
 ) -> None:
     registration = RegistrationStub(error=error)
     async with AsyncClient(
@@ -186,6 +186,8 @@ async def test_completion_handles_password_safety_failures(
             },
         )
     assert response.status_code == status_code
+    if expected_detail is not None:
+        assert response.json()["detail"] == expected_detail
 
 
 @pytest.mark.anyio

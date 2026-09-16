@@ -12,7 +12,11 @@ from studyflow.accounts.preferences import AccountPreferences, StudyPreferences
 from studyflow.accounts.profile import AccountProfile, AccountProfiles
 from studyflow.auth.cookies import CookiePolicy
 from studyflow.auth.oidc import OIDCAccountLinking
-from studyflow.auth.passwords import PasswordPolicyError
+from studyflow.auth.passwords import (
+    KNOWN_BREACH_MESSAGE,
+    BreachedPasswordError,
+    PasswordPolicyError,
+)
 from studyflow.auth.rate_limits import (
     AccountPasswordChangeRateLimit,
     AccountPasswordChangeRateLimitExceeded,
@@ -294,6 +298,11 @@ async def change_password(
     except InvalidCurrentPasswordError as error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect"
+        ) from error
+    except BreachedPasswordError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=KNOWN_BREACH_MESSAGE,
         ) from error
     except PasswordPolicyError as error:
         raise HTTPException(

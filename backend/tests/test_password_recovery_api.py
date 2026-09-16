@@ -5,7 +5,11 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from studyflow.app import create_app
-from studyflow.auth.passwords import PasswordPolicyError
+from studyflow.auth.passwords import (
+    KNOWN_BREACH_MESSAGE,
+    BreachedPasswordError,
+    PasswordPolicyError,
+)
 from studyflow.auth.rate_limits import (
     PasswordResetAttemptRateLimitExceeded,
     PasswordResetRequestRateLimitExceeded,
@@ -20,6 +24,7 @@ class PasswordRecoveryStub:
     resets: list[tuple[str, str]] = field(default_factory=list)
     invalid: bool = False
     policy_failure: bool = False
+    breached_password: bool = False
     unavailable: bool = False
 
     async def request_reset(self, email: str, deferred_tasks: DeferredTasks) -> None:
@@ -31,6 +36,8 @@ class PasswordRecoveryStub:
             raise InvalidPasswordResetTokenError
         if self.policy_failure:
             raise PasswordPolicyError
+        if self.breached_password:
+            raise BreachedPasswordError("internal")
         if self.unavailable:
             raise httpx.ConnectError("unavailable")
 
@@ -82,6 +89,24 @@ async def test_password_reset_rejects_invalid_token_and_accepts_valid_token() ->
 
     assert invalid.status_code == 400
     assert valid.status_code == 204
+
+
+@pytest.mark.anyio
+async def test_password_reset_reports_breached_password() -> None:
+    recovery = PasswordRecoveryStub(breached_password=True)
+    app = create_app(
+        password_recovery=recovery,
+        password_reset_request_rate_limiter=RateLimitStub(),
+        password_reset_attempt_rate_limiter=RateLimitStub(),
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
+        response = await client.post(
+            "/api/v1/auth/reset-password",
+            json={"token": "single-use-password-reset-token", "password": "a-new-secure-password"},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == KNOWN_BREACH_MESSAGE
 
 
 @pytest.mark.anyio

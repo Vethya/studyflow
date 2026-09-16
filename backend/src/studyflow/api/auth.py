@@ -37,7 +37,11 @@ from studyflow.auth.oidc import (
     OIDCNotConfiguredError,
     OIDCProviderUnavailableError,
 )
-from studyflow.auth.passwords import PasswordPolicyError
+from studyflow.auth.passwords import (
+    KNOWN_BREACH_MESSAGE,
+    BreachedPasswordError,
+    PasswordPolicyError,
+)
 from studyflow.auth.rate_limits import (
     EmailVerificationRateLimit,
     EmailVerificationRateLimitExceeded,
@@ -628,6 +632,11 @@ async def reset_password(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Password reset token is invalid or expired",
         ) from error
+    except BreachedPasswordError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=KNOWN_BREACH_MESSAGE,
+        ) from error
     except PasswordPolicyError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -875,6 +884,11 @@ async def complete_registration(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many registration completion attempts",
             headers={"Retry-After": "900"},
+        ) from error
+    except BreachedPasswordError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=KNOWN_BREACH_MESSAGE,
         ) from error
     except PasswordPolicyError as error:
         raise HTTPException(
