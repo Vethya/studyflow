@@ -94,8 +94,8 @@ export function forgotPassword(email: string): Promise<WireAuthenticationMessage
 export function resetPassword(
   token: string,
   password: string,
-): Promise<WireAuthenticationMessage> {
-  return apiJson<WireAuthenticationMessage>("/auth/reset-password", {
+): Promise<void> {
+  return apiVoid("/auth/reset-password", {
     method: "POST",
     body: { token, password },
     csrf: false,

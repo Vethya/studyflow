@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Callout } from "@/components/ui/callout";
 import { PageHeader, PageShell } from "@/components/page-kit";
 import {
+  AddPasswordDialog,
   ChangeNameDialog,
   ChangePasswordDialog,
   ChangeTimezoneDialog,
@@ -58,6 +59,7 @@ export default function SettingsPage() {
   const identities = useApi(loadIdentities);
 
   const [nameOpen, setNameOpen] = useState(false);
+  const [addPasswordOpen, setAddPasswordOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [timezoneOpen, setTimezoneOpen] = useState(false);
 
@@ -96,12 +98,24 @@ export default function SettingsPage() {
         )}
       </Section>
 
-      <Section icon={ShieldCheck} title="Signing in">
-        <Row label="Password" value="Last changed when you set it">
-          <Button variant="outline" size="sm" onClick={() => setPasswordOpen(true)}>
-            Change
-          </Button>
-        </Row>
+      <Section icon={ShieldCheck} title="Sign-in methods">
+        {profile.isLoading ? (
+          <RowSkeleton rows={1} />
+        ) : profile.data ? (
+          <Row label="Password" value={profile.data.password_set ? "Added" : "Not added"}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                profile.data?.password_set
+                  ? setPasswordOpen(true)
+                  : setAddPasswordOpen(true)
+              }
+            >
+              {profile.data.password_set ? "Change password" : "Add password"}
+            </Button>
+          </Row>
+        ) : null}
 
         {identities.isLoading ? (
           <RowSkeleton rows={1} />
@@ -193,6 +207,13 @@ export default function SettingsPage() {
         onOpenChange={setNameOpen}
         currentName={profile.data?.name ?? ""}
         onSaved={(next) => profile.setData(next)}
+      />
+      <AddPasswordDialog
+        open={addPasswordOpen}
+        onOpenChange={setAddPasswordOpen}
+        onSaved={() => {
+          if (profile.data) profile.setData({ ...profile.data, password_set: true });
+        }}
       />
       <ChangePasswordDialog open={passwordOpen} onOpenChange={setPasswordOpen} />
       <ChangeTimezoneDialog

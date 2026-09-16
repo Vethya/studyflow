@@ -38,7 +38,12 @@ class SqlAlchemyAccountProfileRepository:
 
     @staticmethod
     def _to_profile(account: StudentAccount) -> AccountProfile:
-        return AccountProfile(account.id, account.email, account.name)
+        return AccountProfile(
+            account.id,
+            account.email,
+            account.name,
+            password_set=account.password_hash is not None,
+        )
 
 
 class SqlAlchemyStudyPreferencesRepository:
@@ -94,16 +99,19 @@ class SqlAlchemyPasswordChangeRepository:
     async def replace_password(
         self,
         account_id: UUID,
-        expected_password_hash: str,
+        expected_password_hash: str | None,
         new_password_hash: str,
         now: datetime,
     ) -> bool:
         async with self._database.transaction() as session:
             account = await session.get(StudentAccount, account_id, with_for_update=True)
-            if (
-                account is None
-                or account.password_hash is None
-                or not hmac.compare_digest(account.password_hash, expected_password_hash)
+            if account is None:
+                return False
+            if expected_password_hash is None:
+                if account.password_hash is not None:
+                    return False
+            elif account.password_hash is None or not hmac.compare_digest(
+                account.password_hash, expected_password_hash
             ):
                 return False
             account.password_hash = new_password_hash

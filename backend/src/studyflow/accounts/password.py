@@ -1,4 +1,4 @@
-"""Authenticated password-change boundary."""
+"""Authenticated password set/change boundary."""
 
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -7,7 +7,7 @@ from uuid import UUID
 
 
 class InvalidCurrentPasswordError(ValueError):
-    """Raised when an account has no password or its current password is wrong."""
+    """Raised when an existing password is missing or incorrect."""
 
 
 class PasswordChangeRepository(Protocol):
@@ -16,7 +16,7 @@ class PasswordChangeRepository(Protocol):
     async def replace_password(
         self,
         account_id: UUID,
-        expected_password_hash: str,
+        expected_password_hash: str | None,
         new_password_hash: str,
         now: datetime,
     ) -> bool: ...
@@ -29,7 +29,9 @@ class PasswordOperations(Protocol):
 
 
 class AccountPasswords(Protocol):
-    async def change(self, account_id: UUID, current_password: str, new_password: str) -> None: ...
+    async def change(
+        self, account_id: UUID, current_password: str | None, new_password: str
+    ) -> None: ...
 
 
 class PasswordChangeService:
@@ -43,9 +45,14 @@ class PasswordChangeService:
         self._passwords = passwords
         self._clock = clock
 
-    async def change(self, account_id: UUID, current_password: str, new_password: str) -> None:
+    async def change(
+        self, account_id: UUID, current_password: str | None, new_password: str
+    ) -> None:
         current_hash = await self._repository.get_password_hash(account_id)
-        if current_hash is None or not await self._passwords.verify_password(
+        if current_hash is None:
+            if current_password is not None:
+                raise InvalidCurrentPasswordError
+        elif current_password is None or not await self._passwords.verify_password(
             current_password, current_hash
         ):
             raise InvalidCurrentPasswordError

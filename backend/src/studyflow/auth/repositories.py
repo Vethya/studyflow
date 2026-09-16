@@ -380,11 +380,7 @@ class SqlAlchemyPasswordRecoveryRepository:
             account = await session.scalar(
                 select(StudentAccount).where(StudentAccount.email == email).with_for_update()
             )
-            if (
-                account is None
-                or account.email_verified_at is None
-                or account.password_hash is None
-            ):
+            if account is None or account.email_verified_at is None:
                 return False
             await session.execute(
                 delete(AuthenticationEmailToken).where(

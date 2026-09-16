@@ -27,6 +27,7 @@ class AccountProfileResponse(BaseModel):
     id: str
     email: EmailStr
     name: str
+    password_set: bool
 
 
 class AccountProfileUpdate(BaseModel):
@@ -66,7 +67,7 @@ class StudyPreferencesUpdate(BaseModel):
 
 
 class PasswordChangeRequest(BaseModel):
-    current_password: Annotated[str, Field(min_length=1, max_length=128)]
+    current_password: Annotated[str | None, Field(min_length=1, max_length=128)] = None
     new_password: Annotated[str, Field(min_length=12, max_length=128)]
 
 
@@ -137,7 +138,12 @@ async def require_csrf_session(
 
 
 def _response(profile: AccountProfile) -> AccountProfileResponse:
-    return AccountProfileResponse(id=str(profile.id), email=profile.email, name=profile.name)
+    return AccountProfileResponse(
+        id=str(profile.id),
+        email=profile.email,
+        name=profile.name,
+        password_set=profile.password_set,
+    )
 
 
 def _preferences_response(preferences: StudyPreferences) -> StudyPreferencesResponse:

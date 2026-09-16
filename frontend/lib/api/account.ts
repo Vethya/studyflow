@@ -54,3 +54,10 @@ export function changePassword(currentPassword: string, newPassword: string): Pr
     body: { current_password: currentPassword, new_password: newPassword },
   });
 }
+
+export function setPassword(newPassword: string): Promise<void> {
+  return apiVoid("/account/password", {
+    method: "PATCH",
+    body: { new_password: newPassword },
+  });
+}

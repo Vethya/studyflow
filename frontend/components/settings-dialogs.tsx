@@ -37,6 +37,112 @@ import type { WireAccountProfile, WireStudyPreferences } from "@/lib/api/wire";
  * timezone change moves every displayed deadline — both deserve a deliberate
  * moment rather than a field that saves as you leave it.
  */
+export function AddPasswordDialog({
+  open,
+  onOpenChange,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSaved: () => void;
+}) {
+  const [next, setNext] = React.useState("");
+  const [confirm, setConfirm] = React.useState("");
+  const [isSaving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const [wasOpen, setWasOpen] = React.useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setNext("");
+      setConfirm("");
+      setError(null);
+    }
+  }
+
+  const tooShort = next.length > 0 && next.length < 12;
+  const mismatch = confirm.length > 0 && confirm !== next;
+  const canSave = next.length >= 12 && confirm === next && !isSaving;
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      await accountApi.setPassword(next);
+      onSaved();
+      toast.success("Password added");
+      onOpenChange(false);
+    } catch (cause) {
+      setError(describeError(cause));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add a password</DialogTitle>
+          <DialogDescription>
+            You currently sign in with Google. Add a password so you can also sign in with your
+            email.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          {error && <Callout tone="danger">{error}</Callout>}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="add-password-new" className="eyebrow">
+              New password
+            </Label>
+            <Input
+              id="add-password-new"
+              type="password"
+              autoComplete="new-password"
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+              aria-invalid={tooShort || undefined}
+            />
+            {tooShort && (
+              <p className="text-xs text-deficit">
+                {12 - next.length} more {12 - next.length === 1 ? "character" : "characters"} needed.
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="add-password-confirm" className="eyebrow">
+              Repeat new password
+            </Label>
+            <Input
+              id="add-password-confirm"
+              type="password"
+              autoComplete="new-password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              aria-invalid={mismatch || undefined}
+            />
+            {mismatch && <p className="text-xs text-deficit">These do not match.</p>}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isSaving}>
+            Cancel
+          </Button>
+          <Button onClick={() => void save()} disabled={!canSave}>
+            {isSaving && <Loader2 className="animate-spin" />}
+            Add password
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function ChangePasswordDialog({
   open,
   onOpenChange,

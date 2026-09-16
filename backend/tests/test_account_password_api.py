@@ -28,9 +28,11 @@ class AuthenticationStub:
 @dataclass
 class PasswordChangeStub:
     failure: Exception | None = None
-    calls: list[tuple[UUID, str, str]] = field(default_factory=list)
+    calls: list[tuple[UUID, str | None, str]] = field(default_factory=list)
 
-    async def change(self, account_id: UUID, current_password: str, new_password: str) -> None:
+    async def change(
+        self, account_id: UUID, current_password: str | None, new_password: str
+    ) -> None:
         self.calls.append((account_id, current_password, new_password))
         if self.failure is not None:
             raise self.failure
@@ -115,3 +117,29 @@ async def test_password_change_rate_limit_returns_retry_after() -> None:
     assert response.status_code == 429
     assert response.headers["retry-after"] == "900"
     assert passwords.calls == []
+
+
+@pytest.mark.anyio
+async def test_password_can_be_set_without_current_password() -> None:
+    account_id = UUID("5b15bfef-8c44-45d5-a70e-574beb999fb3")
+    passwords = PasswordChangeStub()
+    app = create_app(
+        session_authentication=AuthenticationStub(
+            SessionPrincipal(account_id, "student@example.com", "Student")
+        ),
+        account_passwords=passwords,
+        account_password_change_rate_limiter=RateLimitStub(),
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://test",
+        cookies={"studyflow_session": "session-token"},
+    ) as client:
+        response = await client.patch(
+            "/api/v1/account/password",
+            headers={"X-CSRF-Token": "csrf-token"},
+            json={"new_password": "new-secure-password"},
+        )
+
+    assert response.status_code == 204
+    assert passwords.calls == [(account_id, None, "new-secure-password")]

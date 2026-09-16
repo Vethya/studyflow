@@ -55,6 +55,7 @@ export interface WireAccountProfile {
   id: string;
   email: string;
   name: string;
+  password_set: boolean;
 }
 
 export interface WireStudyPreferences {
