@@ -6,3 +6,12 @@ export function notifyStudyFlowDataChanged(): void {
     window.dispatchEvent(new Event(STUDYFLOW_DATA_CHANGED_EVENT));
   }
 }
+
+/** Broadcasts that the server no longer accepts the browser's session. */
+export const STUDYFLOW_SESSION_INVALIDATED_EVENT = "studyflow:session-invalidated";
+
+export function notifyStudyFlowSessionInvalidated(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(STUDYFLOW_SESSION_INVALIDATED_EVENT));
+  }
+}

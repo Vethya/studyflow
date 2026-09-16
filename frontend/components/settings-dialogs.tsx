@@ -26,6 +26,7 @@ import { Label } from "@/components/ui/label";
 import { Callout } from "@/components/ui/callout";
 import { account as accountApi } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
+import { notifyStudyFlowSessionInvalidated } from "@/lib/data-events";
 import { formatOffset, withTimezone } from "@/lib/timezones";
 import type { WireAccountProfile, WireStudyPreferences } from "@/lib/api/wire";
 
@@ -71,7 +72,8 @@ export function AddPasswordDialog({
     try {
       await accountApi.setPassword(next);
       onSaved();
-      toast.success("Password added");
+      toast.success("Password added. Please sign in again.");
+      notifyStudyFlowSessionInvalidated();
       onOpenChange(false);
     } catch (cause) {
       setError(describeError(cause));
@@ -176,7 +178,8 @@ export function ChangePasswordDialog({
     setError(null);
     try {
       await accountApi.changePassword(current, next);
-      toast.success("Password changed");
+      toast.success("Password changed. Please sign in again.");
+      notifyStudyFlowSessionInvalidated();
       onOpenChange(false);
     } catch (cause) {
       setError(describeError(cause));

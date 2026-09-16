@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ApiError, auth } from "@/lib/api";
+import { STUDYFLOW_SESSION_INVALIDATED_EVENT } from "@/lib/data-events";
 
 export interface SessionAccount {
   id: string;
@@ -28,6 +29,15 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [status, setStatus] = useState<SessionStatus>("loading");
   const [account, setAccountState] = useState<SessionAccount | null>(null);
+
+  useEffect(() => {
+    const invalidate = () => {
+      setAccountState(null);
+      setStatus("unauthenticated");
+    };
+    window.addEventListener(STUDYFLOW_SESSION_INVALIDATED_EVENT, invalidate);
+    return () => window.removeEventListener(STUDYFLOW_SESSION_INVALIDATED_EVENT, invalidate);
+  }, []);
 
   // Read the session once on mount. State is only written from the promise
   // callbacks, and `active` drops results that land after unmount — React
