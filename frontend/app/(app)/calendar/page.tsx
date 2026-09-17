@@ -13,8 +13,6 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
-  Clock3,
-  ListChecks,
   Loader2,
   Plus,
   RefreshCw,
@@ -40,7 +38,15 @@ import {
 import { describeError, useApi } from "@/hooks/use-api";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { TaskFormDialog } from "@/components/task-form-dialog";
-import { PageHeader, PageShell, SectionHeader, StatTile } from "@/components/page-kit";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Figure,
+  FigureRow,
+  PageHeader,
+  PageShell,
+  SectionCard,
+} from "@/components/page-kit";
 import { GridLegend, WeekGrid, type GridBlock, type GridColumn } from "@/components/week-grid";
 import { SessionDrawer } from "@/components/session-drawer";
 import { RecordOutcomeDialog } from "@/components/record-outcome-dialog";
@@ -455,38 +461,35 @@ export default function CalendarPage() {
         />
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile
-          icon={Clock3}
-          value={isLoading ? null : formatDuration(weekSummary.free)}
+      <FigureRow>
+        <Figure
           label={isMobile ? "Free this day" : "Free this week"}
+          value={isLoading ? null : formatDuration(weekSummary.free)}
           tone="surplus"
         />
-        <StatTile
-          icon={CalendarDays}
-          value={isLoading ? null : formatDuration(weekSummary.scheduled)}
+        <Figure
           label="Study planned"
+          value={isLoading ? null : formatDuration(weekSummary.scheduled)}
         />
-        <StatTile
-          icon={CalendarDays}
-          value={isLoading ? null : formatDuration(weekSummary.blocked)}
+        <Figure
           label="Blocked"
+          value={isLoading ? null : formatDuration(weekSummary.blocked)}
           hint="By your exceptions"
         />
-        <StatTile
-          icon={ListChecks}
-          value={isLoading ? null : String(weekSummary.due)}
+        <Figure
           label={weekSummary.due === 1 ? "Deadline here" : "Deadlines here"}
+          value={isLoading ? null : String(weekSummary.due)}
           tone={weekSummary.due > 0 ? "deficit" : undefined}
         />
-      </div>
+      </FigureRow>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_15rem]">
-        <div className="flex min-w-0 flex-col gap-3">
+        <SectionCard flush footer={<GridLegend showDeadline showSession />}>
           {isLoading ? (
-            <Skeleton className="h-[30rem] w-full rounded-xl" />
+            <Skeleton className="m-(--card-spacing) h-[30rem] rounded-lg" />
           ) : (
             <WeekGrid
+              className="rounded-none border-0"
               ariaLabel="Study calendar"
               columns={columns}
               blocks={blocks}
@@ -518,51 +521,55 @@ export default function CalendarPage() {
               }}
             />
           )}
-          <GridLegend showDeadline showSession />
-        </div>
+        </SectionCard>
 
         {/* ── Task sidebar (SPEC §17.3) ─────────────────────── */}
-        <aside className="min-w-0 space-y-5">
-          <TaskGroup title="Overdue" tasks={grouped.overdue} tone="deficit" />
-          <TaskGroup
-            title="No slot yet"
-            tasks={grouped.unscheduled}
-            tone="deficit"
-            empty="Everything has a slot."
-          />
-          <TaskGroup title="Scheduled" tasks={grouped.active} />
-          <TaskGroup title="Done" tasks={grouped.completed} muted />
-        </aside>
+        <Card className="min-w-0 self-start">
+          <CardHeader className="border-b">
+            <CardTitle>This week&rsquo;s work</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <TaskGroup title="Overdue" tasks={grouped.overdue} tone="deficit" />
+            <TaskGroup
+              title="No slot yet"
+              tasks={grouped.unscheduled}
+              tone="deficit"
+              empty="Everything has a slot."
+            />
+            <TaskGroup title="Scheduled" tasks={grouped.active} />
+            <TaskGroup title="Done" tasks={grouped.completed} muted />
+          </CardContent>
+        </Card>
       </div>
 
       {/* Unscheduled Work, with its explanation and remedies (SPEC §17.3). */}
       {pendingPlan && pendingPlan.unscheduledWork.length > 0 && (
-        <section>
-          <SectionHeader
-            title="Work with no slot"
-            meta={`${pendingPlan.unscheduledWork.length} to resolve`}
-            tone="deficit"
-          />
-          <div className="pt-3">
-            <UnscheduledWorkList items={pendingPlan.unscheduledWork} />
-          </div>
-        </section>
+        <SectionCard
+          title="Work with no slot"
+          description="Open work StudyFlow could not place in your study time."
+          action={<Badge variant="destructive">{pendingPlan.unscheduledWork.length}</Badge>}
+        >
+          <UnscheduledWorkList items={pendingPlan.unscheduledWork} />
+        </SectionCard>
       )}
 
-      <section>
-        <SectionHeader
-          title="Upcoming deadlines"
-          meta={`${agenda.length} in the next 14 days`}
-          action={{ href: "/tasks", label: "All tasks" }}
-        />
-
+      <SectionCard
+        title="Upcoming deadlines"
+        description={`${agenda.length} in the next 14 days.`}
+        action={
+          <Button variant="ghost" size="sm" nativeButton={false} render={<Link href="/tasks" />}>
+            All tasks
+          </Button>
+        }
+        flush
+      >
         {isLoading ? (
-          <div className="space-y-2 pt-3">
+          <div className="space-y-2 p-(--card-spacing)">
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
           </div>
         ) : agenda.length === 0 ? (
-          <p className="pt-4 text-sm text-muted-foreground">
+          <p className="p-(--card-spacing) text-sm text-muted-foreground">
             Nothing due in the next two weeks.
           </p>
         ) : (
@@ -574,7 +581,7 @@ export default function CalendarPage() {
                 <li key={task.id}>
                   <Link
                     href={`/tasks/${task.id}`}
-                    className="flex flex-col gap-1 py-2.5 transition-colors hover:bg-muted/40 sm:grid sm:grid-cols-[9.5rem_minmax(0,1fr)_5.5rem_3.5rem_4.5rem] sm:items-center sm:gap-x-4"
+                    className="flex flex-col gap-1 px-(--card-spacing) py-2.5 transition-colors hover:bg-muted/40 sm:grid sm:grid-cols-[9.5rem_minmax(0,1fr)_5.5rem_3.5rem_4.5rem] sm:items-center sm:gap-x-4"
                   >
                     <div className="flex items-baseline justify-between gap-3 sm:contents">
                       <span className="min-w-0 truncate text-sm font-medium sm:order-2">
@@ -613,7 +620,7 @@ export default function CalendarPage() {
             })}
           </ul>
         )}
-      </section>
+      </SectionCard>
 
       <SessionDrawer
         session={selectedSession}

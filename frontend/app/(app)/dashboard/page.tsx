@@ -25,7 +25,7 @@ import { PendingPlanBanner, SchedulePreview } from "@/components/schedule-previe
 import { UnscheduledWorkList } from "@/components/unscheduled-work-list";
 import { formatClock } from "@/lib/datetime";
 import { applyRecordedOutcome } from "@/lib/outcome-ui";
-import { EmptyState, PageHeader, PageShell } from "@/components/page-kit";
+import { EmptyState, Figure, PageHeader, PageShell } from "@/components/page-kit";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatDuration, CATEGORY_CONFIG } from "@/lib/constants";
 import { describeDeadline } from "@/lib/datetime";
@@ -532,29 +532,6 @@ export default function DashboardPage() {
         }}
       />
     </PageShell>
-  );
-}
-
-/** One figure in the row under the verdict. `null` renders the loading state. */
-function Figure({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string | null;
-  hint?: string;
-}) {
-  return (
-    <div className="min-w-0 px-(--card-spacing) py-3">
-      <p className="truncate text-xs text-muted-foreground">{label}</p>
-      {value === null ? (
-        <Skeleton className="mt-1.5 h-6 w-16" />
-      ) : (
-        <p className="mt-1 font-display text-xl font-bold leading-none tabular-nums">{value}</p>
-      )}
-      {hint && <p className="mt-1 truncate text-xs text-muted-foreground">{hint}</p>}
-    </div>
   );
 }
 
