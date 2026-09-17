@@ -293,7 +293,10 @@ export async function installNfr05ApiMocks(
     }
 
     if (path === "/api/v1/availability/windows" && method === "PUT") {
-      await fulfillJson(route, MOCK_WINDOWS);
+      await fulfillJson(route, {
+        windows: MOCK_WINDOWS,
+        invalidated_future_session_ids: [],
+      });
       return;
     }
 
