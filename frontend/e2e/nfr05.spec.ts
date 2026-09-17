@@ -80,6 +80,27 @@ const AUTHENTICATED_ROUTES = [
     readyRequests: ["/api/v1/auth/session", "/api/v1/tasks", "/api/v1/study-sessions"],
   },
   {
+    path: "/import/google/import-calendar",
+    heading: /^Review your Google Calendar events$/,
+    readyRequests: [
+      "/api/v1/auth/session",
+      "/api/v1/integrations/google/imports/import-calendar",
+    ],
+  },
+  {
+    path: "/import/google/import-classroom",
+    heading: /^Review your Google Classroom coursework$/,
+    readyRequests: [
+      "/api/v1/auth/session",
+      "/api/v1/integrations/google/imports/import-classroom",
+    ],
+  },
+  {
+    path: "/import/google?error=permission",
+    heading: /^Google import$/,
+    readyRequests: ["/api/v1/auth/session"],
+  },
+  {
     path: "/settings",
     heading: /^Settings$/,
     readyRequests: [

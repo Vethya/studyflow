@@ -70,6 +70,7 @@ const STATUS_TO_WIRE: Record<TaskStatus, WireTaskStatus> = {
 };
 
 export const toWireCategory = (value: Category): WireTaskCategory => CATEGORY_TO_WIRE[value];
+export const fromWireCategory = (value: WireTaskCategory): Category => CATEGORY_FROM_WIRE[value];
 export const toWirePriority = (value: Priority): WireTaskPriority => PRIORITY_TO_WIRE[value];
 export const toWireStatus = (value: TaskStatus): WireTaskStatus => STATUS_TO_WIRE[value];
 
