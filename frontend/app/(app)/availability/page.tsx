@@ -13,6 +13,7 @@ import { DAY_NAMES, DAY_NAMES_SHORT } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { ScheduleTechnicalFailure, availability as availabilityApi, scheduling } from "@/lib/api";
 import { SchedulePreview } from "@/components/schedule-preview";
+import { PlanGenerationDialog } from "@/components/plan-generation-dialog";
 import type { WindowDraft } from "@/lib/api";
 import type { UnavailablePeriod } from "@/types/availability";
 import type { ScheduleProposal } from "@/types/schedule";
@@ -42,8 +43,18 @@ export default function AvailabilityPage() {
    * Their count is surfaced, and the student may then ask for a new plan —
    * StudyFlow never regenerates on its own (SPEC §11.1).
    */
-  const [invalidatedCount, setInvalidatedCount] = useState(0);
+  const [invalidatedSessionIds, setInvalidatedSessionIds] = useState<Set<string>>(new Set());
+  const invalidatedCount = invalidatedSessionIds.size;
   const [planStale, setPlanStale] = useState(false);
+
+  const recordInvalidatedSessions = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
+    setInvalidatedSessionIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+  }, []);
   const [proposal, setProposal] = useState<ScheduleProposal | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [isGenerating, setGenerating] = useState(false);
@@ -137,12 +148,13 @@ export default function AvailabilityPage() {
    */
   async function saveWindows(next: WindowDraft[]) {
     const saved = await availabilityApi.replaceWindows(next);
-    windows.setData(saved);
+    windows.setData(saved.windows);
+    return saved;
   }
 
   async function handleAddWindow(draft: WindowDraft) {
-    await saveWindows([...toDraft(), draft]);
-    setInvalidatedCount((count) => count || 0);
+    const saved = await saveWindows([...toDraft(), draft]);
+    recordInvalidatedSessions(saved.invalidatedFutureSessionIds);
     setPlanStale(true);
     toast.success("Window added");
   }
@@ -150,11 +162,12 @@ export default function AvailabilityPage() {
   async function handleDeleteWindow(id: string) {
     setPendingId(id);
     try {
-      await saveWindows(
+      const saved = await saveWindows(
         allWindows
           .filter((w) => w.id !== id)
           .map((w) => ({ dayOfWeek: w.dayOfWeek, startTime: w.startTime, endTime: w.endTime })),
       );
+      recordInvalidatedSessions(saved.invalidatedFutureSessionIds);
       setPlanStale(true);
       toast.success("Window removed");
     } catch (cause) {
@@ -176,7 +189,7 @@ export default function AvailabilityPage() {
           period.id === editingPeriod.id ? change.period : period,
         ),
       );
-      setInvalidatedCount(change.invalidatedFutureSessionIds.length);
+      recordInvalidatedSessions(change.invalidatedFutureSessionIds);
       toast.success("Exception updated");
       setEditingPeriod(null);
       return;
@@ -184,7 +197,7 @@ export default function AvailabilityPage() {
 
     const change = await availabilityApi.createUnavailablePeriod(draft);
     periods.setData([...allPeriods, change.period]);
-    setInvalidatedCount(change.invalidatedFutureSessionIds.length);
+    recordInvalidatedSessions(change.invalidatedFutureSessionIds);
     toast.success("Exception added");
   }
 
@@ -214,6 +227,7 @@ export default function AvailabilityPage() {
               variant="outline"
               onClick={() => void requestRegeneration()}
               disabled={isGenerating}
+              aria-busy={isGenerating}
             >
               {isGenerating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               Re-plan my time
@@ -283,6 +297,7 @@ export default function AvailabilityPage() {
                 size="sm"
                 onClick={() => void requestRegeneration()}
                 disabled={isGenerating}
+                aria-busy={isGenerating}
               >
                 {isGenerating && <Loader2 className="animate-spin" />}
                 Re-plan my time
@@ -291,7 +306,7 @@ export default function AvailabilityPage() {
                 variant="ghost"
                 size="sm"
                 onClick={() => {
-                  setInvalidatedCount(0);
+                  setInvalidatedSessionIds(new Set());
                   setPlanStale(false);
                 }}
               >
@@ -549,11 +564,13 @@ export default function AvailabilityPage() {
         onOpenChange={setPreviewOpen}
         onAccepted={() => {
           setProposal(null);
-          setInvalidatedCount(0);
+          setInvalidatedSessionIds(new Set());
           setPlanStale(false);
         }}
         onRejected={() => setProposal(null)}
       />
+
+      <PlanGenerationDialog open={isGenerating} />
 
       <AddWindowDialog
         open={windowDialogOpen}

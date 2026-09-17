@@ -145,6 +145,11 @@ export interface WireAvailabilityWindowRequest {
   end_time: string;
 }
 
+export interface WireAvailabilityWindowChange {
+  windows: WireAvailabilityWindow[];
+  invalidated_future_session_ids: string[];
+}
+
 export interface WireUnavailablePeriod {
   id: string;
   starts_at: string;

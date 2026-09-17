@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useTheme } from "next-themes";
+import { applyThemeWithTransition } from "@/lib/theme";
 import { ChevronsUpDown, LogOut, Palette, Settings } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -126,7 +127,7 @@ export function NavUser() {
               <DropdownMenuSubContent>
                 <DropdownMenuRadioGroup
                   value={theme ?? "system"}
-                  onValueChange={(value) => setTheme(value)}
+                  onValueChange={(value) => applyThemeWithTransition(value, setTheme)}
                 >
                   <DropdownMenuRadioItem value="system">
                     <ThemeOptionIcon theme="system" />

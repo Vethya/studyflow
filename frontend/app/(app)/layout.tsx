@@ -49,7 +49,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <SidebarTrigger className="-ml-1 shrink-0" />
           <TopBar />
         </header>
-        <main className="flex-1 overflow-auto">{children}</main>
+        <main
+          key={pathname}
+          className="flex-1 overflow-auto animate-in fade-in-0 duration-200 ease-out"
+        >
+          {children}
+        </main>
       </SidebarInset>
     </SidebarProvider>
   );

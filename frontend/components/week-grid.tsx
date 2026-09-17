@@ -235,15 +235,15 @@ export function WeekGrid({
                   );
 
                   const className = cn(
-                    "absolute inset-x-1 overflow-hidden rounded-md border transition-colors",
+                    "absolute inset-x-1 overflow-hidden rounded-md border transition-all duration-150 ease-out",
                     isSession
                       ? cn(
-                          "z-10 bg-card shadow-sm",
+                          "z-10 bg-card shadow-xs",
                           block.settled
                             ? "border-border text-muted-foreground"
                             : "border-foreground/70",
                           block.onSelect &&
-                            "cursor-pointer hover:border-foreground hover:bg-muted",
+                            "cursor-pointer hover:border-foreground hover:bg-muted hover:-translate-y-0.5 hover:shadow-md hover:z-30 active:translate-y-0 active:shadow-xs",
                         )
                       : block.variant === "available"
                         ? highlighted

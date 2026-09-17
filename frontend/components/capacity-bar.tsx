@@ -47,7 +47,7 @@ export function CapacityBar({ available, committed, className }: CapacityBarProp
         {filled > 0 && (
           <div
             className={cn(
-              "absolute inset-y-0 left-0 rounded-l-md transition-[width] duration-500",
+              "absolute inset-y-0 left-0 rounded-l-md transition-[width] duration-600 ease-[cubic-bezier(0.16,1,0.3,1)]",
               overcommitted ? "bg-deficit/20" : "bg-surplus/25",
             )}
             style={{
@@ -72,7 +72,7 @@ export function CapacityBar({ available, committed, className }: CapacityBarProp
         {overflow > 0 && (
           <div
             className={cn(
-              "absolute inset-y-1 bg-deficit transition-[width] duration-500",
+              "absolute inset-y-1 bg-deficit transition-[width] duration-600 ease-[cubic-bezier(0.16,1,0.3,1)]",
               overflowClipped ? "rounded-r-none" : "rounded-r-md",
             )}
             style={{ left: `${TRACK}%`, width: `${overflow}%` }}

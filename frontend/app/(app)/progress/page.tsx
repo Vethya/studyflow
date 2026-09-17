@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -205,6 +205,12 @@ function ProgressRow({
   course: string | null;
 }) {
   const status = STATUS_CONFIG[row.status];
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setMounted(true), 30);
+    return () => clearTimeout(timer);
+  }, []);
 
   return (
     <li className="grid grid-cols-1 gap-2 py-3 lg:grid-cols-[minmax(0,1fr)_6rem_5rem_5rem_5rem_7rem] lg:items-center lg:gap-4">
@@ -224,8 +230,8 @@ function ProgressRow({
       <div className="flex items-center gap-2">
         <div className="h-1.5 w-full max-w-24 overflow-hidden rounded-full bg-muted lg:max-w-none">
           <div
-            className="h-full rounded-full bg-foreground/50"
-            style={{ width: `${row.effortPercent}%` }}
+            className="h-full rounded-full bg-foreground/50 transition-[width] duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]"
+            style={{ width: mounted ? `${row.effortPercent}%` : "0%" }}
           />
         </div>
         <span className="shrink-0 text-xs tabular-nums text-muted-foreground">

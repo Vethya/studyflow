@@ -45,6 +45,7 @@ import { GridLegend, WeekGrid, type GridBlock, type GridColumn } from "@/compone
 import { SessionDrawer } from "@/components/session-drawer";
 import { RecordOutcomeDialog } from "@/components/record-outcome-dialog";
 import { PendingPlanBanner, SchedulePreview } from "@/components/schedule-preview";
+import { PlanGenerationDialog } from "@/components/plan-generation-dialog";
 import { UnscheduledWorkList } from "@/components/unscheduled-work-list";
 import type { AcademicTask } from "@/types/task";
 import type { StudySession } from "@/types/session";
@@ -394,6 +395,7 @@ export default function CalendarPage() {
               size="sm"
               onClick={() => void generate()}
               disabled={isGenerating}
+              aria-busy={isGenerating}
             >
               {isGenerating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               Plan my time
@@ -658,6 +660,8 @@ export default function CalendarPage() {
           setProposal(null);
         }}
       />
+
+      <PlanGenerationDialog open={isGenerating} />
 
       <TaskFormDialog
         open={dialogOpen}

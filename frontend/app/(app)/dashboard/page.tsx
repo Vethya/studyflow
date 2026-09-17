@@ -25,6 +25,7 @@ import { UnscheduledWorkList } from "@/components/unscheduled-work-list";
 import { formatClock } from "@/lib/datetime";
 import { applyRecordedOutcome } from "@/lib/outcome-ui";
 import { EmptyState, PageHeader, PageShell, SectionHeader, StatTile } from "@/components/page-kit";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatDuration, CATEGORY_CONFIG } from "@/lib/constants";
 import { describeDeadline } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
@@ -272,68 +273,66 @@ export default function DashboardPage() {
       />
 
       {/* ── The verdict: the one loud thing on the page ─────── */}
-      <section className="flex flex-col gap-4 rounded-xl border bg-card p-5 sm:p-6">
+      <Tabs
+        value={horizon}
+        onValueChange={(val) => {
+          if (val != null) setHorizon(Number(val));
+        }}
+        className="flex flex-col gap-4 rounded-xl border bg-card p-5 sm:p-6"
+      >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm font-medium text-muted-foreground">
             Capacity over the next
           </h2>
-          <div
-            className="flex items-center gap-0.5 rounded-lg bg-muted p-0.5"
-            role="group"
-            aria-label="Time range"
-          >
+          <TabsList className="h-7 p-0.5" aria-label="Time range">
             {HORIZONS.map((option) => (
-              <button
+              <TabsTrigger
                 key={option.days}
-                onClick={() => setHorizon(option.days)}
-                aria-pressed={horizon === option.days}
-                className={cn(
-                  "rounded-[0.4rem] px-2.5 py-1 text-xs font-medium transition-colors",
-                  horizon === option.days
-                    ? "bg-card text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
+                value={option.days}
+                className="h-6 rounded-[0.35rem] px-2.5 py-0.5 text-xs font-medium"
               >
                 {option.label}
-              </button>
+              </TabsTrigger>
             ))}
-          </div>
+          </TabsList>
         </div>
 
-        {isLoading ? (
-          <div className="space-y-4">
-            <Skeleton className="h-14 w-72" />
-            <Skeleton className="h-10 w-full" />
-          </div>
-        ) : !hasWindows ? (
-          <EmptyState
-            icon={CalendarOff}
-            title="No study time set yet"
-            action={
-              <Button size="sm" nativeButton={false} render={<Link href="/availability" />}>
-                Set your availability
-              </Button>
-            }
-          >
-            StudyFlow weighs your coursework against the hours you are actually free.
-            Add your weekly hours and this becomes a real answer.
-          </EmptyState>
-        ) : (
-          <>
-            <Verdict balance={verdict.balance} count={verdict.tasks.length} days={horizon} />
-            <CapacityBar available={verdict.available} committed={verdict.committed} />
-            <p className="border-t pt-3 text-xs text-muted-foreground">
-              Times shown in {preferences.data?.timezone ?? "your timezone"}.{" "}
-              <Link
-                href="/availability"
-                className="font-medium underline underline-offset-2 hover:text-foreground"
-              >
-                Change your hours
-              </Link>
-            </p>
-          </>
-        )}
-      </section>
+        <TabsContent value={horizon} className="flex flex-col gap-4 outline-none">
+          {isLoading ? (
+            <div className="space-y-4">
+              <Skeleton className="h-14 w-72" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : !hasWindows ? (
+            <EmptyState
+              icon={CalendarOff}
+              title="No study time set yet"
+              action={
+                <Button size="sm" nativeButton={false} render={<Link href="/availability" />}>
+                  Set your availability
+                </Button>
+              }
+            >
+              StudyFlow weighs your coursework against the hours you are actually free.
+              Add your weekly hours and this becomes a real answer.
+            </EmptyState>
+          ) : (
+            <>
+              <Verdict balance={verdict.balance} count={verdict.tasks.length} days={horizon} />
+              <CapacityBar available={verdict.available} committed={verdict.committed} />
+              <p className="border-t pt-3 text-xs text-muted-foreground">
+                Times shown in {preferences.data?.timezone ?? "your timezone"}.{" "}
+                <Link
+                  href="/availability"
+                  className="font-medium underline underline-offset-2 hover:text-foreground"
+                >
+                  Change your hours
+                </Link>
+              </p>
+            </>
+          )}
+        </TabsContent>
+      </Tabs>
 
       {/* ── Glanceable figures ─────────────────────────────── */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
