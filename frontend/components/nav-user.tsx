@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useTheme } from "next-themes";
 import { applyThemeWithTransition } from "@/lib/theme";
-import { ChevronsUpDown, LogOut, Palette, Settings } from "lucide-react";
+import { ChevronsUpDown, Compass, LogOut, Palette, Settings } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -26,6 +26,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { useSession } from "@/hooks/use-session";
+import { restartOnboarding } from "@/lib/onboarding";
 import { ThemeOptionIcon } from "@/components/theme-selector";
 
 function initials(name: string): string {
@@ -150,6 +151,11 @@ export function NavUser() {
             </DropdownMenuSub>
 
             <DropdownMenuSeparator />
+
+            <DropdownMenuItem render={<Link href="/dashboard" />} onClick={restartOnboarding}>
+              <Compass />
+              Show me around
+            </DropdownMenuItem>
 
             <DropdownMenuItem render={<Link href="/settings" />}>
               <Settings />
