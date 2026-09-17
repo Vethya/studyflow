@@ -74,7 +74,9 @@ class InvalidOIDCStub(OIDCStub):
 async def test_google_oidc_start_and_callback_cookie_contract() -> None:
     app = create_app(oidc_login=OIDCStub(), oidc_start_rate_limiter=RateLimitStub())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
-        started = await client.get("/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh")
+        started = await client.post(
+            "/api/v1/auth/google/start", json={"timezone": "Asia/Phnom_Penh"}
+        )
         completed = await client.get(
             "/api/v1/auth/google/callback?code=code&state=state-state-state-state"
         )
@@ -92,7 +94,7 @@ async def test_google_oidc_start_and_callback_cookie_contract() -> None:
 async def test_google_oidc_denial_is_generic_and_clears_state_cookie() -> None:
     app = create_app(oidc_login=OIDCStub(), oidc_start_rate_limiter=RateLimitStub())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
-        await client.get("/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh")
+        await client.post("/api/v1/auth/google/start", json={"timezone": "Asia/Phnom_Penh"})
         denied = await client.get(
             "/api/v1/auth/google/callback?error=access_denied&state=state-state-state-state"
         )
@@ -106,7 +108,7 @@ async def test_google_oidc_denial_is_generic_and_clears_state_cookie() -> None:
 async def test_google_oidc_returns_only_the_server_issued_link_challenge() -> None:
     app = create_app(oidc_login=LinkRequiredOIDCStub(), oidc_start_rate_limiter=RateLimitStub())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
-        await client.get("/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh")
+        await client.post("/api/v1/auth/google/start", json={"timezone": "Asia/Phnom_Penh"})
         response = await client.get(
             "/api/v1/auth/google/callback?code=code&state=state-state-state-state"
         )
@@ -125,7 +127,7 @@ async def test_google_oidc_provider_outage_is_retryable_and_retains_state_cookie
         oidc_login=RetryableUnavailableOIDCStub(), oidc_start_rate_limiter=RateLimitStub()
     )
     async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
-        await client.get("/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh")
+        await client.post("/api/v1/auth/google/start", json={"timezone": "Asia/Phnom_Penh"})
         response = await client.get(
             "/api/v1/auth/google/callback?code=code&state=state-state-state-state"
         )
@@ -143,7 +145,7 @@ async def test_google_oidc_provider_outage_is_retryable_and_retains_state_cookie
 async def test_google_oidc_provider_outage_requires_restart_after_code_may_be_consumed() -> None:
     app = create_app(oidc_login=RestartRequiredOIDCStub(), oidc_start_rate_limiter=RateLimitStub())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
-        await client.get("/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh")
+        await client.post("/api/v1/auth/google/start", json={"timezone": "Asia/Phnom_Penh"})
         response = await client.get(
             "/api/v1/auth/google/callback?code=code&state=state-state-state-state"
         )
@@ -157,7 +159,7 @@ async def test_google_oidc_provider_outage_requires_restart_after_code_may_be_co
 async def test_google_oidc_browser_success_redirects_to_clean_app_url() -> None:
     app = create_app(oidc_login=OIDCStub(), oidc_start_rate_limiter=RateLimitStub())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
-        await client.get("/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh")
+        await client.post("/api/v1/auth/google/start", json={"timezone": "Asia/Phnom_Penh"})
         response = await client.get(
             "/api/v1/auth/google/callback?code=code&state=state-state-state-state",
             headers={"Accept": "text/html"},
@@ -188,7 +190,7 @@ async def test_google_oidc_callback_keeps_json_when_html_is_rejected_or_not_pref
 ) -> None:
     app = create_app(oidc_login=OIDCStub(), oidc_start_rate_limiter=RateLimitStub())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
-        await client.get("/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh")
+        await client.post("/api/v1/auth/google/start", json={"timezone": "Asia/Phnom_Penh"})
         response = await client.get(
             "/api/v1/auth/google/callback?code=code&state=state-state-state-state",
             headers={"Accept": accept},
@@ -202,7 +204,7 @@ async def test_google_oidc_callback_keeps_json_when_html_is_rejected_or_not_pref
 async def test_google_oidc_browser_linking_uses_http_only_server_state() -> None:
     app = create_app(oidc_login=LinkRequiredOIDCStub(), oidc_start_rate_limiter=RateLimitStub())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
-        await client.get("/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh")
+        await client.post("/api/v1/auth/google/start", json={"timezone": "Asia/Phnom_Penh"})
         response = await client.get(
             "/api/v1/auth/google/callback?code=code&state=state-state-state-state",
             headers={"Accept": "text/html"},
@@ -232,7 +234,7 @@ async def test_google_oidc_browser_errors_redirect_without_sensitive_parameters(
     oidc = InvalidOIDCStub() if outcome == "invalid" else OIDCStub()
     app = create_app(oidc_login=oidc, oidc_start_rate_limiter=RateLimitStub())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
-        await client.get("/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh")
+        await client.post("/api/v1/auth/google/start", json={"timezone": "Asia/Phnom_Penh"})
         response = await client.get(
             f"/api/v1/auth/google/callback?{query}&state=state-state-state-state",
             headers={"Accept": "text/html"},
@@ -258,7 +260,7 @@ async def test_malformed_google_browser_callbacks_redirect_instead_of_returning_
 ) -> None:
     app = create_app(oidc_login=OIDCStub(), oidc_start_rate_limiter=RateLimitStub())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
-        await client.get("/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh")
+        await client.post("/api/v1/auth/google/start", json={"timezone": "Asia/Phnom_Penh"})
         response = await client.get(
             f"/api/v1/auth/google/callback?{query}", headers={"Accept": "text/html"}
         )
@@ -282,7 +284,7 @@ async def test_google_oidc_browser_provider_outage_redirects_and_clears_callback
         oidc_login=RetryableUnavailableOIDCStub(), oidc_start_rate_limiter=RateLimitStub()
     )
     async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
-        await client.get("/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh")
+        await client.post("/api/v1/auth/google/start", json={"timezone": "Asia/Phnom_Penh"})
         response = await client.get(
             "/api/v1/auth/google/callback?code=code&state=state-state-state-state",
             headers={"Accept": "text/html"},
@@ -321,7 +323,9 @@ async def test_start_google_oidc_validation_and_errors() -> None:
     # 1. Invalid timezone -> 422 (line 360)
     app = create_app(oidc_login=OIDCStub(), oidc_start_rate_limiter=RateLimitStub())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
-        res = await client.get("/api/v1/auth/google/start?timezone=Invalid/Zone")
+        res = await client.post(
+            "/api/v1/auth/google/start", json={"timezone": "Invalid/Zone"}
+        )
         assert res.status_code == 422
         assert "Timezone must be a valid IANA timezone" in res.text
 
@@ -332,7 +336,7 @@ async def test_start_google_oidc_validation_and_errors() -> None:
 
     app2 = create_app(oidc_login=OIDCStub(), oidc_start_rate_limiter=ExceededStartRateLimitStub())
     async with AsyncClient(transport=ASGITransport(app=app2), base_url="https://test") as client:
-        res2 = await client.get("/api/v1/auth/google/start?timezone=UTC")
+        res2 = await client.post("/api/v1/auth/google/start", json={"timezone": "UTC"})
         assert res2.status_code == 429
         assert "Too many Google sign-in attempts" in res2.text
 
@@ -346,7 +350,7 @@ async def test_start_google_oidc_validation_and_errors() -> None:
 
     app3 = create_app(oidc_login=NotConfiguredOIDCStub(), oidc_start_rate_limiter=RateLimitStub())
     async with AsyncClient(transport=ASGITransport(app=app3), base_url="https://test") as client:
-        res3 = await client.get("/api/v1/auth/google/start?timezone=UTC")
+        res3 = await client.post("/api/v1/auth/google/start", json={"timezone": "UTC"})
         assert res3.status_code == 503
         assert "Google sign-in is not configured" in res3.text
 

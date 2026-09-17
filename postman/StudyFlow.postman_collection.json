@@ -158,9 +158,10 @@
         {
           "name": "Start Google OIDC",
           "request": {
-            "method": "GET",
+            "method": "POST",
             "header": [{ "key": "Accept", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "google", "start"], "query": [{ "key": "timezone", "value": "Asia/Phnom_Penh" }] },
+            "body": { "mode": "raw", "raw": "{\n  \"timezone\": \"Asia/Phnom_Penh\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/auth/google/start", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "google", "start"] },
             "description": "Creates one-time state and nonce values and returns Google's authorization URL with only openid, email, and profile scopes."
           },
           "response": [],

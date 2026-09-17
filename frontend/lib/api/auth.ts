@@ -1,6 +1,6 @@
 /** Authentication endpoints — `backend/src/studyflow/api/auth.py`. */
 
-import { apiJson, apiVoid, buildQuery } from "./client";
+import { apiJson, apiVoid } from "./client";
 import type {
   WireAuthenticationMessage,
   WireCurrentSessionResponse,
@@ -112,7 +112,11 @@ export function resetPassword(
  * from. Omitting it fails the request with 422.
  */
 export function startGoogleSignIn(timezone: string): Promise<WireOIDCStartResponse> {
-  return apiJson<WireOIDCStartResponse>(`/auth/google/start${buildQuery({ timezone })}`);
+  return apiJson<WireOIDCStartResponse>("/auth/google/start", {
+    method: "POST",
+    body: { timezone },
+    csrf: false,
+  });
 }
 
 /**

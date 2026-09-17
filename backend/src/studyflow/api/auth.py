@@ -135,6 +135,19 @@ class PasswordResetConfirmation(BaseModel):
     password: Annotated[str, Field(min_length=12, max_length=128)]
 
 
+class GoogleStartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    timezone: Annotated[str, Field(min_length=1, max_length=64)]
+
+    @field_validator("timezone")
+    @classmethod
+    def require_iana_timezone(cls, value: str) -> str:
+        if not is_iana_timezone(value):
+            raise ValueError("Timezone must be a valid IANA timezone")
+        return value
+
+
 class AuthenticatedAccount(BaseModel):
     id: str
     email: EmailStr
@@ -347,24 +360,22 @@ def get_password_reset_attempt_rate_limit(request: Request) -> PasswordResetAtte
     )
 
 
-@router.get(
+@router.post(
     "/google/start",
     response_model=OIDCStartResponse,
     responses={status.HTTP_503_SERVICE_UNAVAILABLE: {"model": AuthenticationError}},
 )
 async def start_google_oidc(
+    payload: GoogleStartRequest,
     response: Response,
     http_request: Request,
-    timezone: Annotated[str, Query(min_length=1, max_length=64)],
     oidc: Annotated[OIDCLogin, Depends(get_oidc_login)],
     rate_limit: Annotated[OIDCStartRateLimit, Depends(get_oidc_start_rate_limit)],
 ) -> OIDCStartResponse:
     try:
-        if not is_iana_timezone(timezone):
-            raise HTTPException(status_code=422, detail="Timezone must be a valid IANA timezone")
         client_ip = http_request.client.host if http_request.client is not None else "unknown"
         await rate_limit.check(client_ip)
-        started = await oidc.start(timezone)
+        started = await oidc.start(payload.timezone)
     except OIDCStartRateLimitExceeded as error:
         raise HTTPException(
             status_code=429,
