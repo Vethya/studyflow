@@ -29,7 +29,7 @@ import type { ScenarioOverrides, SimulatePlanResult } from "@/lib/webmcp/contrac
 import type { OutcomeFormData, StudySession } from "@/types/session";
 import type { Schedule, ScheduleProposal, ScheduleRevision } from "@/types/schedule";
 import type { AdaptiveEstimate } from "@/types/progress";
-import type { Category } from "@/types/task";
+import type { AcademicTask, Category } from "@/types/task";
 
 /**
  * CP-SAT timed out or could not prove its objective (SPEC §10.7), surfaced by
@@ -53,16 +53,22 @@ export interface OutcomeResult {
 }
 
 /** Titles for the session list, which the API returns without them. */
-async function taskTitles(signal?: AbortSignal): Promise<Map<string, string>> {
-  const tasks = await listTasks({}, signal);
-  return new Map(tasks.map((task) => [task.id, task.title]));
+async function taskTitles(
+  signal?: AbortSignal,
+  tasks?: AcademicTask[],
+): Promise<Map<string, string>> {
+  const rows = tasks ?? (await listTasks({}, signal));
+  return new Map(rows.map((task) => [task.id, task.title]));
 }
 
 // ─── Sessions ───────────────────────────────────────────────────
-export async function listSessions(signal?: AbortSignal): Promise<StudySession[]> {
+export async function listSessions(
+  signal?: AbortSignal,
+  tasks?: AcademicTask[],
+): Promise<StudySession[]> {
   const [wire, titles] = await Promise.all([
     apiJson<WireStudySession[]>(`/study-sessions${buildQuery({})}`, { signal }),
-    taskTitles(signal),
+    taskTitles(signal, tasks),
   ]);
   return wire.map((session) => toStudySession(session, titles));
 }
@@ -84,8 +90,11 @@ export async function getSession(
  * sessions into the accepted set, and `GET /study-sessions` returns exactly
  * that. This wraps them so callers keep a single shape.
  */
-export async function getActiveSchedule(signal?: AbortSignal): Promise<Schedule | null> {
-  const sessions = await listSessions(signal);
+export async function getActiveSchedule(
+  signal?: AbortSignal,
+  tasks?: AcademicTask[],
+): Promise<Schedule | null> {
+  const sessions = await listSessions(signal, tasks);
   if (sessions.length === 0) return null;
   return {
     id: "active",
@@ -143,6 +152,7 @@ export async function simulatePlan(
       method: "POST",
       body: { scenario },
       signal,
+      notifyDataChanged: false,
     });
     return {
       scenario: wire.proposal.scenario ? toScenario(wire.proposal.scenario) : scenario,
@@ -175,11 +185,15 @@ export async function getPendingRevision(
 export async function acceptProposal(
   proposalId: string,
   signal?: AbortSignal,
+  refreshActiveSchedule = true,
 ): Promise<Schedule> {
   await apiVoid(`/schedule-proposals/${proposalId}/accept`, { method: "POST", signal });
+  if (!refreshActiveSchedule) {
+    return { id: "active", sessions: [], createdAt: new Date().toISOString(), isActive: true };
+  }
   // The accept response carries only the sessions it just activated; re-read
   // so the caller gets the full accepted set with outcomes attached.
-  return (await getActiveSchedule()) ?? {
+  return (await getActiveSchedule(signal)) ?? {
     id: "active",
     sessions: [],
     createdAt: new Date().toISOString(),
@@ -202,6 +216,7 @@ export async function recordOutcome(
   sessionId: string,
   data: OutcomeFormData,
   signal?: AbortSignal,
+  taskTitle?: string,
 ): Promise<OutcomeResult> {
   try {
     const response = await apiJson<WireSessionOutcomeRecordingResponse>(
@@ -213,7 +228,9 @@ export async function recordOutcome(
       },
     );
 
-    const titles = await taskTitles(signal);
+    const titles = taskTitle
+      ? new Map([[response.session.task_id, taskTitle]])
+      : await taskTitles(signal);
     const revision = response.revision ? toScheduleProposal(response.revision) : null;
     return {
       session: toStudySession(response.session, titles),

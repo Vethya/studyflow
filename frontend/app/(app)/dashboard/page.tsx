@@ -44,6 +44,7 @@ import {
 import { describeError, useApi } from "@/hooks/use-api";
 import { useSession } from "@/hooks/use-session";
 import { useNow } from "@/hooks/use-now";
+import { activeScheduleKey, SWR_KEYS } from "@/lib/swr-keys";
 import type { AcademicTask } from "@/types/task";
 import type { StudySession } from "@/types/session";
 import type { ScheduleProposal } from "@/types/schedule";
@@ -67,15 +68,21 @@ export default function DashboardPage() {
   const loadWindows = useCallback((s: AbortSignal) => availabilityApi.listWindows(s), []);
   const loadPeriods = useCallback((s: AbortSignal) => availabilityApi.listUnavailablePeriods(s), []);
   const loadPreferences = useCallback((s: AbortSignal) => accountApi.getPreferences(s), []);
-  const loadSchedule = useCallback((s: AbortSignal) => scheduling.getActiveSchedule(s), []);
   const loadRevision = useCallback((s: AbortSignal) => scheduling.getPendingRevision(s), []);
 
-  const tasks = useApi(loadTasks);
-  const windows = useApi(loadWindows);
-  const periods = useApi(loadPeriods);
-  const preferences = useApi(loadPreferences);
-  const schedule = useApi(loadSchedule);
-  const revision = useApi(loadRevision);
+  const tasks = useApi(SWR_KEYS.tasks, loadTasks);
+  const loadSchedule = useCallback(
+    (s: AbortSignal) => scheduling.getActiveSchedule(s, tasks.data ?? []),
+    [tasks.data],
+  );
+  const windows = useApi(SWR_KEYS.availabilityWindows, loadWindows);
+  const periods = useApi(SWR_KEYS.unavailablePeriods, loadPeriods);
+  const preferences = useApi(SWR_KEYS.studyPreferences, loadPreferences);
+  const schedule = useApi(
+    activeScheduleKey(tasks.data),
+    loadSchedule,
+  );
+  const revision = useApi(SWR_KEYS.pendingRevision, loadRevision);
 
   const isLoading = tasks.isLoading || windows.isLoading || periods.isLoading;
   const loadError = tasks.error ?? windows.error ?? periods.error ?? preferences.error;
@@ -492,11 +499,9 @@ export default function DashboardPage() {
         onOpenChange={setPreviewOpen}
         onAccepted={() => {
           setProposal(null);
-          reloadAll();
         }}
         onRejected={() => {
           setProposal(null);
-          revision.reload();
         }}
       />
     </PageShell>

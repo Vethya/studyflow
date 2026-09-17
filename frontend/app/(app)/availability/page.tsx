@@ -20,6 +20,7 @@ import { formatDuration } from "@/lib/constants";
 import { weeklyPatternMinutes } from "@/lib/capacity";
 import { describeError, useApi } from "@/hooks/use-api";
 import { AddWindowDialog, ExceptionDialog } from "@/components/availability-dialogs";
+import { SWR_KEYS } from "@/lib/swr-keys";
 
 /** Display Monday-first while the data itself is indexed 0 = Sunday. */
 const DISPLAY_DAYS = [1, 2, 3, 4, 5, 6, 0];
@@ -72,8 +73,8 @@ export default function AvailabilityPage() {
     [],
   );
 
-  const windows = useApi(loadWindows);
-  const periods = useApi(loadPeriods);
+  const windows = useApi(SWR_KEYS.availabilityWindows, loadWindows);
+  const periods = useApi(SWR_KEYS.unavailablePeriods, loadPeriods);
 
   const allWindows = useMemo(() => windows.data ?? [], [windows.data]);
   const allPeriods = useMemo(() => periods.data ?? [], [periods.data]);

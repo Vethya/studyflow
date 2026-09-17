@@ -124,6 +124,8 @@ export function RecordOutcomeDialog({
       const result = await scheduling.recordOutcome(
         session.id,
         largeActualConfirmed ? withLargeActualConfirmation(data) : data,
+        undefined,
+        session.taskTitle,
       );
       toast.success(outcomeSuccessCopy(outcome, result.revision));
       onRecorded(result);

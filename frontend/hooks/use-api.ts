@@ -1,14 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
+import useSWR, { type Key } from "swr";
 import { ApiError } from "@/lib/api";
-import { STUDYFLOW_DATA_CHANGED_EVENT } from "@/lib/data-events";
-
-interface State<T> {
-  data: T | null;
-  error: ApiError | Error | null;
-  isLoading: boolean;
-}
 
 export interface AsyncResource<T> extends State<T> {
   /** Re-runs the loader. Safe to call from event handlers. */
@@ -17,70 +11,57 @@ export interface AsyncResource<T> extends State<T> {
   setData: (next: T) => void;
 }
 
+interface State<T> {
+  data: T | null;
+  error: ApiError | Error | null;
+  isLoading: boolean;
+  isValidating: boolean;
+}
+
 /**
- * Loads a value from the API on mount and whenever `loader` or `deps` change.
+ * Reads a server-state resource through SWR.
  *
- * The loader receives an `AbortSignal` so an in-flight request is cancelled
- * when the component unmounts or the dependencies change again. Pass a
- * `useCallback`-wrapped loader; its identity is part of the dependency list.
+ * The key is the identity of the resource. Components sharing a key share the
+ * cached value and in-flight request. The loader receives an AbortSignal
+ * for API module signature compatibility.
  */
 export function useApi<T>(
+  key: Key,
   loader: (signal: AbortSignal) => Promise<T>,
-  deps: React.DependencyList = [],
 ): AsyncResource<T> {
-  const [state, setState] = useState<State<T>>({
-    data: null,
-    error: null,
-    isLoading: true,
+  const loaderRef = useRef(loader);
+  // Updated before SWR's own layout effect revalidates, so fetches use the latest loader.
+  useLayoutEffect(() => {
+    loaderRef.current = loader;
   });
-  const [nonce, setNonce] = useState(0);
 
-  useEffect(() => {
+  const fetcher = useCallback(() => {
     const controller = new AbortController();
-    let active = true;
-
-    loader(controller.signal)
-      .then((value) => {
-        if (active) setState({ data: value, error: null, isLoading: false });
-      })
-      .catch((cause: unknown) => {
-        if (!active || controller.signal.aborted) return;
-        setState((previous) => ({
-          ...previous,
-          error: cause instanceof Error ? cause : new Error(String(cause)),
-          isLoading: false,
-        }));
-      });
-
-    return () => {
-      active = false;
-      controller.abort();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nonce, loader, ...deps]);
-
-  // WebMCP mutations happen outside React event handlers. Refresh mounted
-  // resources after those calls so the visible app stays in sync with the
-  // authenticated session the agent just changed.
-  useEffect(() => {
-    const onDataChanged = () => {
-      setState((previous) => ({ ...previous, error: null, isLoading: true }));
-      setNonce((value) => value + 1);
-    };
-    window.addEventListener(STUDYFLOW_DATA_CHANGED_EVENT, onDataChanged);
-    return () => window.removeEventListener(STUDYFLOW_DATA_CHANGED_EVENT, onDataChanged);
+    return loaderRef.current(controller.signal);
   }, []);
+
+  const { data, error, isLoading, isValidating, mutate } = useSWR<T>(key, fetcher);
 
   const reload = useCallback(() => {
-    setState((previous) => ({ ...previous, error: null, isLoading: true }));
-    setNonce((value) => value + 1);
-  }, []);
+    void mutate();
+  }, [mutate]);
 
   const setData = useCallback((next: T) => {
-    setState((previous) => ({ ...previous, data: next, error: null }));
-  }, []);
+    void mutate(next, { revalidate: false });
+  }, [mutate]);
 
-  return { ...state, reload, setData };
+  return {
+    data: data ?? null,
+    error: error
+      ? error instanceof Error
+        ? error
+        : new Error(String(error))
+      : null,
+    isLoading,
+    isValidating,
+    reload,
+    setData,
+  };
 }
 
 /** Human-readable text for an error thrown by the API client. */
