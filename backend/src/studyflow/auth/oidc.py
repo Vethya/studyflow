@@ -24,6 +24,8 @@ GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"  # noqa: S105
 GOOGLE_JWKS_ENDPOINT = "https://www.googleapis.com/oauth2/v3/certs"
 GOOGLE_ISSUERS = {"accounts.google.com", "https://accounts.google.com"}
 OIDC_SCOPES = "openid email profile"
+DELETION_AUTH_MAX_AGE = timedelta(minutes=5)
+AUTH_TIME_CLOCK_SKEW = timedelta(minutes=1)
 
 
 class InvalidOIDCResponseError(ValueError):
@@ -64,6 +66,7 @@ class GoogleClaims:
     subject: str
     email: str
     name: str
+    auth_time: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +233,18 @@ class OIDCLoginService:
                 "scope": OIDC_SCOPES,
                 "state": state,
                 "nonce": nonce,
+                **(
+                    {
+                        "prompt": "login",
+                        "max_age": 0,
+                        "claims": json.dumps(
+                            {"id_token": {"auth_time": {"essential": True}}},
+                            separators=(",", ":"),
+                        ),
+                    }
+                    if deletion_account_id is not None
+                    else {}
+                ),
             }
         )
         return OIDCStart(f"{GOOGLE_AUTHORIZATION_ENDPOINT}?{query}", state)
@@ -260,6 +275,8 @@ class OIDCLoginService:
                 )
             raise
         if state_record.deletion_account_id is not None:
+            if not _has_recent_authentication(claims.auth_time, self._clock()):
+                raise InvalidOIDCResponseError
             challenge = self._token_factory()
             deletion_repository = cast(OIDCDeletionRepository, self._repository)
             if not await deletion_repository.create_deletion_challenge(
@@ -420,7 +437,24 @@ class GoogleOIDCProvider:
             raise InvalidOIDCResponseError from error
         raw_name = claims.get("name")
         name = raw_name.strip()[:200] if isinstance(raw_name, str) else ""
-        return GoogleClaims(subject, email, name or email.partition("@")[0])
+        raw_auth_time = claims.get("auth_time")
+        auth_time = (
+            raw_auth_time
+            if isinstance(raw_auth_time, int) and not isinstance(raw_auth_time, bool)
+            else None
+        )
+        return GoogleClaims(subject, email, name or email.partition("@")[0], auth_time)
+
+
+def _has_recent_authentication(auth_time: int | None, now: datetime) -> bool:
+    if auth_time is None:
+        return False
+    try:
+        authenticated_at = datetime.fromtimestamp(auth_time, tz=UTC)
+    except (OSError, OverflowError, ValueError):
+        return False
+    age = now - authenticated_at
+    return -AUTH_TIME_CLOCK_SKEW <= age <= DELETION_AUTH_MAX_AGE
 
 
 class UnconfiguredOIDCLogin:
