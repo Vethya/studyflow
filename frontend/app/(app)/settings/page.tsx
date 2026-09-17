@@ -16,11 +16,11 @@ import {
   ChangePasswordDialog,
   ChangeTimezoneDialog,
 } from "@/components/settings-dialogs";
-import { account as accountApi, availability as availabilityApi } from "@/lib/api";
+import { account as accountApi, auth, availability as availabilityApi } from "@/lib/api";
 import { describeError, useApi } from "@/hooks/use-api";
 import { useSession } from "@/hooks/use-session";
 import { formatDuration } from "@/lib/constants";
-import { formatOffset } from "@/lib/timezones";
+import { detectTimezone, formatOffset } from "@/lib/timezones";
 import { cn } from "@/lib/utils";
 
 const SESSION_LENGTH = { min: 10, max: 240, step: 5 };
@@ -62,13 +62,29 @@ export default function SettingsPage() {
   const [addPasswordOpen, setAddPasswordOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [timezoneOpen, setTimezoneOpen] = useState(false);
+  const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
+  const [googleError, setGoogleError] = useState<string | null>(null);
 
   const google = (identities.data ?? []).find((identity) => identity.provider === "google");
   const zone = preferences.data?.timezone;
 
+  async function connectGoogle() {
+    setGoogleError(null);
+    setIsConnectingGoogle(true);
+    try {
+      const { authorization_url } = await auth.startGoogleSignIn(zone ?? detectTimezone());
+      window.location.assign(authorization_url);
+    } catch (cause) {
+      setGoogleError(describeError(cause));
+      setIsConnectingGoogle(false);
+    }
+  }
+
   return (
     <PageShell width="narrow">
       <PageHeader title="Settings" description="Your account, and how StudyFlow behaves." />
+
+      {googleError && <Callout tone="danger">{googleError}</Callout>}
 
       <Section icon={User} title="Profile">
         {profile.isLoading ? (
@@ -141,11 +157,11 @@ export default function SettingsPage() {
                  two-line label read as an afterthought. */
               <Button
                 variant="outline"
-                nativeButton={false}
                 className="h-auto min-h-11 self-stretch px-5 text-sm"
-                render={<Link href="/login/google-link" />}
+                onClick={() => void connectGoogle()}
+                disabled={isConnectingGoogle}
               >
-                <GoogleIcon />
+                {isConnectingGoogle ? <Loader2 className="animate-spin" /> : <GoogleIcon />}
                 Connect
               </Button>
             )}
