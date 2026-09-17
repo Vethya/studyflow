@@ -164,7 +164,7 @@ async def test_google_oidc_browser_success_redirects_to_clean_app_url() -> None:
         )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "http://localhost:5173/app"
+    assert response.headers["location"] == "http://localhost:3000/app"
     assert response.headers["referrer-policy"] == "no-referrer"
     assert response.headers["vary"] == "Accept"
     assert "code" not in response.headers["location"]
@@ -209,7 +209,7 @@ async def test_google_oidc_browser_linking_uses_http_only_server_state() -> None
         )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "http://localhost:5173/login/google-link"
+    assert response.headers["location"] == "http://localhost:3000/login/google-link"
     assert "server-link-challenge-value" not in response.headers["location"]
     cookies = response.headers.get_list("set-cookie")
     link_cookie = next(cookie for cookie in cookies if "studyflow_oidc_link=" in cookie)
@@ -239,7 +239,7 @@ async def test_google_oidc_browser_errors_redirect_without_sensitive_parameters(
         )
 
     assert response.status_code == 303
-    assert response.headers["location"] == f"http://localhost:5173/login/google-error/{outcome}"
+    assert response.headers["location"] == f"http://localhost:3000/login/google-error/{outcome}"
     assert "?" not in response.headers["location"]
     assert "studyflow_oidc_state=" in response.headers["set-cookie"]
 
@@ -264,7 +264,7 @@ async def test_malformed_google_browser_callbacks_redirect_instead_of_returning_
         )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "http://localhost:5173/login/google-error/invalid"
+    assert response.headers["location"] == "http://localhost:3000/login/google-error/invalid"
 
 
 @pytest.mark.anyio
@@ -290,7 +290,7 @@ async def test_google_oidc_browser_provider_outage_redirects_and_clears_callback
 
     assert response.status_code == 303
     assert response.headers["location"] == (
-        "http://localhost:5173/login/google-error/provider-unavailable"
+        "http://localhost:3000/login/google-error/provider-unavailable"
     )
     assert response.headers["retry-after"] == "60"
     assert "studyflow_oidc_state=" in response.headers["set-cookie"]
@@ -364,4 +364,4 @@ async def test_start_google_oidc_validation_and_errors() -> None:
             headers={"Accept": "text/html"},
         )
         assert res5.status_code == 303
-        assert res5.headers["location"] == "http://localhost:5173/login/google-error/not-configured"
+        assert res5.headers["location"] == "http://localhost:3000/login/google-error/not-configured"

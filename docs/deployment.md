@@ -122,9 +122,9 @@ Frontend developers do not need Python or Docker installed to try the deployed A
 direct cross-site browser calls cannot carry `SameSite=Strict` session cookies regardless of
 CORS settings. Two supported options:
 
-- **Full stack locally** (`docker compose up`): `localhost:5173` and `localhost:8000` are
+- **Full stack locally** (`docker compose up`): `localhost:3000` and `localhost:8000` are
   different origins but the same site, so cookies flow once
-  `STUDYFLOW_CORS_ORIGINS=http://localhost:5173` is set.
+  `STUDYFLOW_CORS_ORIGINS=http://localhost:3000` is set.
 - **Local proxy against any backend** (recommended): run the Next.js rewrite with
   `destination` pointed either at `http://127.0.0.1:8000` or at the deployed Render URL.
   Same-origin requests need no CORS configuration and behave exactly like production.
