@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -37,7 +37,7 @@ const MENU = [
 
 export function AppSidebar() {
   const pathname = usePathname();
-  const menuRef = useRef<HTMLUListElement>(null);
+  const [menuEl, setMenuEl] = useState<HTMLUListElement | null>(null);
   const [indicator, setIndicator] = useState<{
     top: number;
     left: number;
@@ -58,18 +58,17 @@ export function AppSidebar() {
       : pathname === item.url || pathname.startsWith(`${item.url}/`);
 
   useLayoutEffect(() => {
-    const el = menuRef.current;
-    if (!el) return;
+    if (!menuEl) return;
 
     const updateIndicator = () => {
       const activeIndex = MENU.findIndex(isActive);
-      const buttons = el.querySelectorAll<HTMLElement>("[data-slot='sidebar-menu-button']");
+      const buttons = menuEl.querySelectorAll<HTMLElement>("[data-slot='sidebar-menu-button']");
       const activeBtn =
-        el.querySelector<HTMLElement>("[data-active]") ??
+        menuEl.querySelector<HTMLElement>("[data-active]") ??
         (activeIndex >= 0 ? buttons[activeIndex] : null);
 
       if (activeBtn) {
-        const menuRect = el.getBoundingClientRect();
+        const menuRect = menuEl.getBoundingClientRect();
         const btnRect = activeBtn.getBoundingClientRect();
         setIndicator({
           top: btnRect.top - menuRect.top,
@@ -85,9 +84,9 @@ export function AppSidebar() {
 
     updateIndicator();
     const observer = new ResizeObserver(updateIndicator);
-    observer.observe(el);
+    observer.observe(menuEl);
     return () => observer.disconnect();
-  }, [pathname]);
+  }, [pathname, menuEl]);
 
   /*
    * The collapsed overrides are repeated here on purpose.
@@ -145,7 +144,7 @@ export function AppSidebar() {
             Menu
           </SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu ref={menuRef} className="relative gap-1">
+            <SidebarMenu ref={setMenuEl} className="relative gap-1">
               {indicator.ready && (
                 <div
                   aria-hidden="true"
