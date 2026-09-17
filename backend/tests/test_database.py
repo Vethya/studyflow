@@ -16,6 +16,28 @@ class ExampleRecord(Base):
 
 
 @pytest.mark.anyio
+async def test_database_ping_uses_a_started_runtime() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+
+    try:
+        await database.ping()
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_database_rejects_transactions_before_start_and_stops_idempotently() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+
+    with pytest.raises(RuntimeError, match="has not been started"):
+        async with database.transaction():
+            pass
+
+    await database.stop()
+
+
+@pytest.mark.anyio
 async def test_successful_database_transaction_is_committed() -> None:
     database = Database("sqlite+aiosqlite:///:memory:")
     await database.start()

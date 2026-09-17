@@ -74,5 +74,9 @@ async def test_password_replacement_compares_current_hash_and_revokes_all_sessio
         assert not await SqlAlchemyPasswordRecoveryRepository(database).reset_password(
             "r" * 64, "$argon2id$attacker", now
         )
+
+        # get_password_hash (lines 89-90)
+        assert await repository.get_password_hash(account_id) == "$argon2id$new"
+        assert await repository.get_password_hash(uuid4()) is None
     finally:
         await database.stop()

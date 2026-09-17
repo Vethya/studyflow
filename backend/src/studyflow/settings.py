@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     smtp_password: SecretStr | None = None
     smtp_start_tls: bool = False
     email_from_address: EmailStr = "no-reply@example.com"
-    public_app_url: str = "http://localhost:5173"
+    public_app_url: str = "http://localhost:3000"
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
     google_oidc_client_id: str | None = None
     google_oidc_client_secret: SecretStr | None = None

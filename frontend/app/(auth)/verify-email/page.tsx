@@ -27,6 +27,8 @@ import {
   validateRegistration,
   type RegistrationFieldErrors,
 } from "@/lib/registration-validation";
+import { notifyStudyFlowSessionInvalidated } from "@/lib/data-events";
+import { useSession } from "@/hooks/use-session";
 
 function getPasswordStrength(pw: string): { level: number; label: string; color: string } {
   if (pw.length === 0) return { level: 0, label: "", color: "" };
@@ -74,10 +76,40 @@ function VerifyEmailFlow() {
 }
 
 function AwaitingEmail() {
+  const { signOut, status } = useSession();
   const [email, setEmail] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
+
+  if (status !== "unauthenticated") {
+    if (status === "authenticated") {
+      return (
+        <div className="space-y-6">
+          <div className="space-y-1">
+            <h1 className="text-2xl font-bold tracking-tight">You’re already signed in</h1>
+            <p className="text-sm text-muted-foreground">
+              Sign out before using an email verification link for another account.
+            </p>
+          </div>
+          <Button className="w-full" onClick={() => void signOut()}>
+            Sign out
+          </Button>
+          <Link
+            href="/settings"
+            className="flex items-center justify-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Go to settings
+          </Link>
+        </div>
+      );
+    }
+    return (
+      <div className="flex justify-center py-16">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   async function handleResend(event: React.FormEvent) {
     event.preventDefault();
@@ -219,6 +251,7 @@ function CompleteRegistration({ token }: { token: string }) {
     try {
       await auth.completeRegistration({ signupToken, name, password, timezone });
       // Completing registration does not sign the student in.
+      notifyStudyFlowSessionInvalidated();
       router.replace("/login?registered=1");
     } catch (cause) {
       const byField = registrationFieldErrorsFrom(cause);

@@ -1,15 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronsUpDown, LogOut, Settings } from "lucide-react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useTheme } from "next-themes";
+import { ChevronsUpDown, LogOut, Palette, Settings } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -19,6 +25,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { useSession } from "@/hooks/use-session";
+import { ThemeOptionIcon } from "@/components/theme-selector";
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -40,6 +47,7 @@ function initials(name: string): string {
 export function NavUser() {
   const { account, signOut } = useSession();
   const { isMobile } = useSidebar();
+  const { theme, setTheme } = useTheme();
 
   return (
     <SidebarMenu>
@@ -59,6 +67,11 @@ export function NavUser() {
             }
           >
             <Avatar className="size-8 rounded-lg">
+              <AvatarImage
+                src={account?.avatarUrl}
+                alt={account?.name ?? "Profile"}
+                referrerPolicy="no-referrer"
+              />
               <AvatarFallback className="rounded-lg bg-primary text-xs font-medium text-primary-foreground">
                 {account ? initials(account.name) : "··"}
               </AvatarFallback>
@@ -83,20 +96,57 @@ export function NavUser() {
             <DropdownMenuGroup>
               <DropdownMenuLabel className="p-0 font-normal">
                 <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-                <Avatar className="size-8 rounded-lg">
-                  <AvatarFallback className="rounded-lg bg-primary text-xs font-medium text-primary-foreground">
-                    {account ? initials(account.name) : "··"}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">{account?.name ?? "…"}</span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {account?.email ?? ""}
-                  </span>
+                  <Avatar className="size-8 rounded-lg">
+                    <AvatarImage
+                      src={account?.avatarUrl}
+                      alt={account?.name ?? "Profile"}
+                      referrerPolicy="no-referrer"
+                    />
+                    <AvatarFallback className="rounded-lg bg-primary text-xs font-medium text-primary-foreground">
+                      {account ? initials(account.name) : "··"}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="grid flex-1 text-left text-sm leading-tight">
+                    <span className="truncate font-medium">{account?.name ?? "…"}</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {account?.email ?? ""}
+                    </span>
+                  </div>
                 </div>
-              </div>
               </DropdownMenuLabel>
             </DropdownMenuGroup>
+
+            <DropdownMenuSeparator />
+
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <Palette />
+                Appearance
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                <DropdownMenuRadioGroup
+                  value={theme ?? "system"}
+                  onValueChange={(value) => setTheme(value)}
+                >
+                  <DropdownMenuRadioItem value="system">
+                    <ThemeOptionIcon theme="system" />
+                    System
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="light">
+                    <ThemeOptionIcon theme="light" />
+                    Light
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="dark">
+                    <ThemeOptionIcon theme="dark" />
+                    Dark
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="amoled">
+                    <ThemeOptionIcon theme="amoled" />
+                    AMOLED
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
 
             <DropdownMenuSeparator />
 

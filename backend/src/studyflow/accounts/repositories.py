@@ -4,16 +4,77 @@ import hmac
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 
 from studyflow.accounts.preferences import StudyPreferences
 from studyflow.accounts.profile import AccountProfile
 from studyflow.auth.repositories import SessionTransactions
 from studyflow.database.models import (
+    AuthenticationAccountDeletionChallenge,
     AuthenticationEmailToken,
     AuthenticationSession,
     StudentAccount,
 )
+
+
+class SqlAlchemyAccountDeletionRepository:
+    def __init__(self, database: SessionTransactions) -> None:
+        self._database = database
+
+    async def create_challenge(
+        self, account_id: UUID, token_hash: str, expires_at: datetime
+    ) -> bool:
+        async with self._database.transaction() as session:
+            account = await session.get(StudentAccount, account_id, with_for_update=True)
+            if account is None:
+                return False
+            await session.execute(
+                delete(AuthenticationAccountDeletionChallenge).where(
+                    AuthenticationAccountDeletionChallenge.account_id == account_id,
+                    AuthenticationAccountDeletionChallenge.consumed_at.is_(None),
+                )
+            )
+            session.add(
+                AuthenticationAccountDeletionChallenge(
+                    account_id=account_id,
+                    token_hash=token_hash,
+                    expires_at=expires_at,
+                )
+            )
+        return True
+
+    async def has_active_challenge(self, account_id: UUID, token_hash: str, now: datetime) -> bool:
+        async with self._database.transaction() as session:
+            challenge = await session.scalar(
+                select(AuthenticationAccountDeletionChallenge.id).where(
+                    AuthenticationAccountDeletionChallenge.account_id == account_id,
+                    AuthenticationAccountDeletionChallenge.token_hash == token_hash,
+                    AuthenticationAccountDeletionChallenge.consumed_at.is_(None),
+                    AuthenticationAccountDeletionChallenge.expires_at > now,
+                )
+            )
+            return challenge is not None
+
+    async def delete_account(self, account_id: UUID, token_hash: str, now: datetime) -> bool:
+        async with self._database.transaction() as session:
+            challenge = await session.scalar(
+                select(AuthenticationAccountDeletionChallenge)
+                .where(
+                    AuthenticationAccountDeletionChallenge.account_id == account_id,
+                    AuthenticationAccountDeletionChallenge.token_hash == token_hash,
+                    AuthenticationAccountDeletionChallenge.consumed_at.is_(None),
+                    AuthenticationAccountDeletionChallenge.expires_at > now,
+                )
+                .with_for_update()
+            )
+            if challenge is None:
+                return False
+            deleted_id = await session.scalar(
+                delete(StudentAccount)
+                .where(StudentAccount.id == account_id)
+                .returning(StudentAccount.id)
+            )
+            return deleted_id is not None
 
 
 class SqlAlchemyAccountProfileRepository:
@@ -38,7 +99,13 @@ class SqlAlchemyAccountProfileRepository:
 
     @staticmethod
     def _to_profile(account: StudentAccount) -> AccountProfile:
-        return AccountProfile(account.id, account.email, account.name)
+        return AccountProfile(
+            account.id,
+            account.email,
+            account.name,
+            password_set=account.password_hash is not None,
+            avatar_url=account.avatar_url,
+        )
 
 
 class SqlAlchemyStudyPreferencesRepository:
@@ -94,16 +161,19 @@ class SqlAlchemyPasswordChangeRepository:
     async def replace_password(
         self,
         account_id: UUID,
-        expected_password_hash: str,
+        expected_password_hash: str | None,
         new_password_hash: str,
         now: datetime,
     ) -> bool:
         async with self._database.transaction() as session:
             account = await session.get(StudentAccount, account_id, with_for_update=True)
-            if (
-                account is None
-                or account.password_hash is None
-                or not hmac.compare_digest(account.password_hash, expected_password_hash)
+            if account is None:
+                return False
+            if expected_password_hash is None:
+                if account.password_hash is not None:
+                    return False
+            elif account.password_hash is None or not hmac.compare_digest(
+                account.password_hash, expected_password_hash
             ):
                 return False
             account.password_hash = new_password_hash

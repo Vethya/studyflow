@@ -94,3 +94,30 @@ async def test_unavailable_period_allows_period_started_in_the_past() -> None:
     )
 
     assert result.period.starts_at == now - timedelta(hours=1)
+
+
+def test_unavailable_period_rejects_reason_exceeding_200_chars() -> None:
+    from studyflow.availability.unavailable import normalize_draft
+
+    now = datetime(2026, 8, 1, 12, tzinfo=UTC)
+    with pytest.raises(ValueError, match="reason cannot exceed 200 characters"):
+        normalize_draft(UnavailablePeriodDraft(now, now + timedelta(hours=1), "a" * 201))
+
+
+@pytest.mark.anyio
+async def test_unavailable_period_service_methods() -> None:
+    repository = RepositoryStub()
+    now = datetime(2026, 8, 1, 12, tzinfo=UTC)
+    service = UnavailablePeriodService(repository, clock=lambda: now)
+
+    # list_periods (line 70)
+    assert await service.list_periods(ACCOUNT_ID) == []
+
+    # update (line 80)
+    period_id = uuid4()
+    draft = UnavailablePeriodDraft(now + timedelta(hours=1), now + timedelta(hours=3), "Reason")
+    updated = await service.update(ACCOUNT_ID, period_id, draft)
+    assert updated is not None and updated.period.id == period_id
+
+    # delete (line 89)
+    assert await service.delete(ACCOUNT_ID, period_id) is True

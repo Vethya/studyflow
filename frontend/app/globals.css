@@ -17,7 +17,7 @@
  * are switched off, and the radii match what the app already used.
  */
 @plugin "daisyui/theme" {
-  name: "studyflow";
+  name: "light";
   default: true;
   prefersdark: false;
   color-scheme: light;
@@ -59,7 +59,7 @@
 }
 
 @plugin "daisyui/theme" {
-  name: "studyflow-dark";
+  name: "dark";
   prefersdark: true;
   color-scheme: dark;
 
@@ -96,7 +96,45 @@
   --noise: 0;
 }
 
-@custom-variant dark (&:is(.dark *));
+@plugin "daisyui/theme" {
+  name: "amoled";
+  prefersdark: true;
+  color-scheme: dark;
+
+  --color-base-100: oklch(0 0 0);
+  --color-base-200: oklch(0.03 0.004 262);
+  --color-base-300: oklch(0.16 0.008 262);
+  --color-base-content: oklch(0.955 0.004 250);
+
+  --color-primary: oklch(0.925 0.006 250);
+  --color-primary-content: oklch(0.06 0.004 262);
+  --color-secondary: oklch(0.16 0.012 262);
+  --color-secondary-content: oklch(0.955 0.004 250);
+  --color-accent: oklch(0.19 0.014 262);
+  --color-accent-content: oklch(0.955 0.004 250);
+  --color-neutral: oklch(0.38 0.014 260);
+  --color-neutral-content: oklch(0.955 0.004 250);
+
+  --color-info: oklch(0.712 0.014 256);
+  --color-info-content: oklch(0.06 0.004 262);
+  --color-success: oklch(0.712 0.101 183);
+  --color-success-content: oklch(0.06 0.004 262);
+  --color-warning: oklch(0.712 0.157 40);
+  --color-warning-content: oklch(0.06 0.004 262);
+  --color-error: oklch(0.712 0.157 40);
+  --color-error-content: oklch(0.06 0.004 262);
+
+  --radius-selector: 0.5rem;
+  --radius-field: 0.625rem;
+  --radius-box: 0.75rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@custom-variant dark (&:is(.dark *, .amoled *));
 
 @theme inline {
   --color-background: var(--background);
@@ -195,7 +233,7 @@
   --sidebar-ring: oklch(0.518 0.018 258);
 }
 
-.dark {
+html.dark {
   --background: oklch(0.183 0.017 262);
   --foreground: oklch(0.955 0.004 250);
   --card: oklch(0.228 0.019 262);
@@ -233,6 +271,165 @@
   --sidebar-accent-foreground: oklch(0.955 0.004 250);
   --sidebar-border: oklch(1 0 0 / 12%);
   --sidebar-ring: oklch(0.618 0.016 256);
+
+  --landing-page: oklch(0.183 0.017 262);
+  --landing-canvas: oklch(0.228 0.019 262);
+  --landing-card: oklch(0.265 0.019 262);
+  --landing-ink: oklch(0.955 0.004 250);
+  --landing-muted: oklch(0.712 0.014 256);
+  --landing-subtle: oklch(0.68 0.016 258);
+  --landing-border: oklch(1 0 0 / 12%);
+  --landing-accent: oklch(0.78 0.105 230);
+  --landing-shadow: 0 18px 40px 0 oklch(0.04 0.01 262 / 0.28);
+  --landing-shadow-hover: 0 22px 46px 0 oklch(0.04 0.01 262 / 0.38);
+  --landing-hero: linear-gradient(180deg, oklch(0.34 0.07 255) 0%, oklch(0.43 0.08 245) 48%, oklch(0.28 0.04 255) 100%);
+  --auth-sky: linear-gradient(180deg, oklch(0.34 0.07 255) 0%, oklch(0.43 0.08 245) 48%, oklch(0.28 0.04 255) 100%);
+  --auth-shadow: 0 10px 40px 0 oklch(0.04 0.01 262 / 0.35);
+}
+
+html.amoled {
+  color-scheme: dark;
+  --background: oklch(0 0 0);
+  --foreground: oklch(0.955 0.004 250);
+  --card: oklch(0.03 0.004 262);
+  --card-foreground: oklch(0.955 0.004 250);
+  --popover: oklch(0.06 0.006 262);
+  --popover-foreground: oklch(0.955 0.004 250);
+  --primary: oklch(0.925 0.006 250);
+  --primary-foreground: oklch(0.06 0.004 262);
+  --secondary: oklch(0.16 0.012 262);
+  --secondary-foreground: oklch(0.955 0.004 250);
+  --muted: oklch(0.16 0.012 262);
+  --muted-foreground: oklch(0.712 0.014 256);
+  --accent: oklch(0.19 0.014 262);
+  --accent-foreground: oklch(0.955 0.004 250);
+  --destructive: oklch(0.685 0.163 38);
+  --border: oklch(1 0 0 / 16%);
+  --input: oklch(1 0 0 / 18%);
+  --ring: oklch(0.618 0.016 256);
+
+  --surplus: oklch(0.712 0.101 183);
+  --surplus-soft: oklch(0.19 0.045 183);
+  --deficit: oklch(0.712 0.157 40);
+  --deficit-soft: oklch(0.2 0.062 38);
+
+  --chart-1: oklch(0.955 0.004 250);
+  --chart-2: oklch(0.822 0.009 252);
+  --chart-3: oklch(0.712 0.014 256);
+  --chart-4: oklch(0.588 0.016 258);
+  --chart-5: oklch(0.448 0.018 260);
+  --sidebar: oklch(0 0 0);
+  --sidebar-foreground: oklch(0.955 0.004 250);
+  --sidebar-primary: oklch(0.925 0.006 250);
+  --sidebar-primary-foreground: oklch(0.06 0.004 262);
+  --sidebar-accent: oklch(0.14 0.01 262);
+  --sidebar-accent-foreground: oklch(0.955 0.004 250);
+  --sidebar-border: oklch(1 0 0 / 14%);
+  --sidebar-ring: oklch(0.618 0.016 256);
+
+  /* The marketing page owns a separate visual system from the app shell. */
+  --landing-page: oklch(0 0 0);
+  --landing-canvas: oklch(0.02 0.004 262);
+  --landing-card: oklch(0.05 0.006 262);
+  --landing-ink: oklch(0.955 0.004 250);
+  --landing-muted: oklch(0.712 0.014 256);
+  --landing-subtle: oklch(0.68 0.016 258);
+  --landing-border: oklch(1 0 0 / 14%);
+  --landing-accent: oklch(0.78 0.105 230);
+  --landing-shadow: 0 18px 40px 0 oklch(0 0 0 / 0.7);
+  --landing-shadow-hover: 0 22px 46px 0 oklch(0 0 0 / 0.85);
+  --landing-hero: linear-gradient(180deg, oklch(0.13 0.03 255) 0%, oklch(0.07 0.015 255) 48%, oklch(0.01 0.004 262) 100%);
+  --auth-sky: linear-gradient(180deg, oklch(0.1 0.02 255) 0%, oklch(0.05 0.012 255) 48%, oklch(0 0 0) 100%);
+  --auth-shadow: 0 10px 40px 0 oklch(0 0 0 / 0.75);
+}
+
+:root {
+  --landing-page: oklch(1 0 0);
+  --landing-canvas: oklch(0.965 0.003 250);
+  --landing-card: oklch(1 0 0);
+  --landing-ink: oklch(0.205 0.019 262);
+  --landing-muted: oklch(0.518 0.018 258);
+  --landing-subtle: oklch(0.52 0.012 258);
+  --landing-border: oklch(0.92 0.005 250);
+  --landing-accent: oklch(0.62 0.13 230);
+  --landing-shadow: 0 17px 37px 0 oklch(0.2 0.02 262 / 0.06);
+  --landing-shadow-hover: 0 20px 40px 0 oklch(0.2 0.02 262 / 0.1);
+  --landing-hero: linear-gradient(180deg, #779bc1 0%, #9abfda 48%, #cbdcec 80%, #e4ecf3 100%);
+  --auth-sky: linear-gradient(180deg, #779bc1 0%, #9abfda 48%, #cbdcec 80%, #e4ecf3 100%);
+  --auth-shadow: 0 10px 40px 0 oklch(0.2 0.08 250 / 0.1);
+}
+
+@layer components {
+  .landing-page {
+    background: var(--landing-page);
+    color: var(--landing-ink);
+  }
+
+  .auth-surface {
+    background: var(--auth-sky);
+  }
+
+  .landing-canvas {
+    background: var(--landing-canvas);
+  }
+
+  .landing-canvas-text {
+    color: var(--landing-canvas);
+  }
+
+  .landing-surface {
+    background: var(--landing-card);
+  }
+
+  .landing-ink {
+    color: var(--landing-ink);
+  }
+
+  .landing-muted {
+    color: var(--landing-muted);
+  }
+
+  .landing-subtle {
+    color: var(--landing-subtle);
+  }
+
+  .landing-border {
+    border-color: var(--landing-border);
+  }
+
+  .landing-ink-border {
+    border-color: var(--landing-ink);
+  }
+
+  .landing-ink-border-soft {
+    border-color: color-mix(in oklch, var(--landing-ink) 15%, transparent);
+  }
+
+  .landing-accent {
+    color: var(--landing-accent);
+  }
+
+  .landing-accent-bg {
+    background: var(--landing-accent);
+  }
+
+  .landing-ink-button {
+    background: var(--landing-ink);
+    color: var(--landing-page);
+    box-shadow: var(--landing-shadow);
+  }
+
+  .landing-ink-button:hover {
+    background: color-mix(in oklch, var(--landing-ink) 88%, var(--landing-page));
+  }
+
+  .landing-card-shadow {
+    box-shadow: var(--landing-shadow);
+  }
+
+  .landing-card-shadow:hover {
+    box-shadow: var(--landing-shadow-hover);
+  }
 }
 
 @layer base {

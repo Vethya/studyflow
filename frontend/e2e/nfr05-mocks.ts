@@ -372,6 +372,11 @@ export async function installNfr05ApiMocks(
       return;
     }
 
+    if (path === "/api/v1/account/deletion/status" && method === "GET") {
+      await fulfillJson(route, { ready: false });
+      return;
+    }
+
     if (path === "/api/v1/account/identities" && method === "GET") {
       await fulfillJson(route, []);
       return;

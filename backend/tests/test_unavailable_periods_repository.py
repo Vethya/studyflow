@@ -262,5 +262,16 @@ async def test_update_rolls_back_period_and_invalidation_on_failure() -> None:
         assert persisted.ends_at == original.ends_at
         assert persisted.reason == original.reason
         assert account is not None and account.name == "Owner"
+
+        # Successful update (line 381)
+        updated = await repository.update(account_id, created.period.id, replacement)
+        assert updated is not None
+        assert updated.period.reason == "Extended exam"
+
+        # Update nonexistent period returns None (line 372)
+        assert await repository.update(account_id, uuid4(), replacement) is None
+
+        # Delete nonexistent period returns False (line 394)
+        assert await repository.delete(account_id, uuid4()) is False
     finally:
         await database.stop()

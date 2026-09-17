@@ -73,6 +73,7 @@ export default function CalendarPage() {
   const [editingTask, setEditingTask] = useState<AcademicTask | null>(null);
 
   const [selectedSession, setSelectedSession] = useState<StudySession | null>(null);
+  const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
   const [outcomeSession, setOutcomeSession] = useState<StudySession | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<AcademicTask | null>(null);
 
@@ -207,7 +208,10 @@ export default function CalendarPage() {
         title: `${session.taskTitle} · ${formatClock(session.startTime)}–${formatClock(session.endTime)}`,
         settled: Boolean(session.outcome),
         attention: session.isAwaitingOutcome,
-        onSelect: () => setSelectedSession(session),
+        onSelect: () => {
+          setSelectedSession(session);
+          setSessionDrawerOpen(true);
+        },
       });
     }
 
@@ -603,20 +607,23 @@ export default function CalendarPage() {
       <SessionDrawer
         session={selectedSession}
         task={selectedTask}
-        open={selectedSession !== null}
-        onOpenChange={(next) => !next && setSelectedSession(null)}
+        open={sessionDrawerOpen}
+        onOpenChange={setSessionDrawerOpen}
+        onOpenChangeComplete={(next) => {
+          if (!next) setSelectedSession(null);
+        }}
         onEditTask={() => {
           setEditingTask(selectedTask);
-          setSelectedSession(null);
+          setSessionDrawerOpen(false);
           setDialogOpen(true);
         }}
         onDeleteTask={() => {
           setConfirmDelete(selectedTask);
-          setSelectedSession(null);
+          setSessionDrawerOpen(false);
         }}
         onRecordOutcome={() => {
           setOutcomeSession(selectedSession);
-          setSelectedSession(null);
+          setSessionDrawerOpen(false);
         }}
       />
 

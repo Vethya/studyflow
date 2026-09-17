@@ -36,6 +36,7 @@ class StudentAccount(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     email: Mapped[str] = mapped_column(String(320), unique=True)
     name: Mapped[str] = mapped_column(String(200))
+    avatar_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     timezone: Mapped[str] = mapped_column(String(64), server_default="UTC")
@@ -197,6 +198,12 @@ class AuthenticationOIDCState(Base):
     state_hash: Mapped[str] = mapped_column(String(64), unique=True)
     nonce_hash: Mapped[str] = mapped_column(String(64))
     timezone: Mapped[str] = mapped_column(String(64))
+    link_account_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("student_accounts.id", ondelete="CASCADE"), index=True, nullable=True
+    )
+    deletion_account_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("student_accounts.id", ondelete="CASCADE"), index=True, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -215,6 +222,24 @@ class AuthenticationOIDCLinkChallenge(Base):
     )
     subject: Mapped[str] = mapped_column(String(255))
     email: Mapped[str] = mapped_column(String(320))
+    picture_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AuthenticationAccountDeletionChallenge(Base):
+    __tablename__ = "authentication_account_deletion_challenges"
+    __table_args__ = (
+        CheckConstraint("length(token_hash) = 64", name="token_hash_length"),
+        CheckConstraint("created_at < expires_at", name="expiry_order"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    account_id: Mapped[UUID] = mapped_column(
+        ForeignKey("student_accounts.id", ondelete="CASCADE"), index=True
+    )
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

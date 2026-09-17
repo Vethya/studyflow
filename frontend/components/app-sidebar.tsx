@@ -8,7 +8,6 @@ import {
   ListChecks,
   Clock3,
   ChartLine,
-  Settings,
   GraduationCap,
 } from "lucide-react";
 import {
@@ -26,21 +25,13 @@ import {
 import { NavUser } from "@/components/nav-user";
 import { cn } from "@/lib/utils";
 
-/**
- * Two labelled groups: where the work is, and where the account is.
- * Settings keeps no sub-menu — the settings screen carries its own section
- * nav, and duplicating it here meant two copies of the same navigation.
- */
+/** The sidebar is for work navigation; account actions live in the footer menu. */
 const MENU = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutGrid },
   { title: "Tasks", url: "/tasks", icon: ListChecks },
   { title: "Calendar", url: "/calendar", icon: CalendarDays },
   { title: "Availability", url: "/availability", icon: Clock3 },
   { title: "Progress", url: "/progress", icon: ChartLine },
-];
-
-const GENERAL = [
-  { title: "Settings", url: "/settings", icon: Settings },
 ];
 
 export function AppSidebar() {
@@ -70,7 +61,7 @@ export function AppSidebar() {
       "h-10 gap-3 rounded-lg px-3 text-sm transition-colors",
       "group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:p-2!",
       active
-        ? "bg-sidebar-primary font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary hover:text-sidebar-primary-foreground"
+        ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
     );
 
@@ -127,32 +118,6 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <SidebarGroup className="py-1">
-          <SidebarGroupLabel className="px-2 text-xs font-medium text-muted-foreground">
-            Account
-          </SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu className="gap-1">
-              {GENERAL.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    isActive={isActive(item)}
-                    tooltip={item.title}
-                    className={itemClass(isActive(item))}
-                    render={
-                      <Link href={item.url}>
-                        <item.icon className="size-4" />
-                        <span className="group-data-[collapsible=icon]:hidden">
-                          {item.title}
-                        </span>
-                      </Link>
-                    }
-                  />
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter className="border-t p-2 group-data-[collapsible=icon]:p-2">

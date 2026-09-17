@@ -46,6 +46,10 @@ class AccountPasswordChangeRateLimitExceeded(RuntimeError):
     """Raised when current-password checks exceed their window."""
 
 
+class AccountDeletionRateLimitExceeded(RuntimeError):
+    """Raised when account deletion confirmation exceeds its window."""
+
+
 class OIDCStartRateLimitExceeded(RuntimeError):
     """Raised when an IP address creates too many OIDC states."""
 
@@ -89,6 +93,10 @@ class PasswordResetAttemptRateLimit(Protocol):
 
 
 class AccountPasswordChangeRateLimit(Protocol):
+    async def check(self, client_ip: str, account_id: str) -> None: ...
+
+
+class AccountDeletionRateLimit(Protocol):
     async def check(self, client_ip: str, account_id: str) -> None: ...
 
 
@@ -421,6 +429,15 @@ class DatabaseAccountPasswordChangeRateLimiter(_DatabaseRateLimiter):
             "account_password_change",
             (f"ip:{client_ip}", f"account:{account_id}"),
             AccountPasswordChangeRateLimitExceeded,
+        )
+
+
+class DatabaseAccountDeletionRateLimiter(_DatabaseRateLimiter):
+    async def check(self, client_ip: str, account_id: str) -> None:
+        await self._check(
+            "account_deletion",
+            (f"ip:{client_ip}", f"account:{account_id}"),
+            AccountDeletionRateLimitExceeded,
         )
 
 

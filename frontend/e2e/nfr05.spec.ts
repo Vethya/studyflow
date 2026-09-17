@@ -328,7 +328,7 @@ for (const viewport of VIEWPORTS) {
       test.skip(testInfo.project.name.startsWith("mobile-") && viewport.width !== 360, "Mobile projects run at 360px only.");
 
       const issues = installRuntimeMonitoring(page);
-      const mockState = await installNfr05ApiMocks(page, { authenticated: true });
+      const mockState = await installNfr05ApiMocks(page, { authenticated: false });
 
       for (const route of PUBLIC_ROUTES) {
         await test.step(route, async () => {

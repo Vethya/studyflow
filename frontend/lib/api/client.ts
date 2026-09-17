@@ -8,6 +8,8 @@
  * each caller.
  */
 
+import { notifyStudyFlowSessionInvalidated } from "@/lib/data-events";
+
 export const API_BASE = "/api/v1";
 
 /** Dev cookie names; production adds the `__Host-` prefix. */
@@ -156,6 +158,11 @@ async function request(path: string, options: RequestOptions = {}): Promise<Resp
   });
 
   if (!response.ok) {
+    // Authentication endpoints have their own error state. Only protected
+    // application requests should expire the mounted app session.
+    if (response.status === 401 && !path.startsWith("/auth/")) {
+      notifyStudyFlowSessionInvalidated();
+    }
     const retryAfter = response.headers.get("Retry-After");
     const detail = await extractDetail(response);
     throw new ApiError(

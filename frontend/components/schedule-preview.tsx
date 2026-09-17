@@ -97,7 +97,20 @@ export function SchedulePreview({
 }) {
   const [busy, setBusy] = React.useState<"accept" | "reject" | null>(null);
 
-  if (!proposal) return null;
+  // Keep the dialog root mounted before the first proposal is available. This
+  // gives Base UI a closed-to-open transition instead of mounting open.
+  if (!proposal) {
+    return (
+      <DetailDrawer
+        open={false}
+        onOpenChange={onOpenChange}
+        size="wide"
+        title="Your proposed plan"
+      >
+        {null}
+      </DetailDrawer>
+    );
+  }
 
   const upcoming = proposal.proposedSessions
     .filter((session) => !session.outcome && new Date(session.endTime) > new Date())

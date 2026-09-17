@@ -29,6 +29,8 @@ from studyflow.auth.login import (
     LoginCommand,
 )
 from studyflow.auth.oidc import (
+    AccountDeletionOIDC,
+    AccountDeletionReadyError,
     AccountLinkRequiredError,
     InvalidLinkChallengeError,
     InvalidOIDCResponseError,
@@ -37,7 +39,11 @@ from studyflow.auth.oidc import (
     OIDCNotConfiguredError,
     OIDCProviderUnavailableError,
 )
-from studyflow.auth.passwords import PasswordPolicyError
+from studyflow.auth.passwords import (
+    KNOWN_BREACH_MESSAGE,
+    BreachedPasswordError,
+    PasswordPolicyError,
+)
 from studyflow.auth.rate_limits import (
     EmailVerificationRateLimit,
     EmailVerificationRateLimitExceeded,
@@ -61,7 +67,7 @@ from studyflow.auth.rate_limits import (
 from studyflow.auth.recovery import InvalidPasswordResetTokenError, PasswordRecovery
 from studyflow.auth.registration import Registration, RegistrationCommand
 from studyflow.auth.resend import VerificationResend
-from studyflow.auth.session_authentication import SessionAuthentication
+from studyflow.auth.session_authentication import SessionAuthentication, SessionPrincipal
 from studyflow.auth.verification import EmailVerification
 from studyflow.timezones import is_iana_timezone
 
@@ -131,10 +137,24 @@ class PasswordResetConfirmation(BaseModel):
     password: Annotated[str, Field(min_length=12, max_length=128)]
 
 
+class GoogleStartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    timezone: Annotated[str, Field(min_length=1, max_length=64)]
+
+    @field_validator("timezone")
+    @classmethod
+    def require_iana_timezone(cls, value: str) -> str:
+        if not is_iana_timezone(value):
+            raise ValueError("Timezone must be a valid IANA timezone")
+        return value
+
+
 class AuthenticatedAccount(BaseModel):
     id: str
     email: EmailStr
     name: str
+    avatar_url: str | None = None
 
 
 class LoginResponse(BaseModel):
@@ -196,6 +216,10 @@ def get_login_rate_limit(request: Request) -> LoginRateLimit:
 
 def get_oidc_login(request: Request) -> OIDCLogin:
     return cast(OIDCLogin, request.app.state.oidc_login)
+
+
+def get_account_deletion_oidc(request: Request) -> AccountDeletionOIDC:
+    return cast(AccountDeletionOIDC, request.app.state.oidc_login)
 
 
 def get_oidc_start_rate_limit(request: Request) -> OIDCStartRateLimit:
@@ -270,8 +294,15 @@ async def handle_google_callback_validation_error(request: Request, error: Excep
     if not isinstance(error, RequestValidationError):
         raise error
     if request.url.path == "/api/v1/auth/google/callback" and _wants_html(request):
-        response = _browser_redirect(request, "/login/google-error/invalid")
-        get_cookie_policy(request).clear_oidc_state(response)
+        cookie_policy = get_cookie_policy(request)
+        deletion_flow = request.cookies.get(cookie_policy.account_deletion_intent_name) is not None
+        destination = (
+            "/settings?account-deletion=error" if deletion_flow else "/login/google-error/invalid"
+        )
+        response = _browser_redirect(request, destination)
+        cookie_policy.clear_oidc_state(response)
+        if deletion_flow:
+            cookie_policy.clear_account_deletion_intent(response)
         return response
     return await request_validation_exception_handler(request, error)
 
@@ -319,6 +350,25 @@ def get_session_authentication(request: Request) -> SessionAuthentication:
     return cast(SessionAuthentication, request.app.state.session_authentication)
 
 
+async def require_csrf_session(
+    request: Request,
+    authentication: Annotated[SessionAuthentication, Depends(get_session_authentication)],
+    csrf_token: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
+) -> SessionPrincipal:
+    session_token = request.cookies.get(get_cookie_policy(request).session_name)
+    if session_token is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    if csrf_token is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
+    principal = await authentication.authenticate(session_token, csrf_token)
+    if principal is not None:
+        return principal
+    csrf_cookie = request.cookies.get(get_cookie_policy(request).csrf_name)
+    if csrf_cookie is not None and hmac.compare_digest(csrf_token.encode(), csrf_cookie.encode()):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
+
+
 def get_verification_resend(request: Request) -> VerificationResend:
     return cast(VerificationResend, request.app.state.verification_resend)
 
@@ -343,24 +393,22 @@ def get_password_reset_attempt_rate_limit(request: Request) -> PasswordResetAtte
     )
 
 
-@router.get(
+@router.post(
     "/google/start",
     response_model=OIDCStartResponse,
     responses={status.HTTP_503_SERVICE_UNAVAILABLE: {"model": AuthenticationError}},
 )
 async def start_google_oidc(
+    payload: GoogleStartRequest,
     response: Response,
     http_request: Request,
-    timezone: Annotated[str, Query(min_length=1, max_length=64)],
     oidc: Annotated[OIDCLogin, Depends(get_oidc_login)],
     rate_limit: Annotated[OIDCStartRateLimit, Depends(get_oidc_start_rate_limit)],
 ) -> OIDCStartResponse:
     try:
-        if not is_iana_timezone(timezone):
-            raise HTTPException(status_code=422, detail="Timezone must be a valid IANA timezone")
         client_ip = http_request.client.host if http_request.client is not None else "unknown"
         await rate_limit.check(client_ip)
-        started = await oidc.start(timezone)
+        started = await oidc.start(payload.timezone)
     except OIDCStartRateLimitExceeded as error:
         raise HTTPException(
             status_code=429,
@@ -369,13 +417,87 @@ async def start_google_oidc(
         ) from error
     except OIDCNotConfiguredError as error:
         raise HTTPException(status_code=503, detail="Google sign-in is not configured") from error
-    get_cookie_policy(http_request).set_oidc_state(response, started.state)
+    cookie_policy = get_cookie_policy(http_request)
+    cookie_policy.clear_account_deletion_intent(response)
+    cookie_policy.set_oidc_state(response, started.state)
+    return OIDCStartResponse(authorization_url=started.authorization_url)
+
+
+@router.post(
+    "/google/link/start",
+    response_model=OIDCStartResponse,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError},
+        status.HTTP_403_FORBIDDEN: {"model": AuthenticationError},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": AuthenticationError},
+    },
+)
+async def start_google_link_oidc(
+    payload: GoogleStartRequest,
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    response: Response,
+    http_request: Request,
+    oidc: Annotated[OIDCLogin, Depends(get_oidc_login)],
+    rate_limit: Annotated[OIDCStartRateLimit, Depends(get_oidc_start_rate_limit)],
+) -> OIDCStartResponse:
+    try:
+        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        await rate_limit.check(client_ip)
+        started = await oidc.start_link(principal.account_id, payload.timezone)
+    except OIDCStartRateLimitExceeded as error:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many Google linking attempts",
+            headers={"Retry-After": "900"},
+        ) from error
+    except OIDCNotConfiguredError as error:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured") from error
+    cookie_policy = get_cookie_policy(http_request)
+    cookie_policy.clear_account_deletion_intent(response)
+    cookie_policy.set_oidc_state(response, started.state)
+    return OIDCStartResponse(authorization_url=started.authorization_url)
+
+
+@router.post(
+    "/google/account-deletion/start",
+    response_model=OIDCStartResponse,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError},
+        status.HTTP_403_FORBIDDEN: {"model": AuthenticationError},
+        status.HTTP_429_TOO_MANY_REQUESTS: {"model": AuthenticationError},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": AuthenticationError},
+    },
+)
+async def start_google_account_deletion(
+    payload: GoogleStartRequest,
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    response: Response,
+    http_request: Request,
+    oidc: Annotated[AccountDeletionOIDC, Depends(get_account_deletion_oidc)],
+    rate_limit: Annotated[OIDCStartRateLimit, Depends(get_oidc_start_rate_limit)],
+) -> OIDCStartResponse:
+    try:
+        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        await rate_limit.check(client_ip)
+        started = await oidc.start_account_deletion(principal.account_id, payload.timezone)
+    except OIDCStartRateLimitExceeded as error:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many account deletion attempts",
+            headers={"Retry-After": "900"},
+        ) from error
+    except OIDCNotConfiguredError as error:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured") from error
+    cookie_policy = get_cookie_policy(http_request)
+    cookie_policy.set_oidc_state(response, started.state)
+    cookie_policy.set_account_deletion_intent(response)
     return OIDCStartResponse(authorization_url=started.authorization_url)
 
 
 @router.get(
     "/google/callback",
     response_model=LoginResponse,
+    response_model_exclude_none=True,
     responses={
         status.HTTP_303_SEE_OTHER: {
             "description": "Browser flow redirected to a clean frontend route"
@@ -406,10 +528,33 @@ async def complete_google_oidc(
     cookie_policy = get_cookie_policy(http_request)
     browser_flow = _wants_html(http_request)
     state_cookie = http_request.cookies.get(cookie_policy.oidc_state_name)
+    deletion_flow = http_request.cookies.get(cookie_policy.account_deletion_intent_name) is not None
     try:
         if error is not None or code is None or state_cookie is None:
+            if deletion_flow and browser_flow:
+                outcome = "cancelled" if error == "access_denied" else "error"
+                redirect = _browser_redirect(http_request, f"/settings?account-deletion={outcome}")
+                cookie_policy.clear_oidc_state(redirect)
+                cookie_policy.clear_account_deletion_intent(redirect)
+                return redirect
             raise InvalidOIDCResponseError
         result = await oidc.complete(code, state, state_cookie)
+    except AccountDeletionReadyError as deletion_error:
+        if browser_flow:
+            redirect = _browser_redirect(http_request, "/settings?account-deletion=ready")
+            cookie_policy.clear_oidc_state(redirect)
+            cookie_policy.clear_account_deletion_intent(redirect)
+            cookie_policy.set_account_deletion(redirect, deletion_error.challenge)
+            return redirect
+        ready_response = JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"detail": "Google reauthentication completed"},
+            headers={"Cache-Control": "no-store", "Vary": "Accept"},
+        )
+        cookie_policy.clear_oidc_state(ready_response)
+        cookie_policy.clear_account_deletion_intent(ready_response)
+        cookie_policy.set_account_deletion(ready_response, deletion_error.challenge)
+        return ready_response
     except AccountLinkRequiredError as link_error:
         if browser_flow:
             redirect = _browser_redirect(http_request, "/login/google-link")
@@ -419,6 +564,11 @@ async def complete_google_oidc(
         return _oidc_link_required_response(link_error.challenge, cookie_policy)
     except OIDCProviderUnavailableError as provider_error:
         if browser_flow:
+            if deletion_flow:
+                redirect = _browser_redirect(http_request, "/settings?account-deletion=error")
+                cookie_policy.clear_oidc_state(redirect)
+                cookie_policy.clear_account_deletion_intent(redirect)
+                return redirect
             redirect = _browser_redirect(
                 http_request, "/login/google-error/provider-unavailable", retry_after="60"
             )
@@ -427,6 +577,11 @@ async def complete_google_oidc(
         return _oidc_provider_unavailable_response(provider_error, cookie_policy)
     except InvalidOIDCResponseError:
         if browser_flow:
+            if deletion_flow:
+                redirect = _browser_redirect(http_request, "/settings?account-deletion=error")
+                cookie_policy.clear_oidc_state(redirect)
+                cookie_policy.clear_account_deletion_intent(redirect)
+                return redirect
             outcome = "denied" if error == "access_denied" else "invalid"
             redirect = _browser_redirect(http_request, f"/login/google-error/{outcome}")
             cookie_policy.clear_oidc_state(redirect)
@@ -434,20 +589,31 @@ async def complete_google_oidc(
         return _oidc_error_response(400, "Google sign-in could not be completed", cookie_policy)
     except OIDCNotConfiguredError:
         if browser_flow:
+            if deletion_flow:
+                redirect = _browser_redirect(http_request, "/settings?account-deletion=error")
+                cookie_policy.clear_oidc_state(redirect)
+                cookie_policy.clear_account_deletion_intent(redirect)
+                return redirect
             redirect = _browser_redirect(http_request, "/login/google-error/not-configured")
             cookie_policy.clear_oidc_state(redirect)
             return redirect
         return _oidc_error_response(503, "Google sign-in is not configured", cookie_policy)
     if browser_flow:
-        redirect = _browser_redirect(http_request, "/app")
+        destination = "/settings" if result.link_completed else "/app"
+        redirect = _browser_redirect(http_request, destination)
         cookie_policy.clear_oidc_state(redirect)
+        cookie_policy.clear_account_deletion_intent(redirect)
         cookie_policy.set_authentication(redirect, result.session_token, result.csrf_token)
         return redirect
     cookie_policy.clear_oidc_state(response)
+    cookie_policy.clear_account_deletion_intent(response)
     cookie_policy.set_authentication(response, result.session_token, result.csrf_token)
     return LoginResponse(
         account=AuthenticatedAccount(
-            id=str(result.account_id), email=result.email, name=result.name
+            id=str(result.account_id),
+            email=result.email,
+            name=result.name,
+            avatar_url=result.avatar_url,
         ),
         csrf_token=result.csrf_token,
     )
@@ -456,6 +622,7 @@ async def complete_google_oidc(
 @router.post(
     "/google/link",
     response_model=LoginResponse,
+    response_model_exclude_none=True,
     responses={
         status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError},
         status.HTTP_429_TOO_MANY_REQUESTS: {"model": AuthenticationError},
@@ -476,6 +643,7 @@ async def confirm_google_account_link(
 @router.post(
     "/google/link/browser",
     response_model=LoginResponse,
+    response_model_exclude_none=True,
     description=(
         "Completes browser account linking using the short-lived HttpOnly challenge cookie. "
         "Development requires `studyflow_oidc_link`; production requires "
@@ -520,6 +688,18 @@ async def confirm_google_browser_account_link(
     )
 
 
+@router.get(
+    "/google/link/browser",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError}},
+)
+async def check_google_browser_account_link_challenge(http_request: Request) -> Response:
+    cookie_policy = get_cookie_policy(http_request)
+    if http_request.cookies.get(cookie_policy.oidc_link_name) is None:
+        raise HTTPException(status_code=401, detail="Invalid link challenge or password")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 async def _complete_google_account_link(
     challenge: str,
     password: str,
@@ -547,7 +727,10 @@ async def _complete_google_account_link(
     cookie_policy.set_authentication(response, result.session_token, result.csrf_token)
     return LoginResponse(
         account=AuthenticatedAccount(
-            id=str(result.account_id), email=result.email, name=result.name
+            id=str(result.account_id),
+            email=result.email,
+            name=result.name,
+            avatar_url=result.avatar_url,
         ),
         csrf_token=result.csrf_token,
     )
@@ -607,6 +790,7 @@ async def forgot_password(
 )
 async def reset_password(
     payload: PasswordResetConfirmation,
+    response: Response,
     http_request: Request,
     recovery: Annotated[PasswordRecovery, Depends(get_password_recovery)],
     rate_limit: Annotated[
@@ -628,6 +812,11 @@ async def reset_password(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Password reset token is invalid or expired",
         ) from error
+    except BreachedPasswordError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=KNOWN_BREACH_MESSAGE,
+        ) from error
     except PasswordPolicyError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -638,6 +827,7 @@ async def reset_password(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Password safety service is unavailable",
         ) from error
+    get_cookie_policy(http_request).clear_authentication(response)
 
 
 @router.post(
@@ -671,6 +861,7 @@ async def resend_verification(
 @router.get(
     "/session",
     response_model=CurrentSessionResponse,
+    response_model_exclude_none=True,
     responses={status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError}},
 )
 async def get_current_session(
@@ -678,14 +869,23 @@ async def get_current_session(
     authentication: Annotated[SessionAuthentication, Depends(get_session_authentication)],
 ) -> CurrentSessionResponse:
     session_token = http_request.cookies.get(get_cookie_policy(http_request).session_name)
-    principal = (
-        await authentication.authenticate(session_token) if session_token is not None else None
-    )
+    if session_token is None:
+        principal = None
+    else:
+        authenticate_read_only = getattr(authentication, "authenticate_read_only", None)
+        principal = (
+            await authenticate_read_only(session_token)
+            if authenticate_read_only is not None
+            else await authentication.authenticate(session_token)
+        )
     if principal is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     return CurrentSessionResponse(
         account=AuthenticatedAccount(
-            id=str(principal.account_id), email=principal.email, name=principal.name
+            id=str(principal.account_id),
+            email=principal.email,
+            name=principal.name,
+            avatar_url=principal.avatar_url,
         )
     )
 
@@ -713,7 +913,13 @@ async def logout(
         or csrf_cookie is None
         or not hmac.compare_digest(csrf_token.encode(), csrf_cookie.encode())
     ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
+        response: Response = JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": "CSRF validation failed"},
+            headers={"Cache-Control": "no-store"},
+        )
+        cookie_policy.clear_authentication(response)
+        return response
     try:
         await authentication.revoke(session_token, csrf_token)
     except Exception:
@@ -733,6 +939,7 @@ async def logout(
 @router.post(
     "/login",
     response_model=LoginResponse,
+    response_model_exclude_none=True,
     responses={
         status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError},
         status.HTTP_403_FORBIDDEN: {"model": AuthenticationError},
@@ -795,6 +1002,7 @@ async def login_with_email(
             id=str(result.account_id),
             email=result.email,
             name=result.name,
+            avatar_url=result.avatar_url,
         ),
         csrf_token=result.csrf_token,
     )
@@ -854,6 +1062,7 @@ async def register(
 )
 async def complete_registration(
     payload: RegistrationCompletionRequest,
+    response: Response,
     http_request: Request,
     registration: Annotated[Registration, Depends(get_registration)],
     rate_limit: Annotated[
@@ -876,6 +1085,11 @@ async def complete_registration(
             detail="Too many registration completion attempts",
             headers={"Retry-After": "900"},
         ) from error
+    except BreachedPasswordError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=KNOWN_BREACH_MESSAGE,
+        ) from error
     except PasswordPolicyError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -891,6 +1105,7 @@ async def complete_registration(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Signup token is invalid or expired",
         )
+    get_cookie_policy(http_request).clear_authentication(response)
     return AuthenticationMessage(message="Registration complete.")
 
 

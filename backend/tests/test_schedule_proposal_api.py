@@ -4,7 +4,7 @@ from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
 
 from studyflow.app import create_app
@@ -15,9 +15,11 @@ from studyflow.scheduling import (
     ProposalKind,
     ProposalNotFeasibleError,
     ProposalStatus,
+    ScenarioValidationError,
     ScheduleAcceptance,
     ScheduleGeneration,
     ScheduleGenerationFailedError,
+    SchedulingInputError,
     SchedulingInputTooLargeError,
 )
 from studyflow.scheduling.proposals import (
@@ -58,6 +60,13 @@ class GenerationStub:
     error: Exception | None = None
 
     async def generate(self, account_id: UUID, **kwargs: object) -> ScheduleProposalRecord | None:
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+    async def simulate(
+        self, account_id: UUID, scenario: object = None, **kwargs: object
+    ) -> ScheduleProposalRecord | None:
         if self.error is not None:
             raise self.error
         return self.result
@@ -273,6 +282,8 @@ async def test_proposal_endpoints_enforce_session_and_csrf_and_map_missing() -> 
     ("error", "expected_status"),
     [
         (AvailabilityTimezoneConfirmationRequiredError("Confirm timezone"), 409),
+        (ScenarioValidationError("Invalid scenario"), 422),
+        (SchedulingInputError("Invalid scheduling input"), 422),
         (SchedulingInputTooLargeError("Too large"), 422),
         (ScheduleGenerationFailedError("Solver timeout"), 503),
     ],
@@ -300,6 +311,11 @@ def test_schedule_proposal_openapi_contract() -> None:
     )
     assert "/api/v1/schedule-proposals/{proposal_id}/accept" in schema["paths"]
     assert "/api/v1/schedule-proposals/{proposal_id}/reject" in schema["paths"]
+    assert "/api/v1/schedule-proposals/simulate" in schema["paths"]
+    assert schema["paths"]["/api/v1/schedule-proposals/simulate"]["post"]["responses"]["200"]
+    assert {"401", "403", "404", "409", "422", "503"}.issubset(
+        schema["paths"]["/api/v1/schedule-proposals/simulate"]["post"]["responses"]
+    )
 
 
 @pytest.mark.anyio
@@ -367,3 +383,223 @@ async def test_acceptance_maps_missing_and_conflicting_proposals() -> None:
     assert missing_accept.status_code == 404
     assert missing_reject.status_code == 404
     assert conflict.status_code == 409
+
+
+@pytest.mark.anyio
+async def test_simulate_schedule_proposal_success() -> None:
+    proposal = _proposal()
+    application = _app(GenerationStub(proposal), ProposalsStub(None))
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        response = await client.post(
+            "/api/v1/schedule-proposals/simulate",
+            headers={"X-CSRF-Token": "csrf"},
+            json={
+                "scenario": {
+                    "temporary_availability": [
+                        {
+                            "starts_at": "2026-08-25T10:00:00Z",
+                            "ends_at": "2026-08-25T12:00:00Z",
+                        }
+                    ],
+                    "temporary_blocked_periods": [],
+                    "deadline_overrides": [],
+                }
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "proposal" in body
+    assert body["proposal"]["id"] == str(proposal.id)
+    assert body["proposal"]["status"] == "overload"
+
+
+@pytest.mark.anyio
+async def test_proposal_generation_rejects_invalid_scenario_domain() -> None:
+    application = _app(GenerationStub(_proposal()), ProposalsStub(None))
+    invalid_scenario_payload = {
+        "scenario": {
+            "temporary_availability": [
+                {
+                    "starts_at": "2026-08-25T12:00:00Z",
+                    "ends_at": "2026-08-25T10:00:00Z",
+                }
+            ],
+            "temporary_blocked_periods": [],
+            "deadline_overrides": [],
+        }
+    }
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        generate_response = await client.post(
+            "/api/v1/schedule-proposals",
+            headers={"X-CSRF-Token": "csrf"},
+            json=invalid_scenario_payload,
+        )
+        simulate_response = await client.post(
+            "/api/v1/schedule-proposals/simulate",
+            headers={"X-CSRF-Token": "csrf"},
+            json=invalid_scenario_payload,
+        )
+
+    assert generate_response.status_code == 422
+    assert simulate_response.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_simulate_schedule_proposal_requires_scenario() -> None:
+    application = _app(GenerationStub(_proposal()), ProposalsStub(None))
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        no_body = await client.post(
+            "/api/v1/schedule-proposals/simulate",
+            headers={"X-CSRF-Token": "csrf"},
+        )
+        empty_body = await client.post(
+            "/api/v1/schedule-proposals/simulate",
+            headers={"X-CSRF-Token": "csrf"},
+            json={},
+        )
+        null_scenario = await client.post(
+            "/api/v1/schedule-proposals/simulate",
+            headers={"X-CSRF-Token": "csrf"},
+            json={"scenario": None},
+        )
+
+    assert no_body.status_code == 422
+    assert no_body.json()["detail"] == "A scenario is required for simulation"
+    assert empty_body.status_code == 422
+    assert empty_body.json()["detail"] == "A scenario is required for simulation"
+    assert null_scenario.status_code == 422
+    assert null_scenario.json()["detail"] == "A scenario is required for simulation"
+
+
+@pytest.mark.anyio
+async def test_simulate_schedule_proposal_enforces_session_and_csrf() -> None:
+    application = _app(GenerationStub(_proposal()), ProposalsStub(None))
+    payload: dict[str, object] = {
+        "scenario": {
+            "temporary_availability": [],
+            "temporary_blocked_periods": [],
+            "deadline_overrides": [],
+        }
+    }
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="https://test",
+    ) as client:
+        unauthenticated = await client.post("/api/v1/schedule-proposals/simulate", json=payload)
+        client.cookies.set("studyflow_session", "session")
+        missing_csrf = await client.post("/api/v1/schedule-proposals/simulate", json=payload)
+
+    assert unauthenticated.status_code == 401
+    assert missing_csrf.status_code == 403
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (AvailabilityTimezoneConfirmationRequiredError("Confirm timezone"), 409),
+        (ScenarioValidationError("Invalid scenario"), 422),
+        (SchedulingInputError("Invalid scheduling input"), 422),
+        (SchedulingInputTooLargeError("Too large"), 422),
+        (ScheduleGenerationFailedError("Solver timeout"), 503),
+    ],
+)
+async def test_simulate_maps_domain_failures(error: Exception, expected_status: int) -> None:
+    application = _app(GenerationStub(error=error), ProposalsStub(None))
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        response = await client.post(
+            "/api/v1/schedule-proposals/simulate",
+            headers={"X-CSRF-Token": "csrf"},
+            json={
+                "scenario": {
+                    "temporary_availability": [],
+                    "temporary_blocked_periods": [],
+                    "deadline_overrides": [],
+                }
+            },
+        )
+
+    assert response.status_code == expected_status
+
+
+@pytest.mark.anyio
+async def test_simulate_maps_missing_account() -> None:
+    application = _app(GenerationStub(result=None), ProposalsStub(None))
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        response = await client.post(
+            "/api/v1/schedule-proposals/simulate",
+            headers={"X-CSRF-Token": "csrf"},
+            json={
+                "scenario": {
+                    "temporary_availability": [],
+                    "temporary_blocked_periods": [],
+                    "deadline_overrides": [],
+                }
+            },
+        )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Account not found"
+
+
+@pytest.mark.anyio
+async def test_simulate_requires_scenario() -> None:
+    application = _app(GenerationStub(result=None), ProposalsStub(None))
+    async with AsyncClient(
+        transport=ASGITransport(app=application),
+        base_url="https://test",
+        cookies={"studyflow_session": "session"},
+    ) as client:
+        response = await client.post(
+            "/api/v1/schedule-proposals/simulate",
+            headers={"X-CSRF-Token": "csrf"},
+            json={},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "A scenario is required for simulation"
+
+
+@pytest.mark.anyio
+async def test_simulate_defensive_guard_rejects_a_none_scenario(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from studyflow.api.schedule_proposals import simulate_schedule
+
+    monkeypatch.setattr(
+        "studyflow.api.schedule_proposals._scenario_from_request",
+        lambda _payload, *, required=False: None,
+    )
+
+    with pytest.raises(HTTPException) as error:
+        await simulate_schedule(
+            SessionPrincipal(ACCOUNT_ID, "student@example.com", "Student"),
+            cast(ScheduleGeneration, GenerationStub()),
+            cast(AcademicTasks, TasksStub([])),
+            cast(UnavailablePeriods, UnavailablePeriodsStub([])),
+            None,
+        )
+
+    assert error.value.status_code == 422
+    assert error.value.detail == "A scenario is required for simulation"

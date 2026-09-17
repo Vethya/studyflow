@@ -84,3 +84,21 @@ async def test_password_reset_hashes_password_and_rejects_invalid_token() -> Non
         await service.reset_password("invalid-reset-token", "a-new-secure-password")
 
     assert passwords.hashes == ["a-new-secure-password"]
+
+
+@pytest.mark.anyio
+async def test_password_reset_succeeds_when_token_is_valid() -> None:
+    now = datetime(2026, 7, 29, 12, tzinfo=UTC)
+
+    class ValidRecoveryRepositoryStub(RecoveryRepositoryStub):
+        async def reset_password(self, token_hash: str, password_hash: str, now: datetime) -> bool:
+            return True
+
+    repository = ValidRecoveryRepositoryStub()
+    passwords = PasswordHasherStub()
+    service = PasswordRecoveryService(
+        repository, RecoveryEmailSenderStub(), passwords=passwords, clock=lambda: now
+    )
+
+    await service.reset_password("valid-reset-token", "a-new-secure-password")
+    assert passwords.hashes == ["a-new-secure-password"]

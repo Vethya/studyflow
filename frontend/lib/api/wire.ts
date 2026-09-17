@@ -27,6 +27,7 @@ export interface WireAuthenticatedAccount {
   id: string;
   email: string;
   name: string;
+  avatar_url?: string;
 }
 
 export interface WireLoginResponse {
@@ -55,6 +56,8 @@ export interface WireAccountProfile {
   id: string;
   email: string;
   name: string;
+  password_set: boolean;
+  avatar_url?: string;
 }
 
 export interface WireStudyPreferences {

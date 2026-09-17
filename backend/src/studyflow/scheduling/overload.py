@@ -1999,7 +1999,7 @@ def solve_with_overload(problem: FeasibilityProblem) -> OverloadResult:
     placement_objectives: list[tuple[str, cp_model.LinearExpr]] = []
     if spread_objective is not None:
         placement_objectives.append(("spread", spread_objective))
-    if earliness_terms:
+    if earliness_terms:  # pragma: no branch - every spread variable has a session term
         placement_objectives.append(("earliness", cp_model.LinearExpr.sum(earliness_terms)))
 
     for objective_name, objective in placement_objectives:

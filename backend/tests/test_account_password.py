@@ -11,7 +11,7 @@ from studyflow.accounts.password import InvalidCurrentPasswordError, PasswordCha
 class RepositoryStub:
     password_hash: str | None = "$argon2id$current"
     replaced: bool = True
-    changes: list[tuple[UUID, str, str, datetime]] = field(default_factory=list)
+    changes: list[tuple[UUID, str | None, str, datetime]] = field(default_factory=list)
 
     async def get_password_hash(self, account_id: UUID) -> str | None:
         return self.password_hash
@@ -19,7 +19,7 @@ class RepositoryStub:
     async def replace_password(
         self,
         account_id: UUID,
-        expected_password_hash: str,
+        expected_password_hash: str | None,
         new_password_hash: str,
         now: datetime,
     ) -> bool:
@@ -48,6 +48,18 @@ async def test_password_change_verifies_current_then_atomically_replaces() -> No
     await service.change(account_id, "current-password", "new-secure-password")
 
     assert repository.changes == [(account_id, "$argon2id$current", "$argon2id$new", now)]
+
+
+@pytest.mark.anyio
+async def test_password_can_be_set_when_account_has_no_password() -> None:
+    account_id = UUID("5b15bfef-8c44-45d5-a70e-574beb999fb3")
+    now = datetime(2026, 7, 29, 12, tzinfo=UTC)
+    repository = RepositoryStub(password_hash=None)
+    service = PasswordChangeService(repository, PasswordsStub(), clock=lambda: now)
+
+    await service.change(account_id, None, "new-secure-password")
+
+    assert repository.changes == [(account_id, None, "$argon2id$new", now)]
 
 
 @pytest.mark.anyio

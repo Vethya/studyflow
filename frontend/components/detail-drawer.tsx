@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 export function DetailDrawer({
   open,
   onOpenChange,
+  onOpenChangeComplete,
   title,
   description,
   footer,
@@ -32,6 +33,7 @@ export function DetailDrawer({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   title: React.ReactNode;
   description?: React.ReactNode;
   footer?: React.ReactNode;
@@ -42,7 +44,11 @@ export function DetailDrawer({
   const isMobile = useIsMobile();
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet
+      open={open}
+      onOpenChange={onOpenChange}
+      onOpenChangeComplete={onOpenChangeComplete}
+    >
       <SheetContent
         side={isMobile ? "bottom" : "right"}
         size={size}

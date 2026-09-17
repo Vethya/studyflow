@@ -6,7 +6,12 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from studyflow.app import create_app
-from studyflow.auth.oidc import LinkedIdentity, OIDCLoginResult
+from studyflow.auth.oidc import (
+    InvalidLinkChallengeError,
+    LinkedIdentity,
+    OIDCLoginResult,
+)
+from studyflow.auth.rate_limits import OIDCLinkRateLimitExceeded
 from studyflow.auth.session_authentication import SessionPrincipal
 
 ACCOUNT_ID = UUID("5b15bfef-8c44-45d5-a70e-574beb999fb3")
@@ -44,7 +49,7 @@ class LinkingStub:
 
 class RateLimitStub:
     async def check(self, client_ip: str, account_key: str) -> None:
-        assert account_key == str(ACCOUNT_ID)
+        assert account_key in {str(ACCOUNT_ID), "invalid:challenge-token-value-123"}
 
 
 @pytest.mark.anyio
@@ -112,3 +117,64 @@ async def test_json_google_link_still_requires_explicit_challenge() -> None:
         )
 
     assert response.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_google_link_browser_missing_cookie_returns_401() -> None:
+    app = create_app(
+        oidc_account_linking=LinkingStub(),
+        oidc_link_rate_limiter=RateLimitStub(),
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
+        res = await client.post(
+            "/api/v1/auth/google/link/browser",
+            json={"password": "correct password"},
+        )
+    assert res.status_code == 401
+    assert res.json()["detail"] == "Invalid link challenge or password"
+
+
+@pytest.mark.anyio
+async def test_google_link_rate_limit_and_invalid_challenge_errors() -> None:
+    class RateLimitedLinkingStub(LinkingStub):
+        pass
+
+    class ExceededLinkRateLimitStub:
+        async def check(self, client_ip: str, account_key: str) -> None:
+            raise OIDCLinkRateLimitExceeded()
+
+    app = create_app(
+        oidc_account_linking=RateLimitedLinkingStub(),
+        oidc_link_rate_limiter=ExceededLinkRateLimitStub(),
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
+        res = await client.post(
+            "/api/v1/auth/google/link",
+            json={"challenge": "challenge-token-value-123", "password": "correct password"},
+        )
+    assert res.status_code == 429
+    assert res.headers["retry-after"] == "900"
+    assert res.json()["detail"] == "Too many account-link attempts"
+
+    # InvalidLinkChallengeError
+    class InvalidChallengeLinkingStub:
+        async def resolve_attempt_account_id(self, challenge: str) -> UUID | None:
+            return None
+
+        async def link(self, challenge: str, password: str) -> OIDCLoginResult:
+            raise InvalidLinkChallengeError()
+
+        async def list_identities(self, account_id: UUID) -> list[LinkedIdentity]:
+            return []
+
+    app2 = create_app(
+        oidc_account_linking=InvalidChallengeLinkingStub(),
+        oidc_link_rate_limiter=RateLimitStub(),
+    )
+    async with AsyncClient(transport=ASGITransport(app=app2), base_url="https://test") as client:
+        res2 = await client.post(
+            "/api/v1/auth/google/link",
+            json={"challenge": "challenge-token-value-123", "password": "wrong password"},
+        )
+    assert res2.status_code == 401
+    assert res2.json()["detail"] == "Invalid link challenge or password"

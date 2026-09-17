@@ -22,6 +22,7 @@ from studyflow.auth.registration import PendingRegistration, RegistrationComplet
 from studyflow.auth.session_authentication import PersistedSessionPrincipal
 from studyflow.auth.sessions import PendingSession
 from studyflow.database.models import (
+    AuthenticationAccountDeletionChallenge,
     AuthenticationEmailToken,
     AuthenticationIdentity,
     AuthenticationOIDCLinkChallenge,
@@ -286,6 +287,7 @@ class SqlAlchemyLoginRepository:
             name=account.name,
             password_hash=account.password_hash,
             email_verified=account.email_verified_at is not None,
+            avatar_url=account.avatar_url,
         )
 
 
@@ -299,6 +301,26 @@ class SqlAlchemySessionAuthenticationRepository:
         now: datetime,
         refreshed_idle_expiry: datetime,
         csrf_hash: str | None = None,
+    ) -> PersistedSessionPrincipal | None:
+        return await self._authenticate(
+            token_hash,
+            now,
+            csrf_hash=csrf_hash,
+            refreshed_idle_expiry=refreshed_idle_expiry,
+        )
+
+    async def authenticate_read_only(
+        self, token_hash: str, now: datetime
+    ) -> PersistedSessionPrincipal | None:
+        return await self._authenticate(token_hash, now, refreshed_idle_expiry=None)
+
+    async def _authenticate(
+        self,
+        token_hash: str,
+        now: datetime,
+        *,
+        csrf_hash: str | None = None,
+        refreshed_idle_expiry: datetime | None,
     ) -> PersistedSessionPrincipal | None:
         async with self._database.transaction() as session:
             conditions = [
@@ -326,13 +348,16 @@ class SqlAlchemySessionAuthenticationRepository:
             current_idle_expiry = authentication_session.idle_expires_at
             if current_idle_expiry.tzinfo is None:
                 current_idle_expiry = current_idle_expiry.replace(tzinfo=UTC)
-            if refreshed_idle_expiry.tzinfo is None:
-                refreshed_idle_expiry = refreshed_idle_expiry.replace(tzinfo=UTC)
-            authentication_session.idle_expires_at = min(
-                max(current_idle_expiry, refreshed_idle_expiry),
-                absolute_expiry,
+            if refreshed_idle_expiry is not None:
+                if refreshed_idle_expiry.tzinfo is None:
+                    refreshed_idle_expiry = refreshed_idle_expiry.replace(tzinfo=UTC)
+                authentication_session.idle_expires_at = min(
+                    max(current_idle_expiry, refreshed_idle_expiry),
+                    absolute_expiry,
+                )
+            return PersistedSessionPrincipal(
+                account.id, account.email, account.name, getattr(account, "avatar_url", None)
             )
-            return PersistedSessionPrincipal(account.id, account.email, account.name)
 
     async def revoke(self, token_hash: str, csrf_hash: str, now: datetime) -> bool:
         async with self._database.transaction() as session:
@@ -380,11 +405,7 @@ class SqlAlchemyPasswordRecoveryRepository:
             account = await session.scalar(
                 select(StudentAccount).where(StudentAccount.email == email).with_for_update()
             )
-            if (
-                account is None
-                or account.email_verified_at is None
-                or account.password_hash is None
-            ):
+            if account is None or account.email_verified_at is None:
                 return False
             await session.execute(
                 delete(AuthenticationEmailToken).where(
@@ -449,7 +470,13 @@ class SqlAlchemyOIDCRepository:
         self._database = database
 
     async def store_state(
-        self, state_hash: str, nonce_hash: str, timezone: str, expires_at: datetime
+        self,
+        state_hash: str,
+        nonce_hash: str,
+        timezone: str,
+        expires_at: datetime,
+        link_account_id: UUID | None = None,
+        deletion_account_id: UUID | None = None,
     ) -> None:
         async with self._database.transaction() as session:
             await session.execute(
@@ -462,6 +489,8 @@ class SqlAlchemyOIDCRepository:
                     state_hash=state_hash,
                     nonce_hash=nonce_hash,
                     timezone=timezone,
+                    link_account_id=link_account_id,
+                    deletion_account_id=deletion_account_id,
                     expires_at=expires_at,
                 )
             )
@@ -480,7 +509,12 @@ class SqlAlchemyOIDCRepository:
             if row is None:
                 return None
             row.consumed_at = now
-            return OIDCStateRecord(row.nonce_hash, row.timezone)
+            return OIDCStateRecord(
+                row.nonce_hash,
+                row.timezone,
+                row.link_account_id,
+                row.deletion_account_id,
+            )
 
     async def restore_state(self, state_hash: str, consumed_at: datetime, now: datetime) -> bool:
         async with self._database.transaction() as session:
@@ -509,6 +543,9 @@ class SqlAlchemyOIDCRepository:
                 )
                 if identity is not None:
                     account = await session.get(StudentAccount, identity.account_id)
+                    if account is not None:
+                        account.avatar_url = claims.picture_url
+                        await session.flush()
                     return self._to_account(account) if account is not None else None
                 account = await session.scalar(
                     select(StudentAccount)
@@ -520,6 +557,7 @@ class SqlAlchemyOIDCRepository:
                 account = StudentAccount(
                     email=claims.email,
                     name=claims.name,
+                    avatar_url=claims.picture_url,
                     password_hash=None,
                     email_verified_at=datetime.now(UTC),
                     timezone=timezone,
@@ -536,6 +574,7 @@ class SqlAlchemyOIDCRepository:
                 )
                 await session.flush()
                 return self._to_account(account)
+
         except IntegrityError:
             async with self._database.transaction() as session:
                 identity = await session.scalar(
@@ -547,7 +586,61 @@ class SqlAlchemyOIDCRepository:
                 if identity is None:
                     return None
                 account = await session.get(StudentAccount, identity.account_id)
+                if account is not None:
+                    account.avatar_url = claims.picture_url
+                    await session.flush()
                 return self._to_account(account) if account is not None else None
+
+    async def link_identity(self, account_id: UUID, claims: GoogleClaims) -> OIDCAccount | None:
+        try:
+            async with self._database.transaction() as session:
+                account = await session.get(StudentAccount, account_id, with_for_update=True)
+                if account is None:
+                    return None
+
+                existing_subject = await session.scalar(
+                    select(AuthenticationIdentity)
+                    .where(
+                        AuthenticationIdentity.provider == "google",
+                        AuthenticationIdentity.subject == claims.subject,
+                    )
+                    .with_for_update()
+                )
+                if existing_subject is not None:
+                    if existing_subject.account_id == account_id:
+                        account.avatar_url = claims.picture_url
+                        await session.flush()
+                    return (
+                        self._to_account(account)
+                        if existing_subject.account_id == account_id
+                        else None
+                    )
+
+                existing_account_identity = await session.scalar(
+                    select(AuthenticationIdentity)
+                    .where(
+                        AuthenticationIdentity.account_id == account_id,
+                        AuthenticationIdentity.provider == "google",
+                    )
+                    .with_for_update()
+                )
+                if existing_account_identity is not None:
+                    return None
+
+                account.avatar_url = claims.picture_url
+
+                session.add(
+                    AuthenticationIdentity(
+                        account_id=account_id,
+                        provider="google",
+                        subject=claims.subject,
+                        email=claims.email,
+                    )
+                )
+                await session.flush()
+                return self._to_account(account)
+        except IntegrityError:
+            return None
 
     async def create_link_challenge(
         self, claims: GoogleClaims, token_hash: str, expires_at: datetime
@@ -569,6 +662,41 @@ class SqlAlchemyOIDCRepository:
                     account_id=account.id,
                     subject=claims.subject,
                     email=claims.email,
+                    picture_url=claims.picture_url,
+                    token_hash=token_hash,
+                    expires_at=expires_at,
+                )
+            )
+        return True
+
+    async def create_deletion_challenge(
+        self,
+        account_id: UUID,
+        claims: GoogleClaims,
+        token_hash: str,
+        expires_at: datetime,
+    ) -> bool:
+        async with self._database.transaction() as session:
+            identity = await session.scalar(
+                select(AuthenticationIdentity)
+                .where(
+                    AuthenticationIdentity.account_id == account_id,
+                    AuthenticationIdentity.provider == "google",
+                    AuthenticationIdentity.subject == claims.subject,
+                )
+                .with_for_update()
+            )
+            if identity is None or await session.get(StudentAccount, account_id) is None:
+                return False
+            await session.execute(
+                delete(AuthenticationAccountDeletionChallenge).where(
+                    AuthenticationAccountDeletionChallenge.account_id == account_id,
+                    AuthenticationAccountDeletionChallenge.consumed_at.is_(None),
+                )
+            )
+            session.add(
+                AuthenticationAccountDeletionChallenge(
+                    account_id=account_id,
                     token_hash=token_hash,
                     expires_at=expires_at,
                 )
@@ -595,6 +723,7 @@ class SqlAlchemyOIDCRepository:
                 row.subject,
                 row.email,
                 account.password_hash,
+                row.picture_url,
             )
 
     async def link_identity_and_create_session(
@@ -659,6 +788,7 @@ class SqlAlchemyOIDCRepository:
                     )
                 )
                 row.consumed_at = now
+                account.avatar_url = row.picture_url
                 account.email_verified_at = account.email_verified_at or now
                 await session.flush()
                 return self._to_account(account)
@@ -685,4 +815,4 @@ class SqlAlchemyOIDCRepository:
 
     @staticmethod
     def _to_account(account: StudentAccount) -> OIDCAccount:
-        return OIDCAccount(account.id, account.email, account.name)
+        return OIDCAccount(account.id, account.email, account.name, account.avatar_url)

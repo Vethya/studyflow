@@ -128,3 +128,71 @@ async def test_past_unavailable_period_is_rejected_with_422() -> None:
 
     assert response.status_code == 422
     assert response.json()["detail"] == "Unavailable period ends_at must be in the future"
+
+
+@pytest.mark.anyio
+async def test_unavailable_period_delete_requires_confirmation() -> None:
+    period_id = uuid4()
+    unavailable = UnavailableStub(
+        UnavailablePeriod(
+            period_id,
+            datetime(2026, 8, 1, 12, tzinfo=UTC),
+            datetime(2026, 8, 1, 14, tzinfo=UTC),
+            None,
+        )
+    )
+    app = create_app(session_authentication=AuthenticationStub(), unavailable_periods=unavailable)
+    headers = {"X-CSRF-Token": "csrf-token"}
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://test",
+        cookies={"studyflow_session": "session-token"},
+    ) as client:
+        response = await client.delete(
+            f"/api/v1/availability/unavailable-periods/{period_id}?confirmed=false",
+            headers=headers,
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Deletion requires confirmation"
+
+
+@pytest.mark.anyio
+async def test_unavailable_period_update_maps_value_error_to_422() -> None:
+    period_id = uuid4()
+
+    class ValueErrorStub(UnavailableStub):
+        async def update(
+            self, account_id: UUID, period_id: UUID, draft: UnavailablePeriodDraft
+        ) -> UnavailablePeriodChange | None:
+            raise ValueError("Invalid time range")
+
+    app = create_app(
+        session_authentication=AuthenticationStub(),
+        unavailable_periods=ValueErrorStub(
+            UnavailablePeriod(
+                period_id,
+                datetime(2026, 8, 1, 12, tzinfo=UTC),
+                datetime(2026, 8, 1, 14, tzinfo=UTC),
+                None,
+            )
+        ),
+    )
+    headers = {"X-CSRF-Token": "csrf-token"}
+    body = {
+        "starts_at": "2026-08-01T12:00:00Z",
+        "ends_at": "2026-08-01T14:00:00Z",
+    }
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://test",
+        cookies={"studyflow_session": "session-token"},
+    ) as client:
+        response = await client.put(
+            f"/api/v1/availability/unavailable-periods/{period_id}",
+            headers=headers,
+            json=body,
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Invalid time range"
