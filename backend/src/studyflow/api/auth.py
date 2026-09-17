@@ -65,7 +65,7 @@ from studyflow.auth.rate_limits import (
 from studyflow.auth.recovery import InvalidPasswordResetTokenError, PasswordRecovery
 from studyflow.auth.registration import Registration, RegistrationCommand
 from studyflow.auth.resend import VerificationResend
-from studyflow.auth.session_authentication import SessionAuthentication
+from studyflow.auth.session_authentication import SessionAuthentication, SessionPrincipal
 from studyflow.auth.verification import EmailVerification
 from studyflow.timezones import is_iana_timezone
 
@@ -336,6 +336,25 @@ def get_session_authentication(request: Request) -> SessionAuthentication:
     return cast(SessionAuthentication, request.app.state.session_authentication)
 
 
+async def require_csrf_session(
+    request: Request,
+    authentication: Annotated[SessionAuthentication, Depends(get_session_authentication)],
+    csrf_token: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
+) -> SessionPrincipal:
+    session_token = request.cookies.get(get_cookie_policy(request).session_name)
+    if session_token is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    if csrf_token is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
+    principal = await authentication.authenticate(session_token, csrf_token)
+    if principal is not None:
+        return principal
+    csrf_cookie = request.cookies.get(get_cookie_policy(request).csrf_name)
+    if csrf_cookie is not None and hmac.compare_digest(csrf_token.encode(), csrf_cookie.encode()):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
+
+
 def get_verification_resend(request: Request) -> VerificationResend:
     return cast(VerificationResend, request.app.state.verification_resend)
 
@@ -380,6 +399,39 @@ async def start_google_oidc(
         raise HTTPException(
             status_code=429,
             detail="Too many Google sign-in attempts",
+            headers={"Retry-After": "900"},
+        ) from error
+    except OIDCNotConfiguredError as error:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured") from error
+    get_cookie_policy(http_request).set_oidc_state(response, started.state)
+    return OIDCStartResponse(authorization_url=started.authorization_url)
+
+
+@router.post(
+    "/google/link/start",
+    response_model=OIDCStartResponse,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError},
+        status.HTTP_403_FORBIDDEN: {"model": AuthenticationError},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": AuthenticationError},
+    },
+)
+async def start_google_link_oidc(
+    payload: GoogleStartRequest,
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    response: Response,
+    http_request: Request,
+    oidc: Annotated[OIDCLogin, Depends(get_oidc_login)],
+    rate_limit: Annotated[OIDCStartRateLimit, Depends(get_oidc_start_rate_limit)],
+) -> OIDCStartResponse:
+    try:
+        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        await rate_limit.check(client_ip)
+        started = await oidc.start_link(principal.account_id, payload.timezone)
+    except OIDCStartRateLimitExceeded as error:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many Google linking attempts",
             headers={"Retry-After": "900"},
         ) from error
     except OIDCNotConfiguredError as error:
@@ -454,7 +506,8 @@ async def complete_google_oidc(
             return redirect
         return _oidc_error_response(503, "Google sign-in is not configured", cookie_policy)
     if browser_flow:
-        redirect = _browser_redirect(http_request, "/app")
+        destination = "/settings" if result.link_completed else "/app"
+        redirect = _browser_redirect(http_request, destination)
         cookie_policy.clear_oidc_state(redirect)
         cookie_policy.set_authentication(redirect, result.session_token, result.csrf_token)
         return redirect

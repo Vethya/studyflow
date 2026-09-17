@@ -79,12 +79,14 @@ class OIDCLoginResult:
     name: str
     session_token: str
     csrf_token: str
+    link_completed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class OIDCStateRecord:
     nonce_hash: str
     timezone: str
+    link_account_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,13 +107,19 @@ class LinkedIdentity:
 
 class OIDCRepository(Protocol):
     async def store_state(
-        self, state_hash: str, nonce_hash: str, timezone: str, expires_at: datetime
+        self,
+        state_hash: str,
+        nonce_hash: str,
+        timezone: str,
+        expires_at: datetime,
+        link_account_id: UUID | None = None,
     ) -> None: ...
     async def consume_state(self, state_hash: str, now: datetime) -> OIDCStateRecord | None: ...
     async def restore_state(
         self, state_hash: str, consumed_at: datetime, now: datetime
     ) -> bool: ...
     async def resolve_identity(self, claims: GoogleClaims, timezone: str) -> OIDCAccount | None: ...
+    async def link_identity(self, account_id: UUID, claims: GoogleClaims) -> OIDCAccount | None: ...
     async def create_link_challenge(
         self, claims: GoogleClaims, token_hash: str, expires_at: datetime
     ) -> bool: ...
@@ -129,6 +137,7 @@ class SessionIssuer(Protocol):
 
 class OIDCLogin(Protocol):
     async def start(self, timezone: str) -> OIDCStart: ...
+    async def start_link(self, account_id: UUID, timezone: str) -> OIDCStart: ...
     async def complete(self, code: str, state: str, state_cookie: str) -> OIDCLoginResult: ...
 
 
@@ -155,7 +164,7 @@ class OIDCLoginService:
         self._token_factory = token_factory
         self._clock = clock
 
-    async def start(self, timezone: str) -> OIDCStart:
+    async def _start(self, timezone: str, link_account_id: UUID | None = None) -> OIDCStart:
         state = self._token_factory()
         nonce = self._token_factory()
         await self._repository.store_state(
@@ -163,6 +172,7 @@ class OIDCLoginService:
             hash_oidc_secret(nonce),
             timezone,
             self._clock() + timedelta(minutes=10),
+            link_account_id,
         )
         query = urlencode(
             {
@@ -175,6 +185,12 @@ class OIDCLoginService:
             }
         )
         return OIDCStart(f"{GOOGLE_AUTHORIZATION_ENDPOINT}?{query}", state)
+
+    async def start(self, timezone: str) -> OIDCStart:
+        return await self._start(timezone)
+
+    async def start_link(self, account_id: UUID, timezone: str) -> OIDCStart:
+        return await self._start(timezone, account_id)
 
     async def complete(self, code: str, state: str, state_cookie: str) -> OIDCLoginResult:
         if not hmac.compare_digest(state, state_cookie):
@@ -192,6 +208,21 @@ class OIDCLoginService:
                     state_hash, consumed_at, self._clock()
                 )
             raise
+        if state_record.link_account_id is not None:
+            account = await self._repository.link_identity(state_record.link_account_id, claims)
+            if account is None:
+                raise InvalidOIDCResponseError
+            credentials = await self._sessions.create(account.id)
+            if credentials is None:
+                raise InvalidOIDCResponseError
+            return OIDCLoginResult(
+                account.id,
+                account.email,
+                account.name,
+                credentials.session_token,
+                credentials.csrf_token,
+                link_completed=True,
+            )
         account = await self._repository.resolve_identity(claims, state_record.timezone)
         if account is None:
             challenge = self._token_factory()
@@ -332,6 +363,9 @@ class GoogleOIDCProvider:
 
 class UnconfiguredOIDCLogin:
     async def start(self, timezone: str) -> OIDCStart:
+        raise OIDCNotConfiguredError
+
+    async def start_link(self, account_id: UUID, timezone: str) -> OIDCStart:
         raise OIDCNotConfiguredError
 
     async def complete(self, code: str, state: str, state_cookie: str) -> OIDCLoginResult:

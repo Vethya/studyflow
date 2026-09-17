@@ -168,6 +168,18 @@
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) { const url = new URL(pm.response.json().authorization_url); pm.collectionVariables.set('google_oidc_state', url.searchParams.get('state')); }"] } }]
         },
         {
+          "name": "Start Google Account Link",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"timezone\": \"Asia/Phnom_Penh\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/auth/google/link/start", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "google", "link", "start"] },
+            "description": "Creates a one-time Google link state bound to the currently authenticated StudyFlow account."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200 or unauthenticated', () => pm.expect([200, 401, 403]).to.include(pm.response.code));"] } }]
+        },
+        {
           "name": "Complete Google OIDC",
           "request": {
             "method": "GET",

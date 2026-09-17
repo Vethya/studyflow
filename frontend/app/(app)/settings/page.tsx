@@ -72,7 +72,7 @@ export default function SettingsPage() {
     setGoogleError(null);
     setIsConnectingGoogle(true);
     try {
-      const { authorization_url } = await auth.startGoogleSignIn(zone ?? detectTimezone());
+      const { authorization_url } = await auth.startGoogleAccountLink(zone ?? detectTimezone());
       window.location.assign(authorization_url);
     } catch (cause) {
       setGoogleError(describeError(cause));

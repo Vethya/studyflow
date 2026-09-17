@@ -30,17 +30,23 @@ class RepositoryStub:
         self.restored = 0
 
     async def store_state(
-        self, state_hash: str, nonce_hash: str, timezone: str, expires_at: datetime
+        self,
+        state_hash: str,
+        nonce_hash: str,
+        timezone: str,
+        expires_at: datetime,
+        link_account_id: UUID | None = None,
     ) -> None:
         self.state_hash, self.nonce_hash = state_hash, nonce_hash
         self.timezone = timezone
+        self.link_account_id = link_account_id
         self.consumed = False
 
     async def consume_state(self, state_hash: str, now: datetime) -> OIDCStateRecord | None:
         if state_hash != self.state_hash or self.consumed:
             return None
         self.consumed = True
-        return OIDCStateRecord(self.nonce_hash, self.timezone)
+        return OIDCStateRecord(self.nonce_hash, self.timezone, self.link_account_id)
 
     async def restore_state(self, state_hash: str, consumed_at: datetime, now: datetime) -> bool:
         if state_hash != self.state_hash or not self.consumed or not self.can_restore:
@@ -59,6 +65,9 @@ class RepositoryStub:
     ) -> bool:
         self.link_token_hash = token_hash
         return True
+
+    async def link_identity(self, account_id: UUID, claims: GoogleClaims) -> OIDCAccount | None:
+        return OIDCAccount(account_id, claims.email, claims.name)
 
 
 class ProviderStub:

@@ -119,6 +119,14 @@ export function startGoogleSignIn(timezone: string): Promise<WireOIDCStartRespon
   });
 }
 
+/** Returns a Google authorization URL for linking to the current account. */
+export function startGoogleAccountLink(timezone: string): Promise<WireOIDCStartResponse> {
+  return apiJson<WireOIDCStartResponse>("/auth/google/link/start", {
+    method: "POST",
+    body: { timezone },
+  });
+}
+
 /**
  * Completes a Google sign-in that collided with an existing password account.
  * The link challenge is held in an httpOnly cookie set by the callback, so

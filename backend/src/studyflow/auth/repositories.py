@@ -466,7 +466,12 @@ class SqlAlchemyOIDCRepository:
         self._database = database
 
     async def store_state(
-        self, state_hash: str, nonce_hash: str, timezone: str, expires_at: datetime
+        self,
+        state_hash: str,
+        nonce_hash: str,
+        timezone: str,
+        expires_at: datetime,
+        link_account_id: UUID | None = None,
     ) -> None:
         async with self._database.transaction() as session:
             await session.execute(
@@ -479,6 +484,7 @@ class SqlAlchemyOIDCRepository:
                     state_hash=state_hash,
                     nonce_hash=nonce_hash,
                     timezone=timezone,
+                    link_account_id=link_account_id,
                     expires_at=expires_at,
                 )
             )
@@ -497,7 +503,7 @@ class SqlAlchemyOIDCRepository:
             if row is None:
                 return None
             row.consumed_at = now
-            return OIDCStateRecord(row.nonce_hash, row.timezone)
+            return OIDCStateRecord(row.nonce_hash, row.timezone, row.link_account_id)
 
     async def restore_state(self, state_hash: str, consumed_at: datetime, now: datetime) -> bool:
         async with self._database.transaction() as session:
@@ -553,6 +559,7 @@ class SqlAlchemyOIDCRepository:
                 )
                 await session.flush()
                 return self._to_account(account)
+
         except IntegrityError:
             async with self._database.transaction() as session:
                 identity = await session.scalar(
@@ -565,6 +572,52 @@ class SqlAlchemyOIDCRepository:
                     return None
                 account = await session.get(StudentAccount, identity.account_id)
                 return self._to_account(account) if account is not None else None
+
+    async def link_identity(self, account_id: UUID, claims: GoogleClaims) -> OIDCAccount | None:
+        try:
+            async with self._database.transaction() as session:
+                account = await session.get(StudentAccount, account_id, with_for_update=True)
+                if account is None:
+                    return None
+
+                existing_subject = await session.scalar(
+                    select(AuthenticationIdentity)
+                    .where(
+                        AuthenticationIdentity.provider == "google",
+                        AuthenticationIdentity.subject == claims.subject,
+                    )
+                    .with_for_update()
+                )
+                if existing_subject is not None:
+                    return (
+                        self._to_account(account)
+                        if existing_subject.account_id == account_id
+                        else None
+                    )
+
+                existing_account_identity = await session.scalar(
+                    select(AuthenticationIdentity)
+                    .where(
+                        AuthenticationIdentity.account_id == account_id,
+                        AuthenticationIdentity.provider == "google",
+                    )
+                    .with_for_update()
+                )
+                if existing_account_identity is not None:
+                    return None
+
+                session.add(
+                    AuthenticationIdentity(
+                        account_id=account_id,
+                        provider="google",
+                        subject=claims.subject,
+                        email=claims.email,
+                    )
+                )
+                await session.flush()
+                return self._to_account(account)
+        except IntegrityError:
+            return None
 
     async def create_link_challenge(
         self, claims: GoogleClaims, token_hash: str, expires_at: datetime

@@ -30,6 +30,9 @@ class OIDCStub:
             "state-state-state-state",
         )
 
+    async def start_link(self, account_id: UUID, timezone: str) -> OIDCStart:
+        return await self.start(timezone)
+
     async def complete(self, code: str, state: str, state_cookie: str) -> OIDCLoginResult:
         assert (code, state, state_cookie) == (
             "code",
@@ -341,6 +344,9 @@ async def test_start_google_oidc_validation_and_errors() -> None:
     # 3. Not configured -> 503 (lines 370-371, 435-440)
     class NotConfiguredOIDCStub:
         async def start(self, timezone: str) -> OIDCStart:
+            raise OIDCNotConfiguredError()
+
+        async def start_link(self, account_id: UUID, timezone: str) -> OIDCStart:
             raise OIDCNotConfiguredError()
 
         async def complete(self, *args: object, **kwargs: object) -> OIDCLoginResult:
