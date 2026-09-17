@@ -260,6 +260,9 @@ export function WeekGrid({
                         key={block.id}
                         type="button"
                         title={block.title}
+                        // A session that crosses midnight can be only a few pixels
+                        // tall on this day, too short to show its text.
+                        aria-label={block.title}
                         onClick={block.onSelect}
                         className={className}
                         style={{ top, height }}
