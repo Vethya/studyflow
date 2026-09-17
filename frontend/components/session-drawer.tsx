@@ -44,7 +44,15 @@ export function SessionDrawer({
   onDeleteTask: () => void;
   onRecordOutcome: () => void;
 }) {
-  if (!session) return null;
+  // Keep the dialog root mounted before the first session is selected. If the
+  // root mounts only when open=true, Base UI has no opening transition phase.
+  if (!session) {
+    return (
+      <DetailDrawer open={false} onOpenChange={onOpenChange} title="Session details">
+        {null}
+      </DetailDrawer>
+    );
+  }
 
   const start = new Date(session.startTime);
   const end = new Date(session.endTime);
