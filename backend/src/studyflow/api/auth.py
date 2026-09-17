@@ -154,6 +154,7 @@ class AuthenticatedAccount(BaseModel):
     id: str
     email: EmailStr
     name: str
+    avatar_url: str | None = None
 
 
 class LoginResponse(BaseModel):
@@ -496,6 +497,7 @@ async def start_google_account_deletion(
 @router.get(
     "/google/callback",
     response_model=LoginResponse,
+    response_model_exclude_none=True,
     responses={
         status.HTTP_303_SEE_OTHER: {
             "description": "Browser flow redirected to a clean frontend route"
@@ -608,7 +610,10 @@ async def complete_google_oidc(
     cookie_policy.set_authentication(response, result.session_token, result.csrf_token)
     return LoginResponse(
         account=AuthenticatedAccount(
-            id=str(result.account_id), email=result.email, name=result.name
+            id=str(result.account_id),
+            email=result.email,
+            name=result.name,
+            avatar_url=result.avatar_url,
         ),
         csrf_token=result.csrf_token,
     )
@@ -617,6 +622,7 @@ async def complete_google_oidc(
 @router.post(
     "/google/link",
     response_model=LoginResponse,
+    response_model_exclude_none=True,
     responses={
         status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError},
         status.HTTP_429_TOO_MANY_REQUESTS: {"model": AuthenticationError},
@@ -637,6 +643,7 @@ async def confirm_google_account_link(
 @router.post(
     "/google/link/browser",
     response_model=LoginResponse,
+    response_model_exclude_none=True,
     description=(
         "Completes browser account linking using the short-lived HttpOnly challenge cookie. "
         "Development requires `studyflow_oidc_link`; production requires "
@@ -720,7 +727,10 @@ async def _complete_google_account_link(
     cookie_policy.set_authentication(response, result.session_token, result.csrf_token)
     return LoginResponse(
         account=AuthenticatedAccount(
-            id=str(result.account_id), email=result.email, name=result.name
+            id=str(result.account_id),
+            email=result.email,
+            name=result.name,
+            avatar_url=result.avatar_url,
         ),
         csrf_token=result.csrf_token,
     )
@@ -851,6 +861,7 @@ async def resend_verification(
 @router.get(
     "/session",
     response_model=CurrentSessionResponse,
+    response_model_exclude_none=True,
     responses={status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError}},
 )
 async def get_current_session(
@@ -871,7 +882,10 @@ async def get_current_session(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     return CurrentSessionResponse(
         account=AuthenticatedAccount(
-            id=str(principal.account_id), email=principal.email, name=principal.name
+            id=str(principal.account_id),
+            email=principal.email,
+            name=principal.name,
+            avatar_url=principal.avatar_url,
         )
     )
 
@@ -925,6 +939,7 @@ async def logout(
 @router.post(
     "/login",
     response_model=LoginResponse,
+    response_model_exclude_none=True,
     responses={
         status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError},
         status.HTTP_403_FORBIDDEN: {"model": AuthenticationError},
@@ -987,6 +1002,7 @@ async def login_with_email(
             id=str(result.account_id),
             email=result.email,
             name=result.name,
+            avatar_url=result.avatar_url,
         ),
         csrf_token=result.csrf_token,
     )

@@ -104,6 +104,7 @@ class SqlAlchemyAccountProfileRepository:
             account.email,
             account.name,
             password_set=account.password_hash is not None,
+            avatar_url=account.avatar_url,
         )
 
 

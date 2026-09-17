@@ -287,6 +287,7 @@ class SqlAlchemyLoginRepository:
             name=account.name,
             password_hash=account.password_hash,
             email_verified=account.email_verified_at is not None,
+            avatar_url=account.avatar_url,
         )
 
 
@@ -354,7 +355,9 @@ class SqlAlchemySessionAuthenticationRepository:
                     max(current_idle_expiry, refreshed_idle_expiry),
                     absolute_expiry,
                 )
-            return PersistedSessionPrincipal(account.id, account.email, account.name)
+            return PersistedSessionPrincipal(
+                account.id, account.email, account.name, getattr(account, "avatar_url", None)
+            )
 
     async def revoke(self, token_hash: str, csrf_hash: str, now: datetime) -> bool:
         async with self._database.transaction() as session:
@@ -540,6 +543,9 @@ class SqlAlchemyOIDCRepository:
                 )
                 if identity is not None:
                     account = await session.get(StudentAccount, identity.account_id)
+                    if account is not None:
+                        account.avatar_url = claims.picture_url
+                        await session.flush()
                     return self._to_account(account) if account is not None else None
                 account = await session.scalar(
                     select(StudentAccount)
@@ -551,6 +557,7 @@ class SqlAlchemyOIDCRepository:
                 account = StudentAccount(
                     email=claims.email,
                     name=claims.name,
+                    avatar_url=claims.picture_url,
                     password_hash=None,
                     email_verified_at=datetime.now(UTC),
                     timezone=timezone,
@@ -579,6 +586,9 @@ class SqlAlchemyOIDCRepository:
                 if identity is None:
                     return None
                 account = await session.get(StudentAccount, identity.account_id)
+                if account is not None:
+                    account.avatar_url = claims.picture_url
+                    await session.flush()
                 return self._to_account(account) if account is not None else None
 
     async def link_identity(self, account_id: UUID, claims: GoogleClaims) -> OIDCAccount | None:
@@ -597,6 +607,9 @@ class SqlAlchemyOIDCRepository:
                     .with_for_update()
                 )
                 if existing_subject is not None:
+                    if existing_subject.account_id == account_id:
+                        account.avatar_url = claims.picture_url
+                        await session.flush()
                     return (
                         self._to_account(account)
                         if existing_subject.account_id == account_id
@@ -613,6 +626,8 @@ class SqlAlchemyOIDCRepository:
                 )
                 if existing_account_identity is not None:
                     return None
+
+                account.avatar_url = claims.picture_url
 
                 session.add(
                     AuthenticationIdentity(
@@ -647,6 +662,7 @@ class SqlAlchemyOIDCRepository:
                     account_id=account.id,
                     subject=claims.subject,
                     email=claims.email,
+                    picture_url=claims.picture_url,
                     token_hash=token_hash,
                     expires_at=expires_at,
                 )
@@ -707,6 +723,7 @@ class SqlAlchemyOIDCRepository:
                 row.subject,
                 row.email,
                 account.password_hash,
+                row.picture_url,
             )
 
     async def link_identity_and_create_session(
@@ -771,6 +788,7 @@ class SqlAlchemyOIDCRepository:
                     )
                 )
                 row.consumed_at = now
+                account.avatar_url = row.picture_url
                 account.email_verified_at = account.email_verified_at or now
                 await session.flush()
                 return self._to_account(account)
@@ -797,4 +815,4 @@ class SqlAlchemyOIDCRepository:
 
     @staticmethod
     def _to_account(account: StudentAccount) -> OIDCAccount:
-        return OIDCAccount(account.id, account.email, account.name)
+        return OIDCAccount(account.id, account.email, account.name, account.avatar_url)
