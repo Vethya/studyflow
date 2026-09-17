@@ -12,6 +12,8 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 
+import { applyThemeWithTransition } from "@/lib/theme";
+
 const THEME_OPTIONS = [
   { value: "system", label: "System", Icon: Monitor },
   { value: "light", label: "Light", Icon: Sun },
@@ -47,7 +49,9 @@ export function ThemeSelector() {
   return (
     <Select
       value={theme ?? "system"}
-      onValueChange={(value) => value && setTheme(value as ThemeName)}
+      onValueChange={(value) =>
+        value && applyThemeWithTransition(value, setTheme)
+      }
     >
       <SelectTrigger className="w-32" aria-label="Theme">
         <SelectValue>

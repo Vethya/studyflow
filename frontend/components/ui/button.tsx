@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils"
  * The variant and size names are unchanged, so no call site has to move.
  */
 const buttonVariants = cva(
-  "btn group/button font-medium normal-case transition-[color,background-color,border-color] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "btn group/button font-medium normal-case transition-all duration-150 active:scale-[0.98] active:duration-75 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 disabled:active:scale-100",
   {
     variants: {
       variant: {
@@ -23,7 +23,7 @@ const buttonVariants = cva(
         // product reserves saturated fills for capacity, not for chrome.
         destructive:
           "btn-ghost bg-destructive/10 text-destructive hover:bg-destructive/20",
-        link: "btn-link text-primary no-underline hover:underline",
+        link: "btn-link text-primary no-underline hover:underline active:scale-100",
       },
       size: {
         default: "h-8 min-h-8 gap-1.5 px-2.5 text-sm",
