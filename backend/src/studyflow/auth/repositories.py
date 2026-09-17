@@ -667,7 +667,6 @@ class SqlAlchemyOIDCRepository:
                     AuthenticationIdentity.account_id == account_id,
                     AuthenticationIdentity.provider == "google",
                     AuthenticationIdentity.subject == claims.subject,
-                    AuthenticationIdentity.email == claims.email,
                 )
                 .with_for_update()
             )
