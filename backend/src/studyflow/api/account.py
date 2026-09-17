@@ -1,5 +1,6 @@
 """Authenticated account-profile endpoints."""
 
+import hmac
 from datetime import datetime
 from typing import Annotated, cast
 
@@ -137,6 +138,13 @@ async def require_csrf_session(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
     principal = await authentication.authenticate(session_token, csrf_token)
     if principal is None:
+        csrf_cookie = request.cookies.get(get_cookie_policy(request).csrf_name)
+        if csrf_cookie is not None and hmac.compare_digest(
+            csrf_token.encode(), csrf_cookie.encode()
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
+            )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
     return principal
 
