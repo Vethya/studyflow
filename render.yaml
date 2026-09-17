@@ -11,7 +11,7 @@ projects:
             region: singapore
             dockerfilePath: ./backend/Dockerfile
             dockerContext: ./backend
-            healthCheckPath: /api/v1/ready
+            healthCheckPath: /api/v1/health
             envVars:
               - key: STUDYFLOW_ENVIRONMENT
                 value: production
@@ -51,7 +51,7 @@ projects:
             region: singapore
             dockerfilePath: ./backend/Dockerfile
             dockerContext: ./backend
-            healthCheckPath: /api/v1/ready
+            healthCheckPath: /api/v1/health
             envVars:
               - key: STUDYFLOW_ENVIRONMENT
                 value: production
