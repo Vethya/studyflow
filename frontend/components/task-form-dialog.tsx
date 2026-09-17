@@ -316,9 +316,13 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
                 disabled={isSaving || estimateFrozen}
                 required
               />
-              {estimateFrozen && (
+              {estimateFrozen ? (
                 <p className="text-[11px] text-muted-foreground">
                   Frozen — this task has already been scheduled or started.
+                </p>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  How long the whole task will take, not one sitting.
                 </p>
               )}
             </div>

@@ -155,7 +155,9 @@ export function SchedulePreview({
       description={
         proposal.reason
           ? undefined
-          : `${upcoming.length} sessions · ${formatDuration(totalMinutes)} of study`
+          : `${upcoming.length} ${upcoming.length === 1 ? "session" : "sessions"} · ${formatDuration(
+              totalMinutes,
+            )} of study`
       }
       footer={
         <>

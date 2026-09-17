@@ -130,6 +130,13 @@ export function SessionDrawer({
           </div>
         )}
 
+        {task && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary">{task.status}</Badge>
+            {task.priority === "High" && <Badge variant="outline">High priority</Badge>}
+          </div>
+        )}
+
         <dl className="grid grid-cols-2 gap-x-4 gap-y-3 border-y py-4 text-sm">
           <Fact label="Planned" value={formatDuration(session.plannedDuration)} />
           <Fact label="Category" value={CATEGORY_CONFIG[session.category].label} />
@@ -147,20 +154,18 @@ export function SessionDrawer({
         </dl>
 
         {task && (
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline">{task.status}</Badge>
-              {task.priority === "High" && <Badge variant="outline">High priority</Badge>}
-            </div>
+          <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
               {formatDuration(task.remainingDuration)} of this task is still to do.
             </p>
-            <Link
-              href={`/tasks/${session.taskId}`}
-              className="inline-block text-sm font-medium underline-offset-4 hover:underline"
+            <Button
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={<Link href={`/tasks/${session.taskId}`} />}
             >
-              Open the full task →
-            </Link>
+              Open task
+            </Button>
           </div>
         )}
       </div>
