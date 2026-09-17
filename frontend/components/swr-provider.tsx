@@ -8,7 +8,11 @@ import {
 } from "@/lib/data-events";
 import { SWR_KEYS } from "@/lib/swr-keys";
 
-const ALL_CACHE_ROOTS: string[] = [...Object.values(SWR_KEYS), "studyflow/task"];
+const ALL_CACHE_ROOTS: string[] = [
+  ...Object.values(SWR_KEYS),
+  "studyflow/task",
+  "studyflow/adaptive-estimate",
+];
 
 function rootForKey(key: unknown): string | null {
   const root = Array.isArray(key) ? key[0] : key;
@@ -20,6 +24,7 @@ function rootsForMutation(path: string): string[] {
     return [
       SWR_KEYS.tasks,
       "studyflow/task",
+      "studyflow/adaptive-estimate",
       SWR_KEYS.activeSchedule,
       SWR_KEYS.pendingRevision,
       SWR_KEYS.effortProgress,
@@ -57,6 +62,7 @@ function rootsForMutation(path: string): string[] {
     return [
       SWR_KEYS.tasks,
       "studyflow/task",
+      "studyflow/adaptive-estimate",
       SWR_KEYS.activeSchedule,
       SWR_KEYS.pendingRevision,
       SWR_KEYS.effortProgress,

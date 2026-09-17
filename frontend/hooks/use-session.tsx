@@ -44,7 +44,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       throw error;
     }
   }, []);
-  const { data, error, isLoading, mutate } = useSWR<SessionAccount | null>(SWR_KEYS.session, loadSession, {
+  const { data, isLoading, mutate } = useSWR<SessionAccount | null>(SWR_KEYS.session, loadSession, {
     revalidateOnFocus: false,
     shouldRetryOnError: false,
   });
@@ -80,9 +80,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     ? "loading"
     : account
       ? "authenticated"
-      : error
-        ? "loading"
-        : "unauthenticated";
+      : "unauthenticated";
 
   const value = useMemo<SessionContextValue>(
     () => ({
