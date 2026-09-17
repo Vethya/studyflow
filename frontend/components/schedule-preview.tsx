@@ -122,7 +122,9 @@ export function SchedulePreview({
     setBusy(action);
     try {
       if (action === "accept") {
-        await scheduling.acceptProposal(proposal!.id);
+        // The SWR schedule cache is revalidated by the successful mutation;
+        // this UI already reloads its mounted schedule after the callback.
+        await scheduling.acceptProposal(proposal!.id, undefined, false);
         toast.success("Plan accepted");
         onAccepted();
       } else {

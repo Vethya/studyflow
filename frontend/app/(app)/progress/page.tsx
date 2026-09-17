@@ -14,6 +14,7 @@ import { describeError, useApi } from "@/hooks/use-api";
 import { EmptyState, PageHeader, PageShell, SectionHeader } from "@/components/page-kit";
 import type { EffortProgress } from "@/types/progress";
 import type { StudySession } from "@/types/session";
+import { activeScheduleKey, effortProgressKey, SWR_KEYS } from "@/lib/swr-keys";
 
 /**
  * Effort progress = time worked ÷ (time worked + estimated time remaining).
@@ -24,12 +25,24 @@ import type { StudySession } from "@/types/session";
  */
 export default function ProgressPage() {
   const loadTasks = useCallback((s: AbortSignal) => tasksApi.listTasks({}, s), []);
-  const loadEffort = useCallback((s: AbortSignal) => scheduling.listEffortProgress(s), []);
-  const loadSchedule = useCallback((s: AbortSignal) => scheduling.getActiveSchedule(s), []);
-
-  const tasks = useApi(loadTasks);
-  const effort = useApi(loadEffort);
-  const schedule = useApi(loadSchedule);
+  const tasks = useApi(SWR_KEYS.tasks, loadTasks);
+  const loadSchedule = useCallback(
+    (s: AbortSignal) => scheduling.getActiveSchedule(s, tasks.data ?? []),
+    [tasks.data],
+  );
+  const schedule = useApi(
+    activeScheduleKey(tasks.data),
+    loadSchedule,
+  );
+  const loadEffort = useCallback(
+    (s: AbortSignal) =>
+      scheduling.listEffortProgress(s, tasks.data ?? [], schedule.data?.sessions ?? []),
+    [schedule.data, tasks.data],
+  );
+  const effort = useApi(
+    effortProgressKey(tasks.data, schedule.data, schedule.isLoading),
+    loadEffort,
+  );
 
   const isLoading = tasks.isLoading || effort.isLoading || schedule.isLoading;
   const error = tasks.error ?? effort.error ?? schedule.error;

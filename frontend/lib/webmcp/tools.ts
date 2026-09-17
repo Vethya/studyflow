@@ -1,6 +1,5 @@
 import { account, availability, scheduling, tasks } from "@/lib/api";
 import { assessCapacity } from "@/lib/capacity";
-import { notifyStudyFlowDataChanged } from "@/lib/data-events";
 import { toEffortProgress } from "@/lib/api/mappers";
 import { CATEGORIES, PRIORITIES } from "@/types";
 import type { UnavailablePeriodDraft, WindowDraft } from "@/lib/api/availability";
@@ -328,13 +327,13 @@ export function createStudyFlowTools(): WebMcpTool[] {
       execute: async (input, options) => {
         const horizon = horizonDays(input);
         const signal = signalFor(options);
-        const [allTasks, windows, periods, preferences, activeSchedule, pendingProposal] =
+        const allTasks = await tasks.listTasks({}, signal);
+        const [windows, periods, preferences, activeSchedule, pendingProposal] =
           await Promise.all([
-            tasks.listTasks({}, signal),
             availability.listWindows(signal),
             availability.listUnavailablePeriods(signal),
             account.getPreferences(signal),
-            scheduling.getActiveSchedule(signal),
+            scheduling.getActiveSchedule(signal, allTasks),
             scheduling.getPendingRevision(signal),
           ]);
         const capacity = assessCapacity(allTasks, windows, periods, horizon);
@@ -382,7 +381,6 @@ export function createStudyFlowTools(): WebMcpTool[] {
       annotations: writeUntrusted,
       execute: async (input, options) => {
         const task = await tasks.createTask(taskForm(input), signalFor(options));
-        notifyStudyFlowDataChanged();
         return result(
           { task },
           { active_schedule_changed: false, requires_user_review: false, persisted: true },
@@ -399,7 +397,6 @@ export function createStudyFlowTools(): WebMcpTool[] {
       execute: async (input, options) => {
         const record = inputObject(input);
         const changes = await applyStudyTimeChanges(record, signalFor(options));
-        notifyStudyFlowDataChanged();
         const activeScheduleChanged = changes.invalidated_future_session_ids.length > 0;
         return result(
           changes,
@@ -433,7 +430,6 @@ export function createStudyFlowTools(): WebMcpTool[] {
           const invalidatedFutureSessionIds = (scheduleBefore?.sessions ?? [])
             .map((session) => session.id)
             .filter((sessionId) => !afterSessionIds.has(sessionId));
-          notifyStudyFlowDataChanged();
           return result<UpdateTaskResult>(
             {
               operation,
@@ -452,7 +448,6 @@ export function createStudyFlowTools(): WebMcpTool[] {
         if (operation === "start") {
           await tasks.startTask(taskId, signal);
           const task = await tasks.getTask(taskId, signal);
-          notifyStudyFlowDataChanged();
           return result<UpdateTaskResult>(
             { operation, task_id: taskId, task, deleted: false, invalidated_future_session_ids: [] },
             { active_schedule_changed: false, requires_user_review: false, persisted: true },
@@ -462,7 +457,6 @@ export function createStudyFlowTools(): WebMcpTool[] {
           requireConfirmation(record, operation);
           await tasks.finishTaskEarly(taskId, signal);
           const task = await tasks.getTask(taskId, signal);
-          notifyStudyFlowDataChanged();
           return result<UpdateTaskResult>(
             { operation, task_id: taskId, task, deleted: false, invalidated_future_session_ids: [] },
             { active_schedule_changed: true, requires_user_review: true, persisted: true },
@@ -470,7 +464,6 @@ export function createStudyFlowTools(): WebMcpTool[] {
         }
         requireConfirmation(record, operation);
         await tasks.deleteTask(taskId, signal);
-        notifyStudyFlowDataChanged();
         return result<UpdateTaskResult>(
           { operation, task_id: taskId, task: null, deleted: true, invalidated_future_session_ids: [] },
           { active_schedule_changed: true, requires_user_review: true, persisted: true },
@@ -505,7 +498,6 @@ export function createStudyFlowTools(): WebMcpTool[] {
           scenarioInput(input, false),
           signalFor(options),
         );
-        notifyStudyFlowDataChanged();
         return result(
           { proposal },
           { active_schedule_changed: false, requires_user_review: true, persisted: true },
@@ -524,7 +516,6 @@ export function createStudyFlowTools(): WebMcpTool[] {
           idInput(input, "proposal_id"),
           signalFor(options),
         );
-        notifyStudyFlowDataChanged();
         return result(
           { schedule },
           { active_schedule_changed: true, requires_user_review: false, persisted: true },
@@ -541,7 +532,6 @@ export function createStudyFlowTools(): WebMcpTool[] {
       execute: async (input, options) => {
         const proposalId = idInput(input, "proposal_id");
         await scheduling.rejectProposal(proposalId, signalFor(options));
-        notifyStudyFlowDataChanged();
         return result(
           { proposal_id: proposalId },
           { active_schedule_changed: false, requires_user_review: false, persisted: true },
@@ -562,7 +552,6 @@ export function createStudyFlowTools(): WebMcpTool[] {
           { outcome: "Missed", actualMinutes: 0 },
           signalFor(options),
         );
-        notifyStudyFlowDataChanged();
         return result(
           { session_id: outcome.session.id, recovery_proposal: outcome.revision },
           {

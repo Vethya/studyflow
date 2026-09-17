@@ -39,6 +39,7 @@ import { DAY_NAMES_SHORT } from "@/lib/constants";
 import type { AcademicTask } from "@/types/task";
 import type { StudySession } from "@/types/session";
 import type { ScheduleProposal } from "@/types/schedule";
+import { activeScheduleKey, SWR_KEYS, taskDetailKey } from "@/lib/swr-keys";
 
 export default function TaskDetailPage({
   params,
@@ -52,7 +53,10 @@ export default function TaskDetailPage({
     (signal: AbortSignal) => tasksApi.getTask(taskId, signal),
     [taskId],
   );
-  const { data: task, error, isLoading, reload, setData } = useApi(load);
+  const { data: task, error, isLoading, reload, setData } = useApi(taskDetailKey(taskId), load);
+
+  const loadTasks = useCallback((signal: AbortSignal) => tasksApi.listTasks({}, signal), []);
+  const allTasks = useApi(SWR_KEYS.tasks, loadTasks);
 
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -62,8 +66,14 @@ export default function TaskDetailPage({
   const [proposal, setProposal] = useState<ScheduleProposal | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
 
-  const loadSchedule = useCallback((signal: AbortSignal) => scheduling.getActiveSchedule(signal), []);
-  const schedule = useApi(loadSchedule);
+  const loadSchedule = useCallback(
+    (signal: AbortSignal) => scheduling.getActiveSchedule(signal, allTasks.data ?? []),
+    [allTasks.data],
+  );
+  const schedule = useApi(
+    activeScheduleKey(allTasks.data),
+    loadSchedule,
+  );
   /** Every session belonging to this task, newest first (SPEC §17.4). */
   const taskSessions = (schedule.data?.sessions ?? [])
     .filter((session) => session.taskId === taskId)
@@ -74,7 +84,6 @@ export default function TaskDetailPage({
     try {
       await fn();
       toast.success(message);
-      reload();
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
         toast.error("Start the task before finishing it early.");
@@ -334,8 +343,6 @@ export default function TaskDetailPage({
         onOpenChange={setPreviewOpen}
         onAccepted={() => {
           setProposal(null);
-          schedule.reload();
-          reload();
         }}
         onRejected={() => setProposal(null)}
       />

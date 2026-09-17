@@ -45,6 +45,7 @@ import { TaskFormDialog } from "@/components/task-form-dialog";
 import { localInputToIso } from "@/lib/datetime";
 import { CATEGORIES, PRIORITIES, TASK_STATUSES } from "@/types/task";
 import type { AcademicTask, Category, Priority, TaskStatus } from "@/types/task";
+import { taskListKey } from "@/lib/swr-keys";
 
 const ANY = "any";
 
@@ -77,21 +78,21 @@ export default function TasksPage() {
   const [confirmDelete, setConfirmDelete] = useState<AcademicTask | null>(null);
   const [confirmFinish, setConfirmFinish] = useState<AcademicTask | null>(null);
 
-  const load = useCallback(
-    (signal: AbortSignal) =>
-      tasksApi.listTasks(
-        {
-          status: status ?? undefined,
-          category: category ?? undefined,
-          priority: priority ?? undefined,
-          course: appliedCourse || undefined,
-          deadlineTo: dueBefore ? localInputToIso(dueBefore) : undefined,
-        },
-        signal,
-      ),
+  const filters = useMemo(
+    () => ({
+      status: status ?? undefined,
+      category: category ?? undefined,
+      priority: priority ?? undefined,
+      course: appliedCourse || undefined,
+      deadlineTo: dueBefore ? localInputToIso(dueBefore) : undefined,
+    }),
     [status, category, priority, appliedCourse, dueBefore],
   );
-  const { data, error, isLoading, reload, setData } = useApi(load);
+  const load = useCallback(
+    (signal: AbortSignal) => tasksApi.listTasks(filters, signal),
+    [filters],
+  );
+  const { data, error, isLoading, reload, setData } = useApi(taskListKey(filters), load);
 
   const tasks = useMemo(() => data ?? [], [data]);
 
@@ -159,7 +160,6 @@ export default function TasksPage() {
     try {
       await action();
       toast.success(message);
-      reload();
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
         toast.error("Start the task before finishing it early.");

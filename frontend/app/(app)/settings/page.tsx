@@ -36,6 +36,7 @@ import { detectTimezone, formatOffset } from "@/lib/timezones";
 import { cn } from "@/lib/utils";
 import { notifyStudyFlowSessionInvalidated } from "@/lib/data-events";
 import { ThemeSelector } from "@/components/theme-selector";
+import { SWR_KEYS } from "@/lib/swr-keys";
 
 const SESSION_LENGTH = { min: 10, max: 240, step: 5 };
 const BREAK_LENGTH = { min: 0, max: 120, step: 5 };
@@ -89,10 +90,10 @@ function SettingsContent() {
   const deletionErrorFromRedirect = deletionOutcome === "error";
   const loadDeletionStatus = useCallback((s: AbortSignal) => accountApi.getDeletionStatus(s), []);
 
-  const profile = useApi(loadProfile);
-  const preferences = useApi(loadPreferences);
-  const identities = useApi(loadIdentities);
-  const deletionStatus = useApi(loadDeletionStatus);
+  const profile = useApi(SWR_KEYS.profile, loadProfile);
+  const preferences = useApi(SWR_KEYS.studyPreferences, loadPreferences);
+  const identities = useApi(SWR_KEYS.identities, loadIdentities);
+  const deletionStatus = useApi(SWR_KEYS.deletionStatus, loadDeletionStatus);
 
   const [nameOpen, setNameOpen] = useState(false);
   const [addPasswordOpen, setAddPasswordOpen] = useState(false);
@@ -264,7 +265,7 @@ function SettingsContent() {
             {/* SPEC §8.3: recurring windows must be re-confirmed after a change. */}
             {preferences.data?.availability_confirmation_required && (
               <div className="pt-3">
-                <ConfirmTimezone onConfirmed={() => preferences.reload()} />
+                <ConfirmTimezone />
               </div>
             )}
           </>
@@ -406,7 +407,7 @@ function RowSkeleton({ rows }: { rows: number }) {
   );
 }
 
-function ConfirmTimezone({ onConfirmed }: { onConfirmed: () => void }) {
+function ConfirmTimezone() {
   const [isConfirming, setConfirming] = useState(false);
 
   async function confirm() {
@@ -414,7 +415,6 @@ function ConfirmTimezone({ onConfirmed }: { onConfirmed: () => void }) {
     try {
       await availabilityApi.confirmTimezone();
       toast.success("Timezone confirmed");
-      onConfirmed();
     } catch (cause) {
       toast.error(describeError(cause));
     } finally {

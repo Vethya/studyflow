@@ -1,4 +1,3 @@
-import { notifyStudyFlowDataChanged } from "@/lib/data-events";
 import type { OutcomeResult } from "@/lib/api";
 import type { SessionOutcome } from "@/types/session";
 import type { ScheduleRevision } from "@/types/schedule";
@@ -31,5 +30,5 @@ export function applyRecordedOutcome(
     effects.setProposal(result.revision);
     effects.setPreviewOpen(true);
   }
-  (effects.notify ?? notifyStudyFlowDataChanged)();
+  effects.notify?.();
 }

@@ -6,6 +6,7 @@ import { Search, X } from "lucide-react";
 import { tasks as tasksApi } from "@/lib/api";
 import { useApi } from "@/hooks/use-api";
 import { CATEGORY_CONFIG } from "@/lib/constants";
+import { SWR_KEYS } from "@/lib/swr-keys";
 
 /**
  * The header holds one thing: finding a task.
@@ -24,7 +25,7 @@ export function TopBar() {
   const [query, setQuery] = useState("");
 
   const load = useCallback((signal: AbortSignal) => tasksApi.listTasks({}, signal), []);
-  const { data } = useApi(load);
+  const { data } = useApi(SWR_KEYS.tasks, load);
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
