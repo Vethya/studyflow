@@ -50,7 +50,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
             {children}
           </div>
 
-          <p className="mt-6 text-xs text-white/70">© 2026 StudyFlow. Built for students.</p>
+          <p className="mt-6 text-xs text-foreground/70">© 2026 StudyFlow. Built for students.</p>
         </div>
       </div>
     </div>
