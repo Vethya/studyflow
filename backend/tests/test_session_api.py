@@ -91,7 +91,7 @@ async def test_current_session_rejects_a_missing_or_invalid_cookie() -> None:
 
 
 @pytest.mark.anyio
-async def test_logout_rejects_invalid_csrf_without_clearing_cookies() -> None:
+async def test_logout_rejects_invalid_csrf_and_clears_cookies() -> None:
     authentication = SessionAuthenticationStub(None, revoked=False)
     transport = ASGITransport(app=create_app(session_authentication=authentication))
     async with AsyncClient(
@@ -104,7 +104,7 @@ async def test_logout_rejects_invalid_csrf_without_clearing_cookies() -> None:
     ) as client:
         response = await client.post("/api/v1/auth/logout", headers={"X-CSRF-Token": "wrong-token"})
     assert response.status_code == 403
-    assert "set-cookie" not in response.headers
+    assert len(response.headers.get_list("set-cookie")) == 2
     assert authentication.revoke_calls == []
 
 
@@ -152,6 +152,7 @@ async def test_logout_rejects_session_cookie_without_csrf_cookie() -> None:
             "/api/v1/auth/logout", headers={"X-CSRF-Token": "csrf-request-token"}
         )
     assert response.status_code == 403
+    assert len(response.headers.get_list("set-cookie")) == 2
     assert authentication.revoke_calls == []
 
 

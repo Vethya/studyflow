@@ -724,7 +724,13 @@ async def logout(
         or csrf_cookie is None
         or not hmac.compare_digest(csrf_token.encode(), csrf_cookie.encode())
     ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
+        response = JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": "CSRF validation failed"},
+            headers={"Cache-Control": "no-store"},
+        )
+        cookie_policy.clear_authentication(response)
+        return response
     try:
         await authentication.revoke(session_token, csrf_token)
     except Exception:
