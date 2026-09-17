@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle, ArrowLeft, Loader2 } from "lucide-react";
 import { auth } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
+import { notifyStudyFlowSessionInvalidated } from "@/lib/data-events";
 
 /**
  * Landing page for the link emailed by `POST /auth/forgot-password`; the
@@ -52,6 +53,7 @@ function ResetPasswordForm() {
     try {
       await auth.resetPassword(token, password);
       // Resetting revokes existing sessions, so sign in again with the new one.
+      notifyStudyFlowSessionInvalidated();
       router.replace("/login?reset=1");
     } catch (cause) {
       setError(describeError(cause));

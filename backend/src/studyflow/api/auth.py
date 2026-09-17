@@ -611,6 +611,7 @@ async def forgot_password(
 )
 async def reset_password(
     payload: PasswordResetConfirmation,
+    response: Response,
     http_request: Request,
     recovery: Annotated[PasswordRecovery, Depends(get_password_recovery)],
     rate_limit: Annotated[
@@ -647,6 +648,7 @@ async def reset_password(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Password safety service is unavailable",
         ) from error
+    get_cookie_policy(http_request).clear_authentication(response)
 
 
 @router.post(
