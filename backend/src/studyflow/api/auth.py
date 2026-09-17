@@ -753,7 +753,7 @@ async def logout(
         or csrf_cookie is None
         or not hmac.compare_digest(csrf_token.encode(), csrf_cookie.encode())
     ):
-        response = JSONResponse(
+        response: Response = JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
             content={"detail": "CSRF validation failed"},
             headers={"Cache-Control": "no-store"},
