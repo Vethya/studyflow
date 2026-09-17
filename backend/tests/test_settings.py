@@ -247,3 +247,48 @@ def test_production_requires_https_for_google_oidc_redirect_uri() -> None:
             google_oidc_client_secret=SecretStr("google-secret"),
             google_oidc_redirect_uri="http://studyflow.example.com/callback",
         )
+
+
+def test_google_import_redirect_uri_requires_google_oidc_credentials() -> None:
+    with raises(ValidationError, match="Google import requires the Google OIDC client ID"):
+        Settings(
+            google_import_redirect_uri="https://studyflow.example/api/v1/integrations/google/callback"
+        )
+
+    settings = Settings(
+        google_oidc_client_id="google-client",
+        google_oidc_client_secret=SecretStr("google-secret"),
+        google_oidc_redirect_uri="https://studyflow.example/api/v1/auth/google/callback",
+        google_import_redirect_uri="",
+    )
+    assert settings.google_import_redirect_uri is None
+
+
+@mark.parametrize(
+    ("redirect_uri", "message"),
+    [
+        ("javascript:alert(1)", "Google import redirect URI must use HTTP or HTTPS"),
+        ("https://studyflow.example/callback?x=1", "must not include a query or fragment"),
+    ],
+)
+def test_google_import_redirect_uri_is_validated(redirect_uri: str, message: str) -> None:
+    with raises(ValidationError, match=message):
+        Settings(google_import_redirect_uri=redirect_uri)
+
+
+def test_production_requires_https_for_google_import_redirect_uri() -> None:
+    database_url = SecretStr(
+        "postgresql+psycopg://studyflow:secret@database/studyflow?sslmode=require"
+    )
+
+    with raises(ValidationError, match="Production Google import redirect URI must use HTTPS"):
+        Settings(
+            environment=Environment.PRODUCTION,
+            database_url=database_url,
+            public_app_url="https://studyflow.example.com",
+            smtp_start_tls=True,
+            google_oidc_client_id="google-client",
+            google_oidc_client_secret=SecretStr("google-secret"),
+            google_oidc_redirect_uri="https://studyflow.example.com/api/v1/auth/google/callback",
+            google_import_redirect_uri="http://studyflow.example.com/import-callback",
+        )

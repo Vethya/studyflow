@@ -96,6 +96,7 @@ def test_google_oidc_settings_are_forwarded_without_example_secrets() -> None:
         "STUDYFLOW_GOOGLE_OIDC_CLIENT_ID",
         "STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET",
         "STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI",
+        "STUDYFLOW_GOOGLE_IMPORT_REDIRECT_URI",
     }
 
     shared_environment = compose["x-backend-environment"]

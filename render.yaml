@@ -41,6 +41,8 @@ projects:
                 sync: false
               - key: STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI
                 sync: false
+              - key: STUDYFLOW_GOOGLE_IMPORT_REDIRECT_URI
+                sync: false
       - name: Production
         services:
           - type: web
@@ -80,4 +82,6 @@ projects:
               - key: STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET
                 sync: false
               - key: STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI
+                sync: false
+              - key: STUDYFLOW_GOOGLE_IMPORT_REDIRECT_URI
                 sync: false

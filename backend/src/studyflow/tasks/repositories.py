@@ -7,6 +7,7 @@ from typing import Protocol
 from uuid import UUID
 
 from sqlalchemy import delete, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.repositories import SessionTransactions
@@ -22,6 +23,7 @@ from studyflow.estimation import (
 from studyflow.estimation.repositories import SqlAlchemyAdaptivePredictionRepository
 from studyflow.tasks.service import (
     AcademicTaskRecord,
+    DuplicateExternalTaskError,
     EstimateFrozenError,
     InvalidTaskDeadlineError,
     NewAcademicTask,
@@ -210,6 +212,14 @@ class SqlAlchemyAcademicTaskRepository:
             await self._recovery_invalidator.invalidate_for_task(session, account_id, task_id)
 
     async def create(self, account_id: UUID, task: NewAcademicTask) -> AcademicTaskRecord:
+        try:
+            return await self._create(account_id, task)
+        except IntegrityError as error:
+            if task.external_id is not None:
+                raise DuplicateExternalTaskError from error
+            raise
+
+    async def _create(self, account_id: UUID, task: NewAcademicTask) -> AcademicTaskRecord:
         async with self._database.transaction() as session:
             if not await self._lock_account(session, account_id):
                 raise ValueError("Account not found")
@@ -225,6 +235,8 @@ class SqlAlchemyAcademicTaskRepository:
                 adaptive_estimate_minutes=None,
                 planned_source="original",
                 planned_duration_minutes=task.original_estimate_minutes,
+                external_source=task.external_source,
+                external_id=task.external_id,
             )
             session.add(row)
             await session.flush()

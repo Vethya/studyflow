@@ -52,6 +52,12 @@ Google Sign-In is enabled only when `STUDYFLOW_GOOGLE_OIDC_CLIENT_ID`,
 the redirect URI as `/api/v1/auth/google/callback` on the deployed HTTPS origin. The backend asks
 only for `openid email profile`; it never stores Google access or refresh tokens.
 
+Google Calendar and Google Classroom import is enabled when those three values and
+`STUDYFLOW_GOOGLE_IMPORT_REDIRECT_URI` are set. Register the redirect URI as
+`/api/v1/integrations/google/callback` on the same origin. Imports request only read-only scopes,
+use PKCE, and keep no Google tokens: the callback reads the data once and stores a 30-minute preview
+that the student confirms. See `docs/google-import-setup.md`.
+
 ## Test with Postman
 
 Import `postman/StudyFlow.postman_collection.json` from the repository root. The collection uses

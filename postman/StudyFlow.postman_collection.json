@@ -1016,6 +1016,390 @@
       ]
     },
     {
+      "name": "Google Import",
+      "description": "One-time, read-only imports from Google Calendar (blocked time) and Google Classroom (tasks). StudyFlow stores no Google tokens.",
+      "item": [
+        {
+          "name": "Get Google Import Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/integrations/google/status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "google",
+                "status"
+              ]
+            },
+            "description": "Reports whether one-time Google Calendar and Classroom imports are configured on this server."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Start Google Calendar Import",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/integrations/google/calendar/start",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "google",
+                "calendar",
+                "start"
+              ]
+            },
+            "description": "Starts a read-only Google Calendar import for the next horizon_days days. Open authorization_url in a browser; Google redirects back to the callback, which stores a 30-minute preview.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"horizon_days\": 28\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200 or 503 when not configured', () => pm.expect([200, 503]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Start Google Classroom Import",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/integrations/google/classroom/start",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "google",
+                "classroom",
+                "start"
+              ]
+            },
+            "description": "Starts a read-only Google Classroom import of unfinished coursework with a future due date.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200 or 503 when not configured', () => pm.expect([200, 503]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Complete Google Import (browser callback)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/integrations/google/callback?state={{google_import_state}}&code={{google_import_code}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "google",
+                "callback"
+              ],
+              "query": [
+                {
+                  "key": "state",
+                  "value": "{{google_import_state}}"
+                },
+                {
+                  "key": "code",
+                  "value": "{{google_import_code}}"
+                }
+              ]
+            },
+            "description": "Browser-only OAuth callback. Requires the HttpOnly import state cookie set by a start request, so it cannot be completed from Postman. Always answers with a 303 redirect to the frontend."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('redirects to the frontend', () => pm.response.to.have.status(303));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Google Import Preview",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/integrations/google/imports/{{import_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "google",
+                "imports",
+                "{{import_id}}"
+              ]
+            },
+            "description": "Returns the items of an unexpired, unused import with a status for each: new, changed, unchanged, or already_imported."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200 or 404', () => pm.expect([200, 404]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Import Google Calendar Items",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/integrations/google/imports/{{import_id}}/calendar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "google",
+                "imports",
+                "{{import_id}}",
+                "calendar"
+              ]
+            },
+            "description": "Creates or updates blocked periods for the selected Google Calendar events and reports invalidated future sessions. Single use.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"item_ids\": [\"{{google_import_item_id}}\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200, 404, or 422', () => pm.expect([200, 404, 422]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Import Google Classroom Items",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/integrations/google/imports/{{import_id}}/classroom",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "google",
+                "imports",
+                "{{import_id}}",
+                "classroom"
+              ]
+            },
+            "description": "Creates academic tasks for the selected Classroom coursework with the student's category, priority, and estimate. Single use.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\"id\": \"{{google_import_item_id}}\", \"category\": \"assignment\", \"priority\": \"medium\", \"estimate_minutes\": 90}\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200, 404, or 422', () => pm.expect([200, 404, 422]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Discard Google Import",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/integrations/google/imports/{{import_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "google",
+                "imports",
+                "{{import_id}}"
+              ]
+            },
+            "description": "Deletes an import preview without importing anything."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 204 or 404', () => pm.expect([204, 404]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Study Sessions & Outcomes",
       "description": "Inspect accepted study sessions and record one immutable outcome for an ended session.",
       "item": [
