@@ -3,7 +3,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ApiError, auth } from "@/lib/api";
-import { STUDYFLOW_SESSION_INVALIDATED_EVENT } from "@/lib/data-events";
+import {
+  notifyStudyFlowSessionInvalidated,
+  subscribeToStudyFlowSessionInvalidation,
+} from "@/lib/data-events";
 
 export interface SessionAccount {
   id: string;
@@ -35,8 +38,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       setAccountState(null);
       setStatus("unauthenticated");
     };
-    window.addEventListener(STUDYFLOW_SESSION_INVALIDATED_EVENT, invalidate);
-    return () => window.removeEventListener(STUDYFLOW_SESSION_INVALIDATED_EVENT, invalidate);
+    return subscribeToStudyFlowSessionInvalidation(invalidate);
   }, []);
 
   // Read the session once on mount. State is only written from the promise
@@ -82,6 +84,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     try {
       await auth.logout();
     } finally {
+      notifyStudyFlowSessionInvalidated();
       setAccountState(null);
       setStatus("unauthenticated");
       router.replace("/login");
