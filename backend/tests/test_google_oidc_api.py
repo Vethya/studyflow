@@ -323,9 +323,7 @@ async def test_start_google_oidc_validation_and_errors() -> None:
     # 1. Invalid timezone -> 422 (line 360)
     app = create_app(oidc_login=OIDCStub(), oidc_start_rate_limiter=RateLimitStub())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
-        res = await client.post(
-            "/api/v1/auth/google/start", json={"timezone": "Invalid/Zone"}
-        )
+        res = await client.post("/api/v1/auth/google/start", json={"timezone": "Invalid/Zone"})
         assert res.status_code == 422
         assert "Timezone must be a valid IANA timezone" in res.text
 
