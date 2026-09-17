@@ -32,6 +32,7 @@ export function SessionDrawer({
   task,
   open,
   onOpenChange,
+  onOpenChangeComplete,
   onEditTask,
   onDeleteTask,
   onRecordOutcome,
@@ -40,11 +41,20 @@ export function SessionDrawer({
   task: AcademicTask | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   onEditTask: () => void;
   onDeleteTask: () => void;
   onRecordOutcome: () => void;
 }) {
-  if (!session) return null;
+  // Keep the dialog root mounted before the first session is selected. If the
+  // root mounts only when open=true, Base UI has no opening transition phase.
+  if (!session) {
+    return (
+      <DetailDrawer open={false} onOpenChange={onOpenChange} title="Session details">
+        {null}
+      </DetailDrawer>
+    );
+  }
 
   const start = new Date(session.startTime);
   const end = new Date(session.endTime);
@@ -56,6 +66,7 @@ export function SessionDrawer({
     <DetailDrawer
       open={open}
       onOpenChange={onOpenChange}
+      onOpenChangeComplete={onOpenChangeComplete}
       title={session.taskTitle}
       description={
         <>
