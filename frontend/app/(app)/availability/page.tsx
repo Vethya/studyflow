@@ -43,8 +43,18 @@ export default function AvailabilityPage() {
    * Their count is surfaced, and the student may then ask for a new plan —
    * StudyFlow never regenerates on its own (SPEC §11.1).
    */
-  const [invalidatedCount, setInvalidatedCount] = useState(0);
+  const [invalidatedSessionIds, setInvalidatedSessionIds] = useState<Set<string>>(new Set());
+  const invalidatedCount = invalidatedSessionIds.size;
   const [planStale, setPlanStale] = useState(false);
+
+  const recordInvalidatedSessions = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
+    setInvalidatedSessionIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+  }, []);
   const [proposal, setProposal] = useState<ScheduleProposal | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [isGenerating, setGenerating] = useState(false);
@@ -144,7 +154,7 @@ export default function AvailabilityPage() {
 
   async function handleAddWindow(draft: WindowDraft) {
     const saved = await saveWindows([...toDraft(), draft]);
-    setInvalidatedCount(saved.invalidatedFutureSessionIds.length);
+    recordInvalidatedSessions(saved.invalidatedFutureSessionIds);
     setPlanStale(true);
     toast.success("Window added");
   }
@@ -157,7 +167,7 @@ export default function AvailabilityPage() {
           .filter((w) => w.id !== id)
           .map((w) => ({ dayOfWeek: w.dayOfWeek, startTime: w.startTime, endTime: w.endTime })),
       );
-      setInvalidatedCount(saved.invalidatedFutureSessionIds.length);
+      recordInvalidatedSessions(saved.invalidatedFutureSessionIds);
       setPlanStale(true);
       toast.success("Window removed");
     } catch (cause) {
@@ -179,7 +189,7 @@ export default function AvailabilityPage() {
           period.id === editingPeriod.id ? change.period : period,
         ),
       );
-      setInvalidatedCount(change.invalidatedFutureSessionIds.length);
+      recordInvalidatedSessions(change.invalidatedFutureSessionIds);
       toast.success("Exception updated");
       setEditingPeriod(null);
       return;
@@ -187,7 +197,7 @@ export default function AvailabilityPage() {
 
     const change = await availabilityApi.createUnavailablePeriod(draft);
     periods.setData([...allPeriods, change.period]);
-    setInvalidatedCount(change.invalidatedFutureSessionIds.length);
+    recordInvalidatedSessions(change.invalidatedFutureSessionIds);
     toast.success("Exception added");
   }
 
@@ -296,7 +306,7 @@ export default function AvailabilityPage() {
                 variant="ghost"
                 size="sm"
                 onClick={() => {
-                  setInvalidatedCount(0);
+                  setInvalidatedSessionIds(new Set());
                   setPlanStale(false);
                 }}
               >
@@ -553,7 +563,7 @@ export default function AvailabilityPage() {
         onOpenChange={setPreviewOpen}
         onAccepted={() => {
           setProposal(null);
-          setInvalidatedCount(0);
+          setInvalidatedSessionIds(new Set());
           setPlanStale(false);
         }}
         onRejected={() => setProposal(null)}
