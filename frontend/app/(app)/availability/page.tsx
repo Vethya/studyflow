@@ -13,6 +13,7 @@ import { DAY_NAMES, DAY_NAMES_SHORT } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { ScheduleTechnicalFailure, availability as availabilityApi, scheduling } from "@/lib/api";
 import { SchedulePreview } from "@/components/schedule-preview";
+import { PlanGenerationDialog } from "@/components/plan-generation-dialog";
 import type { WindowDraft } from "@/lib/api";
 import type { UnavailablePeriod } from "@/types/availability";
 import type { ScheduleProposal } from "@/types/schedule";
@@ -214,6 +215,7 @@ export default function AvailabilityPage() {
               variant="outline"
               onClick={() => void requestRegeneration()}
               disabled={isGenerating}
+              aria-busy={isGenerating}
             >
               {isGenerating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               Re-plan my time
@@ -283,6 +285,7 @@ export default function AvailabilityPage() {
                 size="sm"
                 onClick={() => void requestRegeneration()}
                 disabled={isGenerating}
+                aria-busy={isGenerating}
               >
                 {isGenerating && <Loader2 className="animate-spin" />}
                 Re-plan my time
@@ -553,6 +556,8 @@ export default function AvailabilityPage() {
         }}
         onRejected={() => setProposal(null)}
       />
+
+      <PlanGenerationDialog open={isGenerating} />
 
       <AddWindowDialog
         open={windowDialogOpen}
