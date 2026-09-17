@@ -70,7 +70,7 @@ export function AppSidebar() {
       "h-10 gap-3 rounded-lg px-3 text-sm transition-colors",
       "group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:p-2!",
       active
-        ? "bg-sidebar-primary font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary hover:text-sidebar-primary-foreground"
+        ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
     );
 

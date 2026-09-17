@@ -9,6 +9,7 @@ import {
   Globe,
   Loader2,
   LogOut,
+  Palette,
   ShieldCheck,
   Trash2,
   User,
@@ -34,6 +35,7 @@ import { formatDuration } from "@/lib/constants";
 import { detectTimezone, formatOffset } from "@/lib/timezones";
 import { cn } from "@/lib/utils";
 import { notifyStudyFlowSessionInvalidated } from "@/lib/data-events";
+import { ThemeSelector } from "@/components/theme-selector";
 
 const SESSION_LENGTH = { min: 10, max: 240, step: 5 };
 const BREAK_LENGTH = { min: 0, max: 120, step: 5 };
@@ -270,6 +272,15 @@ function SettingsContent() {
       </Section>
 
       <StudySessionsSection preferences={preferences} />
+
+      <Section icon={Palette} title="Appearance">
+        <Row
+          label="Theme"
+          value="Choose light mode, dark mode, AMOLED black mode, or follow your device."
+        >
+          <ThemeSelector />
+        </Row>
+      </Section>
 
       <Section icon={Trash2} title="Delete account">
         <Row

@@ -322,13 +322,13 @@ export default function LandingPage() {
   }, { scope: container });
 
   return (
-    <div ref={container} className="min-h-screen bg-white overflow-x-hidden">
+    <div ref={container} className="landing-page min-h-screen overflow-x-hidden">
 
       {/* ═══════ HERO: Sky Gradient with outer padding ═══════ */}
-      <div className="p-2 md:p-3 bg-white">
+      <div className="landing-surface p-2 md:p-3">
         <section
           className="hero-section relative w-full min-h-[calc(100vh-24px)] flex flex-col items-center justify-center overflow-hidden rounded-[20px] md:rounded-[28px]"
-          style={{ background: "linear-gradient(180deg, #779bc1 0%, #9abfda 48%, #cbdcec 80%, #e4ecf3 100%)" }}
+          style={{ background: "var(--landing-hero)" }}
         >
           <Navigation />
           <FloatingElements />
@@ -349,7 +349,7 @@ Add your coursework and the hours you are free.<br />
 
           <div className="hero-cta">
             <Link href="/register">
-              <button className="px-8 py-3.5 rounded-full bg-[#070709] text-white text-[15px] font-semibold tracking-[-0.01em] shadow-[rgba(36,36,40,0.1)_0px_1px_2px_0px,rgba(36,36,40,0.09)_0px_3px_3px_0px,rgba(36,36,40,0.05)_0px_6px_4px_0px,rgba(36,36,40,0.01)_0px_11px_4px_0px] hover:bg-[#1a1a1c] transition-all duration-300 hover:shadow-[rgba(36,36,40,0.15)_0px_2px_4px_0px,rgba(36,36,40,0.12)_0px_6px_6px_0px,rgba(36,36,40,0.08)_0px_12px_8px_0px]">
+              <button className="landing-ink-button px-8 py-3.5 rounded-full text-[15px] font-semibold tracking-[-0.01em] transition-all duration-300">
                 Sign up for free
               </button>
             </Link>
@@ -369,35 +369,35 @@ Add your coursework and the hours you are free.<br />
 
           <div className="relative flex items-end justify-center gap-0 translate-y-[60px] md:translate-y-[80px]">
             {/* "Before" card */}
-            <div className="before-card relative z-10 bg-white rounded-t-[14px] shadow-[rgba(16,55,132,0.06)_0px_10px_30px_0px] p-5 w-[200px] md:w-[250px] -rotate-3 -mr-6">
+            <div className="before-card landing-surface landing-card-shadow relative z-10 rounded-t-[14px] p-5 w-[200px] md:w-[250px] -rotate-3 -mr-6">
               <div className="flex items-center gap-1.5 mb-3">
-                <div className="px-2.5 py-0.5 rounded-full border border-[#070709]/15 text-[11px] font-medium tracking-[-0.01em] text-[#070709] flex items-center gap-1">
-                  <span className="text-[#2597d0] text-[10px]">✎</span> Before
+                <div className="px-2.5 py-0.5 rounded-full border landing-ink-border-soft text-[11px] font-medium tracking-[-0.01em] landing-ink flex items-center gap-1">
+                  <span className="landing-accent text-[10px]">✎</span> Before
                 </div>
               </div>
               <div className="space-y-2">
-                <div className="h-2.5 bg-[#f5f5f5] rounded-full w-full"></div>
-                <div className="h-2.5 bg-[#f5f5f5] rounded-full w-[85%]"></div>
-                <div className="h-2.5 bg-red-50 rounded-full w-[70%]"></div>
-                <div className="h-2.5 bg-[#f5f5f5] rounded-full w-full"></div>
-                <div className="h-2.5 bg-red-50 rounded-full w-[60%]"></div>
+                <div className="landing-canvas h-2.5 rounded-full w-full"></div>
+                <div className="landing-canvas h-2.5 rounded-full w-[85%]"></div>
+                <div className="bg-deficit-soft h-2.5 rounded-full w-[70%]"></div>
+                <div className="landing-canvas h-2.5 rounded-full w-full"></div>
+                <div className="bg-deficit-soft h-2.5 rounded-full w-[60%]"></div>
               </div>
             </div>
 
             {/* "After" card (overlapping, slightly above) */}
-            <div className="after-card relative z-20 bg-white rounded-t-[14px] shadow-[rgba(16,55,132,0.08)_0px_10px_30px_0px] p-5 w-[220px] md:w-[280px] rotate-1 -translate-y-4">
+            <div className="after-card landing-surface landing-card-shadow relative z-20 rounded-t-[14px] p-5 w-[220px] md:w-[280px] rotate-1 -translate-y-4">
               <div className="flex items-center gap-1.5 mb-3">
-                <div className="px-2.5 py-0.5 rounded-full border border-[#070709]/15 text-[11px] font-medium tracking-[-0.01em] text-[#070709] flex items-center gap-1">
-                  <span className="text-[#2597d0] text-[10px]">✓</span> After
+                <div className="px-2.5 py-0.5 rounded-full border landing-ink-border-soft text-[11px] font-medium tracking-[-0.01em] landing-ink flex items-center gap-1">
+                  <span className="landing-accent text-[10px]">✓</span> After
                 </div>
               </div>
-              <div className="space-y-1.5 text-[12px] text-[#070709] leading-[1.5] font-[family-name:var(--font-display)]">
-                <p className="text-[#8b8b8b] text-[11px]">Your weekly plan,</p>
+              <div className="space-y-1.5 text-[12px] landing-ink leading-[1.5] font-[family-name:var(--font-display)]">
+                <p className="landing-subtle text-[11px]">Your weekly plan,</p>
                 <p>Monday — Data Structures (2h)</p>
                 <p>Tuesday — Linear Algebra (1.5h)</p>
                 <p>Wednesday — Essay Draft (2h)</p>
-                <p className="text-[#8b8b8b]">Thursday — Algorithms rev...</p>
-                <p className="text-[#8b8b8b]">Friday — Physics lab pre...</p>
+                <p className="landing-subtle">Thursday — Algorithms rev...</p>
+                <p className="landing-subtle">Friday — Physics lab pre...</p>
               </div>
             </div>
           </div>
@@ -406,7 +406,7 @@ Add your coursework and the hours you are free.<br />
       </div>
 
       {/* ═══════ Stats Row ═══════ */}
-      <section className="stats-section bg-white border-b border-[#f5f5f5]">
+      <section className="stats-section landing-surface border-b landing-border">
         <div className="max-w-[1200px] mx-auto px-6 py-20 flex flex-wrap items-center justify-center gap-16 md:gap-24">
           {[
             { value: 5, suffix: "+", label: "Hours saved weekly" },
@@ -415,45 +415,45 @@ Add your coursework and the hours you are free.<br />
           ].map((stat, i) => (
             <div key={i} className="stat-item text-center">
               <div
-                className="stat-number font-[family-name:var(--font-display)] text-[48px] font-bold tracking-[-0.04em] text-[#070709] leading-[1.1]"
+                className="stat-number font-[family-name:var(--font-display)] text-[48px] font-bold tracking-[-0.04em] landing-ink leading-[1.1]"
                 data-value={stat.value}
                 data-suffix={stat.suffix}
               >
                 0{stat.suffix}
               </div>
-              <div className="text-[14px] text-[#60606c] tracking-[-0.01em] mt-1 font-medium">{stat.label}</div>
+              <div className="text-[14px] landing-muted tracking-[-0.01em] mt-1 font-medium">{stat.label}</div>
             </div>
           ))}
         </div>
       </section>
 
       {/* ═══════ Section Heading ═══════ */}
-      <section className="bg-[#f5f5f5] pt-28 pb-8">
+      <section className="landing-canvas pt-28 pb-8">
         <div className="max-w-[1200px] mx-auto px-6 text-center">
-          <h2 className="section-heading font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] text-[#070709] leading-[1.1]">
+          <h2 className="section-heading font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-[1.1]">
 Most students find out too late
           </h2>
         </div>
       </section>
 
       {/* ═══════ Feature Cards (2-column) ═══════ */}
-      <section id="features" className="bg-[#f5f5f5] py-16">
+      <section id="features" className="landing-canvas py-16">
         <div className="feature-grid max-w-[1200px] mx-auto px-6 grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Card 1: Scheduling */}
-          <div className="feature-card bg-white rounded-[18px] border border-[#f5f5f5] p-10 md:p-12 shadow-[rgba(16,55,132,0.03)_0px_17px_37px_0px,rgba(16,55,132,0.03)_0px_67px_67px_0px,rgba(16,55,132,0.02)_0px_150px_90px_0px] hover:shadow-[rgba(16,55,132,0.05)_0px_20px_40px_0px,rgba(16,55,132,0.04)_0px_70px_70px_0px] transition-shadow duration-500">
+          <div className="feature-card landing-surface landing-card-shadow rounded-[18px] border landing-border p-10 md:p-12 transition-shadow duration-500">
             <div className="flex items-center gap-2 mb-6">
-              <div className="px-3 py-1 rounded-full border border-[#070709] text-[12px] font-medium tracking-[-0.01em] text-[#070709] flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-[#2597d0]" />
+              <div className="px-3 py-1 rounded-full border landing-ink-border text-[12px] font-medium tracking-[-0.01em] landing-ink flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 landing-accent" />
                 Schedule
               </div>
             </div>
-            <h3 className="font-[family-name:var(--font-display)] text-[24px] md:text-[28px] font-semibold tracking-[-0.04em] text-[#070709] leading-[1.2] mb-4">
+            <h3 className="font-[family-name:var(--font-display)] text-[24px] md:text-[28px] font-semibold tracking-[-0.04em] landing-ink leading-[1.2] mb-4">
 Your real hours, not an ideal week.
             </h3>
-            <p className="text-[16px] text-[#60606c] leading-[1.5] tracking-[-0.01em] mb-8">
+            <p className="text-[16px] landing-muted leading-[1.5] tracking-[-0.01em] mb-8">
 Set the weekly windows you are genuinely free to study, then block out the trips, shifts and exam days that take them back. That, minus the interruptions, is your capacity.
             </p>
-            <div className="feature-img rounded-[12px] overflow-hidden border border-[#f5f5f5]">
+            <div className="feature-img rounded-[12px] overflow-hidden border landing-border">
               <Image
                 src="/landing/feature-calendar.png"
                 alt="Schedule interface"
@@ -465,20 +465,20 @@ Set the weekly windows you are genuinely free to study, then block out the trips
           </div>
 
           {/* Card 2: Progress */}
-          <div className="feature-card bg-white rounded-[18px] border border-[#f5f5f5] p-10 md:p-12 shadow-[rgba(16,55,132,0.03)_0px_17px_37px_0px,rgba(16,55,132,0.03)_0px_67px_67px_0px,rgba(16,55,132,0.02)_0px_150px_90px_0px] hover:shadow-[rgba(16,55,132,0.05)_0px_20px_40px_0px,rgba(16,55,132,0.04)_0px_70px_70px_0px] transition-shadow duration-500">
+          <div className="feature-card landing-surface landing-card-shadow rounded-[18px] border landing-border p-10 md:p-12 transition-shadow duration-500">
             <div className="flex items-center gap-2 mb-6">
-              <div className="px-3 py-1 rounded-full border border-[#070709] text-[12px] font-medium tracking-[-0.01em] text-[#070709] flex items-center gap-1.5">
-                <BarChart3 className="w-3.5 h-3.5 text-[#2597d0]" />
+              <div className="px-3 py-1 rounded-full border landing-ink-border text-[12px] font-medium tracking-[-0.01em] landing-ink flex items-center gap-1.5">
+                <BarChart3 className="w-3.5 h-3.5 landing-accent" />
                 Progress
               </div>
             </div>
-            <h3 className="font-[family-name:var(--font-display)] text-[24px] md:text-[28px] font-semibold tracking-[-0.04em] text-[#070709] leading-[1.2] mb-4">
+            <h3 className="font-[family-name:var(--font-display)] text-[24px] md:text-[28px] font-semibold tracking-[-0.04em] landing-ink leading-[1.2] mb-4">
 Every deadline, weighed in hours.
             </h3>
-            <p className="text-[16px] text-[#60606c] leading-[1.5] tracking-[-0.01em] mb-8">
+            <p className="text-[16px] landing-muted leading-[1.5] tracking-[-0.01em] mb-8">
 Each task carries an estimate, a priority and a due date. Add them up across the next week and you have the other half of the sum — the hours you owe.
             </p>
-            <div className="feature-img rounded-[12px] overflow-hidden border border-[#f5f5f5]">
+            <div className="feature-img rounded-[12px] overflow-hidden border landing-border">
               <Image
                 src="/landing/feature-progress.png"
                 alt="Progress tracking dashboard"
@@ -493,9 +493,9 @@ Each task carries an estimate, a priority and a due date. Add them up across the
 
       {/* ═══════ How It Works ═══════ */}
     
-      <section id="how-it-works" className="bg-[#f5f5f5] py-28">
+      <section id="how-it-works" className="landing-canvas py-28">
         <div className="max-w-[1200px] mx-auto px-6">
-          <h2 className="section-heading font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] text-[#070709] leading-[1.1] text-center mb-16">
+          <h2 className="section-heading font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-[1.1] text-center mb-16">
             How Studyflow works
           </h2>
 
@@ -520,19 +520,19 @@ Each task carries an estimate, a priority and a due date. Add them up across the
                 desc: "One figure: the hours you are short, or the hours you have spare. Change something while it still helps.",
               },
             ].map((item, i) => (
-              <div key={i} className="step-card bg-white rounded-[18px] p-8 shadow-[rgba(16,55,132,0.03)_0px_17px_37px_0px,rgba(16,55,132,0.03)_0px_67px_67px_0px,rgba(16,55,132,0.02)_0px_150px_90px_0px] hover:-translate-y-1 transition-transform duration-300">
+              <div key={i} className="step-card landing-surface landing-card-shadow rounded-[18px] p-8 hover:-translate-y-1 transition-transform duration-300">
                 <div className="flex items-center justify-between mb-6">
-                  <div className="w-10 h-10 rounded-lg bg-[#f5f5f5] flex items-center justify-center">
-                    <item.icon className="w-5 h-5 text-[#2597d0]" />
+                  <div className="w-10 h-10 rounded-lg landing-canvas flex items-center justify-center">
+                    <item.icon className="w-5 h-5 landing-accent" />
                   </div>
-                  <span className="step-number font-[family-name:var(--font-display)] text-[48px] font-bold text-[#f5f5f5] leading-none tracking-[-0.04em]">
+                  <span className="step-number font-[family-name:var(--font-display)] text-[48px] font-bold landing-canvas-text leading-none tracking-[-0.04em]">
                     {item.step}
                   </span>
                 </div>
-                <h3 className="font-[family-name:var(--font-display)] text-[20px] font-semibold tracking-[-0.01em] text-[#070709] leading-[1.3] mb-3">
+                <h3 className="font-[family-name:var(--font-display)] text-[20px] font-semibold tracking-[-0.01em] landing-ink leading-[1.3] mb-3">
                   {item.title}
                 </h3>
-                <p className="text-[14px] text-[#60606c] leading-[1.5] tracking-[-0.01em]">
+                <p className="text-[14px] landing-muted leading-[1.5] tracking-[-0.01em]">
                   {item.desc}
                 </p>
               </div>
@@ -542,9 +542,9 @@ Each task carries an estimate, a priority and a due date. Add them up across the
       </section>
 
       {/* ═══════ Full Width Product Image ═══════ */}
-      <section className="bg-white py-28">
+      <section className="landing-surface py-28">
         <div className="max-w-[1200px] mx-auto px-6">
-          <div className="product-image rounded-[24px] overflow-hidden shadow-[rgba(16,55,132,0.03)_0px_17px_37px_0px,rgba(16,55,132,0.03)_0px_67px_67px_0px,rgba(16,55,132,0.02)_0px_150px_90px_0px]">
+          <div className="product-image landing-card-shadow rounded-[24px] overflow-hidden">
             <Image
               src="/landing/hero-study-app.png"
               alt="Studyflow app interface"
@@ -557,17 +557,17 @@ Each task carries an estimate, a priority and a due date. Add them up across the
       </section>
 
       {/* ═══════ CTA Banner ═══════ */}
-      <section className="cta-section bg-white py-28">
+      <section className="cta-section landing-surface py-28">
         <div className="max-w-[700px] mx-auto px-6 text-center">
-          <h2 className="cta-heading font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] text-[#070709] leading-[1.1] mb-6">
+          <h2 className="cta-heading font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-[1.1] mb-6">
 Know now, not in week nine.
           </h2>
-          <p className="cta-sub text-[16px] md:text-[18px] text-[#60606c] leading-[1.5] tracking-[-0.01em] mb-10 max-w-[480px] mx-auto">
+          <p className="cta-sub text-[16px] md:text-[18px] landing-muted leading-[1.5] tracking-[-0.01em] mb-10 max-w-[480px] mx-auto">
 It takes about five minutes to enter a term of coursework and the hours you have for it.
           </p>
           <div className="cta-btn flex items-center justify-center gap-4">
             <Link href="/register">
-              <button className="px-8 py-3.5 rounded-full bg-[#070709] text-white text-[16px] font-semibold tracking-[-0.01em] shadow-[rgba(36,36,40,0.1)_0px_1px_2px_0px,rgba(36,36,40,0.09)_0px_3px_3px_0px,rgba(36,36,40,0.05)_0px_6px_4px_0px,rgba(36,36,40,0.01)_0px_11px_4px_0px] hover:bg-[#1a1a1c] transition-all duration-300">
+              <button className="landing-ink-button px-8 py-3.5 rounded-full text-[16px] font-semibold tracking-[-0.01em] transition-all duration-300">
                 Get started for free
               </button>
             </Link>
@@ -576,26 +576,26 @@ It takes about five minutes to enter a term of coursework and the hours you have
       </section>
 
       {/* ═══════ Footer ═══════ */}
-      <footer className="bg-white border-t border-[#f5f5f5] py-16">
+      <footer className="landing-surface border-t landing-border py-16">
         <div className="footer-content max-w-[1200px] mx-auto px-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-[#2597d0] flex items-center justify-center">
+            <div className="w-7 h-7 rounded-lg landing-accent-bg flex items-center justify-center">
               <BookOpen className="w-3.5 h-3.5 text-white" />
             </div>
-            <span className="font-[family-name:var(--font-display)] font-bold text-[16px] tracking-[-0.01em] text-[#070709]">
+            <span className="font-[family-name:var(--font-display)] font-bold text-[16px] tracking-[-0.01em] landing-ink">
               Studyflow
             </span>
           </div>
 
           <div className="flex flex-wrap gap-8">
-            <Link href="#features" className="text-[14px] text-[#60606c] hover:text-[#070709] transition-colors">Features</Link>
-            <Link href="#how-it-works" className="text-[14px] text-[#60606c] hover:text-[#070709] transition-colors">How it works</Link>
-            <Link href="#pricing" className="text-[14px] text-[#60606c] hover:text-[#070709] transition-colors">Pricing</Link>
-            <span className="text-[14px] text-[#60606c] cursor-pointer hover:text-[#070709] transition-colors">Privacy</span>
-            <span className="text-[14px] text-[#60606c] cursor-pointer hover:text-[#070709] transition-colors">Terms</span>
+            <Link href="#features" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">Features</Link>
+            <Link href="#how-it-works" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">How it works</Link>
+            <Link href="#pricing" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">Pricing</Link>
+            <span className="text-[14px] landing-muted cursor-pointer hover:text-[var(--landing-ink)] transition-colors">Privacy</span>
+            <span className="text-[14px] landing-muted cursor-pointer hover:text-[var(--landing-ink)] transition-colors">Terms</span>
           </div>
 
-          <p className="text-[12px] text-[#8b8b8b]">© 2026 Studyflow</p>
+          <p className="text-[12px] landing-subtle">© 2026 Studyflow</p>
         </div>
       </footer>
     </div>
