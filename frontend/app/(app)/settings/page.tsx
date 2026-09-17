@@ -81,7 +81,10 @@ function SettingsContent() {
   const loadProfile = useCallback((s: AbortSignal) => accountApi.getProfile(s), []);
   const loadPreferences = useCallback((s: AbortSignal) => accountApi.getPreferences(s), []);
   const loadIdentities = useCallback((s: AbortSignal) => accountApi.getLinkedIdentities(s), []);
-  const deletionReadyFromRedirect = searchParams.get("account-deletion") === "ready";
+  const deletionOutcome = searchParams.get("account-deletion");
+  const deletionReadyFromRedirect = deletionOutcome === "ready";
+  const deletionCancelledFromRedirect = deletionOutcome === "cancelled";
+  const deletionErrorFromRedirect = deletionOutcome === "error";
   const loadDeletionStatus = useCallback((s: AbortSignal) => accountApi.getDeletionStatus(s), []);
 
   const profile = useApi(loadProfile);
@@ -102,8 +105,15 @@ function SettingsContent() {
     profile.data !== null && !profile.isLoading && profile.error === null;
 
   useEffect(() => {
-    if (deletionReadyFromRedirect) router.replace("/settings");
-  }, [deletionReadyFromRedirect, router]);
+    if (deletionReadyFromRedirect || deletionCancelledFromRedirect || deletionErrorFromRedirect) {
+      if (deletionCancelledFromRedirect) {
+        toast.info("Google reauthentication was cancelled. Your account was not deleted.");
+      } else if (deletionErrorFromRedirect) {
+        toast.error("Google reauthentication could not be completed. Please try again.");
+      }
+      router.replace("/settings");
+    }
+  }, [deletionCancelledFromRedirect, deletionErrorFromRedirect, deletionReadyFromRedirect, router]);
 
   const google = (identities.data ?? []).find((identity) => identity.provider === "google");
   const zone = preferences.data?.timezone;
