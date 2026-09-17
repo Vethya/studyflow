@@ -571,11 +571,6 @@ It takes about five minutes to enter a term of coursework and the hours you have
                 Get started for free
               </button>
             </Link>
-            <Link href="/dashboard">
-              <button className="px-6 py-3.5 rounded-full border border-[#070709] text-[#070709] text-[16px] font-medium tracking-[-0.01em] hover:bg-[#f5f5f5] transition-colors">
-                View demo
-              </button>
-            </Link>
           </div>
         </div>
       </section>
