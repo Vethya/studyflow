@@ -8,10 +8,16 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from studyflow import __version__
+from studyflow.accounts.deletion import (
+    AccountDeletion,
+    AccountDeletionService,
+    AccountPasswordVerifier,
+)
 from studyflow.accounts.password import AccountPasswords, PasswordChangeService
 from studyflow.accounts.preferences import AccountPreferences, StudyPreferencesService
 from studyflow.accounts.profile import AccountProfiles, AccountProfileService
 from studyflow.accounts.repositories import (
+    SqlAlchemyAccountDeletionRepository,
     SqlAlchemyAccountProfileRepository,
     SqlAlchemyPasswordChangeRepository,
     SqlAlchemyStudyPreferencesRepository,
@@ -35,7 +41,9 @@ from studyflow.auth.oidc import (
 )
 from studyflow.auth.passwords import PasswordService
 from studyflow.auth.rate_limits import (
+    AccountDeletionRateLimit,
     AccountPasswordChangeRateLimit,
+    DatabaseAccountDeletionRateLimiter,
     DatabaseAccountPasswordChangeRateLimiter,
     DatabaseEmailVerificationRateLimiter,
     DatabaseLoginRateLimiter,
@@ -145,7 +153,9 @@ def create_app(
     account_profiles: AccountProfiles | None = None,
     account_preferences: AccountPreferences | None = None,
     account_passwords: AccountPasswords | None = None,
+    account_deletion: AccountDeletion | None = None,
     account_password_change_rate_limiter: AccountPasswordChangeRateLimit | None = None,
+    account_deletion_rate_limiter: AccountDeletionRateLimit | None = None,
     academic_tasks: AcademicTasks | None = None,
     adaptive_estimator: AdaptiveEstimator | None = None,
     availability_windows: AvailabilityWindows | None = None,
@@ -392,9 +402,16 @@ def create_app(
     )
     application.state.account_preferences = resolved_account_preferences
     application.state.account_passwords = resolved_account_passwords
+    application.state.account_deletion = account_deletion or AccountDeletionService(
+        SqlAlchemyAccountDeletionRepository(transactions),
+        cast(AccountPasswordVerifier, resolved_account_passwords),
+    )
     application.state.account_password_change_rate_limiter = (
         account_password_change_rate_limiter
         or DatabaseAccountPasswordChangeRateLimiter(transactions)
+    )
+    application.state.account_deletion_rate_limiter = (
+        account_deletion_rate_limiter or DatabaseAccountDeletionRateLimiter(transactions)
     )
     application.state.academic_tasks = resolved_academic_tasks
     application.state.adaptive_estimator = resolved_adaptive_estimator

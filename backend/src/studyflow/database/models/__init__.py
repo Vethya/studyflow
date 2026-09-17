@@ -1,6 +1,7 @@
 """Persistent domain models."""
 
 from studyflow.database.models.authentication import (
+    AuthenticationAccountDeletionChallenge,
     AuthenticationEmailToken,
     AuthenticationIdentity,
     AuthenticationOIDCLinkChallenge,
@@ -31,6 +32,7 @@ __all__ = [
     "AcademicTask",
     "AdaptiveEstimationAcknowledgment",
     "AdaptiveEstimationPrediction",
+    "AuthenticationAccountDeletionChallenge",
     "AuthenticationEmailToken",
     "AuthenticationIdentity",
     "AuthenticationOIDCLinkChallenge",

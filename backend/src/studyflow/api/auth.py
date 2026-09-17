@@ -29,6 +29,8 @@ from studyflow.auth.login import (
     LoginCommand,
 )
 from studyflow.auth.oidc import (
+    AccountDeletionOIDC,
+    AccountDeletionReadyError,
     AccountLinkRequiredError,
     InvalidLinkChallengeError,
     InvalidOIDCResponseError,
@@ -213,6 +215,10 @@ def get_login_rate_limit(request: Request) -> LoginRateLimit:
 
 def get_oidc_login(request: Request) -> OIDCLogin:
     return cast(OIDCLogin, request.app.state.oidc_login)
+
+
+def get_account_deletion_oidc(request: Request) -> AccountDeletionOIDC:
+    return cast(AccountDeletionOIDC, request.app.state.oidc_login)
 
 
 def get_oidc_start_rate_limit(request: Request) -> OIDCStartRateLimit:
@@ -440,6 +446,40 @@ async def start_google_link_oidc(
     return OIDCStartResponse(authorization_url=started.authorization_url)
 
 
+@router.post(
+    "/google/account-deletion/start",
+    response_model=OIDCStartResponse,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError},
+        status.HTTP_403_FORBIDDEN: {"model": AuthenticationError},
+        status.HTTP_429_TOO_MANY_REQUESTS: {"model": AuthenticationError},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": AuthenticationError},
+    },
+)
+async def start_google_account_deletion(
+    payload: GoogleStartRequest,
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    response: Response,
+    http_request: Request,
+    oidc: Annotated[AccountDeletionOIDC, Depends(get_account_deletion_oidc)],
+    rate_limit: Annotated[OIDCStartRateLimit, Depends(get_oidc_start_rate_limit)],
+) -> OIDCStartResponse:
+    try:
+        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        await rate_limit.check(client_ip)
+        started = await oidc.start_account_deletion(principal.account_id, payload.timezone)
+    except OIDCStartRateLimitExceeded as error:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many account deletion attempts",
+            headers={"Retry-After": "900"},
+        ) from error
+    except OIDCNotConfiguredError as error:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured") from error
+    get_cookie_policy(http_request).set_oidc_state(response, started.state)
+    return OIDCStartResponse(authorization_url=started.authorization_url)
+
+
 @router.get(
     "/google/callback",
     response_model=LoginResponse,
@@ -477,6 +517,20 @@ async def complete_google_oidc(
         if error is not None or code is None or state_cookie is None:
             raise InvalidOIDCResponseError
         result = await oidc.complete(code, state, state_cookie)
+    except AccountDeletionReadyError as deletion_error:
+        if browser_flow:
+            redirect = _browser_redirect(http_request, "/settings?account-deletion=ready")
+            cookie_policy.clear_oidc_state(redirect)
+            cookie_policy.set_account_deletion(redirect, deletion_error.challenge)
+            return redirect
+        ready_response = JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"detail": "Google reauthentication completed"},
+            headers={"Cache-Control": "no-store", "Vary": "Accept"},
+        )
+        cookie_policy.clear_oidc_state(ready_response)
+        cookie_policy.set_account_deletion(ready_response, deletion_error.challenge)
+        return ready_response
     except AccountLinkRequiredError as link_error:
         if browser_flow:
             redirect = _browser_redirect(http_request, "/login/google-link")

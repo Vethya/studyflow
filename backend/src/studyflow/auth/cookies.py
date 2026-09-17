@@ -39,6 +39,10 @@ class CookiePolicy:
     def oidc_link_name(self) -> str:
         return self._name("studyflow_oidc_link")
 
+    @property
+    def account_deletion_name(self) -> str:
+        return self._name("studyflow_account_deletion")
+
     def set_authentication(
         self,
         response: Response,
@@ -114,6 +118,26 @@ class CookiePolicy:
     def clear_oidc_link(self, response: Response) -> None:
         response.delete_cookie(
             self.oidc_link_name,
+            path="/",
+            secure=self.secure,
+            httponly=True,
+            samesite="strict",
+        )
+
+    def set_account_deletion(self, response: Response, challenge: str) -> None:
+        response.set_cookie(
+            key=self.account_deletion_name,
+            value=challenge,
+            max_age=10 * 60,
+            path="/",
+            secure=self.secure,
+            httponly=True,
+            samesite="strict",
+        )
+
+    def clear_account_deletion(self, response: Response) -> None:
+        response.delete_cookie(
+            self.account_deletion_name,
             path="/",
             secure=self.secure,
             httponly=True,

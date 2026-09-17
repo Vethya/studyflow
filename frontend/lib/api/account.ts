@@ -61,3 +61,17 @@ export function setPassword(newPassword: string): Promise<void> {
     body: { new_password: newPassword },
   });
 }
+
+export function prepareDeletion(currentPassword: string): Promise<void> {
+  return apiVoid("/account/deletion/prepare", {
+    method: "POST",
+    body: { current_password: currentPassword },
+  });
+}
+
+export function confirmDeletion(): Promise<void> {
+  return apiVoid("/account/deletion/confirm", {
+    method: "POST",
+    body: { confirmation: "DELETE" },
+  });
+}

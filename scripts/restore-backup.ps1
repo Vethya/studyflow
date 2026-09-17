@@ -269,7 +269,7 @@ try {
     $restoreResult = "pass"
 
     $expectedTables = @(
-        "academic_tasks", "alembic_version", "authentication_email_tokens", "authentication_identities",
+        "academic_tasks", "alembic_version", "authentication_account_deletion_challenges", "authentication_email_tokens", "authentication_identities",
         "authentication_oidc_link_challenges", "authentication_oidc_states", "authentication_rate_limits",
         "authentication_registrations", "authentication_sessions", "availability_windows",
         "proposal_task_allocations", "recovery_snapshot_outcomes", "recovery_task_work", "schedule_proposals",

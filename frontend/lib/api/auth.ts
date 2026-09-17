@@ -127,6 +127,13 @@ export function startGoogleAccountLink(timezone: string): Promise<WireOIDCStartR
   });
 }
 
+export function startGoogleAccountDeletion(timezone: string): Promise<WireOIDCStartResponse> {
+  return apiJson<WireOIDCStartResponse>("/auth/google/account-deletion/start", {
+    method: "POST",
+    body: { timezone },
+  });
+}
+
 /**
  * Completes a Google sign-in that collided with an existing password account.
  * The link challenge is held in an httpOnly cookie set by the callback, so

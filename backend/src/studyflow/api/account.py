@@ -2,12 +2,13 @@
 
 import hmac
 from datetime import datetime
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from studyflow.accounts.deletion import AccountDeletion
 from studyflow.accounts.password import AccountPasswords, InvalidCurrentPasswordError
 from studyflow.accounts.preferences import AccountPreferences, StudyPreferences
 from studyflow.accounts.profile import AccountProfile, AccountProfiles
@@ -19,6 +20,8 @@ from studyflow.auth.passwords import (
     PasswordPolicyError,
 )
 from studyflow.auth.rate_limits import (
+    AccountDeletionRateLimit,
+    AccountDeletionRateLimitExceeded,
     AccountPasswordChangeRateLimit,
     AccountPasswordChangeRateLimitExceeded,
 )
@@ -76,6 +79,14 @@ class PasswordChangeRequest(BaseModel):
     new_password: Annotated[str, Field(min_length=12, max_length=128)]
 
 
+class AccountDeletionPrepareRequest(BaseModel):
+    current_password: Annotated[str, Field(min_length=1, max_length=128)]
+
+
+class AccountDeletionConfirmRequest(BaseModel):
+    confirmation: Literal["DELETE"]
+
+
 class LinkedIdentityResponse(BaseModel):
     provider: str
     email: EmailStr
@@ -111,6 +122,14 @@ def get_account_password_change_rate_limit(request: Request) -> AccountPasswordC
         AccountPasswordChangeRateLimit,
         request.app.state.account_password_change_rate_limiter,
     )
+
+
+def get_account_deletion(request: Request) -> AccountDeletion:
+    return cast(AccountDeletion, request.app.state.account_deletion)
+
+
+def get_account_deletion_rate_limit(request: Request) -> AccountDeletionRateLimit:
+    return cast(AccountDeletionRateLimit, request.app.state.account_deletion_rate_limiter)
 
 
 async def require_session(
@@ -323,3 +342,74 @@ async def change_password(
             detail="Password safety service is unavailable",
         ) from error
     get_cookie_policy(http_request).clear_authentication(response)
+
+
+@router.post(
+    "/deletion/prepare",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": AccountError},
+        status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
+        status.HTTP_403_FORBIDDEN: {"model": AccountError},
+        status.HTTP_429_TOO_MANY_REQUESTS: {"model": AccountError},
+    },
+)
+async def prepare_account_deletion(
+    payload: AccountDeletionPrepareRequest,
+    response: Response,
+    http_request: Request,
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    deletion: Annotated[AccountDeletion, Depends(get_account_deletion)],
+    rate_limit: Annotated[AccountDeletionRateLimit, Depends(get_account_deletion_rate_limit)],
+) -> None:
+    try:
+        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        await rate_limit.check(client_ip, str(principal.account_id))
+        challenge = await deletion.prepare_with_password(
+            principal.account_id, payload.current_password
+        )
+    except AccountDeletionRateLimitExceeded as error:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many account deletion attempts",
+            headers={"Retry-After": "900"},
+        ) from error
+    except InvalidCurrentPasswordError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect",
+        ) from error
+    get_cookie_policy(http_request).set_account_deletion(response, challenge)
+
+
+@router.post(
+    "/deletion/confirm",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": AccountError},
+        status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
+        status.HTTP_403_FORBIDDEN: {"model": AccountError},
+    },
+)
+async def confirm_account_deletion(
+    payload: AccountDeletionConfirmRequest,
+    response: Response,
+    http_request: Request,
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    deletion: Annotated[AccountDeletion, Depends(get_account_deletion)],
+) -> None:
+    cookie_policy = get_cookie_policy(http_request)
+    challenge = http_request.cookies.get(cookie_policy.account_deletion_name)
+    if challenge is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Account deletion confirmation is missing or expired",
+        )
+    if not await deletion.confirm(principal.account_id, challenge):
+        cookie_policy.clear_account_deletion(response)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Account deletion confirmation is missing or expired",
+        )
+    cookie_policy.clear_authentication(response)
+    cookie_policy.clear_account_deletion(response)

@@ -1,8 +1,18 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { Suspense, useCallback, useState } from "react";
 import Link from "next/link";
-import { CheckCircle2, Clock4, Globe, Loader2, LogOut, ShieldCheck, User } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  CheckCircle2,
+  Clock4,
+  Globe,
+  Loader2,
+  LogOut,
+  ShieldCheck,
+  Trash2,
+  User,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -12,6 +22,7 @@ import { Callout } from "@/components/ui/callout";
 import { PageHeader, PageShell } from "@/components/page-kit";
 import {
   AddPasswordDialog,
+  AccountDeletionDialog,
   ChangeNameDialog,
   ChangePasswordDialog,
   ChangeTimezoneDialog,
@@ -22,6 +33,7 @@ import { useSession } from "@/hooks/use-session";
 import { formatDuration } from "@/lib/constants";
 import { detectTimezone, formatOffset } from "@/lib/timezones";
 import { cn } from "@/lib/utils";
+import { notifyStudyFlowSessionInvalidated } from "@/lib/data-events";
 
 const SESSION_LENGTH = { min: 10, max: 240, step: 5 };
 const BREAK_LENGTH = { min: 0, max: 120, step: 5 };
@@ -48,11 +60,28 @@ const GoogleIcon = () => (
  * feel rather than by typing a number, so they stay on the page.
  */
 export default function SettingsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[50svh] items-center justify-center">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </div>
+      }
+    >
+      <SettingsContent />
+    </Suspense>
+  );
+}
+
+function SettingsContent() {
   const { signOut } = useSession();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   const loadProfile = useCallback((s: AbortSignal) => accountApi.getProfile(s), []);
   const loadPreferences = useCallback((s: AbortSignal) => accountApi.getPreferences(s), []);
   const loadIdentities = useCallback((s: AbortSignal) => accountApi.getLinkedIdentities(s), []);
+  const googleDeletionReady = searchParams.get("account-deletion") === "ready";
 
   const profile = useApi(loadProfile);
   const preferences = useApi(loadPreferences);
@@ -64,10 +93,10 @@ export default function SettingsPage() {
   const [timezoneOpen, setTimezoneOpen] = useState(false);
   const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
   const [googleError, setGoogleError] = useState<string | null>(null);
+  const [deletionOpen, setDeletionOpen] = useState(googleDeletionReady);
 
   const google = (identities.data ?? []).find((identity) => identity.provider === "google");
   const zone = preferences.data?.timezone;
-
   async function connectGoogle() {
     setGoogleError(null);
     setIsConnectingGoogle(true);
@@ -78,6 +107,11 @@ export default function SettingsPage() {
       setGoogleError(describeError(cause));
       setIsConnectingGoogle(false);
     }
+  }
+
+  async function startGoogleAccountDeletion() {
+    const { authorization_url } = await auth.startGoogleAccountDeletion(zone ?? detectTimezone());
+    window.location.assign(authorization_url);
   }
 
   return (
@@ -210,6 +244,17 @@ export default function SettingsPage() {
 
       <StudySessionsSection preferences={preferences} />
 
+      <Section icon={Trash2} title="Delete account">
+        <Row
+          label="Delete your StudyFlow account"
+          value="Permanently removes your profile, sign-in methods, and planning data."
+        >
+          <Button variant="destructive" size="sm" onClick={() => setDeletionOpen(true)}>
+            Delete account
+          </Button>
+        </Row>
+      </Section>
+
       <Section icon={LogOut} title="Sign out">
         <Row label="This device" value="Ends your session here only.">
           <Button variant="outline" size="sm" onClick={() => void signOut()}>
@@ -234,6 +279,17 @@ export default function SettingsPage() {
         onOpenChange={setTimezoneOpen}
         preferences={preferences.data}
         onSaved={(next) => preferences.setData(next)}
+      />
+      <AccountDeletionDialog
+        open={deletionOpen}
+        onOpenChange={setDeletionOpen}
+        passwordSet={profile.data?.password_set ?? false}
+        googleReady={googleDeletionReady}
+        onStartGoogle={startGoogleAccountDeletion}
+        onDeleted={() => {
+          notifyStudyFlowSessionInvalidated();
+          router.replace("/login");
+        }}
       />
     </PageShell>
   );

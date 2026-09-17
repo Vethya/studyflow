@@ -7,7 +7,7 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 from urllib.parse import urlencode
 from uuid import UUID
 
@@ -46,6 +46,13 @@ class AccountLinkRequiredError(ValueError):
 
 class InvalidLinkChallengeError(ValueError):
     """A link challenge or password is invalid without revealing which."""
+
+
+class AccountDeletionReadyError(ValueError):
+    """Google reauthentication completed for account deletion."""
+
+    def __init__(self, challenge: str) -> None:
+        self.challenge = challenge
 
 
 class OIDCNotConfiguredError(RuntimeError):
@@ -87,6 +94,7 @@ class OIDCStateRecord:
     nonce_hash: str
     timezone: str
     link_account_id: UUID | None = None
+    deletion_account_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +131,24 @@ class OIDCRepository(Protocol):
     async def create_link_challenge(
         self, claims: GoogleClaims, token_hash: str, expires_at: datetime
     ) -> bool: ...
+class OIDCDeletionRepository(Protocol):
+    async def store_state(
+        self,
+        state_hash: str,
+        nonce_hash: str,
+        timezone: str,
+        expires_at: datetime,
+        link_account_id: UUID | None = None,
+        deletion_account_id: UUID | None = None,
+    ) -> None: ...
+
+    async def create_deletion_challenge(
+        self,
+        account_id: UUID,
+        claims: GoogleClaims,
+        token_hash: str,
+        expires_at: datetime,
+    ) -> bool: ...
 
 
 class GoogleProvider(Protocol):
@@ -139,6 +165,10 @@ class OIDCLogin(Protocol):
     async def start(self, timezone: str) -> OIDCStart: ...
     async def start_link(self, account_id: UUID, timezone: str) -> OIDCStart: ...
     async def complete(self, code: str, state: str, state_cookie: str) -> OIDCLoginResult: ...
+
+
+class AccountDeletionOIDC(Protocol):
+    async def start_account_deletion(self, account_id: UUID, timezone: str) -> OIDCStart: ...
 
 
 def hash_oidc_secret(value: str) -> str:
@@ -164,16 +194,32 @@ class OIDCLoginService:
         self._token_factory = token_factory
         self._clock = clock
 
-    async def _start(self, timezone: str, link_account_id: UUID | None = None) -> OIDCStart:
+    async def _start(
+        self,
+        timezone: str,
+        link_account_id: UUID | None = None,
+        deletion_account_id: UUID | None = None,
+    ) -> OIDCStart:
         state = self._token_factory()
         nonce = self._token_factory()
-        await self._repository.store_state(
-            hash_oidc_secret(state),
-            hash_oidc_secret(nonce),
-            timezone,
-            self._clock() + timedelta(minutes=10),
-            link_account_id,
-        )
+        if deletion_account_id is None:
+            await self._repository.store_state(
+                hash_oidc_secret(state),
+                hash_oidc_secret(nonce),
+                timezone,
+                self._clock() + timedelta(minutes=10),
+                link_account_id,
+            )
+        else:
+            deletion_repository = cast(OIDCDeletionRepository, self._repository)
+            await deletion_repository.store_state(
+                hash_oidc_secret(state),
+                hash_oidc_secret(nonce),
+                timezone,
+                self._clock() + timedelta(minutes=10),
+                link_account_id,
+                deletion_account_id,
+            )
         query = urlencode(
             {
                 "client_id": self._client_id,
@@ -192,6 +238,9 @@ class OIDCLoginService:
     async def start_link(self, account_id: UUID, timezone: str) -> OIDCStart:
         return await self._start(timezone, account_id)
 
+    async def start_account_deletion(self, account_id: UUID, timezone: str) -> OIDCStart:
+        return await self._start(timezone, deletion_account_id=account_id)
+
     async def complete(self, code: str, state: str, state_cookie: str) -> OIDCLoginResult:
         if not hmac.compare_digest(state, state_cookie):
             raise InvalidOIDCResponseError
@@ -208,6 +257,17 @@ class OIDCLoginService:
                     state_hash, consumed_at, self._clock()
                 )
             raise
+        if state_record.deletion_account_id is not None:
+            challenge = self._token_factory()
+            deletion_repository = cast(OIDCDeletionRepository, self._repository)
+            if not await deletion_repository.create_deletion_challenge(
+                state_record.deletion_account_id,
+                claims,
+                hash_oidc_secret(challenge),
+                self._clock() + timedelta(minutes=10),
+            ):
+                raise InvalidOIDCResponseError
+            raise AccountDeletionReadyError(challenge)
         if state_record.link_account_id is not None:
             account = await self._repository.link_identity(state_record.link_account_id, claims)
             if account is None:
@@ -366,6 +426,9 @@ class UnconfiguredOIDCLogin:
         raise OIDCNotConfiguredError
 
     async def start_link(self, account_id: UUID, timezone: str) -> OIDCStart:
+        raise OIDCNotConfiguredError
+
+    async def start_account_deletion(self, account_id: UUID, timezone: str) -> OIDCStart:
         raise OIDCNotConfiguredError
 
     async def complete(self, code: str, state: str, state_cookie: str) -> OIDCLoginResult:

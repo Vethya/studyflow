@@ -354,6 +354,7 @@ fi
 expected_tables=(
   academic_tasks
   alembic_version
+  authentication_account_deletion_challenges
   authentication_email_tokens
   authentication_identities
   authentication_oidc_link_challenges

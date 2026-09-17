@@ -432,3 +432,143 @@ export function ChangeNameDialog({
     </Dialog>
   );
 }
+
+export function AccountDeletionDialog({
+  open,
+  onOpenChange,
+  passwordSet,
+  googleReady,
+  onStartGoogle,
+  onDeleted,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  passwordSet: boolean;
+  googleReady: boolean;
+  onStartGoogle: () => Promise<void>;
+  onDeleted: () => void;
+}) {
+  const [currentPassword, setCurrentPassword] = React.useState("");
+  const [confirmation, setConfirmation] = React.useState("");
+  const [error, setError] = React.useState<string | null>(null);
+  const [isSubmitting, setSubmitting] = React.useState(false);
+
+  const [wasOpen, setWasOpen] = React.useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setCurrentPassword("");
+      setConfirmation("");
+      setError(null);
+    }
+  }
+
+  const canContinue = confirmation === "DELETE" && !isSubmitting;
+
+  async function submit() {
+    if (!canContinue) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      if (passwordSet) {
+        await accountApi.prepareDeletion(currentPassword);
+      }
+      await accountApi.confirmDeletion();
+      toast.success("Account deleted successfully. Please sign in again.");
+      onDeleted();
+    } catch (cause) {
+      setError(describeError(cause));
+      setSubmitting(false);
+    }
+  }
+
+  async function startGoogle() {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onStartGoogle();
+    } catch (cause) {
+      setError(describeError(cause));
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete your account?</DialogTitle>
+          <DialogDescription>
+            This permanently deletes your profile, sign-in methods, tasks, schedules, sessions,
+            and progress. This cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          {error && <Callout tone="danger">{error}</Callout>}
+
+          {passwordSet ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="delete-account-password" className="eyebrow">
+                Current password
+              </Label>
+              <Input
+                id="delete-account-password"
+                type="password"
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+                disabled={isSubmitting}
+                autoFocus
+              />
+            </div>
+          ) : googleReady ? (
+            <Callout tone="success">Google reauthentication complete.</Callout>
+          ) : (
+            <Callout tone="warning">
+              Reauthenticate with Google before deleting this account.
+            </Callout>
+          )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="delete-account-confirmation" className="eyebrow">
+              Type DELETE to confirm
+            </Label>
+            <Input
+              id="delete-account-confirmation"
+              value={confirmation}
+              onChange={(event) => setConfirmation(event.target.value)}
+              disabled={isSubmitting}
+              autoComplete="off"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
+            Cancel
+          </Button>
+          {!passwordSet && !googleReady ? (
+            <Button
+              variant="destructive"
+              onClick={() => void startGoogle()}
+              disabled={!canContinue}
+            >
+              {isSubmitting && <Loader2 className="animate-spin" />}
+              Continue with Google
+            </Button>
+          ) : (
+            <Button
+              variant="destructive"
+              onClick={() => void submit()}
+              disabled={!canContinue || (passwordSet && currentPassword.length === 0)}
+            >
+              {isSubmitting && <Loader2 className="animate-spin" />}
+              Delete account
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
