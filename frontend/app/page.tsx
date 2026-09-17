@@ -525,7 +525,7 @@ Each task carries an estimate, a priority and a due date. Add them up across the
                   <div className="w-10 h-10 rounded-lg landing-canvas flex items-center justify-center">
                     <item.icon className="w-5 h-5 landing-accent" />
                   </div>
-                  <span className="step-number font-[family-name:var(--font-display)] text-[48px] font-bold landing-canvas leading-none tracking-[-0.04em]">
+                  <span className="step-number font-[family-name:var(--font-display)] text-[48px] font-bold landing-canvas-text leading-none tracking-[-0.04em]">
                     {item.step}
                   </span>
                 </div>

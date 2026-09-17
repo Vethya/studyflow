@@ -339,6 +339,8 @@ html.amoled {
   --landing-shadow: 0 18px 40px 0 oklch(0 0 0 / 0.7);
   --landing-shadow-hover: 0 22px 46px 0 oklch(0 0 0 / 0.85);
   --landing-hero: linear-gradient(180deg, oklch(0.13 0.03 255) 0%, oklch(0.07 0.015 255) 48%, oklch(0.01 0.004 262) 100%);
+  --auth-sky: linear-gradient(180deg, oklch(0.1 0.02 255) 0%, oklch(0.05 0.012 255) 48%, oklch(0 0 0) 100%);
+  --auth-shadow: 0 10px 40px 0 oklch(0 0 0 / 0.75);
 }
 
 :root {
@@ -369,6 +371,10 @@ html.amoled {
 
   .landing-canvas {
     background: var(--landing-canvas);
+  }
+
+  .landing-canvas-text {
+    color: var(--landing-canvas);
   }
 
   .landing-surface {
