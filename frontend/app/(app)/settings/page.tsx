@@ -227,9 +227,6 @@ export default function SettingsPage() {
       <AddPasswordDialog
         open={addPasswordOpen}
         onOpenChange={setAddPasswordOpen}
-        onSaved={() => {
-          if (profile.data) profile.setData({ ...profile.data, password_set: true });
-        }}
       />
       <ChangePasswordDialog open={passwordOpen} onOpenChange={setPasswordOpen} />
       <ChangeTimezoneDialog

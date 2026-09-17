@@ -41,11 +41,9 @@ import type { WireAccountProfile, WireStudyPreferences } from "@/lib/api/wire";
 export function AddPasswordDialog({
   open,
   onOpenChange,
-  onSaved,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSaved: () => void;
 }) {
   const [next, setNext] = React.useState("");
   const [confirm, setConfirm] = React.useState("");
@@ -71,7 +69,6 @@ export function AddPasswordDialog({
     setError(null);
     try {
       await accountApi.setPassword(next);
-      onSaved();
       toast.success("Password added. Please sign in again.");
       notifyStudyFlowSessionInvalidated();
       onOpenChange(false);

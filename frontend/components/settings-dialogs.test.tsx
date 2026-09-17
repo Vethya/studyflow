@@ -50,7 +50,7 @@ it("invalidates the session and explains the add-password redirect", async () =>
   const onSessionInvalidated = vi.fn();
   window.addEventListener(STUDYFLOW_SESSION_INVALIDATED_EVENT, onSessionInvalidated);
 
-  render(<AddPasswordDialog open onOpenChange={onOpenChange} onSaved={() => {}} />);
+  render(<AddPasswordDialog open onOpenChange={onOpenChange} />);
   fireEvent.change(screen.getByLabelText("New password"), {
     target: { value: "new-secure-password" },
   });
