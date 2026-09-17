@@ -300,6 +300,26 @@ class SqlAlchemySessionAuthenticationRepository:
         refreshed_idle_expiry: datetime,
         csrf_hash: str | None = None,
     ) -> PersistedSessionPrincipal | None:
+        return await self._authenticate(
+            token_hash,
+            now,
+            csrf_hash=csrf_hash,
+            refreshed_idle_expiry=refreshed_idle_expiry,
+        )
+
+    async def authenticate_read_only(
+        self, token_hash: str, now: datetime
+    ) -> PersistedSessionPrincipal | None:
+        return await self._authenticate(token_hash, now, refreshed_idle_expiry=None)
+
+    async def _authenticate(
+        self,
+        token_hash: str,
+        now: datetime,
+        *,
+        csrf_hash: str | None = None,
+        refreshed_idle_expiry: datetime | None,
+    ) -> PersistedSessionPrincipal | None:
         async with self._database.transaction() as session:
             conditions = [
                 AuthenticationSession.token_hash == token_hash,
@@ -326,12 +346,13 @@ class SqlAlchemySessionAuthenticationRepository:
             current_idle_expiry = authentication_session.idle_expires_at
             if current_idle_expiry.tzinfo is None:
                 current_idle_expiry = current_idle_expiry.replace(tzinfo=UTC)
-            if refreshed_idle_expiry.tzinfo is None:
-                refreshed_idle_expiry = refreshed_idle_expiry.replace(tzinfo=UTC)
-            authentication_session.idle_expires_at = min(
-                max(current_idle_expiry, refreshed_idle_expiry),
-                absolute_expiry,
-            )
+            if refreshed_idle_expiry is not None:
+                if refreshed_idle_expiry.tzinfo is None:
+                    refreshed_idle_expiry = refreshed_idle_expiry.replace(tzinfo=UTC)
+                authentication_session.idle_expires_at = min(
+                    max(current_idle_expiry, refreshed_idle_expiry),
+                    absolute_expiry,
+                )
             return PersistedSessionPrincipal(account.id, account.email, account.name)
 
     async def revoke(self, token_hash: str, csrf_hash: str, now: datetime) -> bool:

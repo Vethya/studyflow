@@ -701,9 +701,15 @@ async def get_current_session(
     authentication: Annotated[SessionAuthentication, Depends(get_session_authentication)],
 ) -> CurrentSessionResponse:
     session_token = http_request.cookies.get(get_cookie_policy(http_request).session_name)
-    principal = (
-        await authentication.authenticate(session_token) if session_token is not None else None
-    )
+    if session_token is None:
+        principal = None
+    else:
+        authenticate_read_only = getattr(authentication, "authenticate_read_only", None)
+        principal = (
+            await authenticate_read_only(session_token)
+            if authenticate_read_only is not None
+            else await authentication.authenticate(session_token)
+        )
     if principal is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     return CurrentSessionResponse(
