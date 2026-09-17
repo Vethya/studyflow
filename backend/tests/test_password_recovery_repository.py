@@ -6,8 +6,13 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
+from studyflow.auth.oidc import GoogleClaims
 from studyflow.auth.registration import hash_verification_token
-from studyflow.auth.repositories import SqlAlchemyPasswordRecoveryRepository
+from studyflow.auth.repositories import (
+    SqlAlchemyLoginRepository,
+    SqlAlchemyOIDCRepository,
+    SqlAlchemyPasswordRecoveryRepository,
+)
 from studyflow.database import Base, Database
 from studyflow.database.models import (
     AuthenticationEmailToken,
@@ -97,6 +102,39 @@ async def test_password_reset_request_ignores_ineligible_accounts() -> None:
         assert not await repository.create_reset_token(
             "missing@example.com", "b" * 64, now + timedelta(hours=1)
         )
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_password_reset_can_set_password_for_google_only_account() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    now = datetime.now(UTC)
+    token = "google-only-password-setup-token"
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        account = await SqlAlchemyOIDCRepository(database).resolve_identity(
+            GoogleClaims("google-subject", "student@example.com", "Google Student"), "UTC"
+        )
+        assert account is not None
+
+        repository = SqlAlchemyPasswordRecoveryRepository(database)
+        assert await repository.create_reset_token(
+            "student@example.com", hash_verification_token(token), now + timedelta(hours=1)
+        )
+        assert await repository.reset_password(
+            hash_verification_token(token), "$argon2id$new-hash", now
+        )
+
+        login_account = await SqlAlchemyLoginRepository(database).find_by_email(
+            "student@example.com"
+        )
+        assert login_account is not None
+        assert login_account.password_hash == "$argon2id$new-hash"
     finally:
         await database.stop()
 

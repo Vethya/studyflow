@@ -9,6 +9,9 @@ from studyflow.auth.breached_passwords import BreachedPasswordChecker
 ARGON2_TIME_COST = 2
 ARGON2_MEMORY_COST_KIB = 19_456
 ARGON2_PARALLELISM = 1
+KNOWN_BREACH_MESSAGE = (
+    "This password has appeared in a known data breach. Choose a different password."
+)
 
 
 class PasswordPolicyError(ValueError):
@@ -59,7 +62,7 @@ class PasswordService:
     async def hash_password(self, password: str) -> str:
         self._hasher.validate_password(password)
         if await self._breached_passwords.is_breached(password):
-            raise BreachedPasswordError("Password appears in a known breach")
+            raise BreachedPasswordError(KNOWN_BREACH_MESSAGE)
         return await anyio.to_thread.run_sync(self._hasher.hash_password, password)
 
     async def verify_password(self, password: str, password_hash: str) -> bool:

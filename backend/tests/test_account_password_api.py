@@ -7,7 +7,11 @@ from httpx import ASGITransport, AsyncClient
 
 from studyflow.accounts.password import InvalidCurrentPasswordError
 from studyflow.app import create_app
-from studyflow.auth.passwords import PasswordPolicyError
+from studyflow.auth.passwords import (
+    KNOWN_BREACH_MESSAGE,
+    BreachedPasswordError,
+    PasswordPolicyError,
+)
 from studyflow.auth.rate_limits import AccountPasswordChangeRateLimitExceeded
 from studyflow.auth.session_authentication import SessionPrincipal
 
@@ -28,9 +32,11 @@ class AuthenticationStub:
 @dataclass
 class PasswordChangeStub:
     failure: Exception | None = None
-    calls: list[tuple[UUID, str, str]] = field(default_factory=list)
+    calls: list[tuple[UUID, str | None, str]] = field(default_factory=list)
 
-    async def change(self, account_id: UUID, current_password: str, new_password: str) -> None:
+    async def change(
+        self, account_id: UUID, current_password: str | None, new_password: str
+    ) -> None:
         self.calls.append((account_id, current_password, new_password))
         if self.failure is not None:
             raise self.failure
@@ -47,16 +53,17 @@ class RateLimitStub:
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
-    ("failure", "expected"),
+    ("failure", "expected", "expected_detail"),
     (
-        (None, 204),
-        (InvalidCurrentPasswordError(), 400),
-        (PasswordPolicyError(), 422),
-        (httpx.ConnectError("unavailable"), 503),
+        (None, 204, None),
+        (InvalidCurrentPasswordError(), 400, None),
+        (BreachedPasswordError("internal"), 422, KNOWN_BREACH_MESSAGE),
+        (PasswordPolicyError(), 422, "Password is not allowed"),
+        (httpx.ConnectError("unavailable"), 503, None),
     ),
 )
 async def test_password_change_contract_and_session_clearing(
-    failure: Exception | None, expected: int
+    failure: Exception | None, expected: int, expected_detail: str | None
 ) -> None:
     account_id = UUID("5b15bfef-8c44-45d5-a70e-574beb999fb3")
     app = create_app(
@@ -81,6 +88,8 @@ async def test_password_change_contract_and_session_clearing(
         )
 
     assert response.status_code == expected
+    if expected_detail is not None:
+        assert response.json()["detail"] == expected_detail
     if expected == 204:
         cookies = response.headers.get_list("set-cookie")
         assert any("studyflow_session=" in value and "Max-Age=0" in value for value in cookies)
@@ -115,3 +124,29 @@ async def test_password_change_rate_limit_returns_retry_after() -> None:
     assert response.status_code == 429
     assert response.headers["retry-after"] == "900"
     assert passwords.calls == []
+
+
+@pytest.mark.anyio
+async def test_password_can_be_set_without_current_password() -> None:
+    account_id = UUID("5b15bfef-8c44-45d5-a70e-574beb999fb3")
+    passwords = PasswordChangeStub()
+    app = create_app(
+        session_authentication=AuthenticationStub(
+            SessionPrincipal(account_id, "student@example.com", "Student")
+        ),
+        account_passwords=passwords,
+        account_password_change_rate_limiter=RateLimitStub(),
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://test",
+        cookies={"studyflow_session": "session-token"},
+    ) as client:
+        response = await client.patch(
+            "/api/v1/account/password",
+            headers={"X-CSRF-Token": "csrf-token"},
+            json={"new_password": "new-secure-password"},
+        )
+
+    assert response.status_code == 204
+    assert passwords.calls == [(account_id, None, "new-secure-password")]

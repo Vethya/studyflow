@@ -37,7 +37,11 @@ from studyflow.auth.oidc import (
     OIDCNotConfiguredError,
     OIDCProviderUnavailableError,
 )
-from studyflow.auth.passwords import PasswordPolicyError
+from studyflow.auth.passwords import (
+    KNOWN_BREACH_MESSAGE,
+    BreachedPasswordError,
+    PasswordPolicyError,
+)
 from studyflow.auth.rate_limits import (
     EmailVerificationRateLimit,
     EmailVerificationRateLimitExceeded,
@@ -61,7 +65,7 @@ from studyflow.auth.rate_limits import (
 from studyflow.auth.recovery import InvalidPasswordResetTokenError, PasswordRecovery
 from studyflow.auth.registration import Registration, RegistrationCommand
 from studyflow.auth.resend import VerificationResend
-from studyflow.auth.session_authentication import SessionAuthentication
+from studyflow.auth.session_authentication import SessionAuthentication, SessionPrincipal
 from studyflow.auth.verification import EmailVerification
 from studyflow.timezones import is_iana_timezone
 
@@ -129,6 +133,19 @@ class PasswordResetRequest(BaseModel):
 class PasswordResetConfirmation(BaseModel):
     token: Annotated[str, Field(min_length=20, max_length=512)]
     password: Annotated[str, Field(min_length=12, max_length=128)]
+
+
+class GoogleStartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    timezone: Annotated[str, Field(min_length=1, max_length=64)]
+
+    @field_validator("timezone")
+    @classmethod
+    def require_iana_timezone(cls, value: str) -> str:
+        if not is_iana_timezone(value):
+            raise ValueError("Timezone must be a valid IANA timezone")
+        return value
 
 
 class AuthenticatedAccount(BaseModel):
@@ -319,6 +336,25 @@ def get_session_authentication(request: Request) -> SessionAuthentication:
     return cast(SessionAuthentication, request.app.state.session_authentication)
 
 
+async def require_csrf_session(
+    request: Request,
+    authentication: Annotated[SessionAuthentication, Depends(get_session_authentication)],
+    csrf_token: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
+) -> SessionPrincipal:
+    session_token = request.cookies.get(get_cookie_policy(request).session_name)
+    if session_token is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    if csrf_token is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
+    principal = await authentication.authenticate(session_token, csrf_token)
+    if principal is not None:
+        return principal
+    csrf_cookie = request.cookies.get(get_cookie_policy(request).csrf_name)
+    if csrf_cookie is not None and hmac.compare_digest(csrf_token.encode(), csrf_cookie.encode()):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
+
+
 def get_verification_resend(request: Request) -> VerificationResend:
     return cast(VerificationResend, request.app.state.verification_resend)
 
@@ -343,28 +379,59 @@ def get_password_reset_attempt_rate_limit(request: Request) -> PasswordResetAtte
     )
 
 
-@router.get(
+@router.post(
     "/google/start",
     response_model=OIDCStartResponse,
     responses={status.HTTP_503_SERVICE_UNAVAILABLE: {"model": AuthenticationError}},
 )
 async def start_google_oidc(
+    payload: GoogleStartRequest,
     response: Response,
     http_request: Request,
-    timezone: Annotated[str, Query(min_length=1, max_length=64)],
     oidc: Annotated[OIDCLogin, Depends(get_oidc_login)],
     rate_limit: Annotated[OIDCStartRateLimit, Depends(get_oidc_start_rate_limit)],
 ) -> OIDCStartResponse:
     try:
-        if not is_iana_timezone(timezone):
-            raise HTTPException(status_code=422, detail="Timezone must be a valid IANA timezone")
         client_ip = http_request.client.host if http_request.client is not None else "unknown"
         await rate_limit.check(client_ip)
-        started = await oidc.start(timezone)
+        started = await oidc.start(payload.timezone)
     except OIDCStartRateLimitExceeded as error:
         raise HTTPException(
             status_code=429,
             detail="Too many Google sign-in attempts",
+            headers={"Retry-After": "900"},
+        ) from error
+    except OIDCNotConfiguredError as error:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured") from error
+    get_cookie_policy(http_request).set_oidc_state(response, started.state)
+    return OIDCStartResponse(authorization_url=started.authorization_url)
+
+
+@router.post(
+    "/google/link/start",
+    response_model=OIDCStartResponse,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError},
+        status.HTTP_403_FORBIDDEN: {"model": AuthenticationError},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": AuthenticationError},
+    },
+)
+async def start_google_link_oidc(
+    payload: GoogleStartRequest,
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    response: Response,
+    http_request: Request,
+    oidc: Annotated[OIDCLogin, Depends(get_oidc_login)],
+    rate_limit: Annotated[OIDCStartRateLimit, Depends(get_oidc_start_rate_limit)],
+) -> OIDCStartResponse:
+    try:
+        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        await rate_limit.check(client_ip)
+        started = await oidc.start_link(principal.account_id, payload.timezone)
+    except OIDCStartRateLimitExceeded as error:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many Google linking attempts",
             headers={"Retry-After": "900"},
         ) from error
     except OIDCNotConfiguredError as error:
@@ -439,7 +506,8 @@ async def complete_google_oidc(
             return redirect
         return _oidc_error_response(503, "Google sign-in is not configured", cookie_policy)
     if browser_flow:
-        redirect = _browser_redirect(http_request, "/app")
+        destination = "/settings" if result.link_completed else "/app"
+        redirect = _browser_redirect(http_request, destination)
         cookie_policy.clear_oidc_state(redirect)
         cookie_policy.set_authentication(redirect, result.session_token, result.csrf_token)
         return redirect
@@ -518,6 +586,18 @@ async def confirm_google_browser_account_link(
     return await _complete_google_account_link(
         challenge, payload.password, response, http_request, linking, rate_limit
     )
+
+
+@router.get(
+    "/google/link/browser",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError}},
+)
+async def check_google_browser_account_link_challenge(http_request: Request) -> Response:
+    cookie_policy = get_cookie_policy(http_request)
+    if http_request.cookies.get(cookie_policy.oidc_link_name) is None:
+        raise HTTPException(status_code=401, detail="Invalid link challenge or password")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 async def _complete_google_account_link(
@@ -607,6 +687,7 @@ async def forgot_password(
 )
 async def reset_password(
     payload: PasswordResetConfirmation,
+    response: Response,
     http_request: Request,
     recovery: Annotated[PasswordRecovery, Depends(get_password_recovery)],
     rate_limit: Annotated[
@@ -628,6 +709,11 @@ async def reset_password(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Password reset token is invalid or expired",
         ) from error
+    except BreachedPasswordError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=KNOWN_BREACH_MESSAGE,
+        ) from error
     except PasswordPolicyError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -638,6 +724,7 @@ async def reset_password(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Password safety service is unavailable",
         ) from error
+    get_cookie_policy(http_request).clear_authentication(response)
 
 
 @router.post(
@@ -678,9 +765,15 @@ async def get_current_session(
     authentication: Annotated[SessionAuthentication, Depends(get_session_authentication)],
 ) -> CurrentSessionResponse:
     session_token = http_request.cookies.get(get_cookie_policy(http_request).session_name)
-    principal = (
-        await authentication.authenticate(session_token) if session_token is not None else None
-    )
+    if session_token is None:
+        principal = None
+    else:
+        authenticate_read_only = getattr(authentication, "authenticate_read_only", None)
+        principal = (
+            await authenticate_read_only(session_token)
+            if authenticate_read_only is not None
+            else await authentication.authenticate(session_token)
+        )
     if principal is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     return CurrentSessionResponse(
@@ -713,7 +806,13 @@ async def logout(
         or csrf_cookie is None
         or not hmac.compare_digest(csrf_token.encode(), csrf_cookie.encode())
     ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
+        response: Response = JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": "CSRF validation failed"},
+            headers={"Cache-Control": "no-store"},
+        )
+        cookie_policy.clear_authentication(response)
+        return response
     try:
         await authentication.revoke(session_token, csrf_token)
     except Exception:
@@ -854,6 +953,7 @@ async def register(
 )
 async def complete_registration(
     payload: RegistrationCompletionRequest,
+    response: Response,
     http_request: Request,
     registration: Annotated[Registration, Depends(get_registration)],
     rate_limit: Annotated[
@@ -876,6 +976,11 @@ async def complete_registration(
             detail="Too many registration completion attempts",
             headers={"Retry-After": "900"},
         ) from error
+    except BreachedPasswordError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=KNOWN_BREACH_MESSAGE,
+        ) from error
     except PasswordPolicyError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -891,6 +996,7 @@ async def complete_registration(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Signup token is invalid or expired",
         )
+    get_cookie_policy(http_request).clear_authentication(response)
     return AuthenticationMessage(message="Registration complete.")
 
 

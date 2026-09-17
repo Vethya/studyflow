@@ -1,5 +1,6 @@
 """Authenticated account-profile endpoints."""
 
+import hmac
 from datetime import datetime
 from typing import Annotated, cast
 
@@ -12,7 +13,11 @@ from studyflow.accounts.preferences import AccountPreferences, StudyPreferences
 from studyflow.accounts.profile import AccountProfile, AccountProfiles
 from studyflow.auth.cookies import CookiePolicy
 from studyflow.auth.oidc import OIDCAccountLinking
-from studyflow.auth.passwords import PasswordPolicyError
+from studyflow.auth.passwords import (
+    KNOWN_BREACH_MESSAGE,
+    BreachedPasswordError,
+    PasswordPolicyError,
+)
 from studyflow.auth.rate_limits import (
     AccountPasswordChangeRateLimit,
     AccountPasswordChangeRateLimitExceeded,
@@ -27,6 +32,7 @@ class AccountProfileResponse(BaseModel):
     id: str
     email: EmailStr
     name: str
+    password_set: bool
 
 
 class AccountProfileUpdate(BaseModel):
@@ -66,7 +72,7 @@ class StudyPreferencesUpdate(BaseModel):
 
 
 class PasswordChangeRequest(BaseModel):
-    current_password: Annotated[str, Field(min_length=1, max_length=128)]
+    current_password: Annotated[str | None, Field(min_length=1, max_length=128)] = None
     new_password: Annotated[str, Field(min_length=12, max_length=128)]
 
 
@@ -132,12 +138,24 @@ async def require_csrf_session(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
     principal = await authentication.authenticate(session_token, csrf_token)
     if principal is None:
+        csrf_cookie = request.cookies.get(get_cookie_policy(request).csrf_name)
+        if csrf_cookie is not None and hmac.compare_digest(
+            csrf_token.encode(), csrf_cookie.encode()
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
+            )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
     return principal
 
 
 def _response(profile: AccountProfile) -> AccountProfileResponse:
-    return AccountProfileResponse(id=str(profile.id), email=profile.email, name=profile.name)
+    return AccountProfileResponse(
+        id=str(profile.id),
+        email=profile.email,
+        name=profile.name,
+        password_set=profile.password_set,
+    )
 
 
 def _preferences_response(preferences: StudyPreferences) -> StudyPreferencesResponse:
@@ -288,6 +306,11 @@ async def change_password(
     except InvalidCurrentPasswordError as error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect"
+        ) from error
+    except BreachedPasswordError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=KNOWN_BREACH_MESSAGE,
         ) from error
     except PasswordPolicyError as error:
         raise HTTPException(

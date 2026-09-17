@@ -36,7 +36,7 @@ class AccountProfileStub:
 
     async def update_name(self, account_id: UUID, name: str) -> AccountProfile | None:
         self.updates.append((account_id, name))
-        return AccountProfile(account_id, self.profile.email, name)
+        return AccountProfile(account_id, self.profile.email, name, self.profile.password_set)
 
 
 def test_account_profile_update_rejects_blank_names() -> None:
@@ -50,7 +50,9 @@ async def test_account_profile_read_and_csrf_protected_update() -> None:
     authentication = SessionAuthenticationStub(
         SessionPrincipal(account_id, "student@example.com", "Student Name")
     )
-    profiles = AccountProfileStub(AccountProfile(account_id, "student@example.com", "Student Name"))
+    profiles = AccountProfileStub(
+        AccountProfile(account_id, "student@example.com", "Student Name", password_set=True)
+    )
     app = create_app(session_authentication=authentication, account_profiles=profiles)
     cookies = {"studyflow_session": "opaque-session-token"}
     async with AsyncClient(
@@ -68,6 +70,7 @@ async def test_account_profile_read_and_csrf_protected_update() -> None:
         "id": str(account_id),
         "email": "student@example.com",
         "name": "Student Name",
+        "password_set": True,
     }
     assert updated.status_code == 200
     assert updated.json()["name"] == "Updated Student"

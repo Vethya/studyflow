@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle, ArrowLeft, Loader2 } from "lucide-react";
 import { auth } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
+import { notifyStudyFlowSessionInvalidated } from "@/lib/data-events";
+import { useSession } from "@/hooks/use-session";
 
 /**
  * Landing page for the link emailed by `POST /auth/forgot-password`; the
@@ -32,11 +34,16 @@ export default function ResetPasswordPage() {
 function ResetPasswordForm() {
   const router = useRouter();
   const token = useSearchParams().get("token");
+  const { status } = useSession();
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!token && status === "authenticated") router.replace("/settings");
+  }, [router, status, token]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -52,6 +59,7 @@ function ResetPasswordForm() {
     try {
       await auth.resetPassword(token, password);
       // Resetting revokes existing sessions, so sign in again with the new one.
+      notifyStudyFlowSessionInvalidated();
       router.replace("/login?reset=1");
     } catch (cause) {
       setError(describeError(cause));
@@ -60,6 +68,13 @@ function ResetPasswordForm() {
   }
 
   if (!token) {
+    if (status !== "unauthenticated") {
+      return (
+        <div className="flex justify-center py-16">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </div>
+      );
+    }
     return (
       <div className="space-y-6">
         <div className="space-y-1">
@@ -83,6 +98,14 @@ function ResetPasswordForm() {
           This link can only be used once.
         </p>
       </div>
+
+      {status === "authenticated" && (
+        <Alert>
+          <AlertDescription>
+            Resetting this password will sign you out of all sessions.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {error && (
         <Alert variant="destructive">
@@ -124,7 +147,7 @@ function ResetPasswordForm() {
 
         <Button type="submit" className="w-full font-medium" disabled={isSubmitting}>
           {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Reset password
+          Set password
         </Button>
       </form>
 

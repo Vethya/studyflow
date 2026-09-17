@@ -10,6 +10,7 @@ class AccountProfile:
     id: UUID
     email: str
     name: str
+    password_set: bool = False
 
 
 class AccountProfileRepository(Protocol):

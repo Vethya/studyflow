@@ -7,6 +7,7 @@ import { Calendar, BarChart3, Clock, Sparkles, BookOpen, Target, GraduationCap, 
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { ScrollTrigger } from "gsap/dist/ScrollTrigger";
+import { useSession } from "@/hooks/use-session";
 
 if (typeof window !== "undefined") {
   gsap.registerPlugin(ScrollTrigger, useGSAP);
@@ -85,6 +86,7 @@ function FloatingElements() {
 /* ─── Navigation (transparent over gradient) ─── */
 function Navigation() {
   const navRef = useRef(null);
+  const { status } = useSession();
 
   useGSAP(() => {
     gsap.from(navRef.current, {
@@ -124,14 +126,26 @@ function Navigation() {
 
         {/* Right auth */}
         <div className="flex items-center gap-4">
-          <Link href="/login" className="text-[14px] font-medium tracking-[-0.01em] text-white hover:text-white/80 transition-colors">
-            Login
-          </Link>
-          <Link href="/register">
-            <button className="px-5 py-2 rounded-full bg-white text-[#070709] text-[14px] font-medium tracking-[-0.01em] hover:bg-white/90 transition-colors shadow-[rgba(36,36,40,0.1)_0px_1px_2px_0px]">
-              Sign up
-            </button>
-          </Link>
+          {status === "authenticated" ? (
+            <Link href="/dashboard">
+              <button className="px-5 py-2 rounded-full bg-white text-[#070709] text-[14px] font-medium tracking-[-0.01em] hover:bg-white/90 transition-colors shadow-[rgba(36,36,40,0.1)_0px_1px_2px_0px]">
+                Open dashboard
+              </button>
+            </Link>
+          ) : status === "loading" ? (
+            <div aria-hidden className="h-9 w-28" />
+          ) : (
+            <>
+              <Link href="/login" className="text-[14px] font-medium tracking-[-0.01em] text-white hover:text-white/80 transition-colors">
+                Login
+              </Link>
+              <Link href="/register">
+                <button className="px-5 py-2 rounded-full bg-white text-[#070709] text-[14px] font-medium tracking-[-0.01em] hover:bg-white/90 transition-colors shadow-[rgba(36,36,40,0.1)_0px_1px_2px_0px]">
+                  Sign up
+                </button>
+              </Link>
+            </>
+          )}
         </div>
       </div>
     </nav>
@@ -555,11 +569,6 @@ It takes about five minutes to enter a term of coursework and the hours you have
             <Link href="/register">
               <button className="px-8 py-3.5 rounded-full bg-[#070709] text-white text-[16px] font-semibold tracking-[-0.01em] shadow-[rgba(36,36,40,0.1)_0px_1px_2px_0px,rgba(36,36,40,0.09)_0px_3px_3px_0px,rgba(36,36,40,0.05)_0px_6px_4px_0px,rgba(36,36,40,0.01)_0px_11px_4px_0px] hover:bg-[#1a1a1c] transition-all duration-300">
                 Get started for free
-              </button>
-            </Link>
-            <Link href="/dashboard">
-              <button className="px-6 py-3.5 rounded-full border border-[#070709] text-[#070709] text-[16px] font-medium tracking-[-0.01em] hover:bg-[#f5f5f5] transition-colors">
-                View demo
               </button>
             </Link>
           </div>

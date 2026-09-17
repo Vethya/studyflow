@@ -1,6 +1,6 @@
 /** Authentication endpoints — `backend/src/studyflow/api/auth.py`. */
 
-import { apiJson, apiVoid, buildQuery } from "./client";
+import { apiJson, apiVoid } from "./client";
 import type {
   WireAuthenticationMessage,
   WireCurrentSessionResponse,
@@ -94,8 +94,8 @@ export function forgotPassword(email: string): Promise<WireAuthenticationMessage
 export function resetPassword(
   token: string,
   password: string,
-): Promise<WireAuthenticationMessage> {
-  return apiJson<WireAuthenticationMessage>("/auth/reset-password", {
+): Promise<void> {
+  return apiVoid("/auth/reset-password", {
     method: "POST",
     body: { token, password },
     csrf: false,
@@ -112,7 +112,19 @@ export function resetPassword(
  * from. Omitting it fails the request with 422.
  */
 export function startGoogleSignIn(timezone: string): Promise<WireOIDCStartResponse> {
-  return apiJson<WireOIDCStartResponse>(`/auth/google/start${buildQuery({ timezone })}`);
+  return apiJson<WireOIDCStartResponse>("/auth/google/start", {
+    method: "POST",
+    body: { timezone },
+    csrf: false,
+  });
+}
+
+/** Returns a Google authorization URL for linking to the current account. */
+export function startGoogleAccountLink(timezone: string): Promise<WireOIDCStartResponse> {
+  return apiJson<WireOIDCStartResponse>("/auth/google/link/start", {
+    method: "POST",
+    body: { timezone },
+  });
 }
 
 /**
@@ -126,4 +138,8 @@ export function linkGoogleAccount(password: string): Promise<WireLoginResponse> 
     body: { password },
     csrf: false,
   });
+}
+
+export function checkGoogleLinkChallenge(): Promise<void> {
+  return apiVoid("/auth/google/link/browser");
 }
