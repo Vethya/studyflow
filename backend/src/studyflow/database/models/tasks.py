@@ -13,6 +13,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -54,6 +55,17 @@ class AcademicTask(Base):
             "estimate_frozen_at IS NOT NULL",
             name="completion_requires_start",
         ),
+        CheckConstraint(
+            "(external_source IS NULL AND external_id IS NULL) OR "
+            "(external_source = 'google_classroom' AND length(external_id) = 64)",
+            name="external_reference",
+        ),
+        UniqueConstraint(
+            "account_id",
+            "external_source",
+            "external_id",
+            name="uq_academic_tasks_external_reference",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -74,6 +86,9 @@ class AcademicTask(Base):
     overdue_remediated_deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_early_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set only for tasks imported from Google Classroom, so a repeat import is recognised.
+    external_source: Mapped[str | None] = mapped_column(String(32))
+    external_id: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

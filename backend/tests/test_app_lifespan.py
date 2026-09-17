@@ -57,3 +57,40 @@ async def test_app_lifespan_handles_an_injected_authentication_client_absence() 
         assert database.events == ["started"]
 
     assert database.events == ["started", "stopped"]
+
+
+@pytest.mark.anyio
+async def test_google_import_is_enabled_only_with_its_redirect_uri_and_closes_its_client() -> None:
+    from pydantic import SecretStr
+
+    from studyflow.integrations.google_import import (
+        GoogleImportService,
+        UnconfiguredGoogleImports,
+    )
+
+    oidc = {
+        "google_oidc_client_id": "client-id",
+        "google_oidc_client_secret": SecretStr("client-secret"),
+        "google_oidc_redirect_uri": "https://studyflow.example/api/v1/auth/google/callback",
+    }
+    without_import = create_app(
+        Settings(environment=Environment.TEST, **oidc),  # type: ignore[arg-type]
+        database=TrackingDatabase(),
+    )
+    database = TrackingDatabase()
+    with_import = create_app(
+        Settings(
+            environment=Environment.TEST,
+            google_import_redirect_uri="https://studyflow.example/api/v1/integrations/google/callback",
+            **oidc,  # type: ignore[arg-type]
+        ),
+        database=database,
+    )
+
+    assert isinstance(without_import.state.google_imports, UnconfiguredGoogleImports)
+    assert without_import.state.google_import_http_client is None
+    assert isinstance(with_import.state.google_imports, GoogleImportService)
+    client = with_import.state.google_import_http_client
+    async with with_import.router.lifespan_context(with_import):
+        assert not client.is_closed
+    assert client.is_closed

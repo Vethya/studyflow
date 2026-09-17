@@ -30,6 +30,8 @@ def test_academic_task_schema_preserves_owned_planning_inputs() -> None:
         "overdue_remediated_deadline_at",
         "completed_at",
         "finished_early_at",
+        "external_source",
+        "external_id",
         "created_at",
         "updated_at",
     }
