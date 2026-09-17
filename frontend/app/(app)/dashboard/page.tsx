@@ -18,6 +18,7 @@ import { Callout } from "@/components/ui/callout";
 import { AlertTriangle, CalendarClock, CalendarOff, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { TaskFormDialog } from "@/components/task-form-dialog";
+import { GettingStarted, WelcomeTour } from "@/components/onboarding";
 import { CapacityBar } from "@/components/capacity-bar";
 import { ShortfallCard } from "@/components/shortfall-card";
 import { RecordOutcomeDialog } from "@/components/record-outcome-dialog";
@@ -198,6 +199,16 @@ export default function DashboardPage() {
   }, [pendingPlan, sessions, allTasks]);
 
   const unplannedMinutes = unscheduled.reduce((sum, item) => sum + item.remainingMinutes, 0);
+
+  // SPEC §17.2 asks the Dashboard to say what to do next. For an account with
+  // nothing set up, that is the four steps themselves.
+  const onboarding = {
+    weeklyWindows: allWindows.length,
+    openTasks: allTasks.filter((task) => task.status !== "Completed").length,
+    plannedSessions: sessions.length,
+    recordedOutcomes: sessions.filter((session) => session.outcome !== undefined).length,
+  };
+  const onboardingReady = !isLoading && !schedule.isLoading && loadError === null;
   const firstName = account?.name.trim().split(/\s+/)[0] ?? "";
 
   function reloadAll() {
@@ -235,6 +246,9 @@ export default function DashboardPage() {
           {describeError(loadError)}
         </Callout>
       )}
+
+      <WelcomeTour state={onboarding} ready={onboardingReady} />
+      <GettingStarted state={onboarding} ready={onboardingReady} />
 
       {pendingPlan && (
         <PendingPlanBanner
