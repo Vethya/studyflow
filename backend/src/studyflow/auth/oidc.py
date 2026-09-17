@@ -131,6 +131,8 @@ class OIDCRepository(Protocol):
     async def create_link_challenge(
         self, claims: GoogleClaims, token_hash: str, expires_at: datetime
     ) -> bool: ...
+
+
 class OIDCDeletionRepository(Protocol):
     async def store_state(
         self,

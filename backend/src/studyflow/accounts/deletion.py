@@ -14,9 +14,7 @@ class AccountDeletionRepository(Protocol):
         self, account_id: UUID, token_hash: str, expires_at: datetime
     ) -> bool: ...
 
-    async def delete_account(
-        self, account_id: UUID, token_hash: str, now: datetime
-    ) -> bool: ...
+    async def delete_account(self, account_id: UUID, token_hash: str, now: datetime) -> bool: ...
 
 
 class AccountPasswordVerifier(Protocol):
