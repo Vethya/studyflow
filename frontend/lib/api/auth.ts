@@ -127,3 +127,7 @@ export function linkGoogleAccount(password: string): Promise<WireLoginResponse> 
     csrf: false,
   });
 }
+
+export function checkGoogleLinkChallenge(): Promise<void> {
+  return apiVoid("/auth/google/link/browser");
+}

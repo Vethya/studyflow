@@ -25,6 +25,28 @@ export default function GoogleLinkPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCheckingChallenge, setIsCheckingChallenge] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    auth
+      .checkGoogleLinkChallenge()
+      .then(() => {
+        if (active) setIsCheckingChallenge(false);
+      })
+      .catch((cause) => {
+        if (!active) return;
+        if (cause instanceof ApiError && cause.isUnauthenticated) {
+          router.replace("/settings?google=challenge-missing");
+          return;
+        }
+        setError(describeError(cause));
+        setIsCheckingChallenge(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [router]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -87,8 +109,12 @@ export default function GoogleLinkPage() {
           />
         </div>
 
-        <Button type="submit" className="w-full font-medium" disabled={isSubmitting}>
-          {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+        <Button
+          type="submit"
+          className="w-full font-medium"
+          disabled={isSubmitting || isCheckingChallenge}
+        >
+          {(isSubmitting || isCheckingChallenge) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Connect and sign in
         </Button>
       </form>

@@ -524,6 +524,18 @@ async def confirm_google_browser_account_link(
     )
 
 
+@router.get(
+    "/google/link/browser",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError}},
+)
+async def check_google_browser_account_link_challenge(http_request: Request) -> Response:
+    cookie_policy = get_cookie_policy(http_request)
+    if http_request.cookies.get(cookie_policy.oidc_link_name) is None:
+        raise HTTPException(status_code=401, detail="Invalid link challenge or password")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 async def _complete_google_account_link(
     challenge: str,
     password: str,
@@ -871,6 +883,7 @@ async def register(
 )
 async def complete_registration(
     payload: RegistrationCompletionRequest,
+    response: Response,
     http_request: Request,
     registration: Annotated[Registration, Depends(get_registration)],
     rate_limit: Annotated[
@@ -913,6 +926,7 @@ async def complete_registration(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Signup token is invalid or expired",
         )
+    get_cookie_policy(http_request).clear_authentication(response)
     return AuthenticationMessage(message="Registration complete.")
 
 
