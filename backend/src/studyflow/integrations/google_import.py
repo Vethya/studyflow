@@ -100,6 +100,13 @@ class GoogleImportStart:
 
 
 @dataclass(frozen=True, slots=True)
+class GoogleImportStatus:
+    configured: bool
+    """When the student last asked Google for each source's data."""
+    last_checked: dict[GoogleImportSource, datetime]
+
+
+@dataclass(frozen=True, slots=True)
 class GoogleImportAccount:
     email: str
     timezone: str
@@ -259,6 +266,7 @@ class ClassroomImportResult:
 
 class GoogleImportRepository(Protocol):
     async def account(self, account_id: UUID) -> GoogleImportAccount | None: ...
+    async def last_checked(self, account_id: UUID) -> dict[GoogleImportSource, datetime]: ...
     async def store_state(
         self,
         account_id: UUID,
@@ -317,6 +325,7 @@ class GoogleImportClient(Protocol):
 class GoogleImports(Protocol):
     @property
     def configured(self) -> bool: ...
+    async def status(self, account_id: UUID) -> GoogleImportStatus: ...
     async def start(
         self, account_id: UUID, source: GoogleImportSource, horizon_days: int
     ) -> GoogleImportStart: ...
@@ -372,6 +381,9 @@ class GoogleImportService:
     @property
     def configured(self) -> bool:
         return True
+
+    async def status(self, account_id: UUID) -> GoogleImportStatus:
+        return GoogleImportStatus(True, await self._repository.last_checked(account_id))
 
     async def start(
         self, account_id: UUID, source: GoogleImportSource, horizon_days: int
@@ -558,6 +570,9 @@ class UnconfiguredGoogleImports:
     @property
     def configured(self) -> bool:
         return False
+
+    async def status(self, account_id: UUID) -> GoogleImportStatus:
+        return GoogleImportStatus(False, {})
 
     async def start(
         self, account_id: UUID, source: GoogleImportSource, horizon_days: int

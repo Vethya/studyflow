@@ -26,6 +26,7 @@ from studyflow.integrations.google_import import (
     GoogleImportProviderUnavailableError,
     GoogleImportSource,
     GoogleImportStart,
+    GoogleImportStatus,
     InvalidGoogleImportCallbackError,
     UnconfiguredGoogleImports,
     UnknownGoogleImportItemError,
@@ -74,6 +75,9 @@ class ImportsStub:
     @property
     def configured(self) -> bool:
         return True
+
+    async def status(self, account_id: UUID) -> GoogleImportStatus:
+        return GoogleImportStatus(True, {GoogleImportSource.CLASSROOM: NOW})
 
     async def start(
         self, account_id: UUID, source: GoogleImportSource, horizon_days: int
@@ -178,8 +182,16 @@ async def test_status_reports_configuration_and_requires_a_session() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as http:
         anonymous = await http.get(f"{BASE}/status")
 
-    assert configured.json() == {"configured": True}
-    assert unconfigured.json() == {"configured": False}
+    assert configured.json() == {
+        "configured": True,
+        "calendar_checked_at": None,
+        "classroom_checked_at": "2026-09-18T08:00:00Z",
+    }
+    assert unconfigured.json() == {
+        "configured": False,
+        "calendar_checked_at": None,
+        "classroom_checked_at": None,
+    }
     assert anonymous.status_code == 401
 
 

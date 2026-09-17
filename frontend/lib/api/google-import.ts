@@ -82,8 +82,24 @@ type WireGoogleImport =
   | { id: string; source: "google_calendar"; expires_at: string; items: WireCalendarItem[] }
   | { id: string; source: "google_classroom"; expires_at: string; items: WireClassroomItem[] };
 
-export async function getStatus(signal?: AbortSignal): Promise<{ configured: boolean }> {
-  return apiJson<{ configured: boolean }>("/integrations/google/status", { signal });
+export interface GoogleImportStatus {
+  configured: boolean;
+  /** When this student last asked Google for each source, if ever. */
+  calendarCheckedAt: string | null;
+  classroomCheckedAt: string | null;
+}
+
+export async function getStatus(signal?: AbortSignal): Promise<GoogleImportStatus> {
+  const wire = await apiJson<{
+    configured: boolean;
+    calendar_checked_at: string | null;
+    classroom_checked_at: string | null;
+  }>("/integrations/google/status", { signal });
+  return {
+    configured: wire.configured,
+    calendarCheckedAt: wire.calendar_checked_at,
+    classroomCheckedAt: wire.classroom_checked_at,
+  };
 }
 
 /** Starts a calendar import covering the next `horizonDays` days. */

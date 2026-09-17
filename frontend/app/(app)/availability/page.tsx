@@ -11,7 +11,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Callout } from "@/components/ui/callout";
-import { GoogleImportButton } from "@/components/google-import-button";
+import {
+  GoogleImportButton,
+  GoogleImportReminder,
+} from "@/components/google-import-button";
 import { Plus, Trash2, CalendarOff, Clock4, Loader2, Pencil, RefreshCw, X } from "lucide-react";
 import {
   EmptyState,
@@ -335,6 +338,8 @@ export default function AvailabilityPage() {
             : "You changed your study hours, so your current sessions may no longer be the best fit."}
         </Callout>
       )}
+
+      <GoogleImportReminder source="google_calendar" />
 
       <FigureRow>
         <Figure

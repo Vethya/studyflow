@@ -51,6 +51,9 @@ class GoogleImportError(BaseModel):
 
 class GoogleImportStatusResponse(BaseModel):
     configured: bool
+    """When the student last asked Google for each source, if ever."""
+    calendar_checked_at: datetime | None = None
+    classroom_checked_at: datetime | None = None
 
 
 class GoogleImportStartResponse(BaseModel):
@@ -176,7 +179,12 @@ async def get_google_import_status(
     principal: Annotated[SessionPrincipal, Depends(require_session)],
     imports: Annotated[GoogleImports, Depends(get_google_imports)],
 ) -> GoogleImportStatusResponse:
-    return GoogleImportStatusResponse(configured=imports.configured)
+    status_report = await imports.status(principal.account_id)
+    return GoogleImportStatusResponse(
+        configured=status_report.configured,
+        calendar_checked_at=status_report.last_checked.get(GoogleImportSource.CALENDAR),
+        classroom_checked_at=status_report.last_checked.get(GoogleImportSource.CLASSROOM),
+    )
 
 
 async def _start(
