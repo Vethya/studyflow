@@ -22,6 +22,8 @@ const PUBLIC_ROUTES = [
   "/forgot-password",
   "/reset-password",
   "/verify-email",
+  "/privacy",
+  "/terms",
 ] as const;
 
 const AUTHENTICATED_ROUTES = [
