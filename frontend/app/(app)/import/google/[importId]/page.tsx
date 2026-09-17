@@ -203,8 +203,12 @@ function CalendarReview({
             </Button>
           }
         >
-          {result.unchanged > 0 && `${result.unchanged} were already up to date. `}
-          {result.skippedPast > 0 && `${result.skippedPast} had already ended and were skipped. `}
+          {result.unchanged > 0 &&
+            `${result.unchanged} ${result.unchanged === 1 ? "was" : "were"} already up to date. `}
+          {result.skippedPast > 0 &&
+            `${result.skippedPast} had already ended and ${
+              result.skippedPast === 1 ? "was" : "were"
+            } skipped. `}
           The imported events are now blocked time, so StudyFlow will not plan study sessions
           during them.
         </Callout>
@@ -381,7 +385,11 @@ function ClassroomReview({
           }
         >
           {result.alreadyImported.length > 0 &&
-            `${result.alreadyImported.length} were already in StudyFlow and were left as they are. `}
+            `${result.alreadyImported.length} ${
+              result.alreadyImported.length === 1 ? "was" : "were"
+            } already in StudyFlow and left as ${
+              result.alreadyImported.length === 1 ? "it is" : "they are"
+            }. `}
           Generate a plan from the Calendar to schedule study time for the new tasks.
         </Callout>
         {result.failed.length > 0 && (
