@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Callout } from "@/components/ui/callout";
-import { account as accountApi } from "@/lib/api";
+import { ApiError, account as accountApi } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
 import { notifyStudyFlowSessionInvalidated } from "@/lib/data-events";
 import { formatOffset, withTimezone } from "@/lib/timezones";
@@ -439,6 +439,7 @@ export function AccountDeletionDialog({
   passwordSet,
   googleReady,
   onStartGoogle,
+  onGoogleChallengeExpired,
   onDeleted,
 }: {
   open: boolean;
@@ -446,6 +447,7 @@ export function AccountDeletionDialog({
   passwordSet: boolean;
   googleReady: boolean;
   onStartGoogle: () => Promise<void>;
+  onGoogleChallengeExpired: () => void;
   onDeleted: () => void;
 }) {
   const [currentPassword, setCurrentPassword] = React.useState("");
@@ -477,6 +479,9 @@ export function AccountDeletionDialog({
       toast.success("Account deleted successfully. Please sign in again.");
       onDeleted();
     } catch (cause) {
+      if (!passwordSet && googleReady && cause instanceof ApiError && cause.status === 400) {
+        onGoogleChallengeExpired();
+      }
       setError(describeError(cause));
       setSubmitting(false);
     }

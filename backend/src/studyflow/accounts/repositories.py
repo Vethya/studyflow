@@ -43,6 +43,18 @@ class SqlAlchemyAccountDeletionRepository:
             )
         return True
 
+    async def has_active_challenge(self, account_id: UUID, token_hash: str, now: datetime) -> bool:
+        async with self._database.transaction() as session:
+            challenge = await session.scalar(
+                select(AuthenticationAccountDeletionChallenge.id).where(
+                    AuthenticationAccountDeletionChallenge.account_id == account_id,
+                    AuthenticationAccountDeletionChallenge.token_hash == token_hash,
+                    AuthenticationAccountDeletionChallenge.consumed_at.is_(None),
+                    AuthenticationAccountDeletionChallenge.expires_at > now,
+                )
+            )
+            return challenge is not None
+
     async def delete_account(self, account_id: UUID, token_hash: str, now: datetime) -> bool:
         async with self._database.transaction() as session:
             challenge = await session.scalar(

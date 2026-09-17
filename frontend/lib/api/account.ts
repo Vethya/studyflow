@@ -69,6 +69,10 @@ export function prepareDeletion(currentPassword: string): Promise<void> {
   });
 }
 
+export function getDeletionStatus(signal?: AbortSignal): Promise<{ ready: boolean }> {
+  return apiJson<{ ready: boolean }>("/account/deletion/status", { signal });
+}
+
 export function confirmDeletion(): Promise<void> {
   return apiVoid("/account/deletion/confirm", {
     method: "POST",

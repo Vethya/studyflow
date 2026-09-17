@@ -652,6 +652,20 @@
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204 or expected account state error', () => pm.expect([204, 400, 401, 403, 429]).to.include(pm.response.code));"] } }]
         },
         {
+          "name": "Account Deletion Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/account/deletion/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "account", "deletion", "status"]
+            }
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
           "name": "Confirm Account Deletion",
           "request": {
             "method": "POST",

@@ -14,6 +14,10 @@ class AccountDeletionRepository(Protocol):
         self, account_id: UUID, token_hash: str, expires_at: datetime
     ) -> bool: ...
 
+    async def has_active_challenge(
+        self, account_id: UUID, token_hash: str, now: datetime
+    ) -> bool: ...
+
     async def delete_account(self, account_id: UUID, token_hash: str, now: datetime) -> bool: ...
 
 
@@ -23,6 +27,8 @@ class AccountPasswordVerifier(Protocol):
 
 class AccountDeletion(Protocol):
     async def prepare_with_password(self, account_id: UUID, password: str) -> str: ...
+
+    async def is_ready(self, account_id: UUID, challenge: str) -> bool: ...
 
     async def confirm(self, account_id: UUID, challenge: str) -> bool: ...
 
@@ -47,6 +53,13 @@ class AccountDeletionService:
 
     async def confirm(self, account_id: UUID, challenge: str) -> bool:
         return await self._repository.delete_account(
+            account_id,
+            _hash_challenge(challenge),
+            self._clock(),
+        )
+
+    async def is_ready(self, account_id: UUID, challenge: str) -> bool:
+        return await self._repository.has_active_challenge(
             account_id,
             _hash_challenge(challenge),
             self._clock(),

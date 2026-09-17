@@ -87,6 +87,10 @@ class AccountDeletionConfirmRequest(BaseModel):
     confirmation: Literal["DELETE"]
 
 
+class AccountDeletionStatusResponse(BaseModel):
+    ready: bool
+
+
 class LinkedIdentityResponse(BaseModel):
     provider: str
     email: EmailStr
@@ -380,6 +384,25 @@ async def prepare_account_deletion(
             detail="Current password is incorrect",
         ) from error
     get_cookie_policy(http_request).set_account_deletion(response, challenge)
+
+
+@router.get(
+    "/deletion/status",
+    response_model=AccountDeletionStatusResponse,
+    responses={status.HTTP_401_UNAUTHORIZED: {"model": AccountError}},
+)
+async def get_account_deletion_status(
+    response: Response,
+    http_request: Request,
+    principal: Annotated[SessionPrincipal, Depends(require_session)],
+    deletion: Annotated[AccountDeletion, Depends(get_account_deletion)],
+) -> AccountDeletionStatusResponse:
+    cookie_policy = get_cookie_policy(http_request)
+    challenge = http_request.cookies.get(cookie_policy.account_deletion_name)
+    ready = challenge is not None and await deletion.is_ready(principal.account_id, challenge)
+    if not ready and challenge is not None:
+        cookie_policy.clear_account_deletion(response)
+    return AccountDeletionStatusResponse(ready=ready)
 
 
 @router.post(

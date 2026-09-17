@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -81,11 +81,13 @@ function SettingsContent() {
   const loadProfile = useCallback((s: AbortSignal) => accountApi.getProfile(s), []);
   const loadPreferences = useCallback((s: AbortSignal) => accountApi.getPreferences(s), []);
   const loadIdentities = useCallback((s: AbortSignal) => accountApi.getLinkedIdentities(s), []);
-  const googleDeletionReady = searchParams.get("account-deletion") === "ready";
+  const deletionReadyFromRedirect = searchParams.get("account-deletion") === "ready";
+  const loadDeletionStatus = useCallback((s: AbortSignal) => accountApi.getDeletionStatus(s), []);
 
   const profile = useApi(loadProfile);
   const preferences = useApi(loadPreferences);
   const identities = useApi(loadIdentities);
+  const deletionStatus = useApi(loadDeletionStatus);
 
   const [nameOpen, setNameOpen] = useState(false);
   const [addPasswordOpen, setAddPasswordOpen] = useState(false);
@@ -93,7 +95,13 @@ function SettingsContent() {
   const [timezoneOpen, setTimezoneOpen] = useState(false);
   const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
   const [googleError, setGoogleError] = useState<string | null>(null);
-  const [deletionOpen, setDeletionOpen] = useState(googleDeletionReady);
+  const [deletionOpen, setDeletionOpen] = useState(false);
+
+  const googleDeletionReady = deletionStatus.data?.ready === true && !deletionStatus.isLoading;
+
+  useEffect(() => {
+    if (deletionReadyFromRedirect) router.replace("/settings");
+  }, [deletionReadyFromRedirect, router]);
 
   const google = (identities.data ?? []).find((identity) => identity.provider === "google");
   const zone = preferences.data?.timezone;
@@ -110,8 +118,14 @@ function SettingsContent() {
   }
 
   async function startGoogleAccountDeletion() {
+    deletionStatus.reload();
     const { authorization_url } = await auth.startGoogleAccountDeletion(zone ?? detectTimezone());
     window.location.assign(authorization_url);
+  }
+
+  function openDeletionDialog() {
+    setDeletionOpen(true);
+    deletionStatus.reload();
   }
 
   return (
@@ -249,7 +263,7 @@ function SettingsContent() {
           label="Delete your StudyFlow account"
           value="Permanently removes your profile, sign-in methods, and planning data."
         >
-          <Button variant="destructive" size="sm" onClick={() => setDeletionOpen(true)}>
+          <Button variant="destructive" size="sm" onClick={openDeletionDialog}>
             Delete account
           </Button>
         </Row>
@@ -286,6 +300,7 @@ function SettingsContent() {
         passwordSet={profile.data?.password_set ?? false}
         googleReady={googleDeletionReady}
         onStartGoogle={startGoogleAccountDeletion}
+        onGoogleChallengeExpired={deletionStatus.reload}
         onDeleted={() => {
           notifyStudyFlowSessionInvalidated();
           router.replace("/login");
