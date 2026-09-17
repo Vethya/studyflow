@@ -83,6 +83,11 @@ function LoginForm() {
 
   // Set by the app shell when it bounced an unauthenticated visitor.
   const nextPath = getSafeNextPath(searchParams.get("next"));
+  const successMessage = searchParams.has("registered")
+    ? "Your account is ready. Sign in to continue."
+    : searchParams.has("reset")
+      ? "Your password has been reset. Sign in with your new password."
+      : null;
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -131,6 +136,12 @@ function LoginForm() {
           Sign in to your StudyFlow account
         </p>
       </div>
+
+      {successMessage && (
+        <Alert>
+          <AlertDescription>{successMessage}</AlertDescription>
+        </Alert>
+      )}
 
       {error && (
         <Alert variant="destructive">
