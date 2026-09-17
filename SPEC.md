@@ -1068,14 +1068,15 @@ Evidence uses the data inventory, deletion tests, and cross-user ownership tests
 
 Zero-cost deployment:
 
-- Render Free for the Dockerized React/FastAPI service.
+- Vercel for the Next.js frontend, with `/api/v1` requests proxied to the backend.
+- Render Free for the Dockerized FastAPI backend.
 - Neon Free for managed PostgreSQL.
 
 Authentication-email provider selection remains an environment configuration choice rather than a product requirement.
 
 Known limitation:
 
-- Render Free sleeps after inactivity and can incur a cold start.
+- Render Free sleeps after inactivity, so the backend can incur a cold start.
 - Wake it before demonstrations.
 - Document the limitation.
 
