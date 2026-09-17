@@ -173,6 +173,32 @@ async def test_snapshots_are_owner_only_expiring_and_claimed_once(database: Data
 
 
 @pytest.mark.anyio
+async def test_asking_google_records_when_each_source_was_last_checked(
+    database: Database,
+) -> None:
+    repository = SqlAlchemyGoogleImportRepository(database, RecordingInvalidator())
+    later = NOW + timedelta(days=3)
+
+    assert await repository.last_checked(OWNER) == {}
+
+    await repository.store_snapshot(
+        OWNER, GoogleImportSource.CALENDAR, [], NOW, NOW + timedelta(minutes=30)
+    )
+    await repository.store_snapshot(
+        OWNER, GoogleImportSource.CLASSROOM, [], NOW, NOW + timedelta(minutes=30)
+    )
+    await repository.store_snapshot(
+        OWNER, GoogleImportSource.CALENDAR, [], later, later + timedelta(minutes=30)
+    )
+
+    assert await repository.last_checked(OWNER) == {
+        GoogleImportSource.CALENDAR: later,
+        GoogleImportSource.CLASSROOM: NOW,
+    }
+    assert await repository.last_checked(OTHER) == {}
+
+
+@pytest.mark.anyio
 async def test_calendar_import_creates_updates_and_skips_in_one_transaction(
     database: Database,
 ) -> None:

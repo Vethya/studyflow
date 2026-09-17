@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import {
   getImport,
+  getStatus,
   importClassroomItems,
   startCalendarImport,
   trustedGoogleUrl,
@@ -111,5 +112,24 @@ it("sends classroom selections in wire enums", async () => {
     items: [
       { id: "c".repeat(64), category: "research_writing", priority: "high", estimate_minutes: 90 },
     ],
+  });
+});
+
+it("maps the import status, including when Google was last checked", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json({
+        configured: true,
+        calendar_checked_at: null,
+        classroom_checked_at: "2026-09-12T08:00:00Z",
+      }),
+    ),
+  );
+
+  await expect(getStatus()).resolves.toEqual({
+    configured: true,
+    calendarCheckedAt: null,
+    classroomCheckedAt: "2026-09-12T08:00:00Z",
   });
 });

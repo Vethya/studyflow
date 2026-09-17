@@ -11,6 +11,7 @@ from studyflow.auth.repositories import SessionTransactions
 from studyflow.availability.repositories import FutureSessionInvalidator
 from studyflow.database.models import (
     AcademicTask,
+    GoogleImportCheck,
     GoogleImportSnapshot,
     GoogleImportState,
     StudentAccount,
@@ -43,6 +44,13 @@ class SqlAlchemyGoogleImportRepository:
             if account is None:
                 return None
             return GoogleImportAccount(account.email, account.timezone)
+
+    async def last_checked(self, account_id: UUID) -> dict[GoogleImportSource, datetime]:
+        async with self._database.transaction() as session:
+            rows = await session.scalars(
+                select(GoogleImportCheck).where(GoogleImportCheck.account_id == account_id)
+            )
+            return {GoogleImportSource(row.source): _aware(row.checked_at) for row in rows}
 
     async def store_state(
         self,
@@ -125,6 +133,15 @@ class SqlAlchemyGoogleImportRepository:
                 expires_at=expires_at,
             )
             session.add(row)
+            check = await session.get(
+                GoogleImportCheck, (account_id, source.value), with_for_update=True
+            )
+            if check is None:
+                session.add(
+                    GoogleImportCheck(account_id=account_id, source=source.value, checked_at=now)
+                )
+            else:
+                check.checked_at = now
             await session.flush()
             return row.id
 

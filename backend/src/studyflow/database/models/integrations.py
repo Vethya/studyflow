@@ -55,3 +55,21 @@ class GoogleImportSnapshot(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class GoogleImportCheck(Base):
+    """When a student last asked Google for this source's data.
+
+    Only the timestamp is kept, so StudyFlow can say "last checked six days
+    ago" without holding any Google access. A future background sync can hang
+    its own state off the same row.
+    """
+
+    __tablename__ = "google_import_checks"
+    __table_args__ = (CheckConstraint(f"source IN {GOOGLE_IMPORT_SOURCES}", name="source"),)
+
+    account_id: Mapped[UUID] = mapped_column(
+        ForeignKey("student_accounts.id", ondelete="CASCADE"), primary_key=True
+    )
+    source: Mapped[str] = mapped_column(String(32), primary_key=True)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

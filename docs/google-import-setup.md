@@ -12,6 +12,7 @@ app stays far below the free quotas.
 | | Google Calendar | Google Classroom |
 |---|---|---|
 | Starts from | Availability → **Import from Google Calendar** | Tasks → **Import from Google Classroom** |
+| Reminder | After three days, Availability shows "Last checked Google Calendar 5 days ago · Check again" | The same line on Tasks |
 | Reads | Events in the student's primary calendar for 2 weeks to 3 months | Active classes, published coursework, and the student's own submission state |
 | Creates | Blocked time (unavailable periods) for the events the student ticks | Tasks for the coursework the student ticks, with their own estimate |
 | Scopes | `calendar.events.readonly` | `classroom.courses.readonly`, `classroom.coursework.me.readonly` |
@@ -30,6 +31,18 @@ Security design, in short:
   becomes a task or blocked time until the student confirms, and each preview can be confirmed once.
 - The start endpoint needs a session and CSRF token and is rate-limited (10 per 15 minutes per
   account and IP). All data cascades on account deletion.
+- StudyFlow stores **when** each student last asked Google, so it can say "last checked five days
+  ago". That timestamp is the only lasting trace of an import besides what the student confirmed.
+
+## Imports are manual, not a background sync
+
+There is no automatic sync, by design: StudyFlow holds no Google token, Google expires an
+unverified app's access after seven days, and Classroom cannot say how long an assignment takes,
+which the student must decide. Instead, each page shows how long it has been since the last check
+and offers to check again. A repeat import marks anything already imported, so nothing is
+duplicated. A future background sync (Cloud Pub/Sub push, or a scheduled job) would need stored
+refresh tokens, a verified app, and a worker that stays awake; it can reuse the
+`google_import_checks` row this feature already keeps.
 
 ## 1. Enable the two APIs
 

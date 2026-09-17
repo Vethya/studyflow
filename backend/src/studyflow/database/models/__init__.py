@@ -12,7 +12,11 @@ from studyflow.database.models.authentication import (
     StudentAccount,
 )
 from studyflow.database.models.availability import AvailabilityWindow, UnavailablePeriod
-from studyflow.database.models.integrations import GoogleImportSnapshot, GoogleImportState
+from studyflow.database.models.integrations import (
+    GoogleImportCheck,
+    GoogleImportSnapshot,
+    GoogleImportState,
+)
 from studyflow.database.models.scheduling import (
     ProposalTaskAllocation,
     RecoverySnapshotOutcome,
@@ -42,6 +46,7 @@ __all__ = [
     "AuthenticationRegistration",
     "AuthenticationSession",
     "AvailabilityWindow",
+    "GoogleImportCheck",
     "GoogleImportSnapshot",
     "GoogleImportState",
     "ProposalTaskAllocation",

@@ -68,6 +68,9 @@ class FakeRepository:
             GoogleImportAccount("student@example.com", "UTC") if account_id == ACCOUNT_ID else None
         )
 
+    async def last_checked(self, account_id: UUID) -> dict[GoogleImportSource, datetime]:
+        return {GoogleImportSource.CALENDAR: NOW} if account_id == ACCOUNT_ID else {}
+
     async def store_state(self, *args: Any) -> None:
         self.stored_states.append(args)
 
@@ -214,6 +217,19 @@ def service(
         client,
         tasks,
     )
+
+
+@pytest.mark.anyio
+async def test_status_reports_configuration_and_the_last_check() -> None:
+    imports, _, _, _ = service()
+
+    configured = await imports.status(ACCOUNT_ID)
+    unconfigured = await UnconfiguredGoogleImports().status(ACCOUNT_ID)
+
+    assert configured.configured is True
+    assert configured.last_checked == {GoogleImportSource.CALENDAR: NOW}
+    assert unconfigured.configured is False
+    assert unconfigured.last_checked == {}
 
 
 @pytest.mark.anyio

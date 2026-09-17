@@ -376,7 +376,12 @@ export async function installNfr05ApiMocks(
     }
 
     if (path === "/api/v1/integrations/google/status" && method === "GET") {
-      await fulfillJson(route, { configured: true });
+      await fulfillJson(route, {
+        configured: true,
+        calendar_checked_at: null,
+        // Old enough that the "check again" reminder shows on Tasks.
+        classroom_checked_at: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString(),
+      });
       return;
     }
 

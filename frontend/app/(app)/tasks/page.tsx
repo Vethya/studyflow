@@ -38,7 +38,10 @@ import { toast } from "sonner";
 import { formatDuration, CATEGORY_CONFIG, STATUS_CONFIG } from "@/lib/constants";
 import { describeDeadline } from "@/lib/datetime";
 import { EmptyState, PageHeader, PageShell } from "@/components/page-kit";
-import { GoogleImportButton } from "@/components/google-import-button";
+import {
+  GoogleImportButton,
+  GoogleImportReminder,
+} from "@/components/google-import-button";
 import { cn } from "@/lib/utils";
 import { ApiError, tasks as tasksApi } from "@/lib/api";
 import { describeError, useApi } from "@/hooks/use-api";
@@ -206,6 +209,8 @@ export default function TasksPage() {
           {describeError(error)}
         </Callout>
       )}
+
+      <GoogleImportReminder source="google_classroom" />
 
       {/* ── Ledger: the controls and the list are one object ── */}
       {/* `py-0`: Card applies `py-(--card-spacing)` by default, which left a
