@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft, BookOpen } from "lucide-react";
 
-export const LEGAL_LAST_UPDATED = "17 September 2026";
+export const LEGAL_LAST_UPDATED = "18 September 2026";
 
 interface LegalPageProps {
   title: string;
