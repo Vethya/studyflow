@@ -32,6 +32,7 @@ export function SessionDrawer({
   task,
   open,
   onOpenChange,
+  onOpenChangeComplete,
   onEditTask,
   onDeleteTask,
   onRecordOutcome,
@@ -40,6 +41,7 @@ export function SessionDrawer({
   task: AcademicTask | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   onEditTask: () => void;
   onDeleteTask: () => void;
   onRecordOutcome: () => void;
@@ -64,6 +66,7 @@ export function SessionDrawer({
     <DetailDrawer
       open={open}
       onOpenChange={onOpenChange}
+      onOpenChangeComplete={onOpenChangeComplete}
       title={session.taskTitle}
       description={
         <>
