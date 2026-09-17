@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { useTheme } from "next-themes";
-import { Monitor, Moon, Sun } from "lucide-react";
+import { Monitor, Moon, MoonStar, Sun } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -16,6 +16,7 @@ const THEME_OPTIONS = [
   { value: "system", label: "System", Icon: Monitor },
   { value: "light", label: "Light", Icon: Sun },
   { value: "dark", label: "Dark", Icon: Moon },
+  { value: "amoled", label: "AMOLED", Icon: MoonStar },
 ] as const;
 
 type ThemeName = (typeof THEME_OPTIONS)[number]["value"];
@@ -48,7 +49,7 @@ export function ThemeSelector() {
       value={theme ?? "system"}
       onValueChange={(value) => value && setTheme(value as ThemeName)}
     >
-      <SelectTrigger className="w-28" aria-label="Theme">
+      <SelectTrigger className="w-32" aria-label="Theme">
         <SelectValue>
           {(selected) => {
             const option = THEME_OPTIONS.find(({ value }) => value === selected) ?? THEME_OPTIONS[0];

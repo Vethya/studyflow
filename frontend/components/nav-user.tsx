@@ -130,6 +130,10 @@ export function NavUser() {
                     <ThemeOptionIcon theme="dark" />
                     Dark
                   </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="amoled">
+                    <ThemeOptionIcon theme="amoled" />
+                    AMOLED
+                  </DropdownMenuRadioItem>
                 </DropdownMenuRadioGroup>
               </DropdownMenuSubContent>
             </DropdownMenuSub>

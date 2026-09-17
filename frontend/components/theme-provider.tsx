@@ -10,6 +10,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       enableColorScheme
       enableSystem
       disableTransitionOnChange
+      themes={["light", "dark", "amoled"]}
       storageKey="studyflow-theme"
     >
       {children}

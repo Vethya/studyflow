@@ -276,7 +276,7 @@ function SettingsContent() {
       <Section icon={Palette} title="Appearance">
         <Row
           label="Theme"
-          value="Choose light mode, dark mode, or follow your device."
+          value="Choose light mode, dark mode, AMOLED black mode, or follow your device."
         >
           <ThemeSelector />
         </Row>
