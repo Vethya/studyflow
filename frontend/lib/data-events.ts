@@ -1,9 +1,18 @@
-/** Broadcasts data changes made by WebMCP so mounted screens can refresh. */
+/** Broadcasts successful data mutations so mounted screens can revalidate. */
 export const STUDYFLOW_DATA_CHANGED_EVENT = "studyflow:data-changed";
 
-export function notifyStudyFlowDataChanged(): void {
+export interface StudyFlowDataChangedDetail {
+  path: string;
+  method: string;
+}
+
+export function notifyStudyFlowDataChanged(path?: string, method?: string): void {
   if (typeof window !== "undefined") {
-    window.dispatchEvent(new Event(STUDYFLOW_DATA_CHANGED_EVENT));
+    const detail =
+      path && method
+        ? ({ path, method } satisfies StudyFlowDataChangedDetail)
+        : undefined;
+    window.dispatchEvent(new CustomEvent(STUDYFLOW_DATA_CHANGED_EVENT, { detail }));
   }
 }
 

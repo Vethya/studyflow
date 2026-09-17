@@ -8,7 +8,10 @@
  * each caller.
  */
 
-import { notifyStudyFlowSessionInvalidated } from "@/lib/data-events";
+import {
+  notifyStudyFlowDataChanged,
+  notifyStudyFlowSessionInvalidated,
+} from "@/lib/data-events";
 
 export const API_BASE = "/api/v1";
 
@@ -112,6 +115,8 @@ interface RequestOptions {
   /** Set false for endpoints that must not carry the CSRF header (login, register). */
   csrf?: boolean;
   signal?: AbortSignal;
+  /** Set false for POST endpoints that only calculate a non-persisted result. */
+  notifyDataChanged?: boolean;
 }
 
 async function request(path: string, options: RequestOptions = {}): Promise<Response> {
@@ -152,6 +157,14 @@ async function request(path: string, options: RequestOptions = {}): Promise<Resp
       retryAfter ? Number(retryAfter) : null,
       detail.code,
     );
+  }
+
+  if (
+    MUTATING_METHODS.has(method) &&
+    !path.startsWith("/auth/") &&
+    options.notifyDataChanged !== false
+  ) {
+    notifyStudyFlowDataChanged(path, method);
   }
 
   return response;

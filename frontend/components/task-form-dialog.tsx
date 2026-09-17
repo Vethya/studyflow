@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import useSWR from "swr";
 import {
   Dialog,
   DialogContent,
@@ -34,6 +35,7 @@ import {
   resolvePreviewSelection,
 } from "@/lib/api/adaptive-contract";
 import type { AdaptiveEstimate } from "@/types/progress";
+import { adaptiveEstimateKey } from "@/lib/swr-keys";
 
 interface TaskFormDialogProps {
   open: boolean;
@@ -68,13 +70,12 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
    * duration. The explanation is always shown; the acknowledgment dialog only
    * blocks the first time a category swings beyond 2× or below 0.5×.
    */
-  const [estimate, setEstimate] = useState<AdaptiveEstimate | null>(null);
   /** Whether the current category/original pair may adopt a preview default. */
   const [applyPreviewDefault, setApplyPreviewDefault] = useState(true);
   const [ackOpen, setAckOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [previewRevision, setPreviewRevision] = useState(0);
+  const previewControllerRef = useRef<AbortController | null>(null);
 
   const isEditing = Boolean(task);
   const estimateFrozen = task?.estimateFrozen === true;
@@ -88,7 +89,6 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
   if (open && (session.open !== open || session.task !== task)) {
     setSession({ open, task });
     setError(null);
-    setEstimate(null);
     setAckOpen(false);
     setApplyPreviewDefault(!task);
     setForm(
@@ -109,22 +109,38 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
     setSession({ open: false });
   }
 
-  useEffect(() => {
-    if (!open || estimateFrozen) return;
+  const previewMinutes = Number(form.originalEstimate);
+  const previewKey =
+    open && !estimateFrozen && previewMinutes > 0
+      ? adaptiveEstimateKey(form.category, previewMinutes)
+      : null;
+  const previewFetcher = useCallback(() => {
+    previewControllerRef.current?.abort();
     const controller = new AbortController();
-    const minutes = Number(form.originalEstimate);
-
-    // Resolve rather than branch so both preview outcomes use the same stale
-    // response guard below.
-    const request =
-      minutes > 0
-        ? scheduling.getAdaptiveEstimate(form.category, minutes, controller.signal)
-        : Promise.resolve(null);
-
-    request
-      .then((next) => {
-        if (controller.signal.aborted) return;
-        setEstimate(next);
+    previewControllerRef.current = controller;
+    return scheduling
+      .getAdaptiveEstimate(form.category, previewMinutes, controller.signal)
+      .finally(() => {
+        if (previewControllerRef.current === controller) previewControllerRef.current = null;
+      });
+  }, [form.category, previewMinutes]);
+  useEffect(() => {
+    if (!previewKey) previewControllerRef.current?.abort();
+  }, [previewKey]);
+  useEffect(() => () => previewControllerRef.current?.abort(), []);
+  const {
+    data: preview,
+    error: previewError,
+    mutate: mutatePreview,
+  } = useSWR<AdaptiveEstimate | null>(
+    previewKey,
+    previewFetcher,
+    {
+      dedupingInterval: 0,
+      revalidateOnFocus: false,
+      shouldRetryOnError: false,
+      onSuccess: (next) => {
+        if (!open || estimateFrozen) return;
         // Existing tasks keep their explicit source. A fresh or deliberately
         // changed category/original pair may adopt the safe preview default.
         setForm((current) => ({
@@ -136,24 +152,10 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
             applyPreviewDefault,
           ),
         }));
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) {
-          setEstimate(null);
-          setForm((current) => ({
-            ...current,
-            ...resolvePreviewSelection(
-              current.originalEstimate,
-              null,
-              current.plannedSource,
-              applyPreviewDefault,
-            ),
-          }));
-        }
-      });
-
-    return () => controller.abort();
-  }, [open, form.category, form.originalEstimate, applyPreviewDefault, estimateFrozen, previewRevision]);
+      },
+    },
+  );
+  const estimate = previewError ? null : preview ?? null;
 
   function chooseEstimate(which: "original" | "adaptive") {
     const action = resolveEstimateChoiceAction(form.originalEstimate, estimate, which);
@@ -208,11 +210,10 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409 && cause.code === "adaptive_estimate_conflict") {
         setError(cause.detail);
-        setEstimate(null);
         setAckOpen(false);
         setApplyPreviewDefault(false);
         setForm((current) => ({ ...current, plannedSource: "Original" }));
-        setPreviewRevision((current) => current + 1);
+        void mutatePreview(undefined, { revalidate: true });
       } else if (cause instanceof ApiError && cause.status === 409) {
         setError(cause.detail);
       } else {
@@ -260,7 +261,6 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
                 value={form.category}
                 onValueChange={(v) => {
                   if (!v) return;
-                  setEstimate(null);
                   setApplyPreviewDefault(true);
                   setForm({ ...form, category: v as Category, plannedSource: estimateFrozen ? form.plannedSource : "Original" });
                 }}
@@ -318,7 +318,6 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
                 min={1}
                 value={form.originalEstimate}
                 onChange={(e) => {
-                  setEstimate(null);
                   setApplyPreviewDefault(true);
                   setForm({
                     ...form,
@@ -405,8 +404,9 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
         onOpenChange={setAckOpen}
         onDecided={(which) => {
           setApplyPreviewDefault(false);
-          setEstimate((current) =>
-            current ? { ...current, needsAcknowledgment: false } : current,
+          void mutatePreview(
+            (current) => (current ? { ...current, needsAcknowledgment: false } : current),
+            { revalidate: false },
           );
           setForm((current) => ({
             ...current,

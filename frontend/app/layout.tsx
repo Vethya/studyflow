@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { SessionProvider } from "@/hooks/use-session";
 import { ThemeProvider } from "@/components/theme-provider";
+import { StudyFlowSWRProvider } from "@/components/swr-provider";
 import "./globals.css";
 
 const inter = Inter({
@@ -48,12 +49,14 @@ export default function RootLayout({
     >
       <body className="min-h-full font-sans antialiased">
         <ThemeProvider>
-          <SessionProvider>
-            <TooltipProvider>
-              {children}
-              <Toaster position="bottom-right" richColors />
-            </TooltipProvider>
-          </SessionProvider>
+          <StudyFlowSWRProvider>
+            <SessionProvider>
+              <TooltipProvider>
+                {children}
+                <Toaster position="bottom-right" richColors />
+              </TooltipProvider>
+            </SessionProvider>
+          </StudyFlowSWRProvider>
         </ThemeProvider>
       </body>
     </html>

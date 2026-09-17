@@ -49,6 +49,7 @@ import { UnscheduledWorkList } from "@/components/unscheduled-work-list";
 import type { AcademicTask } from "@/types/task";
 import type { StudySession } from "@/types/session";
 import type { ScheduleProposal } from "@/types/schedule";
+import { activeScheduleKey, SWR_KEYS } from "@/lib/swr-keys";
 
 const DEFAULT_RANGE = { start: 8, end: 22 };
 
@@ -85,14 +86,20 @@ export default function CalendarPage() {
   const loadTasks = useCallback((s: AbortSignal) => tasksApi.listTasks({}, s), []);
   const loadWindows = useCallback((s: AbortSignal) => availabilityApi.listWindows(s), []);
   const loadPeriods = useCallback((s: AbortSignal) => availabilityApi.listUnavailablePeriods(s), []);
-  const loadSchedule = useCallback((s: AbortSignal) => scheduling.getActiveSchedule(s), []);
   const loadRevision = useCallback((s: AbortSignal) => scheduling.getPendingRevision(s), []);
 
-  const tasks = useApi(loadTasks);
-  const windows = useApi(loadWindows);
-  const periods = useApi(loadPeriods);
-  const schedule = useApi(loadSchedule);
-  const revision = useApi(loadRevision);
+  const tasks = useApi(SWR_KEYS.tasks, loadTasks);
+  const loadSchedule = useCallback(
+    (s: AbortSignal) => scheduling.getActiveSchedule(s, tasks.data ?? []),
+    [tasks.data],
+  );
+  const windows = useApi(SWR_KEYS.availabilityWindows, loadWindows);
+  const periods = useApi(SWR_KEYS.unavailablePeriods, loadPeriods);
+  const schedule = useApi(
+    activeScheduleKey(tasks.data),
+    loadSchedule,
+  );
+  const revision = useApi(SWR_KEYS.pendingRevision, loadRevision);
 
   const isLoading =
     tasks.isLoading || windows.isLoading || periods.isLoading || schedule.isLoading;
@@ -643,11 +650,9 @@ export default function CalendarPage() {
         onOpenChange={setPreviewOpen}
         onAccepted={() => {
           setProposal(null);
-          refreshAll();
         }}
         onRejected={() => {
           setProposal(null);
-          revision.reload();
         }}
       />
 
@@ -656,7 +661,6 @@ export default function CalendarPage() {
         onOpenChange={setDialogOpen}
         task={editingTask}
         onSaved={(task) => {
-          tasks.reload();
           setEditingTask(null);
           toast.success(editingTask ? "Task updated" : "Task added");
           void task;
@@ -675,7 +679,6 @@ export default function CalendarPage() {
           try {
             await tasksApi.deleteTask(confirmDelete.id);
             toast.success("Task deleted");
-            refreshAll();
           } catch (cause) {
             toast.error(describeError(cause));
           } finally {
