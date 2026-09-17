@@ -138,12 +138,13 @@ export default function AvailabilityPage() {
    */
   async function saveWindows(next: WindowDraft[]) {
     const saved = await availabilityApi.replaceWindows(next);
-    windows.setData(saved);
+    windows.setData(saved.windows);
+    return saved;
   }
 
   async function handleAddWindow(draft: WindowDraft) {
-    await saveWindows([...toDraft(), draft]);
-    setInvalidatedCount((count) => count || 0);
+    const saved = await saveWindows([...toDraft(), draft]);
+    setInvalidatedCount(saved.invalidatedFutureSessionIds.length);
     setPlanStale(true);
     toast.success("Window added");
   }
@@ -151,11 +152,12 @@ export default function AvailabilityPage() {
   async function handleDeleteWindow(id: string) {
     setPendingId(id);
     try {
-      await saveWindows(
+      const saved = await saveWindows(
         allWindows
           .filter((w) => w.id !== id)
           .map((w) => ({ dayOfWeek: w.dayOfWeek, startTime: w.startTime, endTime: w.endTime })),
       );
+      setInvalidatedCount(saved.invalidatedFutureSessionIds.length);
       setPlanStale(true);
       toast.success("Window removed");
     } catch (cause) {
