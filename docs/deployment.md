@@ -67,6 +67,8 @@ URL, and TLS for email delivery.
    - `Production`: `studyflow-api` from `master` (this name intentionally matches the existing service)
    - `dev`: `studyflow-api-dev` from `dev`
    Each service uses Docker, the free plan, a health check, and its own environment variables.
+   Render checks `/api/v1/health`, which does not access PostgreSQL. Use `/api/v1/ready` separately
+   when you need to verify database connectivity.
    The Dockerfile `CMD` applies migrations (`alembic upgrade head`) before launching Uvicorn because
    pre-deploy commands require a paid plan. The Blueprint leaves `dockerCommand` unset so Render
    uses that `CMD` without reparsing its shell quoting. `alembic upgrade head` is idempotent, so the

@@ -107,8 +107,10 @@ def test_blueprint_does_not_rely_on_paid_plan_features() -> None:
     assert "preDeployCommand" not in service()
 
 
-def test_blueprint_checks_database_readiness_as_its_health_check() -> None:
-    assert service()["healthCheckPath"] == "/api/v1/ready"
+def test_blueprint_uses_the_database_free_liveness_endpoint_as_its_health_check() -> None:
+    assert {service_config["healthCheckPath"] for service_config in services()} == {
+        "/api/v1/health"
+    }
 
 
 def test_blueprint_runs_in_production_with_proxy_headers_trusted() -> None:
