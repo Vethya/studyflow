@@ -95,9 +95,11 @@ function SettingsContent() {
   const [timezoneOpen, setTimezoneOpen] = useState(false);
   const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
   const [googleError, setGoogleError] = useState<string | null>(null);
-  const [deletionOpen, setDeletionOpen] = useState(false);
+  const [deletionOpen, setDeletionOpen] = useState(deletionReadyFromRedirect);
 
   const googleDeletionReady = deletionStatus.data?.ready === true && !deletionStatus.isLoading;
+  const deletionProfileReady =
+    profile.data !== null && !profile.isLoading && profile.error === null;
 
   useEffect(() => {
     if (deletionReadyFromRedirect) router.replace("/settings");
@@ -124,6 +126,7 @@ function SettingsContent() {
   }
 
   function openDeletionDialog() {
+    if (!deletionProfileReady) return;
     setDeletionOpen(true);
     deletionStatus.reload();
   }
@@ -263,7 +266,12 @@ function SettingsContent() {
           label="Delete your StudyFlow account"
           value="Permanently removes your profile, sign-in methods, and planning data."
         >
-          <Button variant="destructive" size="sm" onClick={openDeletionDialog}>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={openDeletionDialog}
+            disabled={!deletionProfileReady}
+          >
             Delete account
           </Button>
         </Row>
@@ -297,7 +305,7 @@ function SettingsContent() {
       <AccountDeletionDialog
         open={deletionOpen}
         onOpenChange={setDeletionOpen}
-        passwordSet={profile.data?.password_set ?? false}
+        passwordSet={profile.data?.password_set ?? null}
         googleReady={googleDeletionReady}
         onStartGoogle={startGoogleAccountDeletion}
         onGoogleChallengeExpired={deletionStatus.reload}

@@ -444,7 +444,7 @@ export function AccountDeletionDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  passwordSet: boolean;
+  passwordSet: boolean | null;
   googleReady: boolean;
   onStartGoogle: () => Promise<void>;
   onGoogleChallengeExpired: () => void;
@@ -465,7 +465,7 @@ export function AccountDeletionDialog({
     }
   }
 
-  const canContinue = confirmation === "DELETE" && !isSubmitting;
+  const canContinue = passwordSet !== null && confirmation === "DELETE" && !isSubmitting;
 
   async function submit() {
     if (!canContinue) return;
@@ -512,7 +512,9 @@ export function AccountDeletionDialog({
         <div className="space-y-3">
           {error && <Callout tone="danger">{error}</Callout>}
 
-          {passwordSet ? (
+          {passwordSet === null ? (
+            <Callout tone="warning">Loading your account details before deletion.</Callout>
+          ) : passwordSet ? (
             <div className="space-y-1.5">
               <Label htmlFor="delete-account-password" className="eyebrow">
                 Current password
@@ -553,7 +555,11 @@ export function AccountDeletionDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
             Cancel
           </Button>
-          {!passwordSet && !googleReady ? (
+          {passwordSet === null ? (
+            <Button variant="destructive" disabled>
+              Loading account details
+            </Button>
+          ) : !passwordSet && !googleReady ? (
             <Button
               variant="destructive"
               onClick={() => void startGoogle()}
