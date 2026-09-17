@@ -12,6 +12,7 @@ export interface SessionAccount {
   id: string;
   email: string;
   name: string;
+  avatarUrl?: string;
 }
 
 type SessionStatus = "loading" | "authenticated" | "unauthenticated";
@@ -53,7 +54,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       .getSession()
       .then(({ account: current }) => {
         if (!active || generation !== sessionRequestGeneration.current) return;
-        setAccountState(current);
+        setAccountState({ ...current, avatarUrl: current.avatar_url });
         setStatus("authenticated");
       })
       .catch(() => {
@@ -73,7 +74,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     try {
       const { account: current } = await auth.getSession();
       if (generation !== sessionRequestGeneration.current) return;
-      setAccountState(current);
+      setAccountState({ ...current, avatarUrl: current.avatar_url });
       setStatus("authenticated");
     } catch (error) {
       if (generation !== sessionRequestGeneration.current) return;

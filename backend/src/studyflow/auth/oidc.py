@@ -8,7 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, cast
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from uuid import UUID
 
 import httpx
@@ -67,6 +67,7 @@ class GoogleClaims:
     email: str
     name: str
     auth_time: int | None = None
+    picture_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +75,7 @@ class OIDCAccount:
     id: UUID
     email: str
     name: str
+    avatar_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +92,7 @@ class OIDCLoginResult:
     session_token: str
     csrf_token: str
     link_completed: bool = False
+    avatar_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +110,7 @@ class OIDCLinkChallenge:
     subject: str
     email: str
     password_hash: str
+    picture_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,6 +305,7 @@ class OIDCLoginService:
                 credentials.session_token,
                 credentials.csrf_token,
                 link_completed=True,
+                avatar_url=account.avatar_url,
             )
         account = await self._repository.resolve_identity(claims, state_record.timezone)
         if account is None:
@@ -321,6 +326,7 @@ class OIDCLoginService:
             account.name,
             credentials.session_token,
             credentials.csrf_token,
+            avatar_url=account.avatar_url,
         )
 
 
@@ -437,13 +443,32 @@ class GoogleOIDCProvider:
             raise InvalidOIDCResponseError from error
         raw_name = claims.get("name")
         name = raw_name.strip()[:200] if isinstance(raw_name, str) else ""
+        picture_url = _validated_picture_url(claims.get("picture"))
         raw_auth_time = claims.get("auth_time")
         auth_time = (
             raw_auth_time
             if isinstance(raw_auth_time, int) and not isinstance(raw_auth_time, bool)
             else None
         )
-        return GoogleClaims(subject, email, name or email.partition("@")[0], auth_time)
+        return GoogleClaims(
+            subject,
+            email,
+            name or email.partition("@")[0],
+            auth_time=auth_time,
+            picture_url=picture_url,
+        )
+
+
+def _validated_picture_url(raw_picture: Any) -> str | None:
+    if not isinstance(raw_picture, str):
+        return None
+    picture_url = raw_picture.strip()
+    if not picture_url or len(picture_url) > 2048:
+        return None
+    parsed = urlsplit(picture_url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        return None
+    return picture_url
 
 
 def _has_recent_authentication(auth_time: int | None, now: datetime) -> bool:

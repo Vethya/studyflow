@@ -36,6 +36,7 @@ class AccountProfileResponse(BaseModel):
     email: EmailStr
     name: str
     password_set: bool
+    avatar_url: str | None = None
 
 
 class AccountProfileUpdate(BaseModel):
@@ -178,6 +179,7 @@ def _response(profile: AccountProfile) -> AccountProfileResponse:
         email=profile.email,
         name=profile.name,
         password_set=profile.password_set,
+        avatar_url=profile.avatar_url,
     )
 
 
@@ -193,6 +195,7 @@ def _preferences_response(preferences: StudyPreferences) -> StudyPreferencesResp
 @router.get(
     "/profile",
     response_model=AccountProfileResponse,
+    response_model_exclude_none=True,
     responses={status.HTTP_401_UNAUTHORIZED: {"model": AccountError}},
 )
 async def get_profile(
@@ -208,6 +211,7 @@ async def get_profile(
 @router.patch(
     "/profile",
     response_model=AccountProfileResponse,
+    response_model_exclude_none=True,
     responses={
         status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
         status.HTTP_403_FORBIDDEN: {"model": AccountError},

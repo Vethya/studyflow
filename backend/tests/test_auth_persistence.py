@@ -22,6 +22,7 @@ def test_student_account_persists_identity_and_planning_defaults() -> None:
         "id",
         "email",
         "name",
+        "avatar_url",
         "password_hash",
         "email_verified_at",
         "timezone",
