@@ -23,6 +23,35 @@ const GoogleIcon = () => (
   </svg>
 );
 
+const SAFE_NEXT_PATHS = [
+  "/dashboard",
+  "/tasks",
+  "/calendar",
+  "/availability",
+  "/progress",
+  "/settings",
+];
+
+function getSafeNextPath(candidate: string | null): string {
+  if (!candidate || !candidate.startsWith("/") || candidate.startsWith("//")) {
+    return "/dashboard";
+  }
+
+  try {
+    const parsed = new URL(candidate, "https://studyflow.invalid");
+    const path = parsed.pathname;
+    const allowed = SAFE_NEXT_PATHS.some(
+      (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+    );
+    if (parsed.origin !== "https://studyflow.invalid" || !allowed || candidate.includes("\\")) {
+      return "/dashboard";
+    }
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return "/dashboard";
+  }
+}
+
 // `useSearchParams` suspends during prerendering, so the form lives in a child
 // component behind a boundary.
 export default function LoginPage() {
@@ -53,7 +82,7 @@ function LoginForm() {
   const [isRedirecting, setIsRedirecting] = useState(false);
 
   // Set by the app shell when it bounced an unauthenticated visitor.
-  const nextPath = searchParams.get("next") ?? "/dashboard";
+  const nextPath = getSafeNextPath(searchParams.get("next"));
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
