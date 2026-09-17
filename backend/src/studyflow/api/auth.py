@@ -29,6 +29,8 @@ from studyflow.auth.login import (
     LoginCommand,
 )
 from studyflow.auth.oidc import (
+    AccountDeletionOIDC,
+    AccountDeletionReadyError,
     AccountLinkRequiredError,
     InvalidLinkChallengeError,
     InvalidOIDCResponseError,
@@ -215,6 +217,10 @@ def get_oidc_login(request: Request) -> OIDCLogin:
     return cast(OIDCLogin, request.app.state.oidc_login)
 
 
+def get_account_deletion_oidc(request: Request) -> AccountDeletionOIDC:
+    return cast(AccountDeletionOIDC, request.app.state.oidc_login)
+
+
 def get_oidc_start_rate_limit(request: Request) -> OIDCStartRateLimit:
     return cast(OIDCStartRateLimit, request.app.state.oidc_start_rate_limiter)
 
@@ -287,8 +293,15 @@ async def handle_google_callback_validation_error(request: Request, error: Excep
     if not isinstance(error, RequestValidationError):
         raise error
     if request.url.path == "/api/v1/auth/google/callback" and _wants_html(request):
-        response = _browser_redirect(request, "/login/google-error/invalid")
-        get_cookie_policy(request).clear_oidc_state(response)
+        cookie_policy = get_cookie_policy(request)
+        deletion_flow = request.cookies.get(cookie_policy.account_deletion_intent_name) is not None
+        destination = (
+            "/settings?account-deletion=error" if deletion_flow else "/login/google-error/invalid"
+        )
+        response = _browser_redirect(request, destination)
+        cookie_policy.clear_oidc_state(response)
+        if deletion_flow:
+            cookie_policy.clear_account_deletion_intent(response)
         return response
     return await request_validation_exception_handler(request, error)
 
@@ -403,7 +416,9 @@ async def start_google_oidc(
         ) from error
     except OIDCNotConfiguredError as error:
         raise HTTPException(status_code=503, detail="Google sign-in is not configured") from error
-    get_cookie_policy(http_request).set_oidc_state(response, started.state)
+    cookie_policy = get_cookie_policy(http_request)
+    cookie_policy.clear_account_deletion_intent(response)
+    cookie_policy.set_oidc_state(response, started.state)
     return OIDCStartResponse(authorization_url=started.authorization_url)
 
 
@@ -436,7 +451,45 @@ async def start_google_link_oidc(
         ) from error
     except OIDCNotConfiguredError as error:
         raise HTTPException(status_code=503, detail="Google sign-in is not configured") from error
-    get_cookie_policy(http_request).set_oidc_state(response, started.state)
+    cookie_policy = get_cookie_policy(http_request)
+    cookie_policy.clear_account_deletion_intent(response)
+    cookie_policy.set_oidc_state(response, started.state)
+    return OIDCStartResponse(authorization_url=started.authorization_url)
+
+
+@router.post(
+    "/google/account-deletion/start",
+    response_model=OIDCStartResponse,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AuthenticationError},
+        status.HTTP_403_FORBIDDEN: {"model": AuthenticationError},
+        status.HTTP_429_TOO_MANY_REQUESTS: {"model": AuthenticationError},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": AuthenticationError},
+    },
+)
+async def start_google_account_deletion(
+    payload: GoogleStartRequest,
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    response: Response,
+    http_request: Request,
+    oidc: Annotated[AccountDeletionOIDC, Depends(get_account_deletion_oidc)],
+    rate_limit: Annotated[OIDCStartRateLimit, Depends(get_oidc_start_rate_limit)],
+) -> OIDCStartResponse:
+    try:
+        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        await rate_limit.check(client_ip)
+        started = await oidc.start_account_deletion(principal.account_id, payload.timezone)
+    except OIDCStartRateLimitExceeded as error:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many account deletion attempts",
+            headers={"Retry-After": "900"},
+        ) from error
+    except OIDCNotConfiguredError as error:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured") from error
+    cookie_policy = get_cookie_policy(http_request)
+    cookie_policy.set_oidc_state(response, started.state)
+    cookie_policy.set_account_deletion_intent(response)
     return OIDCStartResponse(authorization_url=started.authorization_url)
 
 
@@ -473,10 +526,33 @@ async def complete_google_oidc(
     cookie_policy = get_cookie_policy(http_request)
     browser_flow = _wants_html(http_request)
     state_cookie = http_request.cookies.get(cookie_policy.oidc_state_name)
+    deletion_flow = http_request.cookies.get(cookie_policy.account_deletion_intent_name) is not None
     try:
         if error is not None or code is None or state_cookie is None:
+            if deletion_flow and browser_flow:
+                outcome = "cancelled" if error == "access_denied" else "error"
+                redirect = _browser_redirect(http_request, f"/settings?account-deletion={outcome}")
+                cookie_policy.clear_oidc_state(redirect)
+                cookie_policy.clear_account_deletion_intent(redirect)
+                return redirect
             raise InvalidOIDCResponseError
         result = await oidc.complete(code, state, state_cookie)
+    except AccountDeletionReadyError as deletion_error:
+        if browser_flow:
+            redirect = _browser_redirect(http_request, "/settings?account-deletion=ready")
+            cookie_policy.clear_oidc_state(redirect)
+            cookie_policy.clear_account_deletion_intent(redirect)
+            cookie_policy.set_account_deletion(redirect, deletion_error.challenge)
+            return redirect
+        ready_response = JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"detail": "Google reauthentication completed"},
+            headers={"Cache-Control": "no-store", "Vary": "Accept"},
+        )
+        cookie_policy.clear_oidc_state(ready_response)
+        cookie_policy.clear_account_deletion_intent(ready_response)
+        cookie_policy.set_account_deletion(ready_response, deletion_error.challenge)
+        return ready_response
     except AccountLinkRequiredError as link_error:
         if browser_flow:
             redirect = _browser_redirect(http_request, "/login/google-link")
@@ -486,6 +562,11 @@ async def complete_google_oidc(
         return _oidc_link_required_response(link_error.challenge, cookie_policy)
     except OIDCProviderUnavailableError as provider_error:
         if browser_flow:
+            if deletion_flow:
+                redirect = _browser_redirect(http_request, "/settings?account-deletion=error")
+                cookie_policy.clear_oidc_state(redirect)
+                cookie_policy.clear_account_deletion_intent(redirect)
+                return redirect
             redirect = _browser_redirect(
                 http_request, "/login/google-error/provider-unavailable", retry_after="60"
             )
@@ -494,6 +575,11 @@ async def complete_google_oidc(
         return _oidc_provider_unavailable_response(provider_error, cookie_policy)
     except InvalidOIDCResponseError:
         if browser_flow:
+            if deletion_flow:
+                redirect = _browser_redirect(http_request, "/settings?account-deletion=error")
+                cookie_policy.clear_oidc_state(redirect)
+                cookie_policy.clear_account_deletion_intent(redirect)
+                return redirect
             outcome = "denied" if error == "access_denied" else "invalid"
             redirect = _browser_redirect(http_request, f"/login/google-error/{outcome}")
             cookie_policy.clear_oidc_state(redirect)
@@ -501,6 +587,11 @@ async def complete_google_oidc(
         return _oidc_error_response(400, "Google sign-in could not be completed", cookie_policy)
     except OIDCNotConfiguredError:
         if browser_flow:
+            if deletion_flow:
+                redirect = _browser_redirect(http_request, "/settings?account-deletion=error")
+                cookie_policy.clear_oidc_state(redirect)
+                cookie_policy.clear_account_deletion_intent(redirect)
+                return redirect
             redirect = _browser_redirect(http_request, "/login/google-error/not-configured")
             cookie_policy.clear_oidc_state(redirect)
             return redirect
@@ -509,9 +600,11 @@ async def complete_google_oidc(
         destination = "/settings" if result.link_completed else "/app"
         redirect = _browser_redirect(http_request, destination)
         cookie_policy.clear_oidc_state(redirect)
+        cookie_policy.clear_account_deletion_intent(redirect)
         cookie_policy.set_authentication(redirect, result.session_token, result.csrf_token)
         return redirect
     cookie_policy.clear_oidc_state(response)
+    cookie_policy.clear_account_deletion_intent(response)
     cookie_policy.set_authentication(response, result.session_token, result.csrf_token)
     return LoginResponse(
         account=AuthenticatedAccount(

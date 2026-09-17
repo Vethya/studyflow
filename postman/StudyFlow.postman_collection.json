@@ -180,6 +180,18 @@
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200 or unauthenticated', () => pm.expect([200, 401, 403]).to.include(pm.response.code));"] } }]
         },
         {
+          "name": "Start Google Account Deletion Reauthentication",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"timezone\": \"Asia/Phnom_Penh\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/auth/google/account-deletion/start", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "google", "account-deletion", "start"] },
+            "description": "Starts fresh Google reauthentication for a passwordless account deletion request."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200 or unauthenticated', () => pm.expect([200, 401, 403, 429, 503]).to.include(pm.response.code));"] } }]
+        },
+        {
           "name": "Complete Google OIDC",
           "request": {
             "method": "GET",
@@ -615,6 +627,66 @@
           },
           "response": [],
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
+        },
+        {
+          "name": "Prepare Account Deletion",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"current_password\": \"correct horse battery staple\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/account/deletion/prepare",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "account", "deletion", "prepare"]
+            },
+            "description": "Verifies the current password and creates a short-lived account deletion challenge."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204 or expected account state error', () => pm.expect([204, 400, 401, 403, 429]).to.include(pm.response.code));"] } }]
+        },
+        {
+          "name": "Account Deletion Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/account/deletion/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "account", "deletion", "status"]
+            }
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Confirm Account Deletion",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"confirmation\": \"DELETE\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/account/deletion/confirm",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "account", "deletion", "confirm"]
+            },
+            "description": "Permanently deletes the authenticated account after a valid deletion challenge and clears authentication cookies."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204 or expected account state error', () => pm.expect([204, 400, 401, 403]).to.include(pm.response.code));"] } }]
         }
       ]
     },

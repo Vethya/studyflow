@@ -45,6 +45,12 @@ class PasswordChangeService:
         self._passwords = passwords
         self._clock = clock
 
+    async def verify_current(self, account_id: UUID, current_password: str) -> bool:
+        current_hash = await self._repository.get_password_hash(account_id)
+        return current_hash is not None and await self._passwords.verify_password(
+            current_password, current_hash
+        )
+
     async def change(
         self, account_id: UUID, current_password: str | None, new_password: str
     ) -> None:

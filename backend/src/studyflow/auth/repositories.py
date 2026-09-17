@@ -22,6 +22,7 @@ from studyflow.auth.registration import PendingRegistration, RegistrationComplet
 from studyflow.auth.session_authentication import PersistedSessionPrincipal
 from studyflow.auth.sessions import PendingSession
 from studyflow.database.models import (
+    AuthenticationAccountDeletionChallenge,
     AuthenticationEmailToken,
     AuthenticationIdentity,
     AuthenticationOIDCLinkChallenge,
@@ -472,6 +473,7 @@ class SqlAlchemyOIDCRepository:
         timezone: str,
         expires_at: datetime,
         link_account_id: UUID | None = None,
+        deletion_account_id: UUID | None = None,
     ) -> None:
         async with self._database.transaction() as session:
             await session.execute(
@@ -485,6 +487,7 @@ class SqlAlchemyOIDCRepository:
                     nonce_hash=nonce_hash,
                     timezone=timezone,
                     link_account_id=link_account_id,
+                    deletion_account_id=deletion_account_id,
                     expires_at=expires_at,
                 )
             )
@@ -503,7 +506,12 @@ class SqlAlchemyOIDCRepository:
             if row is None:
                 return None
             row.consumed_at = now
-            return OIDCStateRecord(row.nonce_hash, row.timezone, row.link_account_id)
+            return OIDCStateRecord(
+                row.nonce_hash,
+                row.timezone,
+                row.link_account_id,
+                row.deletion_account_id,
+            )
 
     async def restore_state(self, state_hash: str, consumed_at: datetime, now: datetime) -> bool:
         async with self._database.transaction() as session:
@@ -639,6 +647,40 @@ class SqlAlchemyOIDCRepository:
                     account_id=account.id,
                     subject=claims.subject,
                     email=claims.email,
+                    token_hash=token_hash,
+                    expires_at=expires_at,
+                )
+            )
+        return True
+
+    async def create_deletion_challenge(
+        self,
+        account_id: UUID,
+        claims: GoogleClaims,
+        token_hash: str,
+        expires_at: datetime,
+    ) -> bool:
+        async with self._database.transaction() as session:
+            identity = await session.scalar(
+                select(AuthenticationIdentity)
+                .where(
+                    AuthenticationIdentity.account_id == account_id,
+                    AuthenticationIdentity.provider == "google",
+                    AuthenticationIdentity.subject == claims.subject,
+                )
+                .with_for_update()
+            )
+            if identity is None or await session.get(StudentAccount, account_id) is None:
+                return False
+            await session.execute(
+                delete(AuthenticationAccountDeletionChallenge).where(
+                    AuthenticationAccountDeletionChallenge.account_id == account_id,
+                    AuthenticationAccountDeletionChallenge.consumed_at.is_(None),
+                )
+            )
+            session.add(
+                AuthenticationAccountDeletionChallenge(
+                    account_id=account_id,
                     token_hash=token_hash,
                     expires_at=expires_at,
                 )
