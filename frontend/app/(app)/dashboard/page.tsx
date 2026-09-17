@@ -4,17 +4,18 @@ import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Callout } from "@/components/ui/callout";
-import {
-  AlertTriangle,
-  CalendarClock,
-  CalendarDays,
-  CalendarOff,
-  Clock3,
-  ListChecks,
-  Plus,
-} from "lucide-react";
+import { AlertTriangle, CalendarClock, CalendarOff, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { TaskFormDialog } from "@/components/task-form-dialog";
 import { CapacityBar } from "@/components/capacity-bar";
@@ -24,7 +25,7 @@ import { PendingPlanBanner, SchedulePreview } from "@/components/schedule-previe
 import { UnscheduledWorkList } from "@/components/unscheduled-work-list";
 import { formatClock } from "@/lib/datetime";
 import { applyRecordedOutcome } from "@/lib/outcome-ui";
-import { EmptyState, PageHeader, PageShell, SectionHeader, StatTile } from "@/components/page-kit";
+import { EmptyState, PageHeader, PageShell } from "@/components/page-kit";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatDuration, CATEGORY_CONFIG } from "@/lib/constants";
 import { describeDeadline } from "@/lib/datetime";
@@ -196,6 +197,7 @@ export default function DashboardPage() {
       }));
   }, [pendingPlan, sessions, allTasks]);
 
+  const unplannedMinutes = unscheduled.reduce((sum, item) => sum + item.remainingMinutes, 0);
   const firstName = account?.name.trim().split(/\s+/)[0] ?? "";
 
   function reloadAll() {
@@ -263,213 +265,239 @@ export default function DashboardPage() {
         </Callout>
       )}
 
-
-      {/* ── What happens next (SPEC §17.2) ─────────────────── */}
-      <NextSession
-        session={nextSession}
-        isLoading={schedule.isLoading}
-        workloadToday={workloadToday}
-        hasSessions={sessions.length > 0}
-      />
-
-      {/* ── The verdict: the one loud thing on the page ─────── */}
-      <Tabs
-        value={horizon}
-        onValueChange={(val) => {
-          if (val != null) setHorizon(Number(val));
-        }}
-        className="flex flex-col gap-4 rounded-xl border bg-card p-5 sm:p-6"
-      >
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-sm font-medium text-muted-foreground">
-            Capacity over the next
-          </h2>
-          <TabsList className="h-7 p-0.5" aria-label="Time range">
-            {HORIZONS.map((option) => (
-              <TabsTrigger
-                key={option.days}
-                value={option.days}
-                className="h-6 rounded-[0.35rem] px-2.5 py-0.5 text-xs font-medium"
-              >
-                {option.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
-
-        <TabsContent value={horizon} className="flex flex-col gap-4 outline-none">
-          {isLoading ? (
-            <div className="space-y-4">
-              <Skeleton className="h-14 w-72" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          ) : !hasWindows ? (
-            <EmptyState
-              icon={CalendarOff}
-              title="No study time set yet"
-              action={
-                <Button size="sm" nativeButton={false} render={<Link href="/availability" />}>
-                  Set your availability
-                </Button>
-              }
+      {/*
+        Two columns: the answer to "does my coursework fit?" on the left at full
+        width, and the things that need a decision today in a narrower rail. On
+        one column the rail follows, so the verdict still opens the page.
+      */}
+      <div className="grid min-w-0 items-start gap-4 lg:grid-cols-3">
+        <div className="flex min-w-0 flex-col gap-4 lg:col-span-2">
+          {/* ── The verdict: the one loud thing on the page ─── */}
+          <Card>
+            <Tabs
+              value={horizon}
+              onValueChange={(val) => {
+                if (val != null) setHorizon(Number(val));
+              }}
+              className="flex flex-col gap-(--card-spacing)"
             >
-              StudyFlow weighs your coursework against the hours you are actually free.
-              Add your weekly hours and this becomes a real answer.
-            </EmptyState>
-          ) : (
-            <>
-              <Verdict balance={verdict.balance} count={verdict.tasks.length} days={horizon} />
-              <CapacityBar available={verdict.available} committed={verdict.committed} />
-              <p className="border-t pt-3 text-xs text-muted-foreground">
-                Times shown in {preferences.data?.timezone ?? "your timezone"}.{" "}
+              <CardHeader>
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Capacity over the next
+                </CardTitle>
+                <CardAction>
+                  <TabsList className="h-7 p-0.5" aria-label="Time range">
+                    {HORIZONS.map((option) => (
+                      <TabsTrigger
+                        key={option.days}
+                        value={option.days}
+                        className="h-6 rounded-[0.35rem] px-2.5 py-0.5 text-xs font-medium"
+                      >
+                        {option.label}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </CardAction>
+              </CardHeader>
+
+              <TabsContent value={horizon} className="outline-none">
+                <CardContent className="flex flex-col gap-5">
+                  {isLoading ? (
+                    <div className="space-y-4">
+                      <Skeleton className="h-14 w-72" />
+                      <Skeleton className="h-10 w-full" />
+                    </div>
+                  ) : !hasWindows ? (
+                    <EmptyState
+                      icon={CalendarOff}
+                      title="No study time set yet"
+                      action={
+                        <Button size="sm" nativeButton={false} render={<Link href="/availability" />}>
+                          Set your availability
+                        </Button>
+                      }
+                    >
+                      StudyFlow weighs your coursework against the hours you are actually
+                      free. Add your weekly hours and this becomes a real answer.
+                    </EmptyState>
+                  ) : (
+                    <>
+                      <Verdict
+                        balance={verdict.balance}
+                        count={verdict.tasks.length}
+                        days={horizon}
+                      />
+                      <CapacityBar available={verdict.available} committed={verdict.committed} />
+                    </>
+                  )}
+                </CardContent>
+              </TabsContent>
+
+              {/* Today's figures sit with the verdict rather than floating as
+                  separate cards; they are the same question at a smaller scale. */}
+              <CardFooter className="grid divide-y border-t p-0 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+                <Figure
+                  label="Free today"
+                  value={isLoading ? null : formatDuration(todayRemaining)}
+                />
+                <Figure
+                  label="Study time each week"
+                  value={isLoading ? null : formatDuration(weeklyPatternMinutes(allWindows))}
+                />
+                <Figure
+                  label="Work still to do"
+                  value={isLoading ? null : formatDuration(openWork)}
+                  hint={
+                    unscheduled.length > 0 ? `${formatDuration(unplannedMinutes)} unplanned` : undefined
+                  }
+                />
+              </CardFooter>
+            </Tabs>
+          </Card>
+
+          {/* ── Upcoming deadlines ─────────────────────────── */}
+          <Card>
+            <CardHeader className="border-b">
+              <CardTitle>Upcoming deadlines</CardTitle>
+              <CardDescription>Open work due in the next {horizon} days.</CardDescription>
+              <CardAction>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  nativeButton={false}
+                  render={<Link href="/tasks" />}
+                >
+                  All tasks
+                </Button>
+              </CardAction>
+            </CardHeader>
+            <CardContent className="p-0">
+              {isLoading ? (
+                <div className="space-y-2 px-(--card-spacing)">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <Skeleton key={i} className="h-11 w-full" />
+                  ))}
+                </div>
+              ) : verdict.tasks.length === 0 ? (
+                <p className="px-(--card-spacing) text-sm text-muted-foreground">
+                  Nothing due in this window. Widen the range above, or add a task.
+                </p>
+              ) : (
+                <ul className="divide-y">
+                  {verdict.tasks.slice(0, 7).map((task) => (
+                    <TaskRow key={task.id} task={task} />
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+            {preferences.data?.timezone && (
+              <CardFooter className="border-t pt-(--card-spacing) text-xs text-muted-foreground">
+                Times shown in {preferences.data.timezone}.{" "}
                 <Link
                   href="/availability"
-                  className="font-medium underline underline-offset-2 hover:text-foreground"
+                  className="ms-1 font-medium underline underline-offset-2 hover:text-foreground"
                 >
                   Change your hours
                 </Link>
-              </p>
-            </>
-          )}
-        </TabsContent>
-      </Tabs>
-
-      {/* ── Glanceable figures ─────────────────────────────── */}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile
-          icon={Clock3}
-          value={isLoading ? null : formatDuration(todayRemaining)}
-          label="Free today"
-        />
-        <StatTile
-          icon={CalendarDays}
-          value={isLoading ? null : formatDuration(weeklyPatternMinutes(allWindows))}
-          label="Study time each week"
-        />
-        <StatTile
-          icon={ListChecks}
-          value={isLoading ? null : formatDuration(openWork)}
-          label="Work still to do"
-          hint={
-            unscheduled.length > 0
-              ? `${formatDuration(
-                  unscheduled.reduce((sum, item) => sum + item.remainingMinutes, 0),
-                )} unplanned`
-              : undefined
-          }
-        />
-        <StatTile
-          icon={AlertTriangle}
-          value={isLoading ? null : String(overloaded.length)}
-          label="Tasks that don't fit"
-          tone={overloaded.length > 0 ? "deficit" : undefined}
-        />
-      </div>
-
-      {/* ── Weekly effort progress (SPEC §17.2, §13) ───────── */}
-      {sessions.length > 0 && (
-        <section className="rounded-xl border bg-card p-4">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-            <h2 className="text-sm font-medium">This week&rsquo;s effort</h2>
-            <p className="text-xs text-muted-foreground">
-              <span className="font-medium tabular-nums text-foreground">
-                {formatDuration(weeklyEffort.worked)}
-              </span>{" "}
-              worked of {formatDuration(weeklyEffort.planned)} planned
-            </p>
-          </div>
-          <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full bg-foreground/70 transition-[width]"
-              style={{ width: `${Math.min(100, weeklyEffort.percent)}%` }}
-            />
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground">
-            Effort means time put in, not how much of the work is finished.
-          </p>
-        </section>
-      )}
-
-      {/* ── Working area ───────────────────────────────────── */}
-      <div className="grid gap-8 lg:grid-cols-[1.35fr_1fr]">
-        <section className="min-w-0">
-          <SectionHeader
-            title="Upcoming deadlines"
-            meta={`next ${horizon} days`}
-            action={{ href: "/tasks", label: "All tasks" }}
-          />
-          {isLoading ? (
-            <div className="space-y-2 pt-3">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-11 w-full" />
-              ))}
-            </div>
-          ) : verdict.tasks.length === 0 ? (
-            <p className="pt-4 text-sm text-muted-foreground">
-              Nothing due in this window. Widen the range above, or add a task.
-            </p>
-          ) : (
-            <ul className="divide-y">
-              {verdict.tasks.slice(0, 7).map((task) => (
-                <TaskRow key={task.id} task={task} />
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section className="min-w-0">
-          <SectionHeader
-            title="Tasks that don't fit"
-            meta={
-              !hasWindows
-                ? "needs your hours"
-                : overloaded.length === 0
-                  ? "none"
-                  : `${overloaded.length} of ${feasibility.length}`
-            }
-            tone={overloaded.length > 0 ? "deficit" : undefined}
-          />
-          <div className="space-y-3 pt-3">
-            {isLoading ? (
-              <Skeleton className="h-32 w-full rounded-lg" />
-            ) : !hasWindows ? (
-              <p className="text-sm text-muted-foreground">
-                Set your weekly hours and StudyFlow will flag anything that cannot fit.
-              </p>
-            ) : overloaded.length === 0 ? (
-              <Callout tone="success" title="Everything fits">
-                Every open task has enough free time before its deadline.
-              </Callout>
-            ) : (
-              overloaded
-                .slice(0, 3)
-                .map((item) => <ShortfallCard key={item.task.id} item={item} />)
+              </CardFooter>
             )}
-            {overloaded.length > 3 && (
-              <Link
-                href="/tasks"
-                className="block text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-              >
-                {overloaded.length - 3}
-                {" more don’t fit →"}
-              </Link>
-            )}
-          </div>
-        </section>
-      </div>
-      {/* ── Unscheduled Work (SPEC §17.2, §5.4) ────────────── */}
-      {unscheduled.length > 0 && (
-        <section>
-          <SectionHeader
-            title="Work with no slot"
-            meta={`${unscheduled.length} to resolve`}
-            tone="deficit"
+          </Card>
+
+          {/* ── Unscheduled Work (SPEC §17.2, §5.4) ────────── */}
+          {unscheduled.length > 0 && (
+            <Card>
+              <CardHeader className="border-b">
+                <CardTitle>Work with no slot</CardTitle>
+                <CardDescription>
+                  {formatDuration(unplannedMinutes)} of open work has no study session booked.
+                </CardDescription>
+                <CardAction>
+                  <Badge variant="destructive">{unscheduled.length}</Badge>
+                </CardAction>
+              </CardHeader>
+              <CardContent>
+                <UnscheduledWorkList items={unscheduled.slice(0, 4)} />
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* ── Rail: what needs a decision ───────────────────── */}
+        <div className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-6">
+          <NextSession
+            session={nextSession}
+            isLoading={schedule.isLoading}
+            workloadToday={workloadToday}
+            hasSessions={sessions.length > 0}
           />
-          <div className="pt-3">
-            <UnscheduledWorkList items={unscheduled.slice(0, 4)} />
-          </div>
-        </section>
-      )}
+
+          <Card>
+            <CardHeader className={overloaded.length > 0 ? "border-b" : undefined}>
+              <CardTitle>Tasks that don&rsquo;t fit</CardTitle>
+              <CardAction>
+                <Badge variant={overloaded.length > 0 ? "destructive" : "secondary"}>
+                  {!hasWindows ? "—" : overloaded.length}
+                </Badge>
+              </CardAction>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              {isLoading ? (
+                <Skeleton className="h-24 w-full rounded-lg" />
+              ) : !hasWindows ? (
+                <p className="text-sm text-muted-foreground">
+                  Set your weekly hours and StudyFlow will flag anything that cannot fit.
+                </p>
+              ) : overloaded.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Every open task has enough free time before its deadline.
+                </p>
+              ) : (
+                <>
+                  {overloaded.slice(0, 3).map((item) => (
+                    <ShortfallCard key={item.task.id} item={item} />
+                  ))}
+                  {overloaded.length > 3 && (
+                    <Link
+                      href="/tasks"
+                      className="text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                    >
+                      {overloaded.length - 3} more don&rsquo;t fit
+                    </Link>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* ── Weekly effort progress (SPEC §17.2, §13) ───── */}
+          {sessions.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>This week&rsquo;s effort</CardTitle>
+                <CardDescription>
+                  Time put in, not how much of the work is finished.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-2">
+                <p className="text-sm">
+                  <span className="font-display text-xl font-bold tabular-nums">
+                    {formatDuration(weeklyEffort.worked)}
+                  </span>{" "}
+                  <span className="text-muted-foreground">
+                    worked of {formatDuration(weeklyEffort.planned)} planned
+                  </span>
+                </p>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-foreground/70 transition-[width]"
+                    style={{ width: `${Math.min(100, weeklyEffort.percent)}%` }}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
 
       <TaskFormDialog
         open={addOpen}
@@ -507,6 +535,29 @@ export default function DashboardPage() {
   );
 }
 
+/** One figure in the row under the verdict. `null` renders the loading state. */
+function Figure({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string | null;
+  hint?: string;
+}) {
+  return (
+    <div className="min-w-0 px-(--card-spacing) py-3">
+      <p className="truncate text-xs text-muted-foreground">{label}</p>
+      {value === null ? (
+        <Skeleton className="mt-1.5 h-6 w-16" />
+      ) : (
+        <p className="mt-1 font-display text-xl font-bold leading-none tabular-nums">{value}</p>
+      )}
+      {hint && <p className="mt-1 truncate text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}
+
 /**
  * "What happens next?" — the first thing SPEC §17.2 asks the Dashboard to
  * answer, paired with how much study is still booked for today.
@@ -522,24 +573,25 @@ function NextSession({
   workloadToday: number;
   hasSessions: boolean;
 }) {
-  if (isLoading) return <Skeleton className="h-24 w-full rounded-xl" />;
+  if (isLoading) return <Skeleton className="h-44 w-full rounded-xl" />;
 
   if (!session) {
     return (
-      <Callout
-        tone="info"
-        icon={CalendarClock}
-        title={hasSessions ? "No sessions coming up" : "You have no plan yet"}
-        actions={
+      <Card>
+        <CardHeader>
+          <CardTitle>{hasSessions ? "No sessions coming up" : "You have no plan yet"}</CardTitle>
+          <CardDescription>
+            {hasSessions
+              ? "Everything scheduled is behind you. Generate a new plan when you add more work."
+              : "Let StudyFlow work out when to fit your tasks around the hours you are free."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
           <Button size="sm" nativeButton={false} render={<Link href="/calendar" />}>
             {hasSessions ? "Open the calendar" : "Plan my time"}
           </Button>
-        }
-      >
-        {hasSessions
-          ? "Everything scheduled is behind you. Generate a new plan when you add more work."
-          : "Let StudyFlow work out when to fit your tasks around the hours you are free."}
-      </Callout>
+        </CardContent>
+      </Card>
     );
   }
 
@@ -554,34 +606,31 @@ function NextSession({
       })} at ${formatClock(start)}`;
 
   return (
-    <section className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-xl border bg-card p-4 sm:p-5">
-      <div className="min-w-0">
-        <p className="text-xs font-medium text-muted-foreground">Up next</p>
-        <p className="mt-1 truncate font-display text-lg font-bold tracking-tight">
+    <Card>
+      <CardHeader className="border-b">
+        <CardTitle className="text-sm font-medium text-muted-foreground">Up next</CardTitle>
+        <CardAction>
+          <Badge variant="outline">{formatDuration(session.plannedDuration)}</Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-1">
+        <p className="font-display text-lg font-bold leading-tight tracking-tight">
           {session.taskTitle}
         </p>
-        <p className="mt-0.5 text-sm text-muted-foreground">
-          {when} · {formatDuration(session.plannedDuration)}
-        </p>
-      </div>
-
-      <div className="flex items-center gap-6">
-        <div className="text-end">
-          <p className="text-xs font-medium text-muted-foreground">Left to study today</p>
-          <p className="mt-1 font-display text-xl font-bold tabular-nums">
+        <p className="text-sm text-muted-foreground">{when}</p>
+      </CardContent>
+      <CardFooter className="flex items-center justify-between gap-3 border-t pt-(--card-spacing)">
+        <p className="text-xs text-muted-foreground">
+          Left to study today{" "}
+          <span className="font-medium tabular-nums text-foreground">
             {formatDuration(workloadToday)}
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          nativeButton={false}
-          render={<Link href="/calendar" />}
-        >
+          </span>
+        </p>
+        <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/calendar" />}>
           Calendar
         </Button>
-      </div>
-    </section>
+      </CardFooter>
+    </Card>
   );
 }
 
@@ -625,7 +674,7 @@ function TaskRow({ task }: { task: AcademicTask }) {
     <li>
       <Link
         href={`/tasks/${task.id}`}
-        className="flex flex-col gap-1 py-2.5 transition-colors hover:bg-muted/40 sm:flex-row sm:items-center sm:gap-3"
+        className="flex flex-col gap-1 px-(--card-spacing) py-2.5 transition-colors hover:bg-muted/40 sm:flex-row sm:items-center sm:gap-3"
       >
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{task.title}</p>
