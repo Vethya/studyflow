@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Callout } from "@/components/ui/callout";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -207,163 +207,166 @@ export default function TasksPage() {
         </Callout>
       )}
 
-      {/* ── Toolbar ────────────────────────────── */}
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Search leads, because it is what a long list is actually used
-              with. It used to be the fifth control in a wrapped row of seven. */}
-          <div className="relative min-w-56 flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Search tasks"
-              aria-label="Search tasks by title"
-              className="h-10 w-full ps-9 pe-9"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            {search && (
-              <button
-                onClick={() => setSearch("")}
-                aria-label="Clear search"
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-              >
-                <X className="size-4" />
-              </button>
-            )}
-          </div>
-
-          <Select value={sort} onValueChange={(next) => next && setSort(next as SortKey)}>
-            <SelectTrigger className="h-10" aria-label="Sort tasks">
-              <ArrowUpDown className="text-muted-foreground" />
-              <SelectValue>
-                {(selected) => SORT_LABELS[selected as SortKey] ?? "Sort"}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
-                <SelectItem key={key} value={key}>
-                  {SORT_LABELS[key]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          {/* The five filters live behind one control instead of spilling
-              across two wrapped rows of half-labelled inputs. */}
-          <Popover>
-            <PopoverTrigger
-              render={
-                <Button variant="outline" className="h-10">
-                  <SlidersHorizontal />
-                  Filters
-                  {filterCount > 0 && (
-                    <span className="ms-0.5 flex size-5 items-center justify-center rounded-full bg-foreground text-[0.6875rem] font-semibold text-background">
-                      {filterCount}
-                    </span>
-                  )}
-                </Button>
-              }
-            />
-            <PopoverContent align="end" className="w-80 p-4">
-              <div className="space-y-3">
-                <FilterField label="Status">
-                  <FilterSelect
-                    value={status}
-                    onChange={setStatus}
-                    options={TASK_STATUSES}
-                    placeholder="Any status"
-                  />
-                </FilterField>
-                <FilterField label="Category">
-                  <FilterSelect
-                    value={category}
-                    onChange={setCategory}
-                    options={CATEGORIES}
-                    placeholder="Any category"
-                  />
-                </FilterField>
-                <FilterField label="Priority">
-                  <FilterSelect
-                    value={priority}
-                    onChange={setPriority}
-                    options={PRIORITIES}
-                    placeholder="Any priority"
-                  />
-                </FilterField>
-                <FilterField label="Course">
-                  <Input
-                    placeholder="Any course"
-                    className="h-9 w-full"
-                    value={course}
-                    onChange={(e) => setCourse(e.target.value)}
-                    onBlur={() => setAppliedCourse(course.trim())}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") setAppliedCourse(course.trim());
-                    }}
-                  />
-                </FilterField>
-                <FilterField label="Due before">
-                  <Input
-                    type="datetime-local"
-                    className="h-9 w-full"
-                    value={dueBefore}
-                    onChange={(e) => setDueBefore(e.target.value)}
-                    aria-label="Show tasks due before"
-                  />
-                </FilterField>
-
-                {filterCount > 0 && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-full"
-                    onClick={clearFilters}
-                  >
-                    Clear all filters
-                  </Button>
-                )}
-              </div>
-            </PopoverContent>
-          </Popover>
-        </div>
-
-        {/* Active filters stay visible outside the popover, each removable on
-            its own — otherwise a filtered list looks like an empty one. */}
-        {(filterCount > 0 || search !== "") && (
-          <div className="flex flex-wrap items-center gap-2">
-            {search && <Chip label={`“${search}”`} onClear={() => setSearch("")} />}
-            {status && <Chip label={status} onClear={() => setStatus(null)} />}
-            {category && <Chip label={category} onClear={() => setCategory(null)} />}
-            {priority && <Chip label={`${priority} priority`} onClear={() => setPriority(null)} />}
-            {appliedCourse && (
-              <Chip
-                label={appliedCourse}
-                onClear={() => {
-                  setCourse("");
-                  setAppliedCourse("");
-                }}
-              />
-            )}
-            {dueBefore && (
-              <Chip label="Due before set" onClear={() => setDueBefore("")} />
-            )}
-            <button
-              onClick={clearFilters}
-              className="text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-            >
-              Clear all
-            </button>
-            <span className="ms-auto text-xs text-muted-foreground">
-              {isLoading ? "…" : `${visibleSorted.length} of ${tasks.length}`}
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* ── Ledger ─────────────────────────────── */}
+      {/* ── Ledger: the controls and the list are one object ── */}
       {/* `py-0`: Card applies `py-(--card-spacing)` by default, which left a
           band of empty space above the first row and below the last. */}
       <Card className="overflow-hidden py-0">
+        <CardHeader className="flex flex-col items-stretch gap-3 border-b py-(--card-spacing)">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Search leads, because it is what a long list is actually used
+                with. It used to be the fifth control in a wrapped row of seven. */}
+            <div className="relative min-w-56 flex-1 basis-64">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search tasks"
+                aria-label="Search tasks by title"
+                className="h-10 w-full ps-9 pe-9"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch("")}
+                  aria-label="Clear search"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <X className="size-4" />
+                </button>
+              )}
+            </div>
+
+            <Select value={sort} onValueChange={(next) => next && setSort(next as SortKey)}>
+              <SelectTrigger className="h-10" aria-label="Sort tasks">
+                <ArrowUpDown className="text-muted-foreground" />
+                <SelectValue>
+                  {(selected) => SORT_LABELS[selected as SortKey] ?? "Sort"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+                  <SelectItem key={key} value={key}>
+                    {SORT_LABELS[key]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* The five filters live behind one control instead of spilling
+                across two wrapped rows of half-labelled inputs. */}
+            <Popover>
+              <PopoverTrigger
+                render={
+                  <Button variant="outline" className="h-10">
+                    <SlidersHorizontal />
+                    Filters
+                    {filterCount > 0 && (
+                      <span className="ms-0.5 flex size-5 items-center justify-center rounded-full bg-foreground text-[0.6875rem] font-semibold text-background">
+                        {filterCount}
+                      </span>
+                    )}
+                  </Button>
+                }
+              />
+              <PopoverContent align="end" className="w-80 p-4">
+                <div className="space-y-3">
+                  <FilterField label="Status">
+                    <FilterSelect
+                      value={status}
+                      onChange={setStatus}
+                      options={TASK_STATUSES}
+                      placeholder="Any status"
+                    />
+                  </FilterField>
+                  <FilterField label="Category">
+                    <FilterSelect
+                      value={category}
+                      onChange={setCategory}
+                      options={CATEGORIES}
+                      placeholder="Any category"
+                    />
+                  </FilterField>
+                  <FilterField label="Priority">
+                    <FilterSelect
+                      value={priority}
+                      onChange={setPriority}
+                      options={PRIORITIES}
+                      placeholder="Any priority"
+                    />
+                  </FilterField>
+                  <FilterField label="Course">
+                    <Input
+                      placeholder="Any course"
+                      className="h-9 w-full"
+                      value={course}
+                      onChange={(e) => setCourse(e.target.value)}
+                      onBlur={() => setAppliedCourse(course.trim())}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") setAppliedCourse(course.trim());
+                      }}
+                    />
+                  </FilterField>
+                  <FilterField label="Due before">
+                    <Input
+                      type="datetime-local"
+                      className="h-9 w-full"
+                      value={dueBefore}
+                      onChange={(e) => setDueBefore(e.target.value)}
+                      aria-label="Show tasks due before"
+                    />
+                  </FilterField>
+
+                  {filterCount > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full"
+                      onClick={clearFilters}
+                    >
+                      Clear all filters
+                    </Button>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            <span className="ms-auto shrink-0 text-xs text-muted-foreground">
+              {isLoading
+                ? "Loading…"
+                : filterCount > 0 || search !== ""
+                  ? `${visibleSorted.length} of ${tasks.length} tasks`
+                  : `${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`}
+            </span>
+          </div>
+
+          {/* Active filters stay visible outside the popover, each removable on
+              its own — otherwise a filtered list looks like an empty one. */}
+          {(filterCount > 0 || search !== "") && (
+            <div className="flex flex-wrap items-center gap-2">
+              {search && <Chip label={`“${search}”`} onClear={() => setSearch("")} />}
+              {status && <Chip label={status} onClear={() => setStatus(null)} />}
+              {category && <Chip label={category} onClear={() => setCategory(null)} />}
+              {priority && <Chip label={`${priority} priority`} onClear={() => setPriority(null)} />}
+              {appliedCourse && (
+                <Chip
+                  label={appliedCourse}
+                  onClear={() => {
+                    setCourse("");
+                    setAppliedCourse("");
+                  }}
+                />
+              )}
+              {dueBefore && (
+                <Chip label="Due before set" onClear={() => setDueBefore("")} />
+              )}
+              <button
+                onClick={clearFilters}
+                className="text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              >
+                Clear all
+              </button>
+            </div>
+          )}
+        </CardHeader>
         <CardContent className="p-0">
           {isLoading ? (
             <div className="space-y-2 p-6">

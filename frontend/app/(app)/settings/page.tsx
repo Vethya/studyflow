@@ -16,6 +16,13 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -150,7 +157,7 @@ function SettingsContent() {
 
       {googleError && <Callout tone="danger">{googleError}</Callout>}
 
-      <Section icon={User} title="Profile">
+      <Section icon={User} title="Profile" description="How you appear in StudyFlow.">
         {profile.isLoading ? (
           <RowSkeleton rows={2} />
         ) : (
@@ -178,7 +185,11 @@ function SettingsContent() {
         )}
       </Section>
 
-      <Section icon={ShieldCheck} title="Sign-in methods">
+      <Section
+        icon={ShieldCheck}
+        title="Sign-in methods"
+        description="How you get into your account."
+      >
         {profile.isLoading ? (
           <RowSkeleton rows={1} />
         ) : profile.data ? (
@@ -233,7 +244,11 @@ function SettingsContent() {
         )}
       </Section>
 
-      <Section icon={Globe} title="Timezone">
+      <Section
+        icon={Globe}
+        title="Timezone"
+        description="Every study time is shown and planned in this zone."
+      >
         {preferences.isLoading ? (
           <RowSkeleton rows={1} />
         ) : (
@@ -274,7 +289,7 @@ function SettingsContent() {
 
       <StudySessionsSection preferences={preferences} />
 
-      <Section icon={Palette} title="Appearance">
+      <Section icon={Palette} title="Appearance" description="How StudyFlow looks on this device.">
         <Row
           label="Theme"
           value="Choose light mode, dark mode, AMOLED black mode, or follow your device."
@@ -283,7 +298,11 @@ function SettingsContent() {
         </Row>
       </Section>
 
-      <Section icon={Trash2} title="Delete account">
+      <Section
+        icon={Trash2}
+        title="Delete account"
+        description="Permanently removes your account and all of your planning data."
+      >
         <Row
           label="Delete your StudyFlow account"
           value="Permanently removes your profile, sign-in methods, and planning data."
@@ -343,20 +362,25 @@ function SettingsContent() {
 function Section({
   icon: Icon,
   title,
+  description,
   children,
 }: {
   icon: React.ElementType;
   title: string;
+  description?: string;
   children: React.ReactNode;
 }) {
   return (
-    <section>
-      <h2 className="mb-2 flex items-center gap-2 text-sm font-medium text-muted-foreground">
-        <Icon className="size-4" aria-hidden />
-        {title}
-      </h2>
-      <div className="divide-y rounded-xl border bg-card px-4">{children}</div>
-    </section>
+    <Card>
+      <CardHeader className="border-b">
+        <CardTitle className="flex items-center gap-2">
+          <Icon className="size-4 text-muted-foreground" aria-hidden />
+          {title}
+        </CardTitle>
+        {description && <CardDescription>{description}</CardDescription>}
+      </CardHeader>
+      <CardContent className="divide-y py-0">{children}</CardContent>
+    </Card>
   );
 }
 

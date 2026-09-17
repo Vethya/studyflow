@@ -11,7 +11,14 @@ import { formatDuration, CATEGORY_CONFIG, STATUS_CONFIG, DAY_NAMES_SHORT } from 
 import { formatClock } from "@/lib/datetime";
 import { scheduling, tasks as tasksApi } from "@/lib/api";
 import { describeError, useApi } from "@/hooks/use-api";
-import { EmptyState, PageHeader, PageShell, SectionHeader } from "@/components/page-kit";
+import {
+  EmptyState,
+  Figure,
+  FigureRow,
+  PageHeader,
+  PageShell,
+  SectionCard,
+} from "@/components/page-kit";
 import type { EffortProgress } from "@/types/progress";
 import type { StudySession } from "@/types/session";
 import { activeScheduleKey, effortProgressKey, SWR_KEYS } from "@/lib/swr-keys";
@@ -97,41 +104,42 @@ export default function ProgressPage() {
         </Callout>
       )}
 
-      <Callout tone="info" title="What this measures">
-        Effort is the time you have put in against the time you expect to need. It does not
-        say how much of the work is finished, or how good it is.
-      </Callout>
-
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-5 border-y py-5 sm:grid-cols-5">
-        <Total label="Tasks" value={isLoading ? null : String(totals.count)} />
-        <Total label="Worked" value={isLoading ? null : formatDuration(totals.worked)} />
-        <Total label="Remaining" value={isLoading ? null : formatDuration(totals.remaining)} />
-        <Total label="Sessions done" value={isLoading ? null : String(totals.sessionsDone)} />
-        <Total label="Sessions to come" value={isLoading ? null : String(totals.sessionsUpcoming)} />
-      </dl>
-
-      <section>
-        <SectionHeader
-          title="By task"
-          meta={isLoading ? undefined : `${rows.length} total`}
-          action={{ href: "/tasks", label: "All tasks" }}
+      <FigureRow>
+        <Figure label="Tasks" value={isLoading ? null : String(totals.count)} />
+        <Figure label="Worked" value={isLoading ? null : formatDuration(totals.worked)} />
+        <Figure label="Remaining" value={isLoading ? null : formatDuration(totals.remaining)} />
+        <Figure label="Sessions done" value={isLoading ? null : String(totals.sessionsDone)} />
+        <Figure
+          label="Sessions to come"
+          value={isLoading ? null : String(totals.sessionsUpcoming)}
         />
+      </FigureRow>
 
+      <SectionCard
+        title="By task"
+        description="Effort is the time you have put in against the time you expect to need. It does not say how much of the work is finished, or how good it is."
+        action={
+          <Button variant="ghost" size="sm" nativeButton={false} render={<Link href="/tasks" />}>
+            All tasks
+          </Button>
+        }
+        flush
+      >
         {isLoading ? (
-          <div className="space-y-2 pt-3">
+          <div className="space-y-2 p-(--card-spacing)">
             {Array.from({ length: 4 }).map((_, i) => (
               <Skeleton key={i} className="h-14 w-full" />
             ))}
           </div>
         ) : rows.length === 0 ? (
-          <EmptyState title="No tasks yet" className="mt-4">
+          <EmptyState title="No tasks yet" className="m-(--card-spacing) border-0">
             Add your first task and its effort will show up here.
           </EmptyState>
         ) : (
           <>
             {/* Column headings only exist once the grid does; below `lg` each
                 row labels its own figures instead. */}
-            <div className="hidden grid-cols-[minmax(0,1fr)_6rem_5rem_5rem_5rem_7rem] gap-4 border-b pt-3 pb-2 lg:grid">
+            <div className="hidden grid-cols-[minmax(0,1fr)_6rem_5rem_5rem_5rem_7rem] gap-4 border-b px-(--card-spacing) py-2 lg:grid">
               <span className="text-xs font-medium text-muted-foreground">Task</span>
               <span className="text-xs font-medium text-muted-foreground">Effort</span>
               <span className="text-end text-xs font-medium text-muted-foreground">Worked</span>
@@ -153,21 +161,26 @@ export default function ProgressPage() {
             </ul>
           </>
         )}
-      </section>
+      </SectionCard>
 
       {/* ── Completed-session history (SPEC §17.6) ─────────── */}
-      <section>
-        <SectionHeader
-          title="Session history"
-          meta={isLoading ? undefined : `${history.length} recorded`}
-        />
+      <SectionCard
+        title="Session history"
+        description="Every study session you have recorded, newest first."
+        action={
+          isLoading ? undefined : (
+            <span className="text-xs text-muted-foreground">{history.length} recorded</span>
+          )
+        }
+        flush
+      >
         {isLoading ? (
-          <div className="space-y-2 pt-3">
+          <div className="space-y-2 p-(--card-spacing)">
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
           </div>
         ) : history.length === 0 ? (
-          <EmptyState title="Nothing recorded yet" className="mt-4">
+          <EmptyState title="Nothing recorded yet" className="m-(--card-spacing) border-0">
             Once you finish a study session and say how it went, it will be listed here.
           </EmptyState>
         ) : (
@@ -177,21 +190,9 @@ export default function ProgressPage() {
             ))}
           </ul>
         )}
-      </section>
-    </PageShell>
-  );
-}
+      </SectionCard>
 
-function Total({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      {value === null ? (
-        <Skeleton className="mt-1.5 h-7 w-16" />
-      ) : (
-        <dd className="mt-1 font-display text-2xl font-bold tabular-nums">{value}</dd>
-      )}
-    </div>
+    </PageShell>
   );
 }
 
@@ -213,7 +214,7 @@ function ProgressRow({
   }, []);
 
   return (
-    <li className="grid grid-cols-1 gap-2 py-3 lg:grid-cols-[minmax(0,1fr)_6rem_5rem_5rem_5rem_7rem] lg:items-center lg:gap-4">
+    <li className="grid grid-cols-1 gap-2 px-(--card-spacing) py-3 lg:grid-cols-[minmax(0,1fr)_6rem_5rem_5rem_5rem_7rem] lg:items-center lg:gap-4">
       <div className="min-w-0">
         <Link
           href={`/tasks/${row.taskId}`}
@@ -277,7 +278,7 @@ function HistoryRow({ session }: { session: StudySession }) {
   const style = OUTCOME_STYLE[session.outcome!];
 
   return (
-    <li className="flex flex-col gap-1 py-2.5 sm:grid sm:grid-cols-[9.5rem_minmax(0,1fr)_7rem_5rem] sm:items-center sm:gap-x-4">
+    <li className="flex flex-col gap-1 px-(--card-spacing) py-2.5 sm:grid sm:grid-cols-[9.5rem_minmax(0,1fr)_7rem_5rem] sm:items-center sm:gap-x-4">
       <div className="flex items-baseline justify-between gap-3 sm:contents">
         <Link
           href={`/tasks/${session.taskId}`}
