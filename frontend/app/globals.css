@@ -17,7 +17,7 @@
  * are switched off, and the radii match what the app already used.
  */
 @plugin "daisyui/theme" {
-  name: "studyflow";
+  name: "light";
   default: true;
   prefersdark: false;
   color-scheme: light;
@@ -59,7 +59,7 @@
 }
 
 @plugin "daisyui/theme" {
-  name: "studyflow-dark";
+  name: "dark";
   prefersdark: true;
   color-scheme: dark;
 
@@ -195,7 +195,7 @@
   --sidebar-ring: oklch(0.518 0.018 258);
 }
 
-.dark {
+html.dark {
   --background: oklch(0.183 0.017 262);
   --foreground: oklch(0.955 0.004 250);
   --card: oklch(0.228 0.019 262);
@@ -233,6 +233,105 @@
   --sidebar-accent-foreground: oklch(0.955 0.004 250);
   --sidebar-border: oklch(1 0 0 / 12%);
   --sidebar-ring: oklch(0.618 0.016 256);
+
+  --landing-page: oklch(0.183 0.017 262);
+  --landing-canvas: oklch(0.228 0.019 262);
+  --landing-card: oklch(0.265 0.019 262);
+  --landing-ink: oklch(0.955 0.004 250);
+  --landing-muted: oklch(0.712 0.014 256);
+  --landing-subtle: oklch(0.588 0.016 258);
+  --landing-border: oklch(1 0 0 / 12%);
+  --landing-accent: oklch(0.78 0.105 230);
+  --landing-shadow: 0 18px 40px 0 oklch(0.04 0.01 262 / 0.28);
+  --landing-shadow-hover: 0 22px 46px 0 oklch(0.04 0.01 262 / 0.38);
+  --landing-hero: linear-gradient(180deg, oklch(0.34 0.07 255) 0%, oklch(0.43 0.08 245) 48%, oklch(0.28 0.04 255) 100%);
+  --auth-sky: linear-gradient(180deg, oklch(0.34 0.07 255) 0%, oklch(0.43 0.08 245) 48%, oklch(0.28 0.04 255) 100%);
+  --auth-shadow: 0 10px 40px 0 oklch(0.04 0.01 262 / 0.35);
+}
+
+:root {
+  --landing-page: oklch(1 0 0);
+  --landing-canvas: oklch(0.965 0.003 250);
+  --landing-card: oklch(1 0 0);
+  --landing-ink: oklch(0.205 0.019 262);
+  --landing-muted: oklch(0.518 0.018 258);
+  --landing-subtle: oklch(0.62 0.01 258);
+  --landing-border: oklch(0.92 0.005 250);
+  --landing-accent: oklch(0.62 0.13 230);
+  --landing-shadow: 0 17px 37px 0 oklch(0.2 0.02 262 / 0.06);
+  --landing-shadow-hover: 0 20px 40px 0 oklch(0.2 0.02 262 / 0.1);
+  --landing-hero: linear-gradient(180deg, #779bc1 0%, #9abfda 48%, #cbdcec 80%, #e4ecf3 100%);
+  --auth-sky: linear-gradient(180deg, #779bc1 0%, #9abfda 48%, #cbdcec 80%, #e4ecf3 100%);
+  --auth-shadow: 0 10px 40px 0 oklch(0.2 0.08 250 / 0.1);
+}
+
+@layer components {
+  .landing-page {
+    background: var(--landing-page);
+    color: var(--landing-ink);
+  }
+
+  .auth-surface {
+    background: var(--auth-sky);
+  }
+
+  .landing-canvas {
+    background: var(--landing-canvas);
+  }
+
+  .landing-surface {
+    background: var(--landing-card);
+  }
+
+  .landing-ink {
+    color: var(--landing-ink);
+  }
+
+  .landing-muted {
+    color: var(--landing-muted);
+  }
+
+  .landing-subtle {
+    color: var(--landing-subtle);
+  }
+
+  .landing-border {
+    border-color: var(--landing-border);
+  }
+
+  .landing-ink-border {
+    border-color: var(--landing-ink);
+  }
+
+  .landing-ink-border-soft {
+    border-color: color-mix(in oklch, var(--landing-ink) 15%, transparent);
+  }
+
+  .landing-accent {
+    color: var(--landing-accent);
+  }
+
+  .landing-accent-bg {
+    background: var(--landing-accent);
+  }
+
+  .landing-ink-button {
+    background: var(--landing-ink);
+    color: var(--landing-page);
+    box-shadow: var(--landing-shadow);
+  }
+
+  .landing-ink-button:hover {
+    background: color-mix(in oklch, var(--landing-ink) 88%, var(--landing-page));
+  }
+
+  .landing-card-shadow {
+    box-shadow: var(--landing-shadow);
+  }
+
+  .landing-card-shadow:hover {
+    box-shadow: var(--landing-shadow-hover);
+  }
 }
 
 @layer base {

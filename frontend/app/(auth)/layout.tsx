@@ -15,14 +15,11 @@ import { GraduationCap } from "lucide-react";
  * site. The gradient, the outer padding and the rounded corners are lifted
  * from that hero deliberately.
  */
-const SKY = "linear-gradient(180deg, #779bc1 0%, #9abfda 48%, #cbdcec 80%, #e4ecf3 100%)";
-
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-svh bg-white p-2 md:p-3">
+    <div className="min-h-svh bg-background p-2 md:p-3">
       <div
-        className="relative flex min-h-[calc(100svh-1rem)] flex-col items-center justify-center overflow-hidden rounded-[20px] px-4 py-10 md:min-h-[calc(100svh-1.5rem)] md:rounded-[28px]"
-        style={{ background: SKY }}
+        className="auth-surface relative flex min-h-[calc(100svh-1rem)] flex-col items-center justify-center overflow-hidden rounded-[20px] px-4 py-10 md:min-h-[calc(100svh-1.5rem)] md:rounded-[28px]"
       >
         {/* Static, not animated: this is a backdrop for a form, and a moving
             one would pull the eye away from the field being filled in. */}
@@ -49,7 +46,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
             </span>
           </Link>
 
-          <div className="w-full rounded-2xl bg-white p-6 shadow-[rgba(16,55,132,0.10)_0px_10px_40px_0px] sm:p-8">
+          <div className="w-full rounded-2xl bg-card p-6 shadow-[var(--auth-shadow)] sm:p-8">
             {children}
           </div>
 

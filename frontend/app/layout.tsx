@@ -3,6 +3,7 @@ import { Bricolage_Grotesque, IBM_Plex_Mono, Inter } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { SessionProvider } from "@/hooks/use-session";
+import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
 const inter = Inter({
@@ -42,18 +43,18 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      // DaisyUI resolves its colour roles from the active theme; without this
-      // attribute `.btn-primary` and friends fall back to the base surface.
-      data-theme="studyflow"
+      suppressHydrationWarning
       className={`${inter.variable} ${bricolage.variable} ${plexMono.variable} h-full`}
     >
       <body className="min-h-full font-sans antialiased">
-        <SessionProvider>
-          <TooltipProvider>
-            {children}
-            <Toaster position="bottom-right" richColors />
-          </TooltipProvider>
-        </SessionProvider>
+        <ThemeProvider>
+          <SessionProvider>
+            <TooltipProvider>
+              {children}
+              <Toaster position="bottom-right" richColors />
+            </TooltipProvider>
+          </SessionProvider>
+        </ThemeProvider>
       </body>
     </html>
   );
