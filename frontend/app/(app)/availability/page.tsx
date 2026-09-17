@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Callout } from "@/components/ui/callout";
+import { GoogleImportButton } from "@/components/google-import-button";
 import { Plus, Trash2, CalendarDays, CalendarOff, Clock4, Loader2, Pencil, RefreshCw, X } from "lucide-react";
 import { EmptyState, PageHeader, PageShell, StatTile } from "@/components/page-kit";
 import { GridLegend, WeekGrid, type GridBlock, type GridColumn } from "@/components/week-grid";
@@ -236,6 +237,7 @@ export default function AvailabilityPage() {
               <CalendarOff />
               Add exception
             </Button>
+            <GoogleImportButton source="google_calendar" />
             <Button onClick={() => setWindowDialogOpen(true)}>
               <Plus />
               Add window

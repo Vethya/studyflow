@@ -9,6 +9,7 @@
 export * as account from "./account";
 export * as auth from "./auth";
 export * as availability from "./availability";
+export * as googleImport from "./google-import";
 export * as scheduling from "./scheduling";
 export * as system from "./system";
 export * as tasks from "./tasks";
