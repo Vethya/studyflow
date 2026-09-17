@@ -1,11 +1,8 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
-import useSWR, { unstable_serialize, type Key } from "swr";
+import { useCallback, useRef } from "react";
+import useSWR, { type Key } from "swr";
 import { ApiError } from "@/lib/api";
-
-const activeRequests = new Map<string, AbortController>();
-const mountedConsumers = new Map<string, number>();
 
 export interface AsyncResource<T> extends State<T> {
   /** Re-runs the loader. Safe to call from event handlers. */
@@ -25,37 +22,22 @@ interface State<T> {
  * Reads a server-state resource through SWR.
  *
  * The key is the identity of the resource. Components sharing a key share the
- * cached value and in-flight request. The loader still receives an AbortSignal
- * so API modules keep their existing typed request signatures.
+ * cached value and in-flight request. The loader receives an AbortSignal
+ * for API module signature compatibility.
  */
 export function useApi<T>(
   key: Key,
   loader: (signal: AbortSignal) => Promise<T>,
 ): AsyncResource<T> {
-  const serializedKey = unstable_serialize(key);
-  const fetcher = useCallback(() => {
-    activeRequests.get(serializedKey)?.abort();
-    const controller = new AbortController();
-    activeRequests.set(serializedKey, controller);
-    return loader(controller.signal).finally(() => {
-      if (activeRequests.get(serializedKey) === controller) activeRequests.delete(serializedKey);
-    });
-  }, [loader, serializedKey]);
-  const { data, error, isLoading, isValidating, mutate } = useSWR<T>(key, fetcher);
+  const loaderRef = useRef(loader);
+  loaderRef.current = loader;
 
-  useEffect(() => {
-    if (!serializedKey) return;
-    mountedConsumers.set(serializedKey, (mountedConsumers.get(serializedKey) ?? 0) + 1);
-    return () => {
-      const remaining = (mountedConsumers.get(serializedKey) ?? 1) - 1;
-      if (remaining <= 0) {
-        mountedConsumers.delete(serializedKey);
-        activeRequests.get(serializedKey)?.abort();
-      } else {
-        mountedConsumers.set(serializedKey, remaining);
-      }
-    };
-  }, [serializedKey]);
+  const fetcher = useCallback(() => {
+    const controller = new AbortController();
+    return loaderRef.current(controller.signal);
+  }, []);
+
+  const { data, error, isLoading, isValidating, mutate } = useSWR<T>(key, fetcher);
 
   const reload = useCallback(() => {
     void mutate();

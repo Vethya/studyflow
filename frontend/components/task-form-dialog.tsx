@@ -75,7 +75,6 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
   const [ackOpen, setAckOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const previewControllerRef = useRef<AbortController | null>(null);
 
   const isEditing = Boolean(task);
   const estimateFrozen = task?.estimateFrozen === true;
@@ -115,19 +114,8 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
       ? adaptiveEstimateKey(form.category, previewMinutes)
       : null;
   const previewFetcher = useCallback(() => {
-    previewControllerRef.current?.abort();
-    const controller = new AbortController();
-    previewControllerRef.current = controller;
-    return scheduling
-      .getAdaptiveEstimate(form.category, previewMinutes, controller.signal)
-      .finally(() => {
-        if (previewControllerRef.current === controller) previewControllerRef.current = null;
-      });
+    return scheduling.getAdaptiveEstimate(form.category, previewMinutes);
   }, [form.category, previewMinutes]);
-  useEffect(() => {
-    if (!previewKey) previewControllerRef.current?.abort();
-  }, [previewKey]);
-  useEffect(() => () => previewControllerRef.current?.abort(), []);
   const {
     data: preview,
     error: previewError,

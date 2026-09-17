@@ -320,6 +320,8 @@ export default function CalendarPage() {
 
   function refreshAll() {
     tasks.reload();
+    windows.reload();
+    periods.reload();
     schedule.reload();
     revision.reload();
   }
