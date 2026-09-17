@@ -1,5 +1,6 @@
 "use client";
 
+import { useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -36,11 +37,57 @@ const MENU = [
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const menuRef = useRef<HTMLUListElement>(null);
+  const [indicator, setIndicator] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+    ready: boolean;
+  }>({
+    top: 0,
+    left: 0,
+    width: 0,
+    height: 0,
+    ready: false,
+  });
 
   const isActive = (item: { url: string; match?: string }) =>
     item.match
       ? pathname.startsWith(item.match)
       : pathname === item.url || pathname.startsWith(`${item.url}/`);
+
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+
+    const updateIndicator = () => {
+      const activeIndex = MENU.findIndex(isActive);
+      const buttons = el.querySelectorAll<HTMLElement>("[data-slot='sidebar-menu-button']");
+      const activeBtn =
+        el.querySelector<HTMLElement>("[data-active]") ??
+        (activeIndex >= 0 ? buttons[activeIndex] : null);
+
+      if (activeBtn) {
+        const menuRect = el.getBoundingClientRect();
+        const btnRect = activeBtn.getBoundingClientRect();
+        setIndicator({
+          top: btnRect.top - menuRect.top,
+          left: btnRect.left - menuRect.left,
+          width: btnRect.width,
+          height: btnRect.height,
+          ready: true,
+        });
+      } else {
+        setIndicator((prev) => ({ ...prev, ready: false }));
+      }
+    };
+
+    updateIndicator();
+    const observer = new ResizeObserver(updateIndicator);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [pathname]);
 
   /*
    * The collapsed overrides are repeated here on purpose.
@@ -58,11 +105,13 @@ export function AppSidebar() {
    */
   const itemClass = (active: boolean) =>
     cn(
-      "h-10 gap-3 rounded-lg px-3 text-sm transition-colors",
+      "relative z-10 h-10 gap-3 rounded-lg px-3 text-sm transition-colors duration-150",
       "group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:p-2!",
       active
-        ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-        : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        ? indicator.ready
+          ? "data-active:bg-transparent font-medium text-sidebar-accent-foreground hover:bg-transparent hover:text-sidebar-accent-foreground"
+          : "data-active:bg-sidebar-accent font-medium text-sidebar-accent-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+        : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
     );
 
   return (
@@ -96,7 +145,18 @@ export function AppSidebar() {
             Menu
           </SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu className="gap-1">
+            <SidebarMenu ref={menuRef} className="relative gap-1">
+              {indicator.ready && (
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-0 top-0 z-0 rounded-lg bg-sidebar-accent transition-[transform,width,height,opacity] duration-250 ease-[cubic-bezier(0.2,0,0,1)]"
+                  style={{
+                    transform: `translate3d(${indicator.left}px, ${indicator.top}px, 0)`,
+                    width: `${indicator.width}px`,
+                    height: `${indicator.height}px`,
+                  }}
+                />
+              )}
               {MENU.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton

@@ -22,6 +22,7 @@ import { UnscheduledWorkList } from "@/components/unscheduled-work-list";
 import { formatClock } from "@/lib/datetime";
 import { applyRecordedOutcome } from "@/lib/outcome-ui";
 import { EmptyState, PageHeader, PageShell, SectionHeader, StatTile } from "@/components/page-kit";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatDuration, CATEGORY_CONFIG } from "@/lib/constants";
 import { describeDeadline } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
@@ -266,27 +267,24 @@ export default function DashboardPage() {
           <h2 className="text-sm font-medium text-muted-foreground">
             Capacity over the next
           </h2>
-          <div
-            className="flex items-center gap-0.5 rounded-lg bg-muted p-0.5"
-            role="group"
-            aria-label="Time range"
+          <Tabs
+            value={horizon}
+            onValueChange={(val) => {
+              if (val != null) setHorizon(Number(val));
+            }}
           >
-            {HORIZONS.map((option) => (
-              <button
-                key={option.days}
-                onClick={() => setHorizon(option.days)}
-                aria-pressed={horizon === option.days}
-                className={cn(
-                  "rounded-[0.4rem] px-2.5 py-1 text-xs font-medium transition-colors",
-                  horizon === option.days
-                    ? "bg-card text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+            <TabsList className="h-7 p-0.5" aria-label="Time range">
+              {HORIZONS.map((option) => (
+                <TabsTrigger
+                  key={option.days}
+                  value={option.days}
+                  className="h-6 rounded-[0.35rem] px-2.5 py-0.5 text-xs font-medium"
+                >
+                  {option.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
         </div>
 
         {isLoading ? (
