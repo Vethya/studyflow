@@ -2,6 +2,15 @@
 
 import * as React from "react";
 import Link from "next/link";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
@@ -112,46 +121,85 @@ export function SectionHeader({
 }
 
 /**
- * A single figure. `tone` is the only way colour enters a tile, and only ever
- * for a capacity signal — never for decoration.
+ * Every block of content on every screen: one card, one title, an optional
+ * description and one right-hand action. Pass `flush` for lists, tables and
+ * grids that should meet the card's edges.
  */
-export function StatTile({
-  icon: Icon,
-  value,
+export function SectionCard({
+  title,
+  description,
+  action,
+  footer,
+  flush = false,
+  className,
+  contentClassName,
+  children,
+}: {
+  title?: React.ReactNode;
+  description?: React.ReactNode;
+  action?: React.ReactNode;
+  footer?: React.ReactNode;
+  flush?: boolean;
+  className?: string;
+  contentClassName?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Card className={cn("min-w-0", className)}>
+      {(title || description || action) && (
+        <CardHeader className={flush ? "border-b" : undefined}>
+          {title && <CardTitle>{title}</CardTitle>}
+          {description && <CardDescription>{description}</CardDescription>}
+          {action && <CardAction>{action}</CardAction>}
+        </CardHeader>
+      )}
+      <CardContent className={cn(flush && "p-0", contentClassName)}>{children}</CardContent>
+      {footer && (
+        <CardFooter className="border-t pt-(--card-spacing) text-xs text-muted-foreground">
+          {footer}
+        </CardFooter>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * The page's headline figures, as one card of divided cells rather than a row
+ * of separate tiles — the figures belong to one question, so they read as one
+ * object. Stacks on small screens, where three columns would truncate.
+ */
+export function FigureRow({ children }: { children: React.ReactNode }) {
+  return (
+    <Card className="min-w-0 py-0">
+      <CardContent className="grid divide-y p-0 sm:auto-cols-fr sm:grid-flow-col sm:divide-x sm:divide-y-0">
+        {children}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** One cell of a FigureRow. `tone` only ever carries a capacity signal. */
+export function Figure({
   label,
+  /** `null` renders the loading state. */
+  value,
   hint,
   tone,
 }: {
-  icon: React.ElementType;
-  /** `null` renders the loading state. */
-  value: string | null;
   label: string;
-  hint?: string;
+  value: string | null;
+  hint?: React.ReactNode;
   tone?: "deficit" | "surplus";
 }) {
   return (
-    <div className="min-w-0 rounded-xl border bg-card p-4">
-      <div className="flex items-center gap-2">
-        <Icon
-          className={cn(
-            "size-4 shrink-0",
-            tone === "deficit"
-              ? "text-deficit"
-              : tone === "surplus"
-                ? "text-surplus"
-                : "text-muted-foreground",
-          )}
-          aria-hidden
-        />
-        <p className="truncate text-xs font-medium text-muted-foreground">{label}</p>
-      </div>
-
+    <div className="min-w-0 px-4 py-3">
+      <p className="truncate text-xs text-muted-foreground">{label}</p>
       {value === null ? (
-        <Skeleton className="mt-2.5 h-8 w-24" />
+        <Skeleton className="mt-1.5 h-6 w-16" />
       ) : (
         <p
           className={cn(
-            "mt-2 font-display text-[1.75rem] font-bold leading-none tabular-nums",
+            "mt-1 font-display text-xl font-bold leading-none tabular-nums",
             tone === "deficit" && "text-deficit",
             tone === "surplus" && "text-surplus",
           )}
@@ -159,8 +207,7 @@ export function StatTile({
           {value}
         </p>
       )}
-
-      {hint && <p className="mt-1.5 truncate text-xs text-muted-foreground">{hint}</p>}
+      {hint && <p className="mt-1 truncate text-xs text-muted-foreground">{hint}</p>}
     </div>
   );
 }
@@ -182,11 +229,15 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-12 text-center",
+        "flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-10 text-center",
         className,
       )}
     >
-      {Icon && <Icon className="size-6 text-muted-foreground/50" aria-hidden />}
+      {Icon && (
+        <span className="flex size-10 items-center justify-center rounded-full border bg-muted/50">
+          <Icon className="size-5 text-muted-foreground" aria-hidden />
+        </span>
+      )}
       <div>
         <p className="text-sm font-medium">{title}</p>
         {children && (

@@ -3,7 +3,6 @@
 import { use, useCallback, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -32,7 +31,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { RecordOutcomeDialog } from "@/components/record-outcome-dialog";
 import { SchedulePreview } from "@/components/schedule-preview";
 import { PersistedEstimateNote } from "@/components/adaptive-estimate";
-import { SectionHeader } from "@/components/page-kit";
+import { SectionCard } from "@/components/page-kit";
 import { formatClock } from "@/lib/datetime";
 import { applyRecordedOutcome } from "@/lib/outcome-ui";
 import { DAY_NAMES_SHORT } from "@/lib/constants";
@@ -221,8 +220,7 @@ export default function TaskDetailPage({
       </div>
 
       {/* ── Facts ───────────────────────────────── */}
-      <Card>
-        <CardContent className="grid gap-x-8 gap-y-5 p-6 sm:grid-cols-2">
+      <SectionCard title="Details" contentClassName="grid gap-x-8 gap-y-5 sm:grid-cols-2">
           <Fact label="Deadline" emphasis={overdue}>
             {deadline.toLocaleDateString(undefined, {
               weekday: "short",
@@ -271,8 +269,7 @@ export default function TaskDetailPage({
               <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed">{task.notes}</p>
             </div>
           )}
-        </CardContent>
-      </Card>
+      </SectionCard>
 
       {task.status !== "Not Started" && (
         <Callout tone="info" title="The original estimate is locked">
@@ -292,18 +289,22 @@ export default function TaskDetailPage({
       )}
 
       {/* ── Session history (SPEC §17.4) ───────────────────── */}
-      <section>
-        <SectionHeader
-          title="Study sessions"
-          meta={schedule.isLoading ? undefined : `${taskSessions.length} planned`}
-        />
+      <SectionCard
+        title="Study sessions"
+        action={
+          schedule.isLoading ? undefined : (
+            <span className="text-xs text-muted-foreground">{taskSessions.length} planned</span>
+          )
+        }
+        flush
+      >
         {schedule.isLoading ? (
-          <div className="space-y-2 pt-3">
+          <div className="space-y-2 p-(--card-spacing)">
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
           </div>
         ) : taskSessions.length === 0 ? (
-          <p className="pt-4 text-sm text-muted-foreground">
+          <p className="p-(--card-spacing) text-sm text-muted-foreground">
             No sessions yet.{" "}
             <Link href="/calendar" className="font-medium underline underline-offset-4">
               Plan your time
@@ -321,7 +322,7 @@ export default function TaskDetailPage({
             ))}
           </ul>
         )}
-      </section>
+      </SectionCard>
 
       <TaskFormDialog
         open={editing}
@@ -393,7 +394,7 @@ function SessionRow({
   const isPast = new Date(session.endTime) < new Date();
 
   return (
-    <li className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2.5">
+    <li className="flex flex-wrap items-center gap-x-4 gap-y-1 px-(--card-spacing) py-2.5">
       <span className="w-40 shrink-0 text-xs tabular-nums text-muted-foreground">
         {DAY_NAMES_SHORT[start.getDay()]} {start.getDate()}{" "}
         {start.toLocaleDateString(undefined, { month: "short" })} · {formatClock(start)}–

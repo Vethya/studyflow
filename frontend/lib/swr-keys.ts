@@ -12,6 +12,7 @@ export const SWR_KEYS = {
   profile: "studyflow/account/profile",
   identities: "studyflow/account/identities",
   deletionStatus: "studyflow/account/deletion-status",
+  googleImportStatus: "studyflow/integrations/google/status",
   activeSchedule: "studyflow/schedule/active",
   pendingRevision: "studyflow/schedule/pending-revision",
   effortProgress: "studyflow/progress/effort",

@@ -1,12 +1,29 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Callout } from "@/components/ui/callout";
-import { Plus, Trash2, CalendarDays, CalendarOff, Clock4, Loader2, Pencil, RefreshCw, X } from "lucide-react";
-import { EmptyState, PageHeader, PageShell, StatTile } from "@/components/page-kit";
+import {
+  GoogleImportButton,
+  GoogleImportReminder,
+} from "@/components/google-import-button";
+import { Plus, Trash2, CalendarOff, Clock4, Loader2, Pencil, RefreshCw, X } from "lucide-react";
+import {
+  EmptyState,
+  Figure,
+  FigureRow,
+  PageHeader,
+  PageShell,
+  SectionCard,
+} from "@/components/page-kit";
 import { GridLegend, WeekGrid, type GridBlock, type GridColumn } from "@/components/week-grid";
 import { toast } from "sonner";
 import { DAY_NAMES, DAY_NAMES_SHORT } from "@/lib/constants";
@@ -236,6 +253,7 @@ export default function AvailabilityPage() {
               <CalendarOff />
               Add exception
             </Button>
+            <GoogleImportButton source="google_calendar" />
             <Button onClick={() => setWindowDialogOpen(true)}>
               <Plus />
               Add window
@@ -321,40 +339,39 @@ export default function AvailabilityPage() {
         </Callout>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <StatTile
-          icon={Clock4}
-          value={windows.isLoading ? null : formatDuration(weeklyPatternMinutes(allWindows))}
+      <GoogleImportReminder source="google_calendar" />
+
+      <FigureRow>
+        <Figure
           label="Weekly study time"
+          value={windows.isLoading ? null : formatDuration(weeklyPatternMinutes(allWindows))}
           tone="surplus"
         />
-        <StatTile
-          icon={CalendarDays}
-          value={windows.isLoading ? null : String(allWindows.length)}
+        <Figure
           label={allWindows.length === 1 ? "Weekly window" : "Weekly windows"}
+          value={windows.isLoading ? null : String(allWindows.length)}
         />
-        <StatTile
-          icon={CalendarOff}
-          value={periods.isLoading ? null : String(allPeriods.length)}
+        <Figure
           label={allPeriods.length === 1 ? "Exception" : "Exceptions"}
+          value={periods.isLoading ? null : String(allPeriods.length)}
         />
-      </div>
+      </FigureRow>
 
       {/* ── Main content ───────────────────────── */}
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="flex min-w-0 flex-col gap-3 lg:col-span-2">
-          <div>
-            <h2 className="font-display text-base font-semibold tracking-tight">Your week</h2>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              The same grid the calendar uses. Hover a window to find it in the list.
-            </p>
-          </div>
-
+        <div className="flex min-w-0 flex-col gap-4 lg:col-span-2">
+          <SectionCard
+            title="Your week"
+            description="The same grid the calendar uses. Hover a window to find it in the list."
+            flush
+            footer={<GridLegend />}
+          >
           {windows.isLoading ? (
-            <Skeleton className="h-[26rem] w-full rounded-xl" />
+            <Skeleton className="m-(--card-spacing) h-[26rem] rounded-lg" />
           ) : allWindows.length === 0 ? (
             <EmptyState
               icon={Clock4}
+              className="border-0"
               title="No study hours yet"
               action={
                 <Button size="sm" onClick={() => setWindowDialogOpen(true)}>
@@ -366,6 +383,7 @@ export default function AvailabilityPage() {
             </EmptyState>
           ) : (
             <WeekGrid
+              className="rounded-none border-0"
               ariaLabel="Weekly availability"
               columns={columns}
               blocks={blocks}
@@ -375,7 +393,7 @@ export default function AvailabilityPage() {
               onHighlight={setHoveredWindow}
             />
           )}
-          <GridLegend />
+          </SectionCard>
         </div>
 
         {/* Right column */}
@@ -390,7 +408,7 @@ export default function AvailabilityPage() {
           <Card className="py-0">
             <CardHeader className="border-b py-3">
               <div className="flex items-center justify-between">
-                <CardTitle className="font-display text-base">Your weekly hours</CardTitle>
+                <CardTitle>Your weekly hours</CardTitle>
                 <span className="text-xs text-muted-foreground">
                   {formatDuration(weeklyPatternMinutes(allWindows))} a week
                 </span>
@@ -480,9 +498,9 @@ export default function AvailabilityPage() {
 
           {/* Unavailable periods */}
           <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="font-display text-base">Exceptions</CardTitle>
-              <p className="text-sm text-muted-foreground">Days you know you cannot study</p>
+            <CardHeader>
+              <CardTitle>Exceptions</CardTitle>
+              <CardDescription>Days you know you cannot study</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
               {periods.isLoading ? (

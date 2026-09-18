@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     google_oidc_client_id: str | None = None
     google_oidc_client_secret: SecretStr | None = None
     google_oidc_redirect_uri: str | None = None
+    google_import_redirect_uri: str | None = None
 
     @field_validator("database_url")
     @classmethod
@@ -103,6 +104,7 @@ class Settings(BaseSettings):
         "google_oidc_client_id",
         "google_oidc_client_secret",
         "google_oidc_redirect_uri",
+        "google_import_redirect_uri",
         mode="before",
     )
     @classmethod
@@ -123,6 +125,18 @@ class Settings(BaseSettings):
             raise ValueError("Google OIDC redirect URI must not include a query or fragment")
         return value
 
+    @field_validator("google_import_redirect_uri")
+    @classmethod
+    def require_http_import_redirect_uri(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed_url = urlsplit(value)
+        if parsed_url.scheme not in {"http", "https"} or parsed_url.hostname is None:
+            raise ValueError("Google import redirect URI must use HTTP or HTTPS and include a host")
+        if parsed_url.query or parsed_url.fragment:
+            raise ValueError("Google import redirect URI must not include a query or fragment")
+        return value
+
     @model_validator(mode="after")
     def reject_debug_in_production(self) -> Self:
         configured_oidc_values = (
@@ -133,6 +147,10 @@ class Settings(BaseSettings):
         if any(configured_oidc_values) and not all(configured_oidc_values):
             raise ValueError(
                 "Google OIDC client ID, secret, and redirect URI must be configured together"
+            )
+        if self.google_import_redirect_uri is not None and not all(configured_oidc_values):
+            raise ValueError(
+                "Google import requires the Google OIDC client ID, secret, and redirect URI"
             )
         if self.environment is Environment.PRODUCTION and self.debug:
             raise ValueError("Debug mode must be disabled in production")
@@ -157,4 +175,9 @@ class Settings(BaseSettings):
                 and urlsplit(self.google_oidc_redirect_uri).scheme != "https"
             ):
                 raise ValueError("Production Google OIDC redirect URI must use HTTPS")
+            if (
+                self.google_import_redirect_uri is not None
+                and urlsplit(self.google_import_redirect_uri).scheme != "https"
+            ):
+                raise ValueError("Production Google import redirect URI must use HTTPS")
         return self

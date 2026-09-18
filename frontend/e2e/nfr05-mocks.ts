@@ -375,6 +375,84 @@ export async function installNfr05ApiMocks(
       return;
     }
 
+    if (path === "/api/v1/integrations/google/status" && method === "GET") {
+      await fulfillJson(route, {
+        configured: true,
+        calendar_checked_at: null,
+        // Old enough that the "check again" reminder shows on Tasks.
+        classroom_checked_at: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString(),
+      });
+      return;
+    }
+
+    if (path === "/api/v1/integrations/google/imports/import-calendar" && method === "GET") {
+      const start = new Date(Date.now() + 26 * 60 * 60 * 1000);
+      start.setMinutes(0, 0, 0);
+      const hours = (value: number) => new Date(start.getTime() + value * 60 * 60 * 1000);
+      await fulfillJson(route, {
+        id: "import-calendar",
+        source: "google_calendar",
+        expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+        items: [
+          {
+            id: "a".repeat(64),
+            title: "Part-time shift",
+            starts_at: start.toISOString(),
+            ends_at: hours(4).toISOString(),
+            all_day: false,
+            status: "new",
+          },
+          {
+            id: "b".repeat(64),
+            title: "Family trip",
+            starts_at: hours(24).toISOString(),
+            ends_at: hours(72).toISOString(),
+            all_day: true,
+            status: "changed",
+          },
+          {
+            id: "c".repeat(64),
+            title: "Dentist",
+            starts_at: hours(30).toISOString(),
+            ends_at: hours(31).toISOString(),
+            all_day: false,
+            status: "unchanged",
+          },
+        ],
+      });
+      return;
+    }
+
+    if (path === "/api/v1/integrations/google/imports/import-classroom" && method === "GET") {
+      const due = (days: number) => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+      await fulfillJson(route, {
+        id: "import-classroom",
+        source: "google_classroom",
+        expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+        items: [
+          {
+            id: "d".repeat(64),
+            title: "Lab report 2",
+            course: "Physics",
+            due_at: due(4),
+            link: "https://classroom.google.com/c/abc/a/def/details",
+            suggested_category: "assignment",
+            status: "new",
+          },
+          {
+            id: "e".repeat(64),
+            title: "Midterm quiz",
+            course: "Linear Algebra",
+            due_at: due(9),
+            link: null,
+            suggested_category: "exam_preparation",
+            status: "already_imported",
+          },
+        ],
+      });
+      return;
+    }
+
     if (path === "/api/v1/account/deletion/status" && method === "GET") {
       await fulfillJson(route, { ready: false });
       return;

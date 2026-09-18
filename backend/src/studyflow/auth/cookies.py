@@ -47,6 +47,10 @@ class CookiePolicy:
     def account_deletion_intent_name(self) -> str:
         return self._name("studyflow_account_deletion_intent")
 
+    @property
+    def google_import_state_name(self) -> str:
+        return self._name("studyflow_google_import_state")
+
     def set_authentication(
         self,
         response: Response,
@@ -162,6 +166,28 @@ class CookiePolicy:
     def clear_account_deletion_intent(self, response: Response) -> None:
         response.delete_cookie(
             self.account_deletion_intent_name,
+            path="/",
+            secure=self.secure,
+            httponly=True,
+            samesite="lax",
+        )
+
+    def set_google_import_state(self, response: Response, state: str) -> None:
+        # Lax, because Google's redirect back to the callback is a cross-site
+        # top-level navigation; the value is bound to a server-side state row.
+        response.set_cookie(
+            key=self.google_import_state_name,
+            value=state,
+            max_age=10 * 60,
+            path="/",
+            secure=self.secure,
+            httponly=True,
+            samesite="lax",
+        )
+
+    def clear_google_import_state(self, response: Response) -> None:
+        response.delete_cookie(
+            self.google_import_state_name,
             path="/",
             secure=self.secure,
             httponly=True,

@@ -41,6 +41,10 @@ class TaskMustBeStartedError(ValueError):
     """Raised when an unstarted task is finished early."""
 
 
+class DuplicateExternalTaskError(ValueError):
+    """Raised when an imported task already exists for the same external item."""
+
+
 class TaskStatus(StrEnum):
     NOT_STARTED = "not_started"
     IN_PROGRESS = "in_progress"
@@ -58,6 +62,9 @@ class NewAcademicTask:
     deadline_at: datetime
     original_estimate_minutes: int
     planned_source: PlannedDurationSource | None = None
+    # Identifies the Google Classroom item a task was imported from. Ignored on update.
+    external_source: str | None = None
+    external_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

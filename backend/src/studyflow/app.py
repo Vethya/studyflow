@@ -46,6 +46,7 @@ from studyflow.auth.rate_limits import (
     DatabaseAccountDeletionRateLimiter,
     DatabaseAccountPasswordChangeRateLimiter,
     DatabaseEmailVerificationRateLimiter,
+    DatabaseGoogleImportStartRateLimiter,
     DatabaseLoginRateLimiter,
     DatabaseOIDCLinkRateLimiter,
     DatabaseOIDCStartRateLimiter,
@@ -55,6 +56,7 @@ from studyflow.auth.rate_limits import (
     DatabaseRegistrationRateLimiter,
     DatabaseVerificationResendRateLimiter,
     EmailVerificationRateLimit,
+    GoogleImportStartRateLimit,
     LoginRateLimit,
     OIDCLinkRateLimit,
     OIDCStartRateLimit,
@@ -98,6 +100,13 @@ from studyflow.availability.windows import AvailabilityWindows, AvailabilityWind
 from studyflow.database import Database, DatabaseRuntime
 from studyflow.estimation import AdaptiveEstimator
 from studyflow.estimation.repositories import SqlAlchemyAdaptivePredictionRepository
+from studyflow.integrations.google_client import HttpGoogleImportClient
+from studyflow.integrations.google_import import (
+    GoogleImports,
+    GoogleImportService,
+    UnconfiguredGoogleImports,
+)
+from studyflow.integrations.repositories import SqlAlchemyGoogleImportRepository
 from studyflow.scheduling.acceptance import ScheduleAcceptance, ScheduleAcceptanceService
 from studyflow.scheduling.outcome_repositories import SqlAlchemyStudySessionOutcomeRepository
 from studyflow.scheduling.outcomes import StudySessions, StudySessionService
@@ -132,6 +141,11 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             )
             if authentication_http_client is not None:
                 await authentication_http_client.aclose()
+            google_import_http_client: httpx.AsyncClient | None = (
+                application.state.google_import_http_client
+            )
+            if google_import_http_client is not None:
+                await google_import_http_client.aclose()
 
 
 def create_app(
@@ -170,6 +184,8 @@ def create_app(
     oidc_account_linking: OIDCAccountLinking | None = None,
     oidc_link_rate_limiter: OIDCLinkRateLimit | None = None,
     study_time_updates: StudyTimeUpdates | None = None,
+    google_imports: GoogleImports | None = None,
+    google_import_start_rate_limiter: GoogleImportStartRateLimit | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     resolved_database = database or Database(resolved_settings.database_url.get_secret_value())
@@ -353,6 +369,29 @@ def create_app(
         resolved_recovery_snapshots,
         resolved_schedule_proposals,
     )
+    google_import_http_client: httpx.AsyncClient | None = None
+    resolved_google_imports = google_imports
+    if resolved_google_imports is None:
+        if (
+            resolved_settings.google_oidc_client_id is not None
+            and resolved_settings.google_oidc_client_secret is not None
+            and resolved_settings.google_import_redirect_uri is not None
+        ):
+            google_import_http_client = httpx.AsyncClient(timeout=10.0)
+            resolved_google_imports = GoogleImportService(
+                SqlAlchemyGoogleImportRepository(transactions, future_session_invalidator),
+                HttpGoogleImportClient(
+                    google_import_http_client,
+                    resolved_settings.google_oidc_client_id,
+                    resolved_settings.google_oidc_client_secret.get_secret_value(),
+                    resolved_settings.google_import_redirect_uri,
+                ),
+                resolved_academic_tasks,
+                resolved_settings.google_oidc_client_id,
+                resolved_settings.google_import_redirect_uri,
+            )
+        else:
+            resolved_google_imports = UnconfiguredGoogleImports()
     application.state.settings = resolved_settings
     application.state.cookie_policy = CookiePolicy.for_environment(resolved_settings.environment)
     application.state.database = resolved_database
@@ -423,6 +462,11 @@ def create_app(
     application.state.schedule_acceptance = resolved_schedule_acceptance
     application.state.study_sessions = resolved_study_sessions
     application.state.schedule_recovery = resolved_schedule_recovery
+    application.state.google_imports = resolved_google_imports
+    application.state.google_import_http_client = google_import_http_client
+    application.state.google_import_start_rate_limiter = (
+        google_import_start_rate_limiter or DatabaseGoogleImportStartRateLimiter(transactions)
+    )
     application.include_router(api_router)
 
     return application

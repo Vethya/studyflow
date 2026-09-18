@@ -65,6 +65,7 @@ FR-10 is removed. Internal estimate-comparison metrics remain required for adapt
 - Behavior-adaptive estimation with one transparent personal correction method.
 - Effort Progress without student-facing estimation-accuracy analytics.
 - Responsive desktop and mobile-width workflows.
+- Optional one-time, read-only import of busy events from Google Calendar and unfinished coursework from Google Classroom (§8.5).
 
 ### 3.2 Explicitly Excluded
 
@@ -78,8 +79,8 @@ FR-10 is removed. Internal estimate-comparison metrics remain required for adapt
 - Student-facing estimation-error statistics or model-accuracy analytics.
 - Native Android or iOS applications.
 - Offline mode or installable PWA requirements.
-- LMS integration.
-- Google Calendar integration.
+- LMS integration beyond the one-time Google Classroom import in §8.5.
+- Ongoing Google Calendar synchronization, and writing anything back to Google.
 - Adviser/admin dashboards.
 - Automatic grading or grade prediction.
 - Academic-performance prediction.
@@ -412,6 +413,17 @@ No accepted or generated session may:
 - Enter the past.
 - Cross its task Deadline.
 - Violate Minimum Break.
+
+### 8.5 Google Calendar and Google Classroom Import
+
+Optional. Enabled only when the server has a Google import redirect URI configured.
+
+- The student starts each import explicitly. It is one-time and read-only; nothing in Google is changed.
+- Google Calendar: events from the primary calendar over a chosen horizon (up to 90 days). Cancelled, free, declined, working-location, and birthday events are skipped. Each selected event becomes an Unavailable Period, so §8.2 invalidation applies.
+- Google Classroom: coursework in active classes with a future due date that the student has not turned in. Each selected item becomes an Academic Task; the student chooses Category, Priority, and Original Estimate, because Classroom has no estimate.
+- Nothing is created until the student reviews the list and confirms. A repeat import recognises items already imported: calendar events with changed times are updated, and Classroom tasks are left as the student edited them.
+- Imports are manual. StudyFlow records when each source was last checked and offers to check again after three days; it does not sync in the background.
+- Security: OAuth authorization-code flow with PKCE and a single-use, account-bound state; only read-only scopes; no Google access or refresh token is stored. Fetched data is kept as a preview for at most 30 minutes and can be confirmed once.
 
 ## 9. Session Preferences and Splitting
 

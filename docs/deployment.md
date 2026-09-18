@@ -35,6 +35,7 @@ URL, and TLS for email delivery.
 | `STUDYFLOW_GOOGLE_OIDC_CLIENT_ID` | no | You (secret) | All three OIDC values configure together |
 | `STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET` | no | You (secret) | |
 | `STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI` | no | You (secret) | Paste `https://<frontend-origin>/api/v1/auth/google/callback`; must be HTTPS and must go through the frontend proxy |
+| `STUDYFLOW_GOOGLE_IMPORT_REDIRECT_URI` | no | You (secret) | Enables Google Calendar and Classroom import. Paste `https://<frontend-origin>/api/v1/integrations/google/callback`; requires the three OIDC values. See [google-import-setup.md](google-import-setup.md) |
 
 ## One-time setup
 

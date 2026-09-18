@@ -54,6 +54,10 @@ class OIDCStartRateLimitExceeded(RuntimeError):
     """Raised when an IP address creates too many OIDC states."""
 
 
+class GoogleImportStartRateLimitExceeded(RuntimeError):
+    """Raised when a student starts too many Google imports."""
+
+
 class OIDCLinkRateLimitExceeded(RuntimeError):
     """Raised when Google account-link confirmation is attempted too often."""
 
@@ -102,6 +106,10 @@ class AccountDeletionRateLimit(Protocol):
 
 class OIDCStartRateLimit(Protocol):
     async def check(self, client_ip: str) -> None: ...
+
+
+class GoogleImportStartRateLimit(Protocol):
+    async def check(self, client_ip: str, account_id: str) -> None: ...
 
 
 class OIDCLinkRateLimit(Protocol):
@@ -456,4 +464,28 @@ class DatabaseOIDCLinkRateLimiter(_DatabaseRateLimiter):
             "oidc_link",
             (f"ip:{client_ip}", f"account:{account_key}"),
             OIDCLinkRateLimitExceeded,
+        )
+
+
+class DatabaseGoogleImportStartRateLimiter(_DatabaseRateLimiter):
+    def __init__(
+        self,
+        database: SessionTransactions,
+        *,
+        maximum_attempts: int = 10,
+        window_seconds: int = 900,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
+        super().__init__(
+            database,
+            maximum_attempts=maximum_attempts,
+            window_seconds=window_seconds,
+            clock=clock,
+        )
+
+    async def check(self, client_ip: str, account_id: str) -> None:
+        await self._check(
+            "google_import_start",
+            (f"ip:{client_ip}", f"account:{account_id}"),
+            GoogleImportStartRateLimitExceeded,
         )
