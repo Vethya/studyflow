@@ -277,7 +277,7 @@ html.dark {
   --landing-card: oklch(0.265 0.019 262);
   --landing-ink: oklch(0.955 0.004 250);
   --landing-muted: oklch(0.712 0.014 256);
-  --landing-subtle: oklch(0.588 0.016 258);
+  --landing-subtle: oklch(0.68 0.016 258);
   --landing-border: oklch(1 0 0 / 12%);
   --landing-accent: oklch(0.78 0.105 230);
   --landing-shadow: 0 18px 40px 0 oklch(0.04 0.01 262 / 0.28);
@@ -333,7 +333,7 @@ html.amoled {
   --landing-card: oklch(0.05 0.006 262);
   --landing-ink: oklch(0.955 0.004 250);
   --landing-muted: oklch(0.712 0.014 256);
-  --landing-subtle: oklch(0.588 0.016 258);
+  --landing-subtle: oklch(0.68 0.016 258);
   --landing-border: oklch(1 0 0 / 14%);
   --landing-accent: oklch(0.78 0.105 230);
   --landing-shadow: 0 18px 40px 0 oklch(0 0 0 / 0.7);
@@ -349,7 +349,7 @@ html.amoled {
   --landing-card: oklch(1 0 0);
   --landing-ink: oklch(0.205 0.019 262);
   --landing-muted: oklch(0.518 0.018 258);
-  --landing-subtle: oklch(0.62 0.01 258);
+  --landing-subtle: oklch(0.52 0.012 258);
   --landing-border: oklch(0.92 0.005 250);
   --landing-accent: oklch(0.62 0.13 230);
   --landing-shadow: 0 17px 37px 0 oklch(0.2 0.02 262 / 0.06);

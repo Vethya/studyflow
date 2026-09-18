@@ -34,11 +34,9 @@ export default function ProgressPage() {
     activeScheduleKey(tasks.data),
     loadSchedule,
   );
-  const loadEffort = useCallback(
-    (s: AbortSignal) =>
-      scheduling.listEffortProgress(s, tasks.data ?? [], schedule.data?.sessions ?? []),
-    [schedule.data, tasks.data],
-  );
+  // Progress comes from GET /progress; the key still follows tasks and the
+  // schedule so it refreshes when either changes.
+  const loadEffort = useCallback((s: AbortSignal) => scheduling.listEffortProgress(s), []);
   const effort = useApi(
     effortProgressKey(tasks.data, schedule.data, schedule.isLoading),
     loadEffort,
@@ -255,7 +253,7 @@ function ProgressRow({
           <span className="tabular-nums">
             {row.sessionsCompleted}
             {row.sessionsUpcoming > 0 && (
-              <span className="text-muted-foreground/60"> +{row.sessionsUpcoming}</span>
+              <span className="text-muted-foreground"> +{row.sessionsUpcoming}</span>
             )}
           </span>
         </span>

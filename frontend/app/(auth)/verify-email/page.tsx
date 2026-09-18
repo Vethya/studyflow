@@ -21,6 +21,12 @@ import { ApiError, auth } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
 import { cn } from "@/lib/utils";
 import { detectTimezone, withTimezone } from "@/lib/timezones";
+import { FieldError } from "@/components/ui/field-error";
+import {
+  registrationFieldErrorsFrom,
+  validateRegistration,
+  type RegistrationFieldErrors,
+} from "@/lib/registration-validation";
 import { notifyStudyFlowSessionInvalidated } from "@/lib/data-events";
 import { useSession } from "@/hooks/use-session";
 
@@ -215,6 +221,7 @@ function CompleteRegistration({ token }: { token: string }) {
   const [confirm, setConfirm] = useState("");
   const [timezone, setTimezone] = useState(detectTimezone);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<RegistrationFieldErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Verification tokens are single use, so the exchange must not be repeated —
@@ -235,12 +242,11 @@ function CompleteRegistration({ token }: { token: string }) {
     event.preventDefault();
     if (!signupToken) return;
 
-    if (password !== confirm) {
-      setError("Passwords do not match.");
-      return;
-    }
-
     setError(null);
+    const invalid = validateRegistration({ name, password, confirm });
+    setFieldErrors(invalid);
+    if (Object.keys(invalid).length > 0) return;
+
     setIsSubmitting(true);
     try {
       await auth.completeRegistration({ signupToken, name, password, timezone });
@@ -248,7 +254,9 @@ function CompleteRegistration({ token }: { token: string }) {
       notifyStudyFlowSessionInvalidated();
       router.replace("/login?registered=1");
     } catch (cause) {
-      setError(describeError(cause));
+      const byField = registrationFieldErrorsFrom(cause);
+      if (byField) setFieldErrors(byField);
+      else setError(describeError(cause));
       setIsSubmitting(false);
     }
   }
@@ -302,7 +310,8 @@ function CompleteRegistration({ token }: { token: string }) {
         </Alert>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      {/* noValidate: our own messages sit under each field (FR-01-AC02). */}
+      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
         <div className="space-y-1.5">
           <Label htmlFor="name" className="text-xs font-medium">Full Name</Label>
           <Input
@@ -313,7 +322,10 @@ function CompleteRegistration({ token }: { token: string }) {
             onChange={(e) => setName(e.target.value)}
             disabled={isSubmitting}
             required
+            aria-invalid={fieldErrors.name ? true : undefined}
+            aria-describedby={fieldErrors.name ? "name-error" : undefined}
           />
+          <FieldError id="name-error" message={fieldErrors.name} />
         </div>
 
         <div className="space-y-1.5">
@@ -327,8 +339,11 @@ function CompleteRegistration({ token }: { token: string }) {
             disabled={isSubmitting}
             minLength={12}
             required
+            aria-invalid={fieldErrors.password ? true : undefined}
+            aria-describedby={fieldErrors.password ? "password-error password-hint" : "password-hint"}
           />
-          <p className="text-[11px] text-muted-foreground">
+          <FieldError id="password-error" message={fieldErrors.password} />
+          <p id="password-hint" className="text-[11px] text-muted-foreground">
             At least 12 characters. Passwords found in known breaches are rejected.
           </p>
           {password.length > 0 && (
@@ -361,7 +376,10 @@ function CompleteRegistration({ token }: { token: string }) {
             onChange={(e) => setConfirm(e.target.value)}
             disabled={isSubmitting}
             required
+            aria-invalid={fieldErrors.confirm ? true : undefined}
+            aria-describedby={fieldErrors.confirm ? "confirm-error" : undefined}
           />
+          <FieldError id="confirm-error" message={fieldErrors.confirm} />
         </div>
 
         <div className="space-y-1.5">
@@ -383,6 +401,7 @@ function CompleteRegistration({ token }: { token: string }) {
               ))}
             </SelectContent>
           </Select>
+          <FieldError id="timezone-error" message={fieldErrors.timezone} />
           <p className="text-[11px] text-muted-foreground">
             Used to interpret your deadlines and place study sessions.
           </p>

@@ -12,6 +12,7 @@ import type { EffortProgress } from "@/types/progress";
 import type {
   WireAcademicTask,
   WireAvailabilityWindow,
+  WireEffortProgress,
   WireLinkedIdentity,
   WireStudyPreferences,
   WireTaskCategory,
@@ -74,28 +75,30 @@ export const toWireStatus = (value: TaskStatus): WireTaskStatus => STATUS_TO_WIR
 
 // ─── Tasks ───────────────────────────────────────────────────────
 /**
- * The task endpoints do not yet report logged effort or session counts —
- * those arrive with the scheduling API, which is not implemented on the
- * backend. Until then they read as zero rather than as mock values, so the
- * UI never shows a number the server did not produce.
+ * The task endpoints do not report logged effort or session counts; those come
+ * from `GET /progress`. Pass the task's progress row to use the server's
+ * figures. Without one the task reads as having no recorded work yet.
  */
-export function toAcademicTask(wire: WireAcademicTask): AcademicTask {
+export function toAcademicTask(wire: WireAcademicTask, progress?: EffortProgress): AcademicTask {
+  const status = STATUS_FROM_WIRE[wire.status];
   return {
     id: wire.id,
     title: wire.title,
     category: CATEGORY_FROM_WIRE[wire.category],
     priority: PRIORITY_FROM_WIRE[wire.priority],
-    status: STATUS_FROM_WIRE[wire.status],
+    status,
     deadline: wire.deadline_at,
     originalEstimate: wire.original_estimate_minutes,
     adaptiveEstimate: wire.adaptive_estimate_minutes ?? undefined,
     plannedSource: wire.planned_source === "adaptive" ? "Adaptive" : "Original",
     estimateFrozen: wire.estimate_frozen ?? false,
     plannedDuration: wire.planned_duration_minutes,
-    actualDuration: 0,
-    remainingDuration: wire.planned_duration_minutes,
-    sessionsCompleted: 0,
-    sessionsUpcoming: 0,
+    actualDuration: progress?.actualDuration ?? 0,
+    remainingDuration:
+      progress?.estimatedRemaining ??
+      (status === "Completed" ? 0 : wire.planned_duration_minutes),
+    sessionsCompleted: progress?.sessionsCompleted ?? 0,
+    sessionsUpcoming: progress?.sessionsUpcoming ?? 0,
     course: wire.course ?? undefined,
     notes: wire.notes ?? undefined,
     createdAt: wire.created_at,
@@ -231,6 +234,7 @@ function toScheduleScenario(wire: WireScheduleProposal["scenario"]): ScheduleSce
 
 export function toScheduleProposal(wire: WireScheduleProposal): ScheduleProposal {
   const periods = wire.overload_warning?.relevant_unavailable_periods ?? [];
+  const remedies = wire.overload_warning?.remedies ?? ["extend_deadline", "add_availability"];
 
   return {
     id: wire.id,
@@ -260,35 +264,33 @@ export function toScheduleProposal(wire: WireScheduleProposal): ScheduleProposal
         requiredMinutes: a.required_minutes,
         availableMinutes: a.available_minutes_before_deadline,
         shortfallMinutes: a.shortfall_minutes,
-        relevantUnavailablePeriods: periods.map(
-          (p) => p.reason ?? "an unavailable period",
-        ),
+        // The API lists periods for the whole overload; each task only shows
+        // the ones that begin before its own deadline.
+        relevantUnavailablePeriods: periods
+          .filter((p) => new Date(p.starts_at) < new Date(a.deadline_at))
+          .map((p) => ({
+            id: p.id,
+            startsAt: p.starts_at,
+            endsAt: p.ends_at,
+            reason: p.reason ?? undefined,
+          })),
+        remedies,
       })),
     createdAt: wire.created_at,
     scenario: toScheduleScenario(wire.scenario),
   };
 }
 
-/** SPEC §13: effort = worked / (worked + estimated remaining). */
-export function toEffortProgress(
-  tasks: AcademicTask[],
-  sessions: StudySession[],
-): EffortProgress[] {
-  const now = new Date();
-  return tasks.map((task) => {
-    const mine = sessions.filter((s) => s.taskId === task.id);
-    const worked = mine.reduce((sum, s) => sum + (s.actualDuration ?? 0), 0);
-    const remaining = task.remainingDuration;
-    const denominator = worked + remaining;
-    return {
-      taskId: task.id,
-      taskTitle: task.title,
-      actualDuration: worked,
-      estimatedRemaining: remaining,
-      effortPercent: denominator > 0 ? Math.round((worked / denominator) * 100) : 0,
-      sessionsCompleted: mine.filter((s) => s.outcome === "Completed").length,
-      sessionsUpcoming: mine.filter((s) => !s.outcome && new Date(s.startTime) > now).length,
-      status: task.status,
-    };
-  });
+/** SPEC §13: effort = worked / (worked + estimated remaining), computed server-side. */
+export function toEffortProgress(wire: WireEffortProgress): EffortProgress {
+  return {
+    taskId: wire.task_id,
+    taskTitle: wire.task_title,
+    actualDuration: wire.actual_duration_minutes,
+    estimatedRemaining: wire.estimated_remaining_minutes,
+    effortPercent: wire.effort_percent,
+    sessionsCompleted: wire.sessions_completed,
+    sessionsUpcoming: wire.sessions_upcoming,
+    status: STATUS_FROM_WIRE[wire.status],
+  };
 }

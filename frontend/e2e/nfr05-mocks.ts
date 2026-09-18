@@ -267,6 +267,23 @@ export async function installNfr05ApiMocks(
       return;
     }
 
+    if (path === "/api/v1/progress" && method === "GET") {
+      await fulfillJson(
+        route,
+        taskStore.map((task) => ({
+          task_id: task.id,
+          task_title: task.title,
+          actual_duration_minutes: 0,
+          estimated_remaining_minutes: task.status === "completed" ? 0 : task.planned_duration_minutes,
+          effort_percent: task.status === "completed" ? 100 : 0,
+          sessions_completed: 0,
+          sessions_upcoming: 0,
+          status: task.status,
+        })),
+      );
+      return;
+    }
+
     if (path === "/api/v1/tasks/task-reading" && method === "GET") {
       await fulfillJson(route, taskStore.find((task) => task.id === "task-reading") ?? MOCK_TASKS[0]);
       return;
@@ -355,6 +372,11 @@ export async function installNfr05ApiMocks(
 
     if (path === "/api/v1/account/preferences" && method === "PATCH") {
       await fulfillJson(route, MOCK_PREFERENCES);
+      return;
+    }
+
+    if (path === "/api/v1/account/deletion/status" && method === "GET") {
+      await fulfillJson(route, { ready: false });
       return;
     }
 

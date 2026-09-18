@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 import useSWR, { type Key } from "swr";
 import { ApiError } from "@/lib/api";
 
@@ -30,7 +30,10 @@ export function useApi<T>(
   loader: (signal: AbortSignal) => Promise<T>,
 ): AsyncResource<T> {
   const loaderRef = useRef(loader);
-  loaderRef.current = loader;
+  // Updated before SWR's own layout effect revalidates, so fetches use the latest loader.
+  useLayoutEffect(() => {
+    loaderRef.current = loader;
+  });
 
   const fetcher = useCallback(() => {
     const controller = new AbortController();

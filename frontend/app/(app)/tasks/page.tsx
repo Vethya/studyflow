@@ -390,10 +390,10 @@ export default function TasksPage() {
             </EmptyState>
           ) : (
             <>
-              <div className="hidden grid-cols-[minmax(0,1fr)_7rem_6rem_7rem_2.5rem] gap-4 border-b bg-muted/40 px-6 py-2 lg:grid">
+              <div className="hidden grid-cols-[minmax(0,1fr)_7rem_8rem_7rem_2.5rem] gap-4 border-b bg-muted/40 px-6 py-2 lg:grid">
                 <span className="text-xs font-medium text-muted-foreground">Task</span>
                 <span className="text-xs font-medium text-muted-foreground">Due</span>
-                <span className="text-end text-xs font-medium text-muted-foreground">Left</span>
+                <span className="text-end text-xs font-medium text-muted-foreground">Worked · left</span>
                 <span className="text-xs font-medium text-muted-foreground">Status</span>
                 <span />
               </div>
@@ -547,7 +547,7 @@ function TaskRow({
 
   return (
     <li className="group relative py-3 pl-6 pr-14 transition-colors hover:bg-muted/40 lg:pr-6">
-      <div className="flex flex-col gap-2 lg:grid lg:grid-cols-[minmax(0,1fr)_7rem_6rem_7rem_2.5rem] lg:items-center lg:gap-4">
+      <div className="flex flex-col gap-2 lg:grid lg:grid-cols-[minmax(0,1fr)_7rem_8rem_7rem_2.5rem] lg:items-center lg:gap-4">
         <div className="min-w-0">
           <Link
             href={`/tasks/${task.id}`}
@@ -583,8 +583,14 @@ function TaskRow({
             {due.short}
           </span>
 
+          {/* SPEC §17.4: actual duration alongside estimated remaining. */}
           <span className="min-w-0 text-xs tabular-nums text-muted-foreground lg:text-end">
+            <span className="sr-only">Worked </span>
+            {formatDuration(task.actualDuration)}
+            {" · "}
+            <span className="sr-only">left </span>
             {formatDuration(task.remainingDuration)}
+            <span className="lg:hidden"> left</span>
           </span>
 
           <span className="flex min-w-0 items-center gap-1.5 text-xs">

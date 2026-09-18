@@ -244,7 +244,9 @@ export default function TaskDetailPage({
             {formatDuration(task.plannedDuration)}
           </Fact>
 
-          <Fact label="Remaining">{formatDuration(task.remainingDuration)}</Fact>
+          <Fact label="Actual time worked">{formatDuration(task.actualDuration)}</Fact>
+
+          <Fact label="Estimated remaining">{formatDuration(task.remainingDuration)}</Fact>
 
           <Fact label="Created">
             {new Date(task.createdAt).toLocaleDateString(undefined, {

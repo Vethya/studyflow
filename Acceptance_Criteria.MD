@@ -2,7 +2,7 @@
 
 ## Test baseline
 
-- “Main pages”: Dashboard, Tasks, Availability, Schedule, and Progress.
+- “Main pages”: Dashboard, Calendar, Tasks, Availability, and Progress.
 - Valid duration: positive integer minutes.
 - Current browsers: latest stable Chrome, Edge, and Safari at test time; record versions.
 - Performance profile: production-like warm deployment, one student, 50 active tasks, up to 250 study sessions, a 16-week horizon, 50 unavailable periods, feasible and overloaded scenarios, one unmeasured warm-up, and 20 measured runs.
@@ -14,7 +14,7 @@
 
 ### FR-01 — Account management
 
-- **FR-01-AC01:** Given valid unique registration data, when a student registers, then an account is created and an authenticated session begins.
+- **FR-01-AC01:** Given valid unique registration data, when a student registers and verifies their email, then the account is usable and an authenticated session begins; before verification the account has no application access other than resending verification.
 - **FR-01-AC02:** Given invalid or duplicate registration data, when registration is submitted, then no account is created and field-specific errors are displayed.
 - **FR-01-AC03:** Given correct credentials, when the student signs in, then access is granted to their account.
 - **FR-01-AC04:** Given incorrect credentials, when sign-in is attempted, then access is denied without identifying which credential was incorrect.
@@ -26,7 +26,7 @@
 - **FR-02-AC01:** Given valid title, category, deadline, priority, and estimated duration, when a task is created, then it appears with those values.
 - **FR-02-AC02:** Given a saved task, when the owner opens it, then all stored details are displayed.
 - **FR-02-AC03:** Given a saved task, when the owner updates its details with valid values, then the changes persist.
-- **FR-02-AC04:** Given a saved task, when the owner confirms deletion, then it and its uncompleted generated sessions are removed.
+- **FR-02-AC04:** Given a saved task, when the owner confirms deletion, then the task, its sessions, completion records, and behavior history are removed, adaptive-estimation eligibility and metrics are recalculated without that history, and unaffected future sessions are unchanged.
 - **FR-02-AC05:** Given missing required fields, an invalid deadline, unsupported priority, or non-positive duration, when the form is submitted, then the task is rejected with validation errors.
 
 ### FR-03 — Availability
@@ -34,7 +34,8 @@
 - **FR-03-AC01:** Given valid weekdays and start/end times, when recurring availability is saved, then it recurs on the selected weekdays.
 - **FR-03-AC02:** Given a valid date and time range, when an unavailable period is added, then it overrides recurring availability for that period.
 - **FR-03-AC03:** Given existing availability, when it is updated or deleted, then subsequent schedule generation uses the new definition.
-- **FR-03-AC04:** Given an end time not later than the start time, when availability is submitted, then it is rejected with an error.
+- **FR-03-AC04:** Given an unavailable period whose end is not later than its start, or that ends in the past, when it is submitted, then it is rejected with an error. A recurring window whose end time is earlier than its start time is accepted as one window that crosses midnight.
+- **FR-03-AC05:** Given a saved availability, unavailable-period, or timezone change that invalidates future sessions, then those sessions are removed, their work is shown as Unscheduled, and the student can request schedule regeneration.
 
 ### FR-04 — Task division
 
@@ -56,41 +57,42 @@
 - **FR-06-AC01:** Given a planned session, when it is marked completed, delayed, or missed, then that status persists.
 - **FR-06-AC02:** Given a valid positive actual duration, when it is recorded, then it persists and is linked to the correct session.
 - **FR-06-AC03:** Given zero, negative, or nonnumeric actual duration, when submitted, then it is rejected.
-- **FR-06-AC04:** Given a completed session, then its duration is removed from the task’s remaining workload; delayed or missed work remains outstanding.
+- **FR-06-AC04:** Given a completed session, then its planned work is removed from the task’s remaining workload; a delayed session leaves the student’s revised remaining minutes outstanding, and a missed session leaves all of its planned work outstanding.
 - **FR-06-AC05:** Given recorded work and estimated remaining duration, then Effort Progress is calculated as `Actual Duration / (Actual Duration + estimated remaining duration)` and displays the percentage, actual minutes worked, estimated minutes remaining, completed-session count, upcoming-session count, and task status.
 - **FR-06-AC06:** Effort Progress is clearly labeled as expected effort consumed, not content completion, quality, or grade.
 - **FR-06-AC07:** Sessions without a confirmed actual duration remain pending and are not treated as zero-duration completions.
 
 ### FR-07 — Adaptive estimates
 
-- **FR-07-AC01:** Given completed sessions with estimated and actual durations, when a later estimate is generated, then only records created before that task are used.
+- **FR-07-AC01:** Given completed tasks with original estimates and actual durations, when a later estimate is generated, then only records completed before that task’s prediction are used.
 - **FR-07-AC02:** Given a history where actual durations consistently exceed estimates, then the adaptive estimate is greater than the equivalent unadjusted estimate.
 - **FR-07-AC03:** Given a history where actual durations consistently fall below estimates, then the adaptive estimate is lower than the equivalent unadjusted estimate.
-- **FR-07-AC04:** Given no usable history, then the original student estimate is retained or a documented default is applied.
+- **FR-07-AC04:** Given insufficient history or a correction that has not shown at least a 10% MAE advantage over Original Estimates on the same tasks, then no Adaptive Estimate is shown and the Original Estimate is used for scheduling.
 - **FR-07-AC05:** Repeating estimation with identical inputs and history produces the same result.
 - **FR-07-AC06 (evaluation-only):** Original-versus-Adaptive comparison metrics are retained for adaptive-estimation qualification and thesis evaluation, but are not presented as student-facing estimation-error statistics or model-accuracy analytics.
 
 ### FR-08 — Overload detection
 
 - **FR-08-AC01:** Given required workload greater than available time before applicable deadlines, when scheduling runs, then the workload is identified as infeasible.
-- **FR-08-AC02:** The warning states the affected task or period, required time, available time, and calculated shortfall.
+- **FR-08-AC02:** The warning states the affected task, its deadline, required remaining minutes, available minutes before the deadline, the exact shortfall, relevant unavailable periods, and the student-controlled remedies (extend the deadline or add availability); StudyFlow does not apply a remedy itself.
 - **FR-08-AC03:** An infeasible workload produces a warning instead of a schedule that violates hard constraints.
 - **FR-08-AC04:** Given workload equal to or below available capacity, then no overload warning is displayed.
 
 ### FR-09 — Automatic rescheduling
 
-- **FR-09-AC01:** Given a missed session with future availability, when rescheduling runs, then its remaining workload is moved to a valid future slot.
-- **FR-09-AC02:** Given a changed deadline, duration, priority, or availability period, then affected future sessions are recalculated.
+- **FR-09-AC01:** Given a session recorded as Delayed or Missed with future availability, then a proposed Schedule Revision places its unfinished work in valid future slots, and the revision replaces the active schedule only after the student accepts it.
+- **FR-09-AC02:** Given a planning change other than a Delayed or Missed outcome (such as a deadline, availability, or timezone change), then no revision is generated automatically; invalidated future sessions become Unscheduled Work and the student may request regeneration.
 - **FR-09-AC03:** Completed sessions are not moved or duplicated during rescheduling.
 - **FR-09-AC04:** Rescheduled sessions contain no hard conflicts and do not exceed their task deadlines when a feasible solution exists.
 - **FR-09-AC05:** Under limited capacity, urgency and priority determine which outstanding work is placed first.
 - **FR-09-AC06:** If no feasible reschedule exists, then an overload explanation is shown instead of an invalid plan.
+- **FR-09-AC07:** Given a rejected revision, then existing valid future sessions are unchanged and the unfinished work stays visible as Unscheduled until a valid revision is accepted or planning inputs change.
 
 ## Non-functional acceptance criteria
 
 ### NFR-01 — Security
 
-- **NFR-01-AC01:** Given users A and B, when A requests B’s tasks, sessions, availability, progress, or account records through any API operation, then the request returns 403 or 404 and no data is disclosed or changed.
+- **NFR-01-AC01:** Given users A and B, when A requests B’s tasks, sessions, availability, progress, or account records through any API operation, then the request returns 404 and no data is disclosed or changed.
 - **NFR-01-AC02:** Given an unauthenticated request to a protected resource, then it is rejected with 401.
 - **NFR-01-AC03:** Authorization is enforced server-side even when identifiers or request payloads are manually altered.
 - **NFR-01-AC04:** All automated cross-user access-control tests pass.
@@ -110,7 +112,7 @@
 
 ### NFR-04 — Usability
 
-- **NFR-04-AC01:** At least 80% of representative participants independently complete: sign in, create a task, define availability, generate a schedule, and record a completed session.
+- **NFR-04-AC01:** At least 80% of representative participants (at least 4 of 5) independently complete: set weekly availability, create an Academic Task, generate and accept a schedule, record a session outcome and actual duration, and view updated Effort Progress. Registration, email verification, password recovery, and Google setup are excluded.
 - **NFR-04-AC02:** No verbal, written, or operator assistance is provided after the workflow begins.
 - **NFR-04-AC03:** Successes, failures, participant characteristics, and observed usability issues are recorded in the test report.
 
@@ -120,6 +122,7 @@
 - **NFR-05-AC02:** The main task-to-schedule workflow completes successfully in current Chrome, Edge, and Safari.
 - **NFR-05-AC03:** Keyboard entry, forms, navigation, and status feedback remain functional in each tested browser.
 - **NFR-05-AC04:** Browser names, versions, operating systems, and viewport sizes are recorded as test evidence.
+- **NFR-05-AC05:** Core pages provide accessible names and labels for controls, visible focus, adequate text contrast, keyboard access to scrollable regions, and status cues that do not rely on color alone. Formal WCAG 2.2 AA conformance is not a release gate.
 
 ### NFR-06 — Privacy
 

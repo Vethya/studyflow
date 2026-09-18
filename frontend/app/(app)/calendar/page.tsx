@@ -487,6 +487,7 @@ export default function CalendarPage() {
             <Skeleton className="h-[30rem] w-full rounded-xl" />
           ) : (
             <WeekGrid
+              ariaLabel="Study calendar"
               columns={columns}
               blocks={blocks}
               hourStart={hourRange.start}
@@ -502,7 +503,7 @@ export default function CalendarPage() {
                         key={task.id}
                         href={`/tasks/${task.id}`}
                         title={`${task.title} — due ${formatClock(task.deadline)}`}
-                        className="block rounded-sm bg-deficit-soft px-1.5 py-1 text-start text-[0.6875rem] leading-tight text-deficit transition-colors hover:bg-deficit/20"
+                        className="block rounded-sm bg-deficit-soft px-1.5 py-1 text-start text-[0.6875rem] font-medium leading-tight text-foreground transition-colors hover:bg-deficit/20"
                       >
                         <span className="line-clamp-2">{task.title}</span>
                       </Link>

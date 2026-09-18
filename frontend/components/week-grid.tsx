@@ -62,6 +62,7 @@ export function WeekGrid({
   highlightedId,
   onHighlight,
   className,
+  ariaLabel = "Week view",
 }: {
   columns: GridColumn[];
   blocks: GridBlock[];
@@ -74,6 +75,8 @@ export function WeekGrid({
   highlightedId?: string | null;
   onHighlight?: (id: string | null) => void;
   className?: string;
+  /** Names the scrollable grid for screen readers. */
+  ariaLabel?: string;
 }) {
   const hours = React.useMemo(
     () => Array.from({ length: Math.max(1, hourEnd - hourStart) }, (_, i) => hourStart + i),
@@ -98,7 +101,13 @@ export function WeekGrid({
     <div className={cn("overflow-hidden rounded-xl border bg-card", className)}>
       {/* One scroll container for header and body together, so the columns
           cannot drift out of alignment when the grid is scrolled sideways. */}
-      <div className="overflow-x-auto">
+      {/* Focusable so keyboard users can scroll it sideways (WCAG 2.1.1). */}
+      <div
+        className="overflow-x-auto rounded-xl focus-visible:outline-2 focus-visible:outline-ring"
+        tabIndex={0}
+        role="region"
+        aria-label={ariaLabel}
+      >
         {/*
           Each column needs about 4rem before its day heading starts to
           collide; below that the grid scrolls sideways rather than crushing
@@ -251,6 +260,9 @@ export function WeekGrid({
                         key={block.id}
                         type="button"
                         title={block.title}
+                        // A session that crosses midnight can be only a few pixels
+                        // tall on this day, too short to show its text.
+                        aria-label={block.title}
                         onClick={block.onSelect}
                         className={className}
                         style={{ top, height }}

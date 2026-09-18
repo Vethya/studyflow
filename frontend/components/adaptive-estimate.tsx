@@ -48,7 +48,7 @@ export function AdaptiveEstimateNote({
       }
     >
       <p>
-        Across {estimate.basedOnTasks} finished{" "}
+        Based on your earlier finished{" "}
         {estimate.isCategorySpecific ? `${category} tasks` : "tasks"}, your actual time has
         run {longer ? "over" : "under"} your estimate. StudyFlow suggests{" "}
         <strong className="font-medium text-foreground">
@@ -206,7 +206,8 @@ export function LargeAdjustmentDialog({
 
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Across {estimate.basedOnTasks} finished {category} tasks, you have taken about{" "}
+            Based on your earlier finished{" "}
+            {estimate.isCategorySpecific ? `${category} tasks` : "tasks"}, you have taken about{" "}
             <strong className="font-medium text-foreground">{multiple}</strong> your own
             estimate. For this task that means{" "}
             <strong className="font-medium text-foreground">

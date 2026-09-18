@@ -1,0 +1,89 @@
+name: Frontend Nightly
+
+# SPEC §21 nightly and pre-review checks for the frontend: the full NFR-05
+# browser matrix (Chrome, Edge, WebKit desktop and mobile) and a dependency
+# security audit. Run it manually before each review with "Run workflow".
+
+on:
+  schedule:
+    - cron: "0 19 * * *" # 02:00 Asia/Phnom_Penh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: frontend
+
+jobs:
+  browsers:
+    name: NFR-05 browser matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.14.0
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Google Chrome is preinstalled on the runner; add Edge, WebKit, and the
+      # ffmpeg Playwright uses for failure videos.
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps webkit msedge ffmpeg
+
+      - name: Run NFR-05 suite
+        run: pnpm test:nfr05
+
+      # evidence.md records browser names, versions, OS, and viewports (NFR-05-AC04).
+      - name: Upload NFR-05 evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nfr05-evidence-${{ github.run_id }}
+          path: |
+            frontend/test-results/nfr05
+            frontend/playwright-report
+          retention-days: 30
+
+  security:
+    name: Dependency security audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.14.0
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Audit production dependencies
+        run: pnpm audit --prod --audit-level high

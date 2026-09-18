@@ -22,6 +22,8 @@ export default defineConfig({
   use: {
     baseURL,
     ignoreHTTPSErrors: true,
+    // Scan finished pages rather than fade-ins caught mid-animation.
+    reducedMotion: "reduce",
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
     video: "retain-on-failure",

@@ -25,14 +25,23 @@ export class ApiError extends Error {
   readonly detail: string;
   readonly retryAfterSeconds: number | null;
   readonly code: string | null;
+  /** Validation messages keyed by request field name, from a 422 `loc`. */
+  readonly fieldErrors: Record<string, string>;
 
-  constructor(status: number, detail: string, retryAfterSeconds: number | null = null, code: string | null = null) {
+  constructor(
+    status: number,
+    detail: string,
+    retryAfterSeconds: number | null = null,
+    code: string | null = null,
+    fieldErrors: Record<string, string> = {},
+  ) {
     super(detail);
     this.name = "ApiError";
     this.status = status;
     this.detail = detail;
     this.retryAfterSeconds = retryAfterSeconds;
     this.code = code;
+    this.fieldErrors = fieldErrors;
   }
 
   /** No session, or the session expired. Callers usually redirect to /login. */
@@ -85,7 +94,9 @@ export function buildQuery(params: Record<string, QueryValue>): string {
  * FastAPI returns `{ detail: string }` for handled errors and
  * `{ detail: [{ loc, msg, ... }] }` for Pydantic validation failures.
  */
-async function extractDetail(response: Response): Promise<{ message: string; code?: string }> {
+async function extractDetail(
+  response: Response,
+): Promise<{ message: string; code?: string; fieldErrors?: Record<string, string> }> {
   let body: unknown;
   try {
     body = await response.json();
@@ -100,10 +111,18 @@ async function extractDetail(response: Response): Promise<{ message: string; cod
   }
 
   if (Array.isArray(detail)) {
-    const messages = detail
-      .map((item) => (item as { msg?: unknown })?.msg)
-      .filter((msg): msg is string => typeof msg === "string");
-    if (messages.length > 0) return { message: messages.join(". ") };
+    const messages: string[] = [];
+    const fieldErrors: Record<string, string> = {};
+    for (const item of detail as { loc?: unknown; msg?: unknown }[]) {
+      if (typeof item?.msg !== "string") continue;
+      messages.push(item.msg);
+      // `loc` is e.g. ["body", "password"]; the last string names the field.
+      const field = Array.isArray(item.loc)
+        ? [...item.loc].reverse().find((part): part is string => typeof part === "string")
+        : undefined;
+      if (field && field !== "body" && !(field in fieldErrors)) fieldErrors[field] = item.msg;
+    }
+    if (messages.length > 0) return { message: messages.join(". "), fieldErrors };
   }
 
   return { message: response.statusText || `Request failed with status ${response.status}` };
@@ -156,6 +175,7 @@ async function request(path: string, options: RequestOptions = {}): Promise<Resp
       detail.message,
       retryAfter ? Number(retryAfter) : null,
       detail.code,
+      detail.fieldErrors,
     );
   }
 

@@ -3,7 +3,7 @@
 import { useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { Calendar, BarChart3, Clock, Sparkles, BookOpen, Target, GraduationCap, Pencil, NotebookPen } from "lucide-react";
+import { Calendar, BarChart3, Clock, Sparkles, BookOpen, Target, GraduationCap, Pencil, NotebookPen, Check } from "lucide-react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { ScrollTrigger } from "gsap/dist/ScrollTrigger";
@@ -13,12 +13,59 @@ if (typeof window !== "undefined") {
   gsap.registerPlugin(ScrollTrigger, useGSAP);
 }
 
+const PLANS = [
+  {
+    name: "Free",
+    tagline: "The full planner, for every student.",
+    price: "$0",
+    period: "forever",
+    note: "No card needed.",
+    features: [
+      "Unlimited tasks and deadlines",
+      "Weekly availability and blocked days",
+      "Automatic study schedule",
+      "Overload warnings before you fall behind",
+      "Effort progress for every task",
+    ],
+    cta: "Get started for free",
+    href: "/register",
+    highlighted: false,
+    badge: null,
+  },
+  {
+    name: "Pro",
+    tagline: "More insight for a heavier term.",
+    price: "$2.50",
+    period: "per month",
+    note: "Or $24 a year — two months free.",
+    features: [
+      "Everything in Free",
+      "Sync sessions to Google Calendar",
+      "End-of-term reports you can export as PDF",
+      "Keep past terms to compare your workload",
+      "Priority email support",
+    ],
+    cta: "Start with Free, upgrade later",
+    href: "/register",
+    highlighted: true,
+    badge: "Coming soon",
+  },
+];
+
+/**
+ * Students who ask for reduced motion get the finished page straight away.
+ * This also keeps fade-ins from being read mid-animation by contrast checks.
+ */
+function prefersReducedMotion(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 /* ─── Floating Student Elements ─── */
 function FloatingElements() {
   const elRef = useRef<HTMLDivElement>(null);
 
   useGSAP(() => {
-    if (!elRef.current) return;
+    if (!elRef.current || prefersReducedMotion()) return;
     const items = elRef.current.querySelectorAll(".float-item");
     items.forEach((item) => {
       gsap.to(item, {
@@ -89,6 +136,7 @@ function Navigation() {
   const { status } = useSession();
 
   useGSAP(() => {
+    if (prefersReducedMotion()) return;
     gsap.from(navRef.current, {
       y: -20,
       opacity: 0,
@@ -160,6 +208,7 @@ export default function LandingPage() {
     // ═══ HERO ANIMATIONS ═══
     // Cards show immediately — no waiting
     gsap.set(".hero-cards-wrapper", { opacity: 1 });
+    if (prefersReducedMotion()) return;
     gsap.from(".before-card", {
       x: -20, rotation: -5, opacity: 0, duration: 0.6, ease: "power2.out", delay: 0.1,
     });
@@ -249,7 +298,7 @@ export default function LandingPage() {
             duration: 1.5,
             ease: "power2.out",
             onUpdate: () => {
-              el.textContent = (el.dataset.suffix === "%" ? Math.round(obj.val) + "%" : (obj.val % 1 === 0 ? Math.round(obj.val) : obj.val.toFixed(0)) + (el.dataset.suffix || ""));
+              el.textContent = (el.dataset.prefix || "") + (el.dataset.suffix === "%" ? Math.round(obj.val) + "%" : (obj.val % 1 === 0 ? Math.round(obj.val) : obj.val.toFixed(0)) + (el.dataset.suffix || ""));
             },
           });
         },
@@ -409,17 +458,20 @@ Add your coursework and the hours you are free.<br />
       <section className="stats-section landing-surface border-b landing-border">
         <div className="max-w-[1200px] mx-auto px-6 py-20 flex flex-wrap items-center justify-center gap-16 md:gap-24">
           {[
-            { value: 5, suffix: "+", label: "Hours saved weekly" },
-            { value: 98, suffix: "%", label: "Schedule accuracy" },
-            { value: 0, suffix: "", label: "Conflicts generated" },
+            // Facts about the product, not unmeasured outcome claims.
+            { value: 0, prefix: "$", suffix: "", label: "To plan your whole term" },
+            { value: 3, prefix: "", suffix: "", label: "Steps to your first schedule" },
+            { value: 0, prefix: "", suffix: "", label: "Overlapping study sessions" },
           ].map((stat, i) => (
             <div key={i} className="stat-item text-center">
               <div
                 className="stat-number font-[family-name:var(--font-display)] text-[48px] font-bold tracking-[-0.04em] landing-ink leading-[1.1]"
                 data-value={stat.value}
+                data-prefix={stat.prefix}
                 data-suffix={stat.suffix}
               >
-                0{stat.suffix}
+                {/* Final value by default, so it stays correct when the count-up is skipped. */}
+                {stat.prefix}{stat.value}{stat.suffix}
               </div>
               <div className="text-[14px] landing-muted tracking-[-0.01em] mt-1 font-medium">{stat.label}</div>
             </div>
@@ -525,7 +577,7 @@ Each task carries an estimate, a priority and a due date. Add them up across the
                   <div className="w-10 h-10 rounded-lg landing-canvas flex items-center justify-center">
                     <item.icon className="w-5 h-5 landing-accent" />
                   </div>
-                  <span className="step-number font-[family-name:var(--font-display)] text-[48px] font-bold landing-canvas-text leading-none tracking-[-0.04em]">
+                  <span className="step-number font-[family-name:var(--font-display)] text-[48px] font-bold landing-subtle leading-none tracking-[-0.04em]">
                     {item.step}
                   </span>
                 </div>
@@ -535,6 +587,67 @@ Each task carries an estimate, a priority and a due date. Add them up across the
                 <p className="text-[14px] landing-muted leading-[1.5] tracking-[-0.01em]">
                   {item.desc}
                 </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ═══════ Pricing ═══════ */}
+      <section id="pricing" className="landing-surface py-28 scroll-mt-20">
+        <div className="max-w-[960px] mx-auto px-6">
+          <div className="text-center mb-14">
+            <h2 className="section-heading font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-[1.1] mb-4">
+              Simple pricing for students
+            </h2>
+            <p className="text-[16px] md:text-[18px] landing-muted leading-[1.5] tracking-[-0.01em] max-w-[520px] mx-auto">
+              Everything you need to plan a term is free. Pro adds extras for students who want more.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {PLANS.map((plan) => (
+              <div
+                key={plan.name}
+                className={`relative flex flex-col landing-surface landing-card-shadow rounded-[18px] border p-8 md:p-10 ${
+                  plan.highlighted ? "border-2 border-[var(--landing-accent)]" : "landing-border"
+                }`}
+              >
+                {plan.badge && (
+                  <span className="absolute -top-3 left-8 rounded-full landing-ink-button px-3 py-1 text-[12px] font-semibold tracking-[-0.01em]">
+                    {plan.badge}
+                  </span>
+                )}
+                <h3 className="font-[family-name:var(--font-display)] text-[20px] font-semibold tracking-[-0.01em] landing-ink">
+                  {plan.name}
+                </h3>
+                <p className="mt-1 text-[14px] landing-muted leading-[1.5]">{plan.tagline}</p>
+
+                <p className="mt-6 flex items-baseline gap-1.5">
+                  <span className="font-[family-name:var(--font-display)] text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-none">
+                    {plan.price}
+                  </span>
+                  <span className="text-[14px] landing-muted">{plan.period}</span>
+                </p>
+                <p className="mt-2 min-h-[21px] text-[14px] landing-muted">{plan.note}</p>
+
+                <ul className="mt-8 mb-10 space-y-3" aria-label={`${plan.name} plan includes`}>
+                  {plan.features.map((feature) => (
+                    <li key={feature} className="flex items-start gap-2.5 text-[14px] landing-ink leading-[1.5]">
+                      <Check className="mt-0.5 h-4 w-4 shrink-0 landing-accent" aria-hidden="true" />
+                      {feature}
+                    </li>
+                  ))}
+                </ul>
+
+                <Link
+                  href={plan.href}
+                  className={`mt-auto block rounded-full px-6 py-3 text-center text-[15px] font-semibold tracking-[-0.01em] transition-all duration-300 ${
+                    plan.highlighted ? "landing-ink-button" : "border landing-ink-border landing-ink hover:bg-[var(--landing-canvas)]"
+                  }`}
+                >
+                  {plan.cta}
+                </Link>
               </div>
             ))}
           </div>
@@ -591,8 +704,8 @@ It takes about five minutes to enter a term of coursework and the hours you have
             <Link href="#features" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">Features</Link>
             <Link href="#how-it-works" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">How it works</Link>
             <Link href="#pricing" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">Pricing</Link>
-            <span className="text-[14px] landing-muted cursor-pointer hover:text-[var(--landing-ink)] transition-colors">Privacy</span>
-            <span className="text-[14px] landing-muted cursor-pointer hover:text-[var(--landing-ink)] transition-colors">Terms</span>
+            <Link href="/privacy" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">Privacy</Link>
+            <Link href="/terms" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">Terms</Link>
           </div>
 
           <p className="text-[12px] landing-subtle">© 2026 Studyflow</p>
