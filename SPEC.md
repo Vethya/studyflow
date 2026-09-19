@@ -1,4 +1,4 @@
-# StudyFlow Software Specification
+# StudyFlow Software Specification 
 
 ## 1. Document Status and Authority
 
