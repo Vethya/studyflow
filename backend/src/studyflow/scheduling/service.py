@@ -142,6 +142,9 @@ async def tasks_for_schedule(
     )
 
 
+DEFAULT_PLANNING_LEAD_TIME = timedelta(minutes=15)
+
+
 class ScheduleGenerationService:
     def __init__(
         self,
@@ -154,6 +157,7 @@ class ScheduleGenerationService:
         study_sessions: StudySessions | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         solver: Callable[[FeasibilityProblem], OverloadResult] = solve_with_overload,
+        planning_lead_time: timedelta = DEFAULT_PLANNING_LEAD_TIME,
     ) -> None:
         self._tasks = tasks
         self._availability_windows = availability_windows
@@ -163,6 +167,7 @@ class ScheduleGenerationService:
         self._study_sessions = study_sessions
         self._clock = clock
         self._solver = solver
+        self._planning_lead_time = planning_lead_time
 
     async def generate(
         self,
@@ -214,7 +219,8 @@ class ScheduleGenerationService:
                 read_only=not persist,
             )
         normalized_scenario = (scenario or ScheduleScenario()).normalized()
-        planning_start = self._clock()
+        now = self._clock()
+        planning_start = now + self._planning_lead_time
         effective_tasks = self._apply_deadline_overrides(tasks, normalized_scenario, planning_start)
         fingerprint = schedule_input_fingerprint(
             tasks,
@@ -249,7 +255,7 @@ class ScheduleGenerationService:
         )
         if persist:
             return await self._proposals.replace(account_id, draft)
-        return self._preview_record(account_id, draft, self._clock())
+        return self._preview_record(account_id, draft, now)
 
     @staticmethod
     def _include_overdue_work(

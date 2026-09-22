@@ -133,6 +133,7 @@ class SqlAlchemyScheduleProposalRepository:
         proposal_id: UUID,
         now: datetime,
         minimum_break_minutes: int,
+        grace_period: timedelta = timedelta(seconds=0),
     ) -> tuple[StudySessionRecord, ...] | None:
         async with self._database.transaction() as session:
             account = await session.get(StudentAccount, account_id, with_for_update=True)
@@ -156,7 +157,7 @@ class SqlAlchemyScheduleProposalRepository:
                 )
             )
             now_utc = self._aware(now).astimezone(UTC)
-            if any(self._aware(item.starts_at) < now_utc for item in proposed):
+            if any(self._aware(item.starts_at) < now_utc - grace_period for item in proposed):
                 raise ProposalExpiredError("The schedule proposal has expired")
             preserved = list(
                 await session.scalars(
