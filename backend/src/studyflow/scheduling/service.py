@@ -221,7 +221,7 @@ class ScheduleGenerationService:
         normalized_scenario = (scenario or ScheduleScenario()).normalized()
         now = self._clock()
         planning_start = now + self._planning_lead_time
-        effective_tasks = self._apply_deadline_overrides(tasks, normalized_scenario, planning_start)
+        effective_tasks = self._apply_deadline_overrides(tasks, normalized_scenario, now)
         fingerprint = schedule_input_fingerprint(
             tasks,
             windows,
@@ -241,8 +241,7 @@ class ScheduleGenerationService:
         result = await asyncio.to_thread(self._solver, problem)
         result = self._include_overdue_work(
             result,
-            tasks,
-            normalized_scenario,
+            effective_tasks,
             planning_start,
         )
         draft = self._proposal_draft(
@@ -261,16 +260,13 @@ class ScheduleGenerationService:
     def _include_overdue_work(
         result: OverloadResult,
         tasks: Sequence[AcademicTaskRecord],
-        scenario: ScheduleScenario,
         planning_start: datetime,
     ) -> OverloadResult:
-        overridden_task_ids = {item.task_id for item in scenario.deadline_overrides}
         overdue = tuple(
             task
             for task in tasks
             if task.status is not TaskStatus.COMPLETED
             and task.deadline_at <= planning_start.astimezone(UTC)
-            and task.id not in overridden_task_ids
         )
         if not overdue or result.status not in (KernelStatus.FEASIBLE, KernelStatus.OVERLOAD):
             return result
@@ -299,7 +295,7 @@ class ScheduleGenerationService:
     def _apply_deadline_overrides(
         tasks: Sequence[AcademicTaskRecord],
         scenario: ScheduleScenario,
-        planning_start: datetime,
+        now: datetime,
     ) -> tuple[AcademicTaskRecord, ...]:
         task_by_id = {task.id: task for task in tasks}
         overrides = {item.task_id: item.deadline_at for item in scenario.deadline_overrides}
@@ -307,7 +303,7 @@ class ScheduleGenerationService:
         if unknown:
             raise ScenarioValidationError(f"Scenario contains unknown task id {unknown[0]}")
         for task_id, deadline_at in overrides.items():
-            if deadline_at <= planning_start.astimezone(UTC):
+            if deadline_at <= now.astimezone(UTC):
                 raise ScenarioValidationError(
                     f"Deadline override for task {task_id} must be in the future"
                 )
