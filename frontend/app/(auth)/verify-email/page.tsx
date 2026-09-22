@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -330,9 +331,8 @@ function CompleteRegistration({ token }: { token: string }) {
 
         <div className="space-y-1.5">
           <Label htmlFor="password" className="text-xs font-medium">Password</Label>
-          <Input
+          <PasswordInput
             id="password"
-            type="password"
             autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -368,9 +368,8 @@ function CompleteRegistration({ token }: { token: string }) {
 
         <div className="space-y-1.5">
           <Label htmlFor="confirm" className="text-xs font-medium">Confirm Password</Label>
-          <Input
+          <PasswordInput
             id="confirm"
-            type="password"
             autoComplete="new-password"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
