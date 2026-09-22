@@ -689,14 +689,25 @@ export default function CalendarPage() {
         confirmLabel="Delete task"
         destructive
         onConfirm={async () => {
-          if (!confirmDelete) return;
+          const target = confirmDelete;
+          if (!target) return;
+          const previousTasks = tasks.data;
+          const previousSchedule = schedule.data;
+          if (previousTasks) tasks.setData(previousTasks.filter((task) => task.id !== target.id));
+          if (previousSchedule) {
+            schedule.setData({
+              ...previousSchedule,
+              sessions: previousSchedule.sessions.filter((session) => session.taskId !== target.id),
+            });
+          }
+          setConfirmDelete(null);
           try {
-            await tasksApi.deleteTask(confirmDelete.id);
+            await tasksApi.deleteTask(target.id);
             toast.success("Task deleted");
           } catch (cause) {
+            if (previousTasks) tasks.setData(previousTasks);
+            if (previousSchedule) schedule.setData(previousSchedule);
             toast.error(describeError(cause));
-          } finally {
-            setConfirmDelete(null);
           }
         }}
       />
