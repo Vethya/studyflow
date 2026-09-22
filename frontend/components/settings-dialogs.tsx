@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Callout } from "@/components/ui/callout";
 import { ApiError, account as accountApi } from "@/lib/api";
@@ -97,9 +98,9 @@ export function AddPasswordDialog({
             <Label htmlFor="add-password-new" className="eyebrow">
               New password
             </Label>
-            <Input
+            <PasswordInput
+              key={String(open)}
               id="add-password-new"
-              type="password"
               autoComplete="new-password"
               value={next}
               onChange={(e) => setNext(e.target.value)}
@@ -116,9 +117,9 @@ export function AddPasswordDialog({
             <Label htmlFor="add-password-confirm" className="eyebrow">
               Repeat new password
             </Label>
-            <Input
+            <PasswordInput
+              key={String(open)}
               id="add-password-confirm"
-              type="password"
               autoComplete="new-password"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
@@ -202,9 +203,9 @@ export function ChangePasswordDialog({
             <Label htmlFor="current-password" className="eyebrow">
               Current password
             </Label>
-            <Input
+            <PasswordInput
+              key={String(open)}
               id="current-password"
-              type="password"
               autoComplete="current-password"
               value={current}
               onChange={(e) => setCurrent(e.target.value)}
@@ -215,9 +216,9 @@ export function ChangePasswordDialog({
             <Label htmlFor="new-password" className="eyebrow">
               New password
             </Label>
-            <Input
+            <PasswordInput
+              key={String(open)}
               id="new-password"
-              type="password"
               autoComplete="new-password"
               value={next}
               onChange={(e) => setNext(e.target.value)}
@@ -235,9 +236,9 @@ export function ChangePasswordDialog({
             <Label htmlFor="confirm-password" className="eyebrow">
               Repeat new password
             </Label>
-            <Input
+            <PasswordInput
+              key={String(open)}
               id="confirm-password"
-              type="password"
               autoComplete="new-password"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
@@ -519,9 +520,9 @@ export function AccountDeletionDialog({
               <Label htmlFor="delete-account-password" className="eyebrow">
                 Current password
               </Label>
-              <Input
+              <PasswordInput
+                key={String(open)}
                 id="delete-account-password"
-                type="password"
                 autoComplete="current-password"
                 value={currentPassword}
                 onChange={(event) => setCurrentPassword(event.target.value)}
