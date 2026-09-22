@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { CalendarDays, GraduationCap, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
@@ -91,6 +91,7 @@ function ImportDialog({
   const [horizon, setHorizon] = useState("28");
   const [isStarting, setIsStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const continueButtonRef = useRef<HTMLButtonElement>(null);
   const copy = COPY[source];
 
   async function start() {
@@ -110,13 +111,19 @@ function ImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !isStarting && onOpenChange(next)}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" initialFocus={continueButtonRef}>
         <DialogHeader>
           <DialogTitle>{copy.title}</DialogTitle>
           <DialogDescription>{copy.description}</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 text-sm">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!isStarting) void start();
+          }}
+          className="space-y-4 text-sm"
+        >
           {error && <Callout tone="danger">{error}</Callout>}
 
           {source === "google_calendar" && (
@@ -148,17 +155,26 @@ function ImportDialog({
             <li>• StudyFlow keeps no access afterwards and stores no Google password or token.</li>
             <li>• Nothing is added until you review the list and confirm.</li>
           </ul>
-        </div>
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isStarting}>
-            Cancel
-          </Button>
-          <Button onClick={() => void start()} disabled={isStarting} aria-busy={isStarting}>
-            {isStarting && <Loader2 className="animate-spin" />}
-            Continue to Google
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+              disabled={isStarting}
+            >
+              Cancel
+            </Button>
+            <Button
+              ref={continueButtonRef}
+              type="submit"
+              disabled={isStarting}
+              aria-busy={isStarting}
+            >
+              {isStarting && <Loader2 className="animate-spin" />}
+              Continue to Google
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );
