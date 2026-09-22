@@ -27,7 +27,6 @@ function PasswordInput({ className, disabled, ...props }: PasswordInputProps) {
       <button
         type="button"
         aria-label={visible ? "Hide password" : "Show password"}
-        aria-pressed={visible}
         disabled={disabled}
         onClick={() => {
           setVisible((value) => !value);
