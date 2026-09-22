@@ -540,9 +540,11 @@ export default function DashboardPage() {
         onOpenChange={setPreviewOpen}
         onAccepted={() => {
           setProposal(null);
+          revision.setData(null);
         }}
         onRejected={() => {
           setProposal(null);
+          revision.setData(null);
         }}
       />
     </PageShell>
