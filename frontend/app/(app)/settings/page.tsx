@@ -44,6 +44,7 @@ import { cn } from "@/lib/utils";
 import { notifyStudyFlowSessionInvalidated } from "@/lib/data-events";
 import { ThemeSelector } from "@/components/theme-selector";
 import { SWR_KEYS } from "@/lib/swr-keys";
+import type { WireStudyPreferences } from "@/lib/api/wire";
 
 const SESSION_LENGTH = { min: 10, max: 240, step: 5 };
 const BREAK_LENGTH = { min: 0, max: 120, step: 5 };
@@ -280,7 +281,7 @@ function SettingsContent() {
             {/* SPEC §8.3: recurring windows must be re-confirmed after a change. */}
             {preferences.data?.availability_confirmation_required && (
               <div className="pt-3">
-                <ConfirmTimezone />
+                <ConfirmTimezone preferences={preferences.data} setPreferences={preferences.setData} />
               </div>
             )}
           </>
@@ -431,15 +432,23 @@ function RowSkeleton({ rows }: { rows: number }) {
   );
 }
 
-function ConfirmTimezone() {
+function ConfirmTimezone({
+  preferences,
+  setPreferences,
+}: {
+  preferences: WireStudyPreferences;
+  setPreferences: (next: WireStudyPreferences) => void;
+}) {
   const [isConfirming, setConfirming] = useState(false);
 
   async function confirm() {
     setConfirming(true);
+    setPreferences({ ...preferences, availability_confirmation_required: false });
     try {
       await availabilityApi.confirmTimezone();
       toast.success("Timezone confirmed");
     } catch (cause) {
+      setPreferences(preferences);
       toast.error(describeError(cause));
     } finally {
       setConfirming(false);

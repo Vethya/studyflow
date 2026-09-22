@@ -78,12 +78,29 @@ export default function TaskDetailPage({
     .filter((session) => session.taskId === taskId)
     .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
 
-  async function run(action: string, fn: () => Promise<void>, message: string) {
+  async function run(
+    action: string,
+    fn: () => Promise<void>,
+    message: string,
+    optimisticTask?: AcademicTask,
+  ) {
+    const previousTask = task;
+    const previousTasks = allTasks.data;
+    if (optimisticTask) {
+      setData(optimisticTask);
+      if (previousTasks) {
+        allTasks.setData(previousTasks.map((item) =>
+          item.id === taskId ? optimisticTask : item,
+        ));
+      }
+    }
     setBusy(action);
     try {
       await fn();
       toast.success(message);
     } catch (cause) {
+      if (optimisticTask && previousTask) setData(previousTask);
+      if (optimisticTask && previousTasks) allTasks.setData(previousTasks);
       if (cause instanceof ApiError && cause.status === 409) {
         toast.error("Start the task before finishing it early.");
       } else {
@@ -95,12 +112,17 @@ export default function TaskDetailPage({
   }
 
   async function remove() {
+    const previousTasks = allTasks.data;
+    if (previousTasks) {
+      allTasks.setData(previousTasks.filter((item) => item.id !== taskId));
+    }
     setBusy("delete");
     try {
       await tasksApi.deleteTask(taskId);
       toast.success("Task deleted");
       router.push("/tasks");
     } catch (cause) {
+      if (previousTasks) allTasks.setData(previousTasks);
       toast.error(describeError(cause));
       setBusy(null);
     }
@@ -176,7 +198,7 @@ export default function TaskDetailPage({
         {task.status === "Not Started" && (
           <Button
             size="sm"
-            onClick={() => void run("start", () => tasksApi.startTask(task.id), "Task started")}
+            onClick={() => void run("start", () => tasksApi.startTask(task.id), "Task started", { ...task, status: "In Progress" })}
             disabled={busy !== null}
           >
             {busy === "start" ? (
@@ -335,9 +357,17 @@ export default function TaskDetailPage({
         session={outcomeSession}
         open={outcomeSession !== null}
         onOpenChange={(next) => !next && setOutcomeSession(null)}
-        onRecorded={(result) =>
-          applyRecordedOutcome(result, { setProposal, setPreviewOpen })
-        }
+        onRecorded={(result) => {
+          if (schedule.data) {
+            schedule.setData({
+              ...schedule.data,
+              sessions: schedule.data.sessions.map((session) =>
+                session.id === result.session.id ? result.session : session,
+              ),
+            });
+          }
+          applyRecordedOutcome(result, { setProposal, setPreviewOpen });
+        }}
       />
 
       <SchedulePreview
@@ -369,7 +399,7 @@ export default function TaskDetailPage({
         description="StudyFlow will treat this task as done, drop its upcoming sessions, and keep the time you have already logged."
         confirmLabel="Mark it finished"
         onConfirm={() =>
-          run("finish", () => tasksApi.finishTaskEarly(task.id), "Task finished")
+          run("finish", () => tasksApi.finishTaskEarly(task.id), "Task finished", { ...task, status: "Completed", remainingDuration: 0 })
         }
       />
     </div>

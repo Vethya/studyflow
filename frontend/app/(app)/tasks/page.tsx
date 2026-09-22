@@ -159,12 +159,38 @@ export default function TasksPage() {
     setEditing(null);
   }
 
-  async function runAction(taskId: string, action: () => Promise<void>, message: string) {
+  async function runAction(
+    taskId: string,
+    action: () => Promise<void>,
+    message: string,
+    optimisticUpdate?: (current: AcademicTask[]) => AcademicTask[],
+  ) {
+    if (busyTaskId !== null) return;
+    const previousTask = tasks.find((t) => t.id === taskId);
+    const previousIndex = tasks.findIndex((t) => t.id === taskId);
+    if (optimisticUpdate) {
+      setData((current) => optimisticUpdate(current ?? []));
+    }
     setBusyTaskId(taskId);
     try {
       await action();
       toast.success(message);
     } catch (cause) {
+      if (optimisticUpdate) {
+        if (previousTask) {
+          setData((current) => {
+            const list = current ?? [];
+            return list.some((t) => t.id === taskId)
+              ? list.map((t) => (t.id === taskId ? previousTask : t))
+              : [
+                  ...list.slice(0, previousIndex),
+                  previousTask,
+                  ...list.slice(previousIndex),
+                ];
+          });
+        }
+        reload();
+      }
       if (cause instanceof ApiError && cause.status === 409) {
         toast.error("Start the task before finishing it early.");
       } else {
@@ -416,12 +442,23 @@ export default function TasksPage() {
                     key={task.id}
                     task={task}
                     busy={busyTaskId === task.id}
+                    disabled={busyTaskId !== null}
                     onEdit={() => {
                       setEditing(task);
                       setDialogOpen(true);
                     }}
                     onStart={() =>
-                      void runAction(task.id, () => tasksApi.startTask(task.id), "Task started")
+                      void runAction(
+                        task.id,
+                        () => tasksApi.startTask(task.id),
+                        "Task started",
+                        (current) =>
+                          status !== null && status !== "In Progress"
+                            ? current.filter((t) => t.id !== task.id)
+                            : current.map((t) =>
+                                t.id === task.id ? { ...t, status: "In Progress" } : t,
+                              ),
+                      )
                     }
                     onFinish={() => setConfirmFinish(task)}
                     onDelete={() => setConfirmDelete(task)}
@@ -452,8 +489,13 @@ export default function TasksPage() {
         onConfirm={async () => {
           const target = confirmDelete;
           if (!target) return;
-          await runAction(target.id, () => tasksApi.deleteTask(target.id), "Task deleted");
           setConfirmDelete(null);
+          await runAction(
+            target.id,
+            () => tasksApi.deleteTask(target.id),
+            "Task deleted",
+            (current) => current.filter((t) => t.id !== target.id),
+          );
         }}
       />
 
@@ -468,8 +510,20 @@ export default function TasksPage() {
         onConfirm={async () => {
           const target = confirmFinish;
           if (!target) return;
-          await runAction(target.id, () => tasksApi.finishTaskEarly(target.id), "Task finished");
           setConfirmFinish(null);
+          await runAction(
+            target.id,
+            () => tasksApi.finishTaskEarly(target.id),
+            "Task finished",
+            (current) =>
+              status !== null && status !== "Completed"
+                ? current.filter((t) => t.id !== target.id)
+                : current.map((t) =>
+                    t.id === target.id
+                      ? { ...t, status: "Completed", remainingDuration: 0 }
+                      : t,
+                  ),
+          );
         }}
       />
     </PageShell>
@@ -541,6 +595,7 @@ function FilterSelect<T extends string>({
 function TaskRow({
   task,
   busy,
+  disabled = false,
   onEdit,
   onStart,
   onFinish,
@@ -548,6 +603,7 @@ function TaskRow({
 }: {
   task: AcademicTask;
   busy: boolean;
+  disabled?: boolean;
   onEdit: () => void;
   onStart: () => void;
   onFinish: () => void;
@@ -620,7 +676,7 @@ function TaskRow({
                 variant="ghost"
                 size="icon"
                 className="absolute right-4 top-2.5 h-8 w-8 lg:static lg:opacity-0 lg:transition-opacity lg:group-hover:opacity-100"
-                disabled={busy}
+                disabled={busy || disabled}
                 aria-label={`Actions for ${task.title}`}
               >
                 {busy ? (

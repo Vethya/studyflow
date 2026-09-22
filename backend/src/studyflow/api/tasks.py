@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field, field_validator
 
 from studyflow.api.account import AccountError, require_csrf_session, require_session
@@ -205,6 +205,7 @@ async def create_task(
     },
 )
 async def list_tasks(
+    response: Response,
     principal: Annotated[SessionPrincipal, Depends(require_session)],
     tasks: Annotated[AcademicTasks, Depends(get_academic_tasks)],
     course: Annotated[str | None, Query(max_length=100)] = None,
@@ -214,6 +215,7 @@ async def list_tasks(
     deadline_to: datetime | None = None,
     task_status: Annotated[TaskStatus | None, Query(alias="status")] = None,
 ) -> list[AcademicTaskResponse]:
+    response.headers["Cache-Control"] = "no-store"
     for deadline in (deadline_from, deadline_to):
         if deadline is not None and deadline.tzinfo is None:
             raise HTTPException(
@@ -246,9 +248,11 @@ async def list_tasks(
 )
 async def get_task(
     task_id: UUID,
+    response: Response,
     principal: Annotated[SessionPrincipal, Depends(require_session)],
     tasks: Annotated[AcademicTasks, Depends(get_academic_tasks)],
 ) -> AcademicTaskResponse:
+    response.headers["Cache-Control"] = "no-store"
     task = await tasks.get(principal.account_id, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")

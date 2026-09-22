@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { useSWRConfig } from "swr";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -75,6 +76,7 @@ function addCalendarDays(date: Date, days: number): Date {
 const minutesSinceMidnight = (date: Date) => date.getHours() * 60 + date.getMinutes();
 
 export default function CalendarPage() {
+  const { mutate } = useSWRConfig();
   const isMobile = useIsMobile();
   const [anchor, setAnchor] = useState<Date>(() => new Date());
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -649,9 +651,17 @@ export default function CalendarPage() {
         session={outcomeSession}
         open={outcomeSession !== null}
         onOpenChange={(next) => !next && setOutcomeSession(null)}
-        onRecorded={(result) =>
-          applyRecordedOutcome(result, { setProposal, setPreviewOpen })
-        }
+        onRecorded={(result) => {
+          if (schedule.data) {
+            schedule.setData({
+              ...schedule.data,
+              sessions: schedule.data.sessions.map((session) =>
+                session.id === result.session.id ? result.session : session,
+              ),
+            });
+          }
+          applyRecordedOutcome(result, { setProposal, setPreviewOpen });
+        }}
       />
 
       <SchedulePreview
@@ -662,9 +672,11 @@ export default function CalendarPage() {
         onOpenChange={setPreviewOpen}
         onAccepted={() => {
           setProposal(null);
+          revision.setData(null);
         }}
         onRejected={() => {
           setProposal(null);
+          revision.setData(null);
         }}
       />
 
@@ -689,14 +701,33 @@ export default function CalendarPage() {
         confirmLabel="Delete task"
         destructive
         onConfirm={async () => {
-          if (!confirmDelete) return;
+          const target = confirmDelete;
+          if (!target) return;
+          const previousTasks = tasks.data;
+          const previousSchedule = schedule.data;
+          const nextTasks = previousTasks
+            ? previousTasks.filter((task) => task.id !== target.id)
+            : null;
+          const nextSchedule = previousSchedule
+            ? {
+                ...previousSchedule,
+                sessions: previousSchedule.sessions.filter((session) => session.taskId !== target.id),
+              }
+            : null;
+          if (nextTasks) tasks.setData(nextTasks);
+          if (nextTasks && nextSchedule) {
+            void mutate(activeScheduleKey(nextTasks), nextSchedule, { revalidate: false });
+          }
+          setConfirmDelete(null);
           try {
-            await tasksApi.deleteTask(confirmDelete.id);
+            await tasksApi.deleteTask(target.id);
             toast.success("Task deleted");
           } catch (cause) {
+            if (previousTasks) tasks.setData(previousTasks);
+            if (previousTasks && previousSchedule) {
+              void mutate(activeScheduleKey(previousTasks), previousSchedule, { revalidate: false });
+            }
             toast.error(describeError(cause));
-          } finally {
-            setConfirmDelete(null);
           }
         }}
       />

@@ -8,7 +8,7 @@ export interface AsyncResource<T> extends State<T> {
   /** Re-runs the loader. Safe to call from event handlers. */
   reload: () => void;
   /** Replace the cached value without a round trip, e.g. after a mutation. */
-  setData: (next: T) => void;
+  setData: (next: T | ((current: T | null) => T)) => void;
 }
 
 interface State<T> {
@@ -46,9 +46,17 @@ export function useApi<T>(
     void mutate();
   }, [mutate]);
 
-  const setData = useCallback((next: T) => {
-    void mutate(next, { revalidate: false });
-  }, [mutate]);
+  const setData = useCallback(
+    (next: T | ((current: T | null) => T)) => {
+      if (typeof next === "function") {
+        const updater = next as (current: T | null) => T;
+        void mutate((current) => updater(current ?? null), { revalidate: false });
+      } else {
+        void mutate(next, { revalidate: false });
+      }
+    },
+    [mutate],
+  );
 
   return {
     data: data ?? null,

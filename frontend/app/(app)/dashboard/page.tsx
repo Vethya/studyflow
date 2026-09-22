@@ -527,9 +527,17 @@ export default function DashboardPage() {
         session={outcomeSession}
         open={outcomeSession !== null}
         onOpenChange={(next) => !next && setOutcomeSession(null)}
-        onRecorded={(result) =>
-          applyRecordedOutcome(result, { setProposal, setPreviewOpen })
-        }
+        onRecorded={(result) => {
+          if (schedule.data) {
+            schedule.setData({
+              ...schedule.data,
+              sessions: schedule.data.sessions.map((session) =>
+                session.id === result.session.id ? result.session : session,
+              ),
+            });
+          }
+          applyRecordedOutcome(result, { setProposal, setPreviewOpen });
+        }}
       />
 
       <SchedulePreview
@@ -540,9 +548,11 @@ export default function DashboardPage() {
         onOpenChange={setPreviewOpen}
         onAccepted={() => {
           setProposal(null);
+          revision.setData(null);
         }}
         onRejected={() => {
           setProposal(null);
+          revision.setData(null);
         }}
       />
     </PageShell>
