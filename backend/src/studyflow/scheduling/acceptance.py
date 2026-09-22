@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from uuid import UUID
 
@@ -35,6 +35,9 @@ class ScheduleAcceptance(Protocol):
     async def reject(self, account_id: UUID, proposal_id: UUID) -> bool: ...
 
 
+DEFAULT_ACCEPTANCE_GRACE_PERIOD = timedelta(minutes=2)
+
+
 class ScheduleAcceptanceService:
     def __init__(
         self,
@@ -47,6 +50,7 @@ class ScheduleAcceptanceService:
         *,
         study_sessions: StudySessions | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        acceptance_grace_period: timedelta = DEFAULT_ACCEPTANCE_GRACE_PERIOD,
     ) -> None:
         self._tasks = tasks
         self._availability_windows = availability_windows
@@ -56,6 +60,7 @@ class ScheduleAcceptanceService:
         self._recovery_snapshots = recovery_snapshots
         self._study_sessions = study_sessions
         self._clock = clock
+        self._acceptance_grace_period = acceptance_grace_period
 
     async def accept(
         self, account_id: UUID, proposal_id: UUID
@@ -116,6 +121,7 @@ class ScheduleAcceptanceService:
             proposal_id,
             mutation_now,
             preferences.minimum_break_minutes,
+            grace_period=self._acceptance_grace_period,
         )
 
     async def reject(self, account_id: UUID, proposal_id: UUID) -> bool:

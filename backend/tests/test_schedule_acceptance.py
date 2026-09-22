@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import cast
 from uuid import UUID, uuid4
 
@@ -87,6 +87,7 @@ class RepositoryStub:
         proposal_id: UUID,
         now: datetime,
         minimum_break_minutes: int,
+        grace_period: timedelta = timedelta(seconds=0),
     ) -> tuple[StudySessionRecord, ...]:
         self.accept_calls.append((account_id, proposal_id, now, minimum_break_minutes))
         return ()
