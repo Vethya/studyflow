@@ -159,12 +159,24 @@ export default function TasksPage() {
     setEditing(null);
   }
 
-  async function runAction(taskId: string, action: () => Promise<void>, message: string) {
+  async function runAction(
+    taskId: string,
+    action: () => Promise<void>,
+    message: string,
+    optimisticUpdate?: (current: AcademicTask[]) => AcademicTask[],
+  ) {
+    const previousTasks = tasks;
+    if (optimisticUpdate) {
+      setData(optimisticUpdate(previousTasks));
+    }
     setBusyTaskId(taskId);
     try {
       await action();
       toast.success(message);
     } catch (cause) {
+      if (optimisticUpdate) {
+        setData(previousTasks);
+      }
       if (cause instanceof ApiError && cause.status === 409) {
         toast.error("Start the task before finishing it early.");
       } else {
@@ -421,7 +433,15 @@ export default function TasksPage() {
                       setDialogOpen(true);
                     }}
                     onStart={() =>
-                      void runAction(task.id, () => tasksApi.startTask(task.id), "Task started")
+                      void runAction(
+                        task.id,
+                        () => tasksApi.startTask(task.id),
+                        "Task started",
+                        (current) =>
+                          current.map((t) =>
+                            t.id === task.id ? { ...t, status: "In Progress" } : t,
+                          ),
+                      )
                     }
                     onFinish={() => setConfirmFinish(task)}
                     onDelete={() => setConfirmDelete(task)}
@@ -452,8 +472,13 @@ export default function TasksPage() {
         onConfirm={async () => {
           const target = confirmDelete;
           if (!target) return;
-          await runAction(target.id, () => tasksApi.deleteTask(target.id), "Task deleted");
           setConfirmDelete(null);
+          await runAction(
+            target.id,
+            () => tasksApi.deleteTask(target.id),
+            "Task deleted",
+            (current) => current.filter((t) => t.id !== target.id),
+          );
         }}
       />
 
@@ -468,8 +493,18 @@ export default function TasksPage() {
         onConfirm={async () => {
           const target = confirmFinish;
           if (!target) return;
-          await runAction(target.id, () => tasksApi.finishTaskEarly(target.id), "Task finished");
           setConfirmFinish(null);
+          await runAction(
+            target.id,
+            () => tasksApi.finishTaskEarly(target.id),
+            "Task finished",
+            (current) =>
+              current.map((t) =>
+                t.id === target.id
+                  ? { ...t, status: "Completed", remainingDuration: 0 }
+                  : t,
+              ),
+          );
         }}
       />
     </PageShell>
