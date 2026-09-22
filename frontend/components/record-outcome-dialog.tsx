@@ -74,6 +74,7 @@ export function RecordOutcomeDialog({
   const [remainingTouched, setRemainingTouched] = React.useState(false);
   const [isSaving, setSaving] = React.useState(false);
   const [confirmLarge, setConfirmLarge] = React.useState(false);
+  const saveButtonRef = React.useRef<HTMLButtonElement>(null);
 
   const planned = session?.plannedDuration ?? 0;
 
@@ -150,7 +151,7 @@ export function RecordOutcomeDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg" initialFocus={saveButtonRef}>
           <DialogHeader>
             <DialogTitle>How did it go?</DialogTitle>
             <DialogDescription>
@@ -159,7 +160,14 @@ export function RecordOutcomeDialog({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
+          <form
+            noValidate
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (canSave) handleSave();
+            }}
+            className="space-y-4"
+          >
             <fieldset className="space-y-2">
               <legend className="eyebrow mb-2">What happened</legend>
               <div className="grid gap-2">
@@ -261,17 +269,21 @@ export function RecordOutcomeDialog({
                 StudyFlow will look for a new slot.
               </Callout>
             )}
-          </div>
-
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isSaving}>
-              Cancel
-            </Button>
-            <Button onClick={handleSave} disabled={!canSave}>
-              {isSaving && <Loader2 className="animate-spin" />}
-              Save
-            </Button>
-          </DialogFooter>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => onOpenChange(false)}
+                disabled={isSaving}
+              >
+                Cancel
+              </Button>
+              <Button ref={saveButtonRef} type="submit" disabled={!canSave}>
+                {isSaving && <Loader2 className="animate-spin" />}
+                Save
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 

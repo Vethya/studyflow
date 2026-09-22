@@ -90,7 +90,13 @@ export function AddPasswordDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (canSave) void save();
+          }}
+          className="space-y-3"
+        >
           {error && <Callout tone="danger">{error}</Callout>}
 
           <div className="space-y-1.5">
@@ -126,17 +132,22 @@ export function AddPasswordDialog({
             />
             {mismatch && <p className="text-xs text-deficit">These do not match.</p>}
           </div>
-        </div>
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isSaving}>
-            Cancel
-          </Button>
-          <Button onClick={() => void save()} disabled={!canSave}>
-            {isSaving && <Loader2 className="animate-spin" />}
-            Add password
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+              disabled={isSaving}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!canSave}>
+              {isSaving && <Loader2 className="animate-spin" />}
+              Add password
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );
@@ -195,7 +206,13 @@ export function ChangePasswordDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (canSave) void save();
+          }}
+          className="space-y-3"
+        >
           {error && <Callout tone="danger">{error}</Callout>}
 
           <div className="space-y-1.5">
@@ -245,17 +262,22 @@ export function ChangePasswordDialog({
             />
             {mismatch && <p className="text-xs text-deficit">These do not match.</p>}
           </div>
-        </div>
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isSaving}>
-            Cancel
-          </Button>
-          <Button onClick={() => void save()} disabled={!canSave}>
-            {isSaving && <Loader2 className="animate-spin" />}
-            Change password
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+              disabled={isSaving}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!canSave}>
+              {isSaving && <Loader2 className="animate-spin" />}
+              Change password
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );
@@ -314,7 +336,13 @@ export function ChangeTimezoneDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (isDirty && !isSaving) void save();
+          }}
+          className="space-y-3"
+        >
           <Select value={selected} onValueChange={(next) => next && setSelected(next)}>
             <SelectTrigger className="h-10 w-full">
               <Globe className="text-muted-foreground" />
@@ -341,17 +369,22 @@ export function ChangeTimezoneDialog({
               they are still when you are free.
             </Callout>
           )}
-        </div>
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isSaving}>
-            Cancel
-          </Button>
-          <Button onClick={() => void save()} disabled={!isDirty || isSaving}>
-            {isSaving && <Loader2 className="animate-spin" />}
-            Save timezone
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+              disabled={isSaving}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!isDirty || isSaving}>
+              {isSaving && <Loader2 className="animate-spin" />}
+              Save timezone
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );
@@ -403,7 +436,13 @@ export function ChangeNameDialog({
           <DialogDescription>This is how StudyFlow greets you.</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-1.5">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (canSave) void save();
+          }}
+          className="space-y-1.5"
+        >
           <Label htmlFor="display-name" className="eyebrow">
             Name
           </Label>
@@ -413,21 +452,23 @@ export function ChangeNameDialog({
             maxLength={200}
             autoFocus
             onChange={(event) => setName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && canSave) void save();
-            }}
           />
-        </div>
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isSaving}>
-            Cancel
-          </Button>
-          <Button onClick={() => void save()} disabled={!canSave}>
-            {isSaving && <Loader2 className="animate-spin" />}
-            Save name
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+              disabled={isSaving}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!canSave}>
+              {isSaving && <Loader2 className="animate-spin" />}
+              Save name
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );
@@ -468,7 +509,7 @@ export function AccountDeletionDialog({
   const canContinue = passwordSet !== null && confirmation === "DELETE" && !isSubmitting;
 
   async function submit() {
-    if (!canContinue) return;
+    if (!canContinue || (passwordSet && currentPassword.length === 0)) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -509,7 +550,15 @@ export function AccountDeletionDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!canContinue) return;
+            if (!passwordSet && !googleReady) void startGoogle();
+            else void submit();
+          }}
+          className="space-y-3"
+        >
           {error && <Callout tone="danger">{error}</Callout>}
 
           {passwordSet === null ? (
@@ -549,36 +598,37 @@ export function AccountDeletionDialog({
               autoComplete="off"
             />
           </div>
-        </div>
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
-            Cancel
-          </Button>
-          {passwordSet === null ? (
-            <Button variant="destructive" disabled>
-              Loading account details
-            </Button>
-          ) : !passwordSet && !googleReady ? (
+          <DialogFooter>
             <Button
-              variant="destructive"
-              onClick={() => void startGoogle()}
-              disabled={!canContinue}
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+              disabled={isSubmitting}
             >
-              {isSubmitting && <Loader2 className="animate-spin" />}
-              Continue with Google
+              Cancel
             </Button>
-          ) : (
-            <Button
-              variant="destructive"
-              onClick={() => void submit()}
-              disabled={!canContinue || (passwordSet && currentPassword.length === 0)}
-            >
-              {isSubmitting && <Loader2 className="animate-spin" />}
-              Delete account
-            </Button>
-          )}
-        </DialogFooter>
+            {passwordSet === null ? (
+              <Button type="button" variant="destructive" disabled>
+                Loading account details
+              </Button>
+            ) : !passwordSet && !googleReady ? (
+              <Button variant="destructive" type="submit" disabled={!canContinue}>
+                {isSubmitting && <Loader2 className="animate-spin" />}
+                Continue with Google
+              </Button>
+            ) : (
+              <Button
+                variant="destructive"
+                type="submit"
+                disabled={!canContinue || (passwordSet && currentPassword.length === 0)}
+              >
+                {isSubmitting && <Loader2 className="animate-spin" />}
+                Delete account
+              </Button>
+            )}
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );
