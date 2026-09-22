@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { useSWRConfig } from "swr";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -75,6 +76,7 @@ function addCalendarDays(date: Date, days: number): Date {
 const minutesSinceMidnight = (date: Date) => date.getHours() * 60 + date.getMinutes();
 
 export default function CalendarPage() {
+  const { mutate } = useSWRConfig();
   const isMobile = useIsMobile();
   const [anchor, setAnchor] = useState<Date>(() => new Date());
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -703,12 +705,18 @@ export default function CalendarPage() {
           if (!target) return;
           const previousTasks = tasks.data;
           const previousSchedule = schedule.data;
-          if (previousTasks) tasks.setData(previousTasks.filter((task) => task.id !== target.id));
-          if (previousSchedule) {
-            schedule.setData({
-              ...previousSchedule,
-              sessions: previousSchedule.sessions.filter((session) => session.taskId !== target.id),
-            });
+          const nextTasks = previousTasks
+            ? previousTasks.filter((task) => task.id !== target.id)
+            : null;
+          const nextSchedule = previousSchedule
+            ? {
+                ...previousSchedule,
+                sessions: previousSchedule.sessions.filter((session) => session.taskId !== target.id),
+              }
+            : null;
+          if (nextTasks) tasks.setData(nextTasks);
+          if (nextTasks && nextSchedule) {
+            void mutate(activeScheduleKey(nextTasks), nextSchedule, { revalidate: false });
           }
           setConfirmDelete(null);
           try {
@@ -716,7 +724,9 @@ export default function CalendarPage() {
             toast.success("Task deleted");
           } catch (cause) {
             if (previousTasks) tasks.setData(previousTasks);
-            if (previousSchedule) schedule.setData(previousSchedule);
+            if (previousTasks && previousSchedule) {
+              void mutate(activeScheduleKey(previousTasks), previousSchedule, { revalidate: false });
+            }
             toast.error(describeError(cause));
           }
         }}
