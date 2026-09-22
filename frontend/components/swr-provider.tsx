@@ -82,7 +82,7 @@ function StudyFlowDataChangeListener() {
       void mutate((key) => {
         const root = rootForKey(key);
         return root !== null && roots.includes(root);
-      });
+      }, undefined, { revalidate: true });
     };
     window.addEventListener(STUDYFLOW_DATA_CHANGED_EVENT, onDataChanged);
     return () => window.removeEventListener(STUDYFLOW_DATA_CHANGED_EVENT, onDataChanged);
