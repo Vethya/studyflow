@@ -157,7 +157,11 @@ class SqlAlchemyScheduleProposalRepository:
                 )
             )
             now_utc = self._aware(now).astimezone(UTC)
-            if any(self._aware(item.starts_at) < now_utc - grace_period for item in proposed):
+            if any(
+                self._aware(item.starts_at) < now_utc - grace_period
+                or self._aware(item.ends_at) <= now_utc
+                for item in proposed
+            ):
                 raise ProposalExpiredError("The schedule proposal has expired")
             preserved = list(
                 await session.scalars(
