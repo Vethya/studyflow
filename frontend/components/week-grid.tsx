@@ -270,6 +270,8 @@ export function WeekGrid({
                         onClick={block.onSelect}
                         onMouseEnter={() => onHighlight?.(block.id)}
                         onMouseLeave={() => onHighlight?.(null)}
+                        onFocus={() => onHighlight?.(block.id)}
+                        onBlur={() => onHighlight?.(null)}
                         className={className}
                         style={{ top, height }}
                       >
