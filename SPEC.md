@@ -828,7 +828,6 @@ Show:
 - Unscheduled Work.
 - Awaiting Outcomes.
 - Weekly Effort Progress.
-- Quick Add Task.
 - Links to detailed Calendar, Tasks, and Progress views.
 
 ### 17.3 Calendar
