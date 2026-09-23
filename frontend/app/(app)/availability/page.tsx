@@ -197,6 +197,7 @@ export default function AvailabilityPage() {
       toast.success("Window removed");
     } catch (cause) {
       toast.error(describeError(cause));
+      throw cause;
     } finally {
       setPendingId(null);
     }
