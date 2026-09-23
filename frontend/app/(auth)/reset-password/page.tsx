@@ -42,7 +42,7 @@ function ResetPasswordForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!token && status === "authenticated") router.replace("/settings");
+    if (!token && status === "authenticated") router.replace("/dashboard");
   }, [router, status, token]);
 
   async function handleSubmit(event: React.FormEvent) {

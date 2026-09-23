@@ -37,7 +37,7 @@ export default function GoogleLinkPage() {
       .catch((cause) => {
         if (!active) return;
         if (cause instanceof ApiError && cause.isUnauthenticated) {
-          router.replace("/settings?google=challenge-missing");
+          router.replace("/login");
           return;
         }
         setError(describeError(cause));
