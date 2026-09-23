@@ -524,6 +524,7 @@ export default function DashboardPage() {
         proposal={proposal}
         availabilityWindows={allWindows}
         unavailablePeriods={allPeriods}
+        existingSessions={sessions}
         open={previewOpen}
         onOpenChange={setPreviewOpen}
         onAccepted={() => {

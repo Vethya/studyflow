@@ -372,6 +372,7 @@ export default function TaskDetailPage({
 
       <SchedulePreview
         proposal={proposal}
+        existingSessions={schedule.data?.sessions}
         open={previewOpen}
         onOpenChange={setPreviewOpen}
         onAccepted={() => {

@@ -668,6 +668,7 @@ export default function CalendarPage() {
         proposal={proposal}
         availabilityWindows={allWindows}
         unavailablePeriods={allPeriods}
+        existingSessions={sessions}
         open={previewOpen}
         onOpenChange={setPreviewOpen}
         onAccepted={() => {
