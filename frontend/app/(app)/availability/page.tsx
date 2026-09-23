@@ -32,12 +32,14 @@ import { ScheduleTechnicalFailure, availability as availabilityApi, scheduling }
 import { SchedulePreview } from "@/components/schedule-preview";
 import { PlanGenerationDialog } from "@/components/plan-generation-dialog";
 import type { WindowDraft } from "@/lib/api";
-import type { UnavailablePeriod } from "@/types/availability";
+import type { UnavailablePeriod, AvailabilityWindow } from "@/types/availability";
 import type { ScheduleProposal } from "@/types/schedule";
 import { formatDuration } from "@/lib/constants";
 import { weeklyPatternMinutes } from "@/lib/capacity";
 import { describeError, useApi } from "@/hooks/use-api";
 import { AddWindowDialog, ExceptionDialog } from "@/components/availability-dialogs";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Popover, PopoverContent } from "@/components/ui/popover";
 import { SWR_KEYS } from "@/lib/swr-keys";
 
 /** Display Monday-first while the data itself is indexed 0 = Sunday. */
@@ -50,6 +52,11 @@ function toMinutes(time: string): number {
 }
 
 export default function AvailabilityPage() {
+  const [selectedWindow, setSelectedWindow] = useState<{
+    window: AvailabilityWindow;
+    anchorEl: HTMLElement | null;
+  } | null>(null);
+  const [confirmDeleteWindow, setConfirmDeleteWindow] = useState<AvailabilityWindow | null>(null);
   const [hoveredWindow, setHoveredWindow] = useState<string | null>(null);
   const [windowDialogOpen, setWindowDialogOpen] = useState(false);
   const [exceptionDialogOpen, setExceptionDialogOpen] = useState(false);
@@ -121,6 +128,7 @@ export default function AvailabilityPage() {
         end: toMinutes(w.endTime),
         variant: "available" as const,
         title: `${DAY_NAMES[w.dayOfWeek]} ${w.startTime}–${w.endTime}`,
+        onSelect: (e) => setSelectedWindow({ window: w, anchorEl: e?.currentTarget ?? null }),
       })),
     [allWindows],
   );
@@ -464,7 +472,7 @@ export default function AvailabilityPage() {
                               >
                                 {w.startTime}–{w.endTime}
                                 <button
-                                  onClick={() => void handleDeleteWindow(w.id)}
+                                  onClick={() => setConfirmDeleteWindow(w)}
                                   disabled={pendingId === w.id}
                                   aria-label={`Remove ${DAY_NAMES[dayIdx]} ${w.startTime} to ${w.endTime}`}
                                   className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-card hover:text-deficit"
@@ -603,6 +611,66 @@ export default function AvailabilityPage() {
         }}
         period={editingPeriod}
         onSubmit={handleSaveException}
+      />
+
+      <Popover
+        open={selectedWindow !== null}
+        onOpenChange={(next) => {
+          if (!next) setSelectedWindow(null);
+        }}
+      >
+        <PopoverContent
+          anchor={selectedWindow?.anchorEl ?? undefined}
+          align="center"
+          side="top"
+          className="w-56 p-3"
+        >
+          <div className="space-y-1">
+            <div className="text-xs font-semibold text-foreground">
+              {selectedWindow
+                ? `${DAY_NAMES[selectedWindow.window.dayOfWeek]} · ${selectedWindow.window.startTime}–${selectedWindow.window.endTime}`
+                : ""}
+            </div>
+            <p className="text-[11px] text-muted-foreground">Weekly availability window</p>
+          </div>
+          <Button
+            variant="destructive"
+            size="sm"
+            className="w-full mt-2"
+            onClick={() => {
+              if (selectedWindow) {
+                const target = selectedWindow.window;
+                setSelectedWindow(null);
+                setConfirmDeleteWindow(target);
+              }
+            }}
+          >
+            <Trash2 className="size-3.5" />
+            Delete window
+          </Button>
+        </PopoverContent>
+      </Popover>
+
+      <ConfirmDialog
+        open={confirmDeleteWindow !== null}
+        onOpenChange={(next) => {
+          if (!next) setConfirmDeleteWindow(null);
+        }}
+        title="Delete availability window?"
+        description={
+          confirmDeleteWindow
+            ? `This will remove the recurring ${DAY_NAMES[confirmDeleteWindow.dayOfWeek]} ${confirmDeleteWindow.startTime}–${confirmDeleteWindow.endTime} window from your weekly schedule. Any scheduled sessions in this slot may be rescheduled. It cannot be undone.`
+            : undefined
+        }
+        confirmLabel="Delete window"
+        destructive
+        onConfirm={async () => {
+          const target = confirmDeleteWindow;
+          if (target) {
+            await handleDeleteWindow(target.id);
+            setConfirmDeleteWindow(null);
+          }
+        }}
       />
     </PageShell>
   );

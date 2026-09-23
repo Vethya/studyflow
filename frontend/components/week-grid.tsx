@@ -49,7 +49,7 @@ export interface GridBlock {
   settled?: boolean;
   /** Marks a past session still waiting on an outcome (SPEC §12.1). */
   attention?: boolean;
-  onSelect?: () => void;
+  onSelect?: (e?: React.MouseEvent<HTMLElement>) => void;
 }
 
 export function WeekGrid({
@@ -246,24 +246,30 @@ export function WeekGrid({
                             "cursor-pointer hover:border-foreground hover:bg-muted hover:-translate-y-0.5 hover:shadow-md hover:z-30 active:translate-y-0 active:shadow-xs",
                         )
                       : block.variant === "available"
-                        ? highlighted
-                          ? "border-surplus bg-surplus/35"
-                          : "border-surplus/40 bg-surplus-soft"
+                        ? cn(
+                            highlighted
+                              ? "border-surplus bg-surplus/35"
+                              : "border-surplus/40 bg-surplus-soft",
+                            block.onSelect &&
+                              "cursor-pointer hover:border-surplus hover:bg-surplus/40 hover:shadow-xs",
+                          )
                         : // Blocked time is hatched as well as grey, so it stays
                           // distinguishable without relying on colour.
                           "border-border bg-muted [background-image:repeating-linear-gradient(135deg,var(--color-border)_0_4px,transparent_4px_8px)]",
                   );
 
-                  if (isSession && block.onSelect) {
+                  if (block.onSelect) {
                     return (
                       <button
                         key={block.id}
                         type="button"
                         title={block.title}
-                        // A session that crosses midnight can be only a few pixels
+                        // A session or window that crosses midnight can be only a few pixels
                         // tall on this day, too short to show its text.
                         aria-label={block.title}
                         onClick={block.onSelect}
+                        onMouseEnter={() => onHighlight?.(block.id)}
+                        onMouseLeave={() => onHighlight?.(null)}
                         className={className}
                         style={{ top, height }}
                       >
