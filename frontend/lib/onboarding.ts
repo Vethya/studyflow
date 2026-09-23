@@ -90,8 +90,13 @@ export function isNewAccount(state: OnboardingState): boolean {
 const SEEN_KEY = "studyflow:welcome-seen";
 const HIDDEN_KEY = "studyflow:getting-started-hidden";
 
+const memoryFlags = new Map<string, boolean>();
+
 /** Browser storage can throw or be empty; onboarding must never break a page. */
 function read(key: string): boolean {
+  if (memoryFlags.has(key)) {
+    return memoryFlags.get(key) === true;
+  }
   try {
     return window.localStorage.getItem(key) === "1";
   } catch {
@@ -100,10 +105,11 @@ function read(key: string): boolean {
 }
 
 function write(key: string): void {
+  memoryFlags.set(key, true);
   try {
     window.localStorage.setItem(key, "1");
   } catch {
-    // A student in a private window simply sees the welcome again.
+    // In-memory flag ensures the session still remembers dismissal.
   }
 }
 
@@ -133,6 +139,8 @@ export function rememberGettingStartedHidden(): void {
 
 /** Lets a student replay the tour and bring the checklist back. */
 export function restartOnboarding(): void {
+  memoryFlags.delete(SEEN_KEY);
+  memoryFlags.delete(HIDDEN_KEY);
   try {
     window.localStorage.removeItem(SEEN_KEY);
     window.localStorage.removeItem(HIDDEN_KEY);

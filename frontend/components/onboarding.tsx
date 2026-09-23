@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -54,14 +55,25 @@ export function WelcomeTour({ state, ready }: { state: OnboardingState; ready: b
     () => true,
   );
   const [step, setStep] = useState(0);
+  const [dismissed, setDismissed] = useState(false);
+  const [prevSeen, setPrevSeen] = useState(seen);
 
-  const open = ready && !seen && isNewAccount(state);
+  if (prevSeen !== seen) {
+    setPrevSeen(seen);
+    if (!seen) {
+      setDismissed(false);
+      setStep(0);
+    }
+  }
+
+  const open = !dismissed && ready && !seen && isNewAccount(state);
   const steps = onboardingSteps(state);
   const current = steps[step];
   const Icon = STEP_ICONS[current.id];
   const isLast = step === steps.length - 1;
 
   function close() {
+    setDismissed(true);
     rememberWelcomeSeen();
   }
 
@@ -96,9 +108,9 @@ export function WelcomeTour({ state, ready }: { state: OnboardingState; ready: b
         </div>
 
         <DialogFooter className="sm:justify-between">
-          <Button variant="ghost" onClick={close}>
+          <DialogClose render={<Button variant="ghost" />} onClick={close}>
             {isLast ? "Close" : "Skip"}
-          </Button>
+          </DialogClose>
           <div className="flex gap-2">
             {step > 0 && (
               <Button variant="outline" onClick={() => setStep(step - 1)}>
