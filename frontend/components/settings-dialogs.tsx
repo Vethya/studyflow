@@ -25,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Callout } from "@/components/ui/callout";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ApiError, account as accountApi } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
 import { notifyStudyFlowSessionInvalidated } from "@/lib/data-events";
@@ -50,6 +51,7 @@ export function AddPasswordDialog({
   const [confirm, setConfirm] = React.useState("");
   const [isSaving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [discardOpen, setDiscardOpen] = React.useState(false);
 
   const [wasOpen, setWasOpen] = React.useState(false);
   if (open !== wasOpen) {
@@ -58,7 +60,26 @@ export function AddPasswordDialog({
       setNext("");
       setConfirm("");
       setError(null);
+      setDiscardOpen(false);
     }
+  }
+
+  const isDirty = next !== "" || confirm !== "";
+
+  function resetForm() {
+    setNext("");
+    setConfirm("");
+    setError(null);
+  }
+
+  function requestClose() {
+    if (isSaving || discardOpen) return false;
+    if (isDirty) {
+      setDiscardOpen(true);
+      return false;
+    }
+    onOpenChange(false);
+    return true;
   }
 
   const tooShort = next.length > 0 && next.length < 12;
@@ -72,6 +93,7 @@ export function AddPasswordDialog({
       await accountApi.setPassword(next);
       toast.success("Password added. Please sign in again.");
       notifyStudyFlowSessionInvalidated();
+      resetForm();
       onOpenChange(false);
     } catch (cause) {
       setError(describeError(cause));
@@ -81,7 +103,13 @@ export function AddPasswordDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen, details) => {
+        if (nextOpen) onOpenChange(true);
+        else if (!requestClose()) details?.cancel?.();
+      }}
+    >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Add a password</DialogTitle>
@@ -138,7 +166,7 @@ export function AddPasswordDialog({
             <Button
               type="button"
               variant="ghost"
-              onClick={() => onOpenChange(false)}
+              onClick={requestClose}
               disabled={isSaving}
             >
               Cancel
@@ -150,6 +178,22 @@ export function AddPasswordDialog({
           </DialogFooter>
         </form>
       </DialogContent>
+
+      <ConfirmDialog
+        open={open && discardOpen}
+        onOpenChange={setDiscardOpen}
+        title="Discard changes?"
+        description="Your unsaved changes will be lost."
+        cancelLabel="Keep editing"
+        confirmLabel="Discard changes"
+        destructive
+        focusCancel
+        onConfirm={() => {
+          setDiscardOpen(false);
+          resetForm();
+          onOpenChange(false);
+        }}
+      />
     </Dialog>
   );
 }
@@ -166,6 +210,7 @@ export function ChangePasswordDialog({
   const [confirm, setConfirm] = React.useState("");
   const [isSaving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [discardOpen, setDiscardOpen] = React.useState(false);
 
   const [wasOpen, setWasOpen] = React.useState(false);
   if (open !== wasOpen) {
@@ -175,7 +220,27 @@ export function ChangePasswordDialog({
       setNext("");
       setConfirm("");
       setError(null);
+      setDiscardOpen(false);
     }
+  }
+
+  const isDirty = current !== "" || next !== "" || confirm !== "";
+
+  function resetForm() {
+    setCurrent("");
+    setNext("");
+    setConfirm("");
+    setError(null);
+  }
+
+  function requestClose() {
+    if (isSaving || discardOpen) return false;
+    if (isDirty) {
+      setDiscardOpen(true);
+      return false;
+    }
+    onOpenChange(false);
+    return true;
   }
 
   const tooShort = next.length > 0 && next.length < 12;
@@ -189,6 +254,7 @@ export function ChangePasswordDialog({
       await accountApi.changePassword(current, next);
       toast.success("Password changed. Please sign in again.");
       notifyStudyFlowSessionInvalidated();
+      resetForm();
       onOpenChange(false);
     } catch (cause) {
       setError(describeError(cause));
@@ -198,7 +264,13 @@ export function ChangePasswordDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen, details) => {
+        if (nextOpen) onOpenChange(true);
+        else if (!requestClose()) details?.cancel?.();
+      }}
+    >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Change password</DialogTitle>
@@ -268,7 +340,7 @@ export function ChangePasswordDialog({
             <Button
               type="button"
               variant="ghost"
-              onClick={() => onOpenChange(false)}
+              onClick={requestClose}
               disabled={isSaving}
             >
               Cancel
@@ -280,6 +352,22 @@ export function ChangePasswordDialog({
           </DialogFooter>
         </form>
       </DialogContent>
+
+      <ConfirmDialog
+        open={open && discardOpen}
+        onOpenChange={setDiscardOpen}
+        title="Discard changes?"
+        description="Your unsaved changes will be lost."
+        cancelLabel="Keep editing"
+        confirmLabel="Discard changes"
+        destructive
+        focusCancel
+        onConfirm={() => {
+          setDiscardOpen(false);
+          resetForm();
+          onOpenChange(false);
+        }}
+      />
     </Dialog>
   );
 }
