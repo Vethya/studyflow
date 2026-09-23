@@ -220,7 +220,7 @@ async def list_tasks(
     deadline_from: datetime | None = None,
     deadline_to: datetime | None = None,
     task_status: Annotated[TaskStatus | None, Query(alias="status")] = None,
-    query: Annotated[str | None, Query(max_length=100)] = None,
+    query: Annotated[str | None, Query(max_length=200)] = None,
     limit: Annotated[int | None, Query(ge=1, le=100)] = None,
 ) -> list[AcademicTaskResponse]:
     response.headers["Cache-Control"] = "no-store"

@@ -23,6 +23,7 @@ function rootsForMutation(path: string): string[] {
   if (path === "/tasks" || path.startsWith("/tasks/")) {
     return [
       SWR_KEYS.tasks,
+      SWR_KEYS.taskSearch,
       "studyflow/task",
       "studyflow/adaptive-estimate",
       SWR_KEYS.activeSchedule,
@@ -61,6 +62,7 @@ function rootsForMutation(path: string): string[] {
   if (path.startsWith("/study-sessions/")) {
     return [
       SWR_KEYS.tasks,
+      SWR_KEYS.taskSearch,
       "studyflow/task",
       "studyflow/adaptive-estimate",
       SWR_KEYS.activeSchedule,
