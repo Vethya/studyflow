@@ -203,6 +203,11 @@ function SettingsContent() {
               placeholder="Search settings..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setSearchQuery("");
+                }
+              }}
               className="h-9 pl-8 pr-8 text-sm"
               aria-label="Search settings"
             />
@@ -230,6 +235,7 @@ function SettingsContent() {
                 <button
                   key={tab.id}
                   type="button"
+                  aria-current={isActive ? "page" : undefined}
                   onClick={() => {
                     setActiveTab(tab.id);
                     setSearchQuery("");
@@ -429,6 +435,15 @@ function SettingsContent() {
                               Change
                             </Button>
                           </Row>
+
+                          {preferences.data?.availability_confirmation_required && (
+                            <div className="py-3">
+                              <ConfirmTimezone
+                                preferences={preferences.data}
+                                setPreferences={preferences.setData}
+                              />
+                            </div>
+                          )}
                         </CardContent>
                       </Card>
                     </div>
