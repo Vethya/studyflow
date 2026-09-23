@@ -6,6 +6,7 @@ import type { Schedule } from "@/types/schedule";
 export const SWR_KEYS = {
   session: "studyflow/session",
   tasks: "studyflow/tasks",
+  taskSearch: "studyflow/tasks/search",
   availabilityWindows: "studyflow/availability/windows",
   unavailablePeriods: "studyflow/availability/unavailable-periods",
   studyPreferences: "studyflow/account/preferences",
@@ -25,11 +26,18 @@ export function taskListKey(filters: TaskFilters = {}) {
     filters.priority === undefined &&
     filters.status === undefined &&
     filters.deadlineFrom === undefined &&
-    filters.deadlineTo === undefined
+    filters.deadlineTo === undefined &&
+    filters.query === undefined &&
+    filters.limit === undefined
   ) {
     return SWR_KEYS.tasks;
   }
   return [SWR_KEYS.tasks, filters] as const;
+}
+
+export function taskSearchKey(query: string) {
+  const trimmed = query.trim();
+  return trimmed ? ([SWR_KEYS.taskSearch, trimmed] as const) : null;
 }
 
 export function taskDetailKey(taskId: string) {

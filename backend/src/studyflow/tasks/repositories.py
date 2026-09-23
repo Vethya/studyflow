@@ -325,11 +325,25 @@ class SqlAlchemyAcademicTaskRepository:
                     AcademicTask.estimate_frozen_at.is_(None),
                 ]
             )
-        rows = await session.scalars(
+        if filters.query is not None and filters.query.strip():
+            escaped = (
+                filters.query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            )
+            pattern = f"%{escaped}%"
+            conditions.append(
+                or_(
+                    AcademicTask.title.ilike(pattern, escape="\\"),
+                    AcademicTask.course.ilike(pattern, escape="\\"),
+                )
+            )
+        stmt = (
             select(AcademicTask)
             .where(*conditions)
             .order_by(AcademicTask.deadline_at, AcademicTask.id)
         )
+        if filters.limit is not None:
+            stmt = stmt.limit(filters.limit)
+        rows = await session.scalars(stmt)
         return [self._to_record(row, now) for row in rows]
 
     async def get(self, account_id: UUID, task_id: UUID) -> AcademicTaskRecord | None:

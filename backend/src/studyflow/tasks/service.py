@@ -75,6 +75,8 @@ class TaskFilters:
     deadline_from: datetime | None = None
     deadline_to: datetime | None = None
     status: TaskStatus | None = None
+    query: str | None = None
+    limit: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

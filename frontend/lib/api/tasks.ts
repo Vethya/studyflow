@@ -20,6 +20,8 @@ export interface TaskFilters {
   /** RFC 3339 timestamps with an explicit UTC offset. */
   deadlineFrom?: string;
   deadlineTo?: string;
+  query?: string;
+  limit?: number;
 }
 
 export async function listTasks(
@@ -33,12 +35,30 @@ export async function listTasks(
     status: filters.status && toWireStatus(filters.status),
     deadline_from: filters.deadlineFrom,
     deadline_to: filters.deadlineTo,
+    query: filters.query,
+    limit: filters.limit,
   });
   const [wire, progress] = await Promise.all([
     apiJson<WireAcademicTask[]>(`/tasks${query}`, { signal }),
     progressByTask(signal),
   ]);
   return wire.map((task) => toAcademicTask(task, progress.get(task.id)));
+}
+
+/**
+ * Lightweight search for the top bar and autocomplete.
+ * Directly queries `/tasks` without the overhead of computing `/progress`.
+ */
+export async function searchTasks(
+  searchTerm: string,
+  signal?: AbortSignal,
+  limit = 15,
+): Promise<AcademicTask[]> {
+  const trimmed = searchTerm.trim();
+  if (!trimmed) return [];
+  const query = buildQuery({ query: trimmed, limit });
+  const wire = await apiJson<WireAcademicTask[]>(`/tasks${query}`, { signal });
+  return wire.map((task) => toAcademicTask(task));
 }
 
 export async function getTask(taskId: string, signal?: AbortSignal): Promise<AcademicTask> {

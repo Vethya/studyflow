@@ -33,6 +33,12 @@ def normalize_course(value: str | None) -> str | None:
     return value.strip() or None
 
 
+def normalize_query(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return value.strip() or None
+
+
 class AcademicTaskRequest(BaseModel):
     title: Annotated[str, Field(min_length=1, max_length=200)]
     category: TaskCategory
@@ -214,6 +220,8 @@ async def list_tasks(
     deadline_from: datetime | None = None,
     deadline_to: datetime | None = None,
     task_status: Annotated[TaskStatus | None, Query(alias="status")] = None,
+    query: Annotated[str | None, Query(max_length=200)] = None,
+    limit: Annotated[int | None, Query(ge=1, le=100)] = None,
 ) -> list[AcademicTaskResponse]:
     response.headers["Cache-Control"] = "no-store"
     for deadline in (deadline_from, deadline_to):
@@ -234,6 +242,8 @@ async def list_tasks(
         deadline_from=deadline_from.astimezone(UTC) if deadline_from is not None else None,
         deadline_to=deadline_to.astimezone(UTC) if deadline_to is not None else None,
         status=task_status,
+        query=normalize_query(query),
+        limit=limit,
     )
     return [_response(task) for task in await tasks.list(principal.account_id, filters)]
 
