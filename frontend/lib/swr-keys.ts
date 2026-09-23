@@ -25,11 +25,18 @@ export function taskListKey(filters: TaskFilters = {}) {
     filters.priority === undefined &&
     filters.status === undefined &&
     filters.deadlineFrom === undefined &&
-    filters.deadlineTo === undefined
+    filters.deadlineTo === undefined &&
+    filters.query === undefined &&
+    filters.limit === undefined
   ) {
     return SWR_KEYS.tasks;
   }
   return [SWR_KEYS.tasks, filters] as const;
+}
+
+export function taskSearchKey(query: string) {
+  const trimmed = query.trim();
+  return trimmed ? (["studyflow/tasks/search", trimmed] as const) : null;
 }
 
 export function taskDetailKey(taskId: string) {
