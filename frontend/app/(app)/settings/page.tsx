@@ -161,22 +161,24 @@ function SettingsContent() {
 
   const searchMatches = useMemo(() => {
     if (!query) return null;
-    return {
-      profileName: "profile name display name".includes(query) || "name".includes(query),
-      profileEmail:
-        "profile email address verified".includes(query) ||
-        (profile.data?.email?.toLowerCase().includes(query) ?? false),
-      password: "password change password add password security credentials sign in".includes(query),
-      google: "google sign in connect account linked identity authentication".includes(query),
-      signOut: "sign out log out device session".includes(query),
-      deleteAccount: "delete account remove account wipe data danger permanent".includes(query),
-      timezone:
-        "timezone time zone clock utc gmt hours availability offset".includes(query) ||
-        (zone?.toLowerCase().includes(query) ?? false),
-      sessions: "study sessions session length break duration timer sittings schedule pacing".includes(query),
-      appearance: "appearance theme light dark amoled oled black mode contrast interface".includes(query),
+    const words = query.split(/\s+/).filter(Boolean);
+    const matchTerms = (...terms: (string | undefined | null)[]) => {
+      const combined = terms.filter(Boolean).join(" ").toLowerCase();
+      return words.every((w) => combined.includes(w));
     };
-  }, [query, profile.data?.email, zone]);
+
+    return {
+      profileName: matchTerms("profile", "name", "display name", "change name", profile.data?.name),
+      profileEmail: matchTerms("profile", "email", "address", "verified", profile.data?.email),
+      password: matchTerms("password", "change password", "add password", "security", "credentials", "sign in"),
+      google: matchTerms("google", "sign in", "connect", "account", "linked", "identity", "authentication", google?.email),
+      signOut: matchTerms("sign out", "log out", "device", "session", "ends your session"),
+      deleteAccount: matchTerms("delete account", "remove account", "wipe data", "danger", "permanent", "planning data"),
+      timezone: matchTerms("timezone", "time zone", "clock", "utc", "gmt", "hours", "availability", "offset", zone),
+      sessions: matchTerms("study sessions", "longest session", "session length", "break length", "minimum break", "break between sessions", "duration", "timer", "sittings", "schedule", "pacing"),
+      appearance: matchTerms("appearance", "theme", "light mode", "dark mode", "amoled", "oled", "black mode", "contrast", "interface", "system"),
+    };
+  }, [google?.email, profile.data?.email, profile.data?.name, query, zone]);
 
   const totalMatches = useMemo(() => {
     if (!searchMatches) return 0;
@@ -191,7 +193,7 @@ function SettingsContent() {
 
       <div className="flex flex-col gap-6 md:flex-row md:gap-8 items-start">
         {/* Navigation Sidebar (Vertical on Desktop, Scrollable Pills on Mobile) */}
-        <div className="w-full md:w-56 shrink-0 space-y-3">
+        <div className="w-full md:w-56 shrink-0 min-w-0 space-y-3">
           {/* Live Search Input */}
           <div className="relative">
             <Search
@@ -265,7 +267,11 @@ function SettingsContent() {
                   <h2 className="text-lg font-semibold tracking-tight text-foreground">
                     Search results
                   </h2>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
+                  <p
+                    className="mt-0.5 text-xs text-muted-foreground"
+                    role="status"
+                    aria-live="polite"
+                  >
                     {totalMatches} {totalMatches === 1 ? "result" : "results"} for &ldquo;{searchQuery}&rdquo;
                   </p>
                 </div>
@@ -293,28 +299,39 @@ function SettingsContent() {
                       <CategoryBadge label="Profile" icon={User} />
                       <Card>
                         <CardContent className="divide-y p-0 px-4 sm:px-6">
-                          {searchMatches.profileName && (
-                            <Row label="Name" value={profile.data?.name ?? "—"}>
-                              <Button variant="outline" size="sm" onClick={() => setNameOpen(true)}>
-                                Change
-                              </Button>
-                            </Row>
-                          )}
-                          {searchMatches.profileEmail && (
-                            <Row
-                              label="Email address"
-                              value={
-                                <span className="flex flex-wrap items-center gap-x-1.5">
-                                  <span className="truncate">{profile.data?.email}</span>
-                                  <span className="flex items-center gap-1 font-medium text-surplus">
-                                    <CheckCircle2 className="size-3" />
-                                    Verified
-                                  </span>
-                                </span>
+                          {profile.isLoading ? (
+                            <RowSkeleton
+                              rows={
+                                (searchMatches.profileName ? 1 : 0) +
+                                (searchMatches.profileEmail ? 1 : 0)
                               }
-                            >
-                              <span className="text-sm text-muted-foreground">Can&rsquo;t be changed</span>
-                            </Row>
+                            />
+                          ) : (
+                            <>
+                              {searchMatches.profileName && (
+                                <Row label="Name" value={profile.data?.name ?? "—"}>
+                                  <Button variant="outline" size="sm" onClick={() => setNameOpen(true)}>
+                                    Change
+                                  </Button>
+                                </Row>
+                              )}
+                              {searchMatches.profileEmail && (
+                                <Row
+                                  label="Email address"
+                                  value={
+                                    <span className="flex flex-wrap items-center gap-x-1.5">
+                                      <span className="truncate">{profile.data?.email}</span>
+                                      <span className="flex items-center gap-1 font-medium text-surplus">
+                                        <CheckCircle2 className="size-3" />
+                                        Verified
+                                      </span>
+                                    </span>
+                                  }
+                                >
+                                  <span className="text-sm text-muted-foreground">Can&rsquo;t be changed</span>
+                                </Row>
+                              )}
+                            </>
                           )}
                         </CardContent>
                       </Card>
@@ -331,51 +348,59 @@ function SettingsContent() {
                       <Card>
                         <CardContent className="divide-y p-0 px-4 sm:px-6">
                           {searchMatches.password && (
-                            <Row
-                              label="Password"
-                              value={profile.data?.password_set ? "Added" : "Not added"}
-                            >
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  profile.data?.password_set
-                                    ? setPasswordOpen(true)
-                                    : setAddPasswordOpen(true)
-                                }
+                            profile.isLoading ? (
+                              <RowSkeleton rows={1} />
+                            ) : (
+                              <Row
+                                label="Password"
+                                value={profile.data?.password_set ? "Added" : "Not added"}
                               >
-                                {profile.data?.password_set ? "Change password" : "Add password"}
-                              </Button>
-                            </Row>
-                          )}
-                          {searchMatches.google && (
-                            <Row
-                              stretch={!google}
-                              label={
-                                <span className="flex items-center gap-2">
-                                  <GoogleIcon />
-                                  Google
-                                </span>
-                              }
-                              value={google ? google.email : "Sign in with your Google account"}
-                            >
-                              {google ? (
-                                <span className="flex items-center gap-1.5 text-sm font-medium text-surplus">
-                                  <CheckCircle2 className="size-4" />
-                                  Connected
-                                </span>
-                              ) : (
                                 <Button
                                   variant="outline"
-                                  className="h-auto min-h-11 self-stretch px-5 text-sm"
-                                  onClick={() => void connectGoogle()}
-                                  disabled={isConnectingGoogle}
+                                  size="sm"
+                                  onClick={() =>
+                                    profile.data?.password_set
+                                      ? setPasswordOpen(true)
+                                      : setAddPasswordOpen(true)
+                                  }
                                 >
-                                  {isConnectingGoogle ? <Loader2 className="animate-spin" /> : <GoogleIcon />}
-                                  Connect
+                                  {profile.data?.password_set ? "Change password" : "Add password"}
                                 </Button>
-                              )}
-                            </Row>
+                              </Row>
+                            )
+                          )}
+                          {searchMatches.google && (
+                            identities.isLoading ? (
+                              <RowSkeleton rows={1} />
+                            ) : (
+                              <Row
+                                stretch={!google}
+                                label={
+                                  <span className="flex items-center gap-2">
+                                    <GoogleIcon />
+                                    Google
+                                  </span>
+                                }
+                                value={google ? google.email : "Sign in with your Google account"}
+                              >
+                                {google ? (
+                                  <span className="flex items-center gap-1.5 text-sm font-medium text-surplus">
+                                    <CheckCircle2 className="size-4" />
+                                    Connected
+                                  </span>
+                                ) : (
+                                  <Button
+                                    variant="outline"
+                                    className="h-auto min-h-11 self-stretch px-5 text-sm"
+                                    onClick={() => void connectGoogle()}
+                                    disabled={isConnectingGoogle}
+                                  >
+                                    {isConnectingGoogle ? <Loader2 className="animate-spin" /> : <GoogleIcon />}
+                                    Connect
+                                  </Button>
+                                )}
+                              </Row>
+                            )
                           )}
                           {searchMatches.signOut && (
                             <Row label="Sign out" value="Ends your session on this device only.">
@@ -764,10 +789,10 @@ function CategoryBadge({
   icon: React.ElementType;
 }) {
   return (
-    <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+    <h3 className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
       <Icon className="size-3.5 shrink-0" aria-hidden />
       <span>{label}</span>
-    </div>
+    </h3>
   );
 }
 
