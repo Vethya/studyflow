@@ -897,8 +897,12 @@ function StudySessionsSection({
 }: {
   preferences: ReturnType<typeof useApi<import("@/lib/api/wire").WireStudyPreferences>>;
 }) {
-  const [sessionLength, setSessionLength] = useState(60);
-  const [breakLength, setBreakLength] = useState(10);
+  const [sessionLength, setSessionLength] = useState(
+    () => preferences.data?.preferred_session_length_minutes ?? 60,
+  );
+  const [breakLength, setBreakLength] = useState(
+    () => preferences.data?.minimum_break_minutes ?? 10,
+  );
   const [synced, setSynced] = useState(preferences.data);
   const [isSaving, setSaving] = useState(false);
 
