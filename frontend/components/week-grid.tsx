@@ -314,9 +314,14 @@ export function WeekGrid({
                     <div
                       key={block.id}
                       title={block.title}
+                      aria-label={isSession ? block.title : undefined}
+                      tabIndex={isSession ? 0 : undefined}
                       onMouseEnter={() => onHighlight?.(block.id)}
                       onMouseLeave={() => onHighlight?.(null)}
-                      className={className}
+                      className={cn(
+                        className,
+                        isSession && "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
+                      )}
                       style={{ top, height }}
                     >
                       {body}
@@ -368,6 +373,10 @@ export function GridLegend({
           <span className="flex items-center gap-1.5">
             <span className="h-3 w-5 rounded-sm border border-warning bg-warning/20" />
             Partly done
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-3 w-5 rounded-sm border border-border bg-muted/60" />
+            Completed
           </span>
         </>
       ) : (

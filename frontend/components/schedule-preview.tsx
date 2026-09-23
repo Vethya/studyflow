@@ -215,31 +215,56 @@ export function SchedulePreview({
         {proposal.reason && (
           <Callout tone="info" title="Schedule adjustment summary">
             {activeUpcoming.length > 0 ? (
-              <span>
-                Using this plan will replace{" "}
-                <strong className="font-semibold text-foreground">
-                  {activeUpcoming.length} upcoming {activeUpcoming.length === 1 ? "session" : "sessions"}
-                </strong>{" "}
-                with{" "}
-                <strong className="font-semibold text-foreground">
-                  {upcoming.length} newly proposed recovery {upcoming.length === 1 ? "session" : "sessions"}
-                </strong>
-                . Recorded sessions ({[
-                  missedCount > 0 ? `${missedCount} missed` : null,
-                  delayedCount > 0 ? `${delayedCount} partly done` : null,
-                ]
-                  .filter(Boolean)
-                  .join(", ") || "historical sessions"}
-                ) remain unchanged in your history.
-              </span>
+              <div className="space-y-2">
+                <p>
+                  Using this plan will replace{" "}
+                  <strong className="font-semibold text-foreground">
+                    {activeUpcoming.length} upcoming {activeUpcoming.length === 1 ? "session" : "sessions"}
+                  </strong>{" "}
+                  with{" "}
+                  <strong className="font-semibold text-foreground">
+                    {upcoming.length} newly proposed recovery {upcoming.length === 1 ? "session" : "sessions"}
+                  </strong>
+                  . Recorded sessions ({[
+                    missedCount > 0 ? `${missedCount} missed` : null,
+                    delayedCount > 0 ? `${delayedCount} partly done` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(", ") || "historical sessions"}
+                  ) remain unchanged in your history.
+                </p>
+                <div className="rounded-md border border-border/60 bg-muted/40 p-2.5 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">Upcoming sessions being replaced:</span>
+                  <ul className="mt-1 space-y-1 pl-3 list-disc">
+                    {activeUpcoming.slice(0, 5).map((s) => {
+                      const start = new Date(s.startTime);
+                      const dateStr = `${DAY_NAMES_SHORT[start.getDay()]} ${start.getDate()} ${start.toLocaleDateString(undefined, { month: "short" })}`;
+                      return (
+                        <li key={s.id}>
+                          <span className="font-medium text-foreground">{s.taskTitle ?? "Scheduled study"}</span>
+                          {" — "}
+                          <span>
+                            {dateStr}, {formatClock(start)} ({formatDuration(s.plannedDuration)})
+                          </span>
+                        </li>
+                      );
+                    })}
+                    {activeUpcoming.length > 5 && (
+                      <li className="list-none pt-0.5 text-muted-foreground/80 italic">
+                        ...and {activeUpcoming.length - 5} more upcoming {activeUpcoming.length - 5 === 1 ? "session" : "sessions"}
+                      </li>
+                    )}
+                  </ul>
+                </div>
+              </div>
             ) : (
-              <span>
+              <p>
                 Using this plan will add{" "}
                 <strong className="font-semibold text-foreground">
                   {upcoming.length} newly proposed recovery {upcoming.length === 1 ? "session" : "sessions"}
                 </strong>{" "}
                 to recover your study time. Recorded sessions remain unchanged in your history.
-              </span>
+              </p>
             )}
           </Callout>
         )}
@@ -372,7 +397,16 @@ function ProposalCalendar({
     );
   }, [proposedSessions, recordedSessions]);
 
-  const firstWeek = React.useMemo(() => {
+  const earliestWeek = React.useMemo(() => {
+    if (allSessions.length === 0) return startOfWeek(new Date());
+    const earliestSessionWeek = startOfWeek(new Date(allSessions[0].startTime));
+    const currentWeek = startOfWeek(new Date());
+    return earliestSessionWeek.getTime() < currentWeek.getTime()
+      ? earliestSessionWeek
+      : currentWeek;
+  }, [allSessions]);
+
+  const defaultAnchor = React.useMemo(() => {
     if (allSessions.length === 0) return startOfWeek(new Date());
     const currentWeek = startOfWeek(new Date());
     const hasCurrentWeek = allSessions.some(
@@ -384,10 +418,16 @@ function ProposalCalendar({
 
   const lastWeek = React.useMemo(() => {
     if (allSessions.length === 0) return startOfWeek(new Date());
-    return startOfWeek(new Date(allSessions[allSessions.length - 1].startTime));
+    const latestSessionWeek = startOfWeek(
+      new Date(allSessions[allSessions.length - 1].startTime),
+    );
+    const currentWeek = startOfWeek(new Date());
+    return latestSessionWeek.getTime() > currentWeek.getTime()
+      ? latestSessionWeek
+      : currentWeek;
   }, [allSessions]);
 
-  const [anchor, setAnchor] = React.useState(firstWeek);
+  const [anchor, setAnchor] = React.useState(defaultAnchor);
 
   const days = React.useMemo(
     () => Array.from({ length: 7 }, (_, index) => addCalendarDays(anchor, index)),
@@ -514,7 +554,7 @@ function ProposalCalendar({
   const nowMarker = visibleDays.has(dayKey(now))
     ? { columnKey: dayKey(now), minutes: minutesSinceMidnight(now) }
     : undefined;
-  const canGoBack = anchor.getTime() > firstWeek.getTime();
+  const canGoBack = anchor.getTime() > earliestWeek.getTime();
   const canGoForward = anchor.getTime() < lastWeek.getTime();
 
   return (
