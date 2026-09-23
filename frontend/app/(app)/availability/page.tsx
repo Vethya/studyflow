@@ -192,19 +192,30 @@ export default function AvailabilityPage() {
   }
 
   async function handleDeleteWindow(id: string) {
+    const target =
+      allWindows.find((w) => w.id === id) ??
+      (confirmDeleteWindow &&
+        allWindows.find(
+          (w) =>
+            w.dayOfWeek === confirmDeleteWindow.dayOfWeek &&
+            w.startTime === confirmDeleteWindow.startTime &&
+            w.endTime === confirmDeleteWindow.endTime,
+        ));
+
+    const remaining = target
+      ? allWindows.filter((w) => w !== target)
+      : allWindows.filter((w) => w.id !== id);
+
     setPendingId(id);
     try {
       const saved = await saveWindows(
-        allWindows
-          .filter((w) => w.id !== id)
-          .map((w) => ({ dayOfWeek: w.dayOfWeek, startTime: w.startTime, endTime: w.endTime })),
+        remaining.map((w) => ({ dayOfWeek: w.dayOfWeek, startTime: w.startTime, endTime: w.endTime })),
       );
       recordInvalidatedSessions(saved.invalidatedFutureSessionIds);
       setPlanStale(true);
       toast.success("Window removed");
     } catch (cause) {
       toast.error(describeError(cause));
-      throw cause;
     } finally {
       setPendingId(null);
     }
@@ -670,7 +681,9 @@ export default function AvailabilityPage() {
         onOpenChange={(next) => {
           if (!next) {
             setConfirmDeleteWindow(null);
-            triggerRef.current?.focus();
+            setTimeout(() => {
+              triggerRef.current?.focus();
+            }, 0);
           }
         }}
         title="Delete availability window?"
@@ -684,7 +697,19 @@ export default function AvailabilityPage() {
         onConfirm={async () => {
           const target = confirmDeleteWindow;
           if (target) {
-            await handleDeleteWindow(target.id);
+            const currentWindow =
+              allWindows.find((w) => w.id === target.id) ??
+              allWindows.find(
+                (w) =>
+                  w.dayOfWeek === target.dayOfWeek &&
+                  w.startTime === target.startTime &&
+                  w.endTime === target.endTime,
+              );
+            if (currentWindow) {
+              await handleDeleteWindow(currentWindow.id);
+            } else {
+              toast.info("This window is no longer active");
+            }
             setConfirmDeleteWindow(null);
           }
         }}
