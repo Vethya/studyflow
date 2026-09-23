@@ -39,7 +39,13 @@ import { weeklyPatternMinutes } from "@/lib/capacity";
 import { describeError, useApi } from "@/hooks/use-api";
 import { AddWindowDialog, ExceptionDialog } from "@/components/availability-dialogs";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Popover, PopoverContent } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+} from "@/components/ui/popover";
 import { SWR_KEYS } from "@/lib/swr-keys";
 
 /** Display Monday-first while the data itself is indexed 0 = Sunday. */
@@ -626,14 +632,16 @@ export default function AvailabilityPage() {
           side="top"
           className="w-56 p-3"
         >
-          <div className="space-y-1">
-            <div className="text-xs font-semibold text-foreground">
+          <PopoverHeader className="gap-0.5">
+            <PopoverTitle className="text-xs font-semibold text-foreground">
               {selectedWindow
                 ? `${DAY_NAMES[selectedWindow.window.dayOfWeek]} · ${selectedWindow.window.startTime}–${selectedWindow.window.endTime}`
                 : ""}
-            </div>
-            <p className="text-[11px] text-muted-foreground">Weekly availability window</p>
-          </div>
+            </PopoverTitle>
+            <PopoverDescription className="text-[11px] text-muted-foreground">
+              Weekly availability window
+            </PopoverDescription>
+          </PopoverHeader>
           <Button
             variant="destructive"
             size="sm"
