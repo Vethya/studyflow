@@ -30,7 +30,7 @@ export function TopBar() {
   const activeQuery = trimmedQuery ? debouncedQuery : "";
   const searchKey = taskSearchKey(activeQuery);
   const load = useCallback(
-    (signal: AbortSignal) => tasksApi.searchTasks(activeQuery, signal, 6),
+    (signal: AbortSignal) => tasksApi.searchTasks(activeQuery, signal, 15),
     [activeQuery],
   );
   const { data, isLoading } = useApi(searchKey, load);
@@ -52,6 +52,9 @@ export function TopBar() {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Escape") {
+              setQuery("");
+            } else if (e.key === "Enter" && query.trim()) {
+              router.push(`/tasks?search=${encodeURIComponent(query.trim())}`);
               setQuery("");
             }
           }}
@@ -75,25 +78,39 @@ export function TopBar() {
         )}
 
         {matches.length > 0 && (
-          <ul className="absolute left-0 right-0 top-11 z-50 overflow-hidden rounded-xl border bg-popover py-1 shadow-lg animate-in fade-in-0 slide-in-from-top-1 duration-150 ease-out">
-            {matches.map((task) => (
-              <li key={task.id}>
-                <button
-                  onClick={() => {
-                    router.push(`/tasks/${task.id}`);
-                    setQuery("");
-                  }}
-                  className="flex w-full flex-col items-start px-3 py-2 text-left transition-colors hover:bg-muted"
-                >
-                  <span className="truncate text-sm font-medium">{task.title}</span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {CATEGORY_CONFIG[task.category].label}
-                    {task.course ? ` · ${task.course}` : ""}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <div className="absolute left-0 right-0 top-11 z-50 overflow-hidden rounded-xl border bg-popover shadow-lg animate-in fade-in-0 slide-in-from-top-1 duration-150 ease-out">
+            <ul className="max-h-72 overflow-y-auto py-1">
+              {matches.map((task) => (
+                <li key={task.id}>
+                  <button
+                    onClick={() => {
+                      router.push(`/tasks/${task.id}`);
+                      setQuery("");
+                    }}
+                    className="flex w-full flex-col items-start px-3 py-2 text-left transition-colors hover:bg-muted"
+                  >
+                    <span className="truncate text-sm font-medium">{task.title}</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {CATEGORY_CONFIG[task.category].label}
+                      {task.course ? ` · ${task.course}` : ""}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <div className="border-t border-border bg-muted/30 p-1">
+              <button
+                onClick={() => {
+                  router.push(`/tasks?search=${encodeURIComponent(query.trim())}`);
+                  setQuery("");
+                }}
+                className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <span>View all results in Tasks</span>
+                <span className="text-[10px] font-mono tracking-tighter opacity-70">↵ Enter</span>
+              </button>
+            </div>
+          </div>
         )}
         {query.trim() && !isPending && matches.length === 0 && (
           <div className="absolute left-0 right-0 top-11 z-50 rounded-xl border bg-popover px-3 py-2.5 text-sm text-muted-foreground shadow-lg animate-in fade-in-0 slide-in-from-top-1 duration-150 ease-out">

@@ -52,7 +52,7 @@ export async function listTasks(
 export async function searchTasks(
   searchTerm: string,
   signal?: AbortSignal,
-  limit = 6,
+  limit = 15,
 ): Promise<AcademicTask[]> {
   const trimmed = searchTerm.trim();
   if (!trimmed) return [];

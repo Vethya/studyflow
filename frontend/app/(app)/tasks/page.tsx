@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { Suspense, useCallback, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Callout } from "@/components/ui/callout";
@@ -63,14 +64,17 @@ const SORT_LABELS: Record<SortKey, string> = {
   title: "Name (A–Z)",
 };
 
-export default function TasksPage() {
+function TasksContent() {
+  const searchParams = useSearchParams();
   // Everything except the title search is a real backend query parameter.
   const [status, setStatus] = useState<TaskStatus | null>(null);
   const [category, setCategory] = useState<Category | null>(null);
   const [priority, setPriority] = useState<Priority | null>(null);
   const [course, setCourse] = useState("");
   const [appliedCourse, setAppliedCourse] = useState("");
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(
+    () => searchParams.get("search") ?? searchParams.get("q") ?? "",
+  );
   // The API takes RFC 3339 bounds for the deadline filter.
   const [dueBefore, setDueBefore] = useState("");
   const [sort, setSort] = useState<SortKey>("deadline");
@@ -704,5 +708,19 @@ function TaskRow({
         </DropdownMenu>
       </div>
     </li>
+  );
+}
+
+function TasksPageWrapper() {
+  const searchParams = useSearchParams();
+  const searchKey = searchParams.get("search") ?? searchParams.get("q") ?? "";
+  return <TasksContent key={searchKey} />;
+}
+
+export default function TasksPage() {
+  return (
+    <Suspense fallback={null}>
+      <TasksPageWrapper />
+    </Suspense>
   );
 }
