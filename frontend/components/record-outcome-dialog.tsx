@@ -95,6 +95,18 @@ export function RecordOutcomeDialog({
     setRemaining("");
     setRemainingTouched(false);
     setDiscardOpen(false);
+  } else if (!open && lastSessionId !== null) {
+    setLastSessionId(null);
+  }
+
+  function resetForm() {
+    setLastSessionId(null);
+    setOutcome("Missed");
+    if (session) {
+      setWorked(String(session.plannedDuration));
+    }
+    setRemaining("");
+    setRemainingTouched(false);
   }
 
   const workedNumber = Number(worked);
@@ -148,6 +160,7 @@ export function RecordOutcomeDialog({
       );
       toast.success(outcomeSuccessCopy(outcome, result.revision));
       onRecorded(result);
+      resetForm();
       onOpenChange(false);
     } catch (cause) {
       toast.error(describeError(cause));
@@ -322,6 +335,7 @@ export function RecordOutcomeDialog({
         focusCancel
         onConfirm={() => {
           setDiscardOpen(false);
+          resetForm();
           onOpenChange(false);
         }}
       />
