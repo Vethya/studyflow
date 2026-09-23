@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -10,19 +10,17 @@ import {
   Loader2,
   LogOut,
   Palette,
+  Search,
   ShieldCheck,
+  SlidersHorizontal,
   Trash2,
   User,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -50,7 +48,7 @@ const SESSION_LENGTH = { min: 10, max: 240, step: 5 };
 const BREAK_LENGTH = { min: 0, max: 120, step: 5 };
 
 const GoogleIcon = () => (
-  <svg className="size-5" viewBox="0 0 48 48" aria-hidden="true">
+  <svg className="size-5 shrink-0" viewBox="0 0 48 48" aria-hidden="true">
     <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z" />
     <path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z" />
     <path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238C29.211 35.091 26.715 36 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z" />
@@ -58,18 +56,21 @@ const GoogleIcon = () => (
   </svg>
 );
 
-/**
- * Every account setting on one page.
- *
- * The shape is deliberately repetitive: each row states what the setting is,
- * shows its current value underneath, and puts one button on the right that
- * opens it. Nothing is half-editable in place — the page reads as a summary of
- * your account, and changing anything is an explicit step. That is what makes
- * it scannable; a page mixing live inputs with static text has no such rhythm.
- *
- * Study sessions are the exception, and earn it: two sliders that are set by
- * feel rather than by typing a number, so they stay on the page.
- */
+type TabId = "profile" | "security" | "preferences" | "appearance";
+
+interface TabItem {
+  id: TabId;
+  label: string;
+  icon: React.ElementType;
+}
+
+const TABS: TabItem[] = [
+  { id: "profile", label: "Profile", icon: User },
+  { id: "security", label: "Account & Security", icon: ShieldCheck },
+  { id: "preferences", label: "Preferences", icon: SlidersHorizontal },
+  { id: "appearance", label: "Appearance", icon: Palette },
+];
+
 export default function SettingsPage() {
   return (
     <Suspense
@@ -88,6 +89,9 @@ function SettingsContent() {
   const { signOut } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  const [activeTab, setActiveTab] = useState<TabId>("profile");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const loadProfile = useCallback((s: AbortSignal) => accountApi.getProfile(s), []);
   const loadPreferences = useCallback((s: AbortSignal) => accountApi.getPreferences(s), []);
@@ -128,6 +132,7 @@ function SettingsContent() {
 
   const google = (identities.data ?? []).find((identity) => identity.provider === "google");
   const zone = preferences.data?.timezone;
+
   async function connectGoogle() {
     setGoogleError(null);
     setIsConnectingGoogle(true);
@@ -152,180 +157,534 @@ function SettingsContent() {
     deletionStatus.reload();
   }
 
+  const query = searchQuery.trim().toLowerCase();
+
+  const searchMatches = useMemo(() => {
+    if (!query) return null;
+    return {
+      profileName: "profile name display name".includes(query) || "name".includes(query),
+      profileEmail:
+        "profile email address verified".includes(query) ||
+        (profile.data?.email?.toLowerCase().includes(query) ?? false),
+      password: "password change password add password security credentials sign in".includes(query),
+      google: "google sign in connect account linked identity authentication".includes(query),
+      signOut: "sign out log out device session".includes(query),
+      deleteAccount: "delete account remove account wipe data danger permanent".includes(query),
+      timezone:
+        "timezone time zone clock utc gmt hours availability offset".includes(query) ||
+        (zone?.toLowerCase().includes(query) ?? false),
+      sessions: "study sessions session length break duration timer sittings schedule pacing".includes(query),
+      appearance: "appearance theme light dark amoled oled black mode contrast interface".includes(query),
+    };
+  }, [query, profile.data?.email, zone]);
+
+  const totalMatches = useMemo(() => {
+    if (!searchMatches) return 0;
+    return Object.values(searchMatches).filter(Boolean).length;
+  }, [searchMatches]);
+
   return (
     <PageShell width="narrow">
       <PageHeader title="Settings" description="Your account, and how StudyFlow behaves." />
 
       {googleError && <Callout tone="danger">{googleError}</Callout>}
 
-      <Section icon={User} title="Profile" description="How you appear in StudyFlow.">
-        {profile.isLoading ? (
-          <RowSkeleton rows={2} />
-        ) : (
-          <>
-            <Row label="Name" value={profile.data?.name ?? "—"}>
-              <Button variant="outline" size="sm" onClick={() => setNameOpen(true)}>
-                Change
-              </Button>
-            </Row>
-            <Row
-              label="Email address"
-              value={
-                <span className="flex flex-wrap items-center gap-x-1.5">
-                  <span className="truncate">{profile.data?.email}</span>
-                  <span className="flex items-center gap-1 font-medium text-surplus">
-                    <CheckCircle2 className="size-3" />
-                    Verified
-                  </span>
-                </span>
-              }
-            >
-              <span className="text-sm text-muted-foreground">Can&rsquo;t be changed</span>
-            </Row>
-          </>
-        )}
-      </Section>
-
-      <Section
-        icon={ShieldCheck}
-        title="Sign-in methods"
-        description="How you get into your account."
-      >
-        {profile.isLoading ? (
-          <RowSkeleton rows={1} />
-        ) : profile.data ? (
-          <Row label="Password" value={profile.data.password_set ? "Added" : "Not added"}>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                profile.data?.password_set
-                  ? setPasswordOpen(true)
-                  : setAddPasswordOpen(true)
-              }
-            >
-              {profile.data.password_set ? "Change password" : "Add password"}
-            </Button>
-          </Row>
-        ) : null}
-
-        {identities.isLoading ? (
-          <RowSkeleton rows={1} />
-        ) : (
-          <Row
-            stretch={!google}
-            label={
-              <span className="flex items-center gap-2">
-                <GoogleIcon />
-                Google
-              </span>
-            }
-            value={google ? google.email : "Sign in with your Google account"}
-          >
-            {google ? (
-              <span className="flex items-center gap-1.5 text-sm font-medium text-surplus">
-                <CheckCircle2 className="size-4" />
-                Connected
-              </span>
-            ) : (
-              /* Sized to the row rather than to the text: this is the only
-                 setup action on the page, and a 28px button next to a
-                 two-line label read as an afterthought. */
-              <Button
-                variant="outline"
-                className="h-auto min-h-11 self-stretch px-5 text-sm"
-                onClick={() => void connectGoogle()}
-                disabled={isConnectingGoogle}
+      <div className="flex flex-col gap-6 md:flex-row md:gap-8 items-start">
+        {/* Navigation Sidebar (Vertical on Desktop, Scrollable Pills on Mobile) */}
+        <div className="w-full md:w-56 shrink-0 space-y-3">
+          {/* Live Search Input */}
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+            <Input
+              type="text"
+              placeholder="Search settings..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-9 pl-8 pr-8 text-sm"
+              aria-label="Search settings"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-1 text-muted-foreground hover:text-foreground"
+                aria-label="Clear search"
               >
-                {isConnectingGoogle ? <Loader2 className="animate-spin" /> : <GoogleIcon />}
-                Connect
-              </Button>
+                <X className="size-3.5" />
+              </button>
             )}
-          </Row>
-        )}
-      </Section>
+          </div>
 
-      <Section
-        icon={Globe}
-        title="Timezone"
-        description="Every study time is shown and planned in this zone."
-      >
-        {preferences.isLoading ? (
-          <RowSkeleton rows={1} />
-        ) : (
-          <>
-            <Row
-              label={zone?.replace(/_/g, " ") ?? "Not set"}
-              value={
-                zone ? (
-                  <span className="tabular-nums">
-                    {formatOffset(zone)} ·{" "}
-                    {new Date().toLocaleTimeString(undefined, {
-                      timeZone: zone,
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      hour12: false,
-                    })}{" "}
-                    right now
-                  </span>
-                ) : (
-                  "Used to read your deadlines and place your sessions"
-                )
-              }
-            >
-              <Button variant="outline" size="sm" onClick={() => setTimezoneOpen(true)}>
-                Change
-              </Button>
-            </Row>
-
-            {/* SPEC §8.3: recurring windows must be re-confirmed after a change. */}
-            {preferences.data?.availability_confirmation_required && (
-              <div className="pt-3">
-                <ConfirmTimezone preferences={preferences.data} setPreferences={preferences.setData} />
-              </div>
-            )}
-          </>
-        )}
-      </Section>
-
-      <StudySessionsSection preferences={preferences} />
-
-      <Section icon={Palette} title="Appearance" description="How StudyFlow looks on this device.">
-        <Row
-          label="Theme"
-          value="Choose light mode, dark mode, AMOLED black mode, or follow your device."
-        >
-          <ThemeSelector />
-        </Row>
-      </Section>
-
-      <Section
-        icon={Trash2}
-        title="Delete account"
-        description="Permanently removes your account and all of your planning data."
-      >
-        <Row
-          label="Delete your StudyFlow account"
-          value="Permanently removes your profile, sign-in methods, and planning data."
-        >
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={openDeletionDialog}
-            disabled={!deletionProfileReady}
+          {/* Navigation Tabs */}
+          <nav
+            className="flex md:flex-col gap-1.5 overflow-x-auto md:overflow-visible pb-1 md:pb-0 scrollbar-none"
+            aria-label="Settings sections"
           >
-            Delete account
-          </Button>
-        </Row>
-      </Section>
+            {TABS.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = !searchQuery && activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => {
+                    setActiveTab(tab.id);
+                    setSearchQuery("");
+                  }}
+                  className={cn(
+                    "flex shrink-0 whitespace-nowrap items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-left md:w-full",
+                    isActive
+                      ? "bg-secondary text-foreground font-semibold shadow-xs"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  )}
+                >
+                  <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="shrink-0 whitespace-nowrap">{tab.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
 
-      <Section icon={LogOut} title="Sign out">
-        <Row label="This device" value="Ends your session here only.">
-          <Button variant="outline" size="sm" onClick={() => void signOut()}>
-            Sign out
-          </Button>
-        </Row>
-      </Section>
+        {/* Content Area */}
+        <div className="min-w-0 flex-1 w-full space-y-6">
+          {searchQuery ? (
+            /* Live Search Results View */
+            <div className="space-y-6">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div>
+                  <h2 className="text-lg font-semibold tracking-tight text-foreground">
+                    Search results
+                  </h2>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {totalMatches} {totalMatches === 1 ? "result" : "results"} for &ldquo;{searchQuery}&rdquo;
+                  </p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => setSearchQuery("")}>
+                  Clear search
+                </Button>
+              </div>
+
+              {totalMatches === 0 ? (
+                <div className="rounded-xl border border-dashed p-8 text-center">
+                  <Search className="mx-auto size-8 text-muted-foreground/60 mb-3" aria-hidden />
+                  <p className="text-sm font-semibold">No settings found</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    No results match &ldquo;{searchQuery}&rdquo;. Try searching for profile, password, timezone, or theme.
+                  </p>
+                  <Button variant="outline" size="sm" className="mt-4" onClick={() => setSearchQuery("")}>
+                    Clear search
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {/* Profile Results */}
+                  {(searchMatches?.profileName || searchMatches?.profileEmail) && (
+                    <div className="space-y-2">
+                      <CategoryBadge label="Profile" icon={User} />
+                      <Card>
+                        <CardContent className="divide-y p-0 px-4 sm:px-6">
+                          {searchMatches.profileName && (
+                            <Row label="Name" value={profile.data?.name ?? "—"}>
+                              <Button variant="outline" size="sm" onClick={() => setNameOpen(true)}>
+                                Change
+                              </Button>
+                            </Row>
+                          )}
+                          {searchMatches.profileEmail && (
+                            <Row
+                              label="Email address"
+                              value={
+                                <span className="flex flex-wrap items-center gap-x-1.5">
+                                  <span className="truncate">{profile.data?.email}</span>
+                                  <span className="flex items-center gap-1 font-medium text-surplus">
+                                    <CheckCircle2 className="size-3" />
+                                    Verified
+                                  </span>
+                                </span>
+                              }
+                            >
+                              <span className="text-sm text-muted-foreground">Can&rsquo;t be changed</span>
+                            </Row>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </div>
+                  )}
+
+                  {/* Security Results */}
+                  {(searchMatches?.password ||
+                    searchMatches?.google ||
+                    searchMatches?.signOut ||
+                    searchMatches?.deleteAccount) && (
+                    <div className="space-y-2">
+                      <CategoryBadge label="Account & Security" icon={ShieldCheck} />
+                      <Card>
+                        <CardContent className="divide-y p-0 px-4 sm:px-6">
+                          {searchMatches.password && (
+                            <Row
+                              label="Password"
+                              value={profile.data?.password_set ? "Added" : "Not added"}
+                            >
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                  profile.data?.password_set
+                                    ? setPasswordOpen(true)
+                                    : setAddPasswordOpen(true)
+                                }
+                              >
+                                {profile.data?.password_set ? "Change password" : "Add password"}
+                              </Button>
+                            </Row>
+                          )}
+                          {searchMatches.google && (
+                            <Row
+                              stretch={!google}
+                              label={
+                                <span className="flex items-center gap-2">
+                                  <GoogleIcon />
+                                  Google
+                                </span>
+                              }
+                              value={google ? google.email : "Sign in with your Google account"}
+                            >
+                              {google ? (
+                                <span className="flex items-center gap-1.5 text-sm font-medium text-surplus">
+                                  <CheckCircle2 className="size-4" />
+                                  Connected
+                                </span>
+                              ) : (
+                                <Button
+                                  variant="outline"
+                                  className="h-auto min-h-11 self-stretch px-5 text-sm"
+                                  onClick={() => void connectGoogle()}
+                                  disabled={isConnectingGoogle}
+                                >
+                                  {isConnectingGoogle ? <Loader2 className="animate-spin" /> : <GoogleIcon />}
+                                  Connect
+                                </Button>
+                              )}
+                            </Row>
+                          )}
+                          {searchMatches.signOut && (
+                            <Row label="Sign out" value="Ends your session on this device only.">
+                              <Button variant="outline" size="sm" onClick={() => void signOut()}>
+                                <LogOut className="size-3.5 mr-1 text-muted-foreground" />
+                                Sign out
+                              </Button>
+                            </Row>
+                          )}
+                          {searchMatches.deleteAccount && (
+                            <Row
+                              label="Delete your StudyFlow account"
+                              value="Permanently removes your profile, sign-in methods, and planning data."
+                            >
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={openDeletionDialog}
+                                disabled={!deletionProfileReady}
+                              >
+                                <Trash2 className="size-3.5 mr-1" />
+                                Delete account
+                              </Button>
+                            </Row>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </div>
+                  )}
+
+                  {/* Preferences Results */}
+                  {searchMatches?.timezone && (
+                    <div className="space-y-2">
+                      <CategoryBadge label="Preferences · Timezone" icon={Globe} />
+                      <Card>
+                        <CardContent className="divide-y p-0 px-4 sm:px-6">
+                          <Row
+                            label={zone?.replace(/_/g, " ") ?? "Not set"}
+                            value={
+                              zone ? (
+                                <span className="tabular-nums">
+                                  {formatOffset(zone)} ·{" "}
+                                  {new Date().toLocaleTimeString(undefined, {
+                                    timeZone: zone,
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                    hour12: false,
+                                  })}{" "}
+                                  right now
+                                </span>
+                              ) : (
+                                "Used to read your deadlines and place your sessions"
+                              )
+                            }
+                          >
+                            <Button variant="outline" size="sm" onClick={() => setTimezoneOpen(true)}>
+                              Change
+                            </Button>
+                          </Row>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  )}
+
+                  {searchMatches?.sessions && (
+                    <div className="space-y-2">
+                      <CategoryBadge label="Preferences · Study sessions" icon={Clock4} />
+                      <StudySessionsSection preferences={preferences} />
+                    </div>
+                  )}
+
+                  {/* Appearance Results */}
+                  {searchMatches?.appearance && (
+                    <div className="space-y-2">
+                      <CategoryBadge label="Appearance" icon={Palette} />
+                      <Card>
+                        <CardContent className="p-0 px-4 sm:px-6">
+                          <Row
+                            label="Theme"
+                            value="Choose light mode, dark mode, AMOLED black mode, or follow your device."
+                          >
+                            <ThemeSelector />
+                          </Row>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Standard Tab View */
+            <>
+              {activeTab === "profile" && (
+                <div className="space-y-5">
+                  <SectionHeader
+                    icon={User}
+                    title="Profile"
+                    description="How you appear in StudyFlow."
+                  />
+                  <Card>
+                    <CardContent className="divide-y p-0 px-4 sm:px-6">
+                      {profile.isLoading ? (
+                        <RowSkeleton rows={2} />
+                      ) : (
+                        <>
+                          <Row label="Name" value={profile.data?.name ?? "—"}>
+                            <Button variant="outline" size="sm" onClick={() => setNameOpen(true)}>
+                              Change
+                            </Button>
+                          </Row>
+                          <Row
+                            label="Email address"
+                            value={
+                              <span className="flex flex-wrap items-center gap-x-1.5">
+                                <span className="truncate">{profile.data?.email}</span>
+                                <span className="flex items-center gap-1 font-medium text-surplus">
+                                  <CheckCircle2 className="size-3" />
+                                  Verified
+                                </span>
+                              </span>
+                            }
+                          >
+                            <span className="text-sm text-muted-foreground">Can&rsquo;t be changed</span>
+                          </Row>
+                        </>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+
+              {activeTab === "security" && (
+                <div className="space-y-6">
+                  <SectionHeader
+                    icon={ShieldCheck}
+                    title="Account & Security"
+                    description="How you access your account and manage your data."
+                  />
+
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-medium text-muted-foreground">Sign-in methods</h3>
+                    <Card>
+                      <CardContent className="divide-y p-0 px-4 sm:px-6">
+                        {profile.isLoading ? (
+                          <RowSkeleton rows={1} />
+                        ) : profile.data ? (
+                          <Row
+                            label="Password"
+                            value={profile.data.password_set ? "Added" : "Not added"}
+                          >
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                profile.data?.password_set
+                                  ? setPasswordOpen(true)
+                                  : setAddPasswordOpen(true)
+                              }
+                            >
+                              {profile.data.password_set ? "Change password" : "Add password"}
+                            </Button>
+                          </Row>
+                        ) : null}
+
+                        {identities.isLoading ? (
+                          <RowSkeleton rows={1} />
+                        ) : (
+                          <Row
+                            stretch={!google}
+                            label={
+                              <span className="flex items-center gap-2">
+                                <GoogleIcon />
+                                Google
+                              </span>
+                            }
+                            value={google ? google.email : "Sign in with your Google account"}
+                          >
+                            {google ? (
+                              <span className="flex items-center gap-1.5 text-sm font-medium text-surplus">
+                                <CheckCircle2 className="size-4" />
+                                Connected
+                              </span>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                className="h-auto min-h-11 self-stretch px-5 text-sm"
+                                onClick={() => void connectGoogle()}
+                                disabled={isConnectingGoogle}
+                              >
+                                {isConnectingGoogle ? <Loader2 className="animate-spin" /> : <GoogleIcon />}
+                                Connect
+                              </Button>
+                            )}
+                          </Row>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-medium text-muted-foreground">Account actions</h3>
+                    <Card>
+                      <CardContent className="divide-y p-0 px-4 sm:px-6">
+                        <Row label="Sign out" value="Ends your session on this device only.">
+                          <Button variant="outline" size="sm" onClick={() => void signOut()}>
+                            <LogOut className="size-3.5 mr-1 text-muted-foreground" />
+                            Sign out
+                          </Button>
+                        </Row>
+                        <Row
+                          label="Delete your StudyFlow account"
+                          value="Permanently removes your profile, sign-in methods, and planning data."
+                        >
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={openDeletionDialog}
+                            disabled={!deletionProfileReady}
+                          >
+                            <Trash2 className="size-3.5 mr-1" />
+                            Delete account
+                          </Button>
+                        </Row>
+                      </CardContent>
+                    </Card>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "preferences" && (
+                <div className="space-y-6">
+                  <SectionHeader
+                    icon={SlidersHorizontal}
+                    title="Preferences"
+                    description="Your timezone and study session pacing."
+                  />
+
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-medium text-muted-foreground">Timezone</h3>
+                    <Card>
+                      <CardContent className="divide-y p-0 px-4 sm:px-6">
+                        {preferences.isLoading ? (
+                          <RowSkeleton rows={1} />
+                        ) : (
+                          <>
+                            <Row
+                              label={zone?.replace(/_/g, " ") ?? "Not set"}
+                              value={
+                                zone ? (
+                                  <span className="tabular-nums">
+                                    {formatOffset(zone)} ·{" "}
+                                    {new Date().toLocaleTimeString(undefined, {
+                                      timeZone: zone,
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                      hour12: false,
+                                    })}{" "}
+                                    right now
+                                  </span>
+                                ) : (
+                                  "Used to read your deadlines and place your sessions"
+                                )
+                              }
+                            >
+                              <Button variant="outline" size="sm" onClick={() => setTimezoneOpen(true)}>
+                                Change
+                              </Button>
+                            </Row>
+
+                            {/* Recurring windows re-confirmation */}
+                            {preferences.data?.availability_confirmation_required && (
+                              <div className="py-3">
+                                <ConfirmTimezone
+                                  preferences={preferences.data}
+                                  setPreferences={preferences.setData}
+                                />
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-medium text-muted-foreground">Study sessions</h3>
+                    <StudySessionsSection preferences={preferences} />
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "appearance" && (
+                <div className="space-y-5">
+                  <SectionHeader
+                    icon={Palette}
+                    title="Appearance"
+                    description="How StudyFlow looks on this device."
+                  />
+                  <Card>
+                    <CardContent className="p-0 px-4 sm:px-6">
+                      <Row
+                        label="Theme"
+                        value="Choose light mode, dark mode, AMOLED black mode, or follow your device."
+                      >
+                        <ThemeSelector />
+                      </Row>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
 
       <ChangeNameDialog
         open={nameOpen}
@@ -360,28 +719,40 @@ function SettingsContent() {
   );
 }
 
-function Section({
+function SectionHeader({
   icon: Icon,
   title,
   description,
-  children,
 }: {
   icon: React.ElementType;
   title: string;
   description?: string;
-  children: React.ReactNode;
 }) {
   return (
-    <Card>
-      <CardHeader className="border-b">
-        <CardTitle className="flex items-center gap-2">
-          <Icon className="size-4 text-muted-foreground" aria-hidden />
-          {title}
-        </CardTitle>
-        {description && <CardDescription>{description}</CardDescription>}
-      </CardHeader>
-      <CardContent className="divide-y py-0">{children}</CardContent>
-    </Card>
+    <div className="border-b pb-3 mb-5">
+      <h2 className="text-lg font-semibold tracking-tight text-foreground flex items-center gap-2">
+        <Icon className="size-5 text-muted-foreground shrink-0" aria-hidden />
+        {title}
+      </h2>
+      {description && (
+        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+      )}
+    </div>
+  );
+}
+
+function CategoryBadge({
+  label,
+  icon: Icon,
+}: {
+  label: string;
+  icon: React.ElementType;
+}) {
+  return (
+    <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+      <Icon className="size-3.5 shrink-0" aria-hidden />
+      <span>{label}</span>
+    </div>
   );
 }
 
@@ -523,12 +894,8 @@ function StudySessionsSection({
   }
 
   return (
-    <section>
-      <h2 className="mb-2 flex items-center gap-2 text-sm font-medium text-muted-foreground">
-        <Clock4 className="size-4" aria-hidden />
-        Study sessions
-      </h2>
-      <div className="rounded-xl border bg-card p-4">
+    <Card>
+      <CardContent className="p-4 sm:p-6">
         {preferences.isLoading ? (
           <Skeleton className="h-28 w-full" />
         ) : (
@@ -569,8 +936,8 @@ function StudySessionsSection({
             </div>
           </div>
         )}
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   );
 }
 
