@@ -327,10 +327,7 @@ class SqlAlchemyAcademicTaskRepository:
             )
         if filters.query is not None and filters.query.strip():
             escaped = (
-                filters.query.strip()
-                .replace("\\", "\\\\")
-                .replace("%", "\\%")
-                .replace("_", "\\_")
+                filters.query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             )
             pattern = f"%{escaped}%"
             conditions.append(
