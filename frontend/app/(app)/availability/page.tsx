@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   Card,
   CardContent,
@@ -58,6 +58,7 @@ function toMinutes(time: string): number {
 }
 
 export default function AvailabilityPage() {
+  const triggerRef = useRef<HTMLElement | null>(null);
   const [selectedWindow, setSelectedWindow] = useState<{
     window: AvailabilityWindow;
     anchorEl: HTMLElement | null;
@@ -479,7 +480,10 @@ export default function AvailabilityPage() {
                               >
                                 {w.startTime}–{w.endTime}
                                 <button
-                                  onClick={() => setConfirmDeleteWindow(w)}
+                                  onClick={(e) => {
+                                    triggerRef.current = e.currentTarget;
+                                    setConfirmDeleteWindow(w);
+                                  }}
                                   disabled={pendingId === w.id}
                                   aria-label={`Remove ${DAY_NAMES[dayIdx]} ${w.startTime} to ${w.endTime}`}
                                   className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-card hover:text-deficit"
@@ -649,6 +653,7 @@ export default function AvailabilityPage() {
             onClick={() => {
               if (selectedWindow) {
                 const target = selectedWindow.window;
+                triggerRef.current = selectedWindow.anchorEl;
                 setSelectedWindow(null);
                 setConfirmDeleteWindow(target);
               }
@@ -663,7 +668,10 @@ export default function AvailabilityPage() {
       <ConfirmDialog
         open={confirmDeleteWindow !== null}
         onOpenChange={(next) => {
-          if (!next) setConfirmDeleteWindow(null);
+          if (!next) {
+            setConfirmDeleteWindow(null);
+            triggerRef.current?.focus();
+          }
         }}
         title="Delete availability window?"
         description={
