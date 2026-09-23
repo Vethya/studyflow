@@ -87,10 +87,24 @@ export function RecordOutcomeDialog({
    * about. This is the sanctioned "adjust state when a prop changes" pattern.
    */
   const [lastSessionId, setLastSessionId] = React.useState<string | null>(null);
+  const [discardOpen, setDiscardOpen] = React.useState(false);
   if (open && session && session.id !== lastSessionId) {
     setLastSessionId(session.id);
     setOutcome("Missed");
     setWorked(String(session.plannedDuration));
+    setRemaining("");
+    setRemainingTouched(false);
+    setDiscardOpen(false);
+  } else if (!open && lastSessionId !== null) {
+    setLastSessionId(null);
+  }
+
+  function resetForm() {
+    setLastSessionId(null);
+    setOutcome("Missed");
+    if (session) {
+      setWorked(String(session.plannedDuration));
+    }
     setRemaining("");
     setRemainingTouched(false);
   }
@@ -107,6 +121,22 @@ export function RecordOutcomeDialog({
   const remainingInvalid =
     outcome === "Delayed" && !isPositiveWholeMinute(remainingValue);
   const canSave = !workedInvalid && !remainingInvalid && !isSaving;
+
+  const isDirty =
+    Boolean(session) &&
+    (outcome !== "Missed" ||
+      worked !== String(session?.plannedDuration) ||
+      remainingTouched);
+
+  function requestClose() {
+    if (isSaving || confirmLarge || discardOpen) return false;
+    if (isDirty) {
+      setDiscardOpen(true);
+      return false;
+    }
+    onOpenChange(false);
+    return true;
+  }
 
   /** An entry far above what was planned is more often a typo than a marathon. */
   const isLargeEntry =
@@ -130,6 +160,7 @@ export function RecordOutcomeDialog({
       );
       toast.success(outcomeSuccessCopy(outcome, result.revision));
       onRecorded(result);
+      resetForm();
       onOpenChange(false);
     } catch (cause) {
       toast.error(describeError(cause));
@@ -150,7 +181,13 @@ export function RecordOutcomeDialog({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen, details) => {
+          if (nextOpen) onOpenChange(true);
+          else if (!requestClose()) details?.cancel?.();
+        }}
+      >
         <DialogContent className="sm:max-w-lg" initialFocus={saveButtonRef}>
           <DialogHeader>
             <DialogTitle>How did it go?</DialogTitle>
@@ -273,7 +310,7 @@ export function RecordOutcomeDialog({
               <Button
                 type="button"
                 variant="ghost"
-                onClick={() => onOpenChange(false)}
+                onClick={requestClose}
                 disabled={isSaving}
               >
                 Cancel
@@ -286,6 +323,22 @@ export function RecordOutcomeDialog({
           </form>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={open && discardOpen}
+        onOpenChange={setDiscardOpen}
+        title="Discard changes?"
+        description="Your unsaved changes will be lost."
+        cancelLabel="Keep editing"
+        confirmLabel="Discard changes"
+        destructive
+        focusCancel
+        onConfirm={() => {
+          setDiscardOpen(false);
+          resetForm();
+          onOpenChange(false);
+        }}
+      />
 
       {/* SPEC §12.2: prompt on an unusually large entry, but always allow it. */}
       <ConfirmDialog

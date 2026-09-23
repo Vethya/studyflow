@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Select,
   SelectContent,
@@ -65,6 +66,8 @@ const EMPTY: TaskFormState = {
 
 export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDialogProps) {
   const [form, setForm] = useState(EMPTY);
+  const [initialForm, setInitialForm] = useState(EMPTY);
+  const [discardOpen, setDiscardOpen] = useState(false);
   /**
    * SPEC §15.4 / §15.6: the student's own history may suggest a very different
    * duration. The explanation is always shown; the acknowledgment dialog only
@@ -89,9 +92,9 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
     setSession({ open, task });
     setError(null);
     setAckOpen(false);
+    setDiscardOpen(false);
     setApplyPreviewDefault(!task);
-    setForm(
-      task
+    const initial = task
         ? {
             title: task.title,
             category: task.category,
@@ -102,8 +105,9 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
             course: task.course ?? "",
             notes: task.notes ?? "",
           }
-        : EMPTY,
-    );
+        : EMPTY;
+    setForm(initial);
+    setInitialForm(initial);
   } else if (!open && session.open) {
     setSession({ open: false });
   }
@@ -140,10 +144,33 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
             applyPreviewDefault,
           ),
         }));
+        // Preview defaults are not student edits. Keep the new-task baseline
+        // in sync only when the preview describes its original inputs.
+        if (!task && applyPreviewDefault) {
+          setInitialForm((initial) =>
+            initial.category === form.category &&
+            initial.originalEstimate === previewMinutes
+              ? { ...initial, ...resolvePreviewSelection(initial.originalEstimate, next, initial.plannedSource, true) }
+              : initial,
+          );
+        }
       },
     },
   );
   const estimate = previewError ? null : preview ?? null;
+  const isDirty = (Object.keys(initialForm) as (keyof TaskFormState)[]).some(
+    (key) => form[key] !== initialForm[key],
+  );
+
+  function requestClose() {
+    if (isSaving || ackOpen || discardOpen) return false;
+    if (isDirty) {
+      setDiscardOpen(true);
+      return false;
+    }
+    onOpenChange(false);
+    return true;
+  }
 
   function chooseEstimate(which: "original" | "adaptive") {
     const action = resolveEstimateChoiceAction(form.originalEstimate, estimate, which);
@@ -213,7 +240,13 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen, details) => {
+        if (nextOpen) onOpenChange(true);
+        else if (!requestClose()) details?.cancel?.();
+      }}
+    >
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit task" : "Add task"}</DialogTitle>
@@ -377,7 +410,7 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={requestClose}
               disabled={isSaving}
             >
               Cancel
@@ -389,6 +422,21 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
           </DialogFooter>
         </form>
       </DialogContent>
+
+      <ConfirmDialog
+        open={open && discardOpen}
+        onOpenChange={setDiscardOpen}
+        title="Discard changes?"
+        description="Your unsaved changes will be lost."
+        cancelLabel="Keep editing"
+        confirmLabel="Discard changes"
+        destructive
+        focusCancel
+        onConfirm={() => {
+          setDiscardOpen(false);
+          onOpenChange(false);
+        }}
+      />
 
       <LargeAdjustmentDialog
         estimate={estimate}

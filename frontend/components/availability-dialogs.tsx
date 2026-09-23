@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Select,
   SelectContent,
@@ -44,12 +45,35 @@ export function AddWindowDialog({ open, onOpenChange, onSubmit }: AddWindowDialo
   const [endTime, setEndTime] = useState("21:00");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [discardOpen, setDiscardOpen] = useState(false);
 
   // Clear any stale error each time the dialog is reopened.
   const [wasOpen, setWasOpen] = useState(open);
   if (open !== wasOpen) {
     setWasOpen(open);
-    if (open) setError(null);
+    if (open) {
+      setError(null);
+      setDiscardOpen(false);
+    }
+  }
+
+  const isDirty = dayOfWeek !== "1" || startTime !== "18:00" || endTime !== "21:00";
+
+  function resetForm() {
+    setDayOfWeek("1");
+    setStartTime("18:00");
+    setEndTime("21:00");
+    setError(null);
+  }
+
+  function requestClose() {
+    if (isSaving || discardOpen) return false;
+    if (isDirty) {
+      setDiscardOpen(true);
+      return false;
+    }
+    onOpenChange(false);
+    return true;
   }
 
   async function handleSubmit(event: React.FormEvent) {
@@ -63,6 +87,7 @@ export function AddWindowDialog({ open, onOpenChange, onSubmit }: AddWindowDialo
     setIsSaving(true);
     try {
       await onSubmit({ dayOfWeek: Number(dayOfWeek), startTime, endTime });
+      resetForm();
       onOpenChange(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save the window.");
@@ -72,7 +97,13 @@ export function AddWindowDialog({ open, onOpenChange, onSubmit }: AddWindowDialo
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen, details) => {
+        if (nextOpen) onOpenChange(true);
+        else if (!requestClose()) details?.cancel?.();
+      }}
+    >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Add availability window</DialogTitle>
@@ -131,7 +162,7 @@ export function AddWindowDialog({ open, onOpenChange, onSubmit }: AddWindowDialo
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
+            <Button type="button" variant="outline" onClick={requestClose} disabled={isSaving}>
               Cancel
             </Button>
             <Button type="submit" disabled={isSaving}>
@@ -141,6 +172,22 @@ export function AddWindowDialog({ open, onOpenChange, onSubmit }: AddWindowDialo
           </DialogFooter>
         </form>
       </DialogContent>
+
+      <ConfirmDialog
+        open={open && discardOpen}
+        onOpenChange={setDiscardOpen}
+        title="Discard changes?"
+        description="Your unsaved changes will be lost."
+        cancelLabel="Keep editing"
+        confirmLabel="Discard changes"
+        destructive
+        focusCancel
+        onConfirm={() => {
+          setDiscardOpen(false);
+          resetForm();
+          onOpenChange(false);
+        }}
+      />
     </Dialog>
   );
 }
@@ -165,6 +212,8 @@ export function ExceptionDialog({
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const [initialForm, setInitialForm] = useState({ startsAt: "", endsAt: "", reason: "" });
 
   const isEditing = Boolean(period);
 
@@ -176,11 +225,31 @@ export function ExceptionDialog({
   if (open && (session.open !== open || session.period !== period)) {
     setSession({ open, period });
     setError(null);
-    setStartsAt(period ? isoToLocalInput(period.startDate) : "");
-    setEndsAt(period ? isoToLocalInput(period.endDate) : "");
-    setReason(period?.reason ?? "");
+    setDiscardOpen(false);
+    const initStartsAt = period ? isoToLocalInput(period.startDate) : "";
+    const initEndsAt = period ? isoToLocalInput(period.endDate) : "";
+    const initReason = period?.reason ?? "";
+    setStartsAt(initStartsAt);
+    setEndsAt(initEndsAt);
+    setReason(initReason);
+    setInitialForm({ startsAt: initStartsAt, endsAt: initEndsAt, reason: initReason });
   } else if (!open && session.open) {
     setSession({ open: false });
+  }
+
+  const isDirty =
+    startsAt !== initialForm.startsAt ||
+    endsAt !== initialForm.endsAt ||
+    reason !== initialForm.reason;
+
+  function requestClose() {
+    if (isSaving || discardOpen) return false;
+    if (isDirty) {
+      setDiscardOpen(true);
+      return false;
+    }
+    onOpenChange(false);
+    return true;
   }
 
   async function handleSubmit(event: React.FormEvent) {
@@ -208,7 +277,13 @@ export function ExceptionDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen, details) => {
+        if (nextOpen) onOpenChange(true);
+        else if (!requestClose()) details?.cancel?.();
+      }}
+    >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit exception" : "Add exception"}</DialogTitle>
@@ -263,7 +338,7 @@ export function ExceptionDialog({
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
+            <Button type="button" variant="outline" onClick={requestClose} disabled={isSaving}>
               Cancel
             </Button>
             <Button type="submit" disabled={isSaving}>
@@ -273,6 +348,21 @@ export function ExceptionDialog({
           </DialogFooter>
         </form>
       </DialogContent>
+
+      <ConfirmDialog
+        open={open && discardOpen}
+        onOpenChange={setDiscardOpen}
+        title="Discard changes?"
+        description="Your unsaved changes will be lost."
+        cancelLabel="Keep editing"
+        confirmLabel="Discard changes"
+        destructive
+        focusCancel
+        onConfirm={() => {
+          setDiscardOpen(false);
+          onOpenChange(false);
+        }}
+      />
     </Dialog>
   );
 }

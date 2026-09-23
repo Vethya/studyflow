@@ -25,11 +25,13 @@ function DialogClose({ ...props }: DialogPrimitive.Close.Props) {
 
 function DialogOverlay({
   className,
+  forceRender = true,
   ...props
 }: DialogPrimitive.Backdrop.Props) {
   return (
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
+      forceRender={forceRender}
       className={cn(
         "fixed inset-0 isolate z-50 bg-black/20 dark:bg-black/40 duration-200 ease-out supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:duration-150 data-closed:ease-in data-closed:animate-out data-closed:fade-out-0",
         className

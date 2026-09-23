@@ -31,6 +31,7 @@ export function ConfirmDialog({
   confirmLabel,
   cancelLabel = "Cancel",
   destructive,
+  focusCancel = false,
   onConfirm,
   children,
 }: {
@@ -41,12 +42,15 @@ export function ConfirmDialog({
   confirmLabel: string;
   cancelLabel?: string;
   destructive?: boolean;
+  /** Focus the safe action even when opened by touch. */
+  focusCancel?: boolean;
   /** May be async; the dialog shows a pending state and closes on success. */
   onConfirm: () => void | Promise<void>;
   children?: React.ReactNode;
 }) {
   const [isPending, setPending] = React.useState(false);
   const confirmButtonRef = React.useRef<HTMLButtonElement>(null);
+  const cancelRef = React.useRef<HTMLButtonElement>(null);
 
   async function handleConfirm() {
     if (isPending) return;
@@ -61,7 +65,10 @@ export function ConfirmDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md" initialFocus={confirmButtonRef}>
+      <DialogContent
+        className="sm:max-w-md"
+        initialFocus={focusCancel ? cancelRef : confirmButtonRef}
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}
@@ -78,6 +85,7 @@ export function ConfirmDialog({
 
           <DialogFooter>
             <Button
+              ref={cancelRef}
               type="button"
               variant="ghost"
               onClick={() => onOpenChange(false)}
