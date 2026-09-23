@@ -97,10 +97,10 @@ function AwaitingEmail() {
             Sign out
           </Button>
           <Link
-            href="/settings"
+            href="/dashboard"
             className="flex items-center justify-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
-            Go to settings
+            Go to dashboard
           </Link>
         </div>
       );

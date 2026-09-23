@@ -39,7 +39,7 @@ export default function ForgotPasswordPage() {
 
   if (submitted) {
     return (
-      <GuestOnly redirectTo="/settings">
+      <GuestOnly>
         <div className="space-y-6">
         <div className="flex flex-col items-center text-center space-y-4 py-6">
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-surplus-soft">
@@ -72,7 +72,7 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <GuestOnly redirectTo="/settings">
+    <GuestOnly>
       <div className="space-y-6">
       <div className="space-y-1">
         <h1 className="text-2xl font-bold tracking-tight">Set or reset password</h1>
