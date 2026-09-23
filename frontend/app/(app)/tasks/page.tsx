@@ -255,7 +255,7 @@ function TasksContent() {
               <Input
                 placeholder="Search tasks"
                 aria-label="Search tasks by title"
-                className="h-10 w-full ps-9 pe-9"
+                className="h-10 w-full ps-9 pe-9 [&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-decoration]:appearance-none"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
