@@ -138,9 +138,11 @@ export function SchedulePreview({
   );
 
   const now = new Date();
-  const recordedSessions = existingSessions.filter((s) => !!s.outcome);
+  const recordedSessions = existingSessions.filter(
+    (s) => s.outcome === "Missed" || s.outcome === "Delayed",
+  );
   const activeUpcoming = existingSessions.filter(
-    (s) => !s.outcome && new Date(s.endTime) > now,
+    (s) => !s.outcome && new Date(s.startTime) > now,
   );
   const missedCount = recordedSessions.filter((s) => s.outcome === "Missed").length;
   const delayedCount = recordedSessions.filter((s) => s.outcome === "Delayed").length;
@@ -308,7 +310,6 @@ export function SchedulePreview({
               recordedSessions={recordedSessions}
               availabilityWindows={availabilityWindows}
               unavailablePeriods={unavailablePeriods}
-              isRecovery={!!proposal.reason || recordedSessions.length > 0}
             />
           )}
         </section>
@@ -340,13 +341,11 @@ function ProposalCalendar({
   recordedSessions,
   availabilityWindows,
   unavailablePeriods,
-  isRecovery,
 }: {
   proposedSessions: StudySession[];
   recordedSessions: StudySession[];
   availabilityWindows?: AvailabilityWindow[];
   unavailablePeriods?: UnavailablePeriod[];
-  isRecovery?: boolean;
 }) {
   const allSessions: CalendarSessionItem[] = React.useMemo(() => {
     const list: CalendarSessionItem[] = [];
@@ -413,8 +412,11 @@ function ProposalCalendar({
       (s) => startOfWeek(new Date(s.startTime)).getTime() === currentWeek.getTime(),
     );
     if (hasCurrentWeek) return currentWeek;
-    return startOfWeek(new Date(allSessions[0].startTime));
-  }, [allSessions]);
+    if (proposedSessions.length > 0) {
+      return startOfWeek(new Date(proposedSessions[0].startTime));
+    }
+    return currentWeek;
+  }, [allSessions, proposedSessions]);
 
   const lastWeek = React.useMemo(() => {
     if (allSessions.length === 0) return startOfWeek(new Date());
@@ -596,7 +598,7 @@ function ProposalCalendar({
         now={nowMarker}
       />
       <GridLegend
-        showProposalTones={isRecovery || recordedSessions.length > 0}
+        showProposalTones
         showSession
       />
     </div>

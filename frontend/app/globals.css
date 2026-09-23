@@ -42,8 +42,8 @@
   /* The only two saturated roles in the product. */
   --color-success: oklch(0.512 0.089 183);
   --color-success-content: oklch(0.985 0.002 250);
-  --color-warning: oklch(0.68 0.16 75);
-  --color-warning-content: oklch(0.205 0.019 262);
+  --color-warning: oklch(0.53 0.15 65);
+  --color-warning-content: oklch(0.985 0.002 250);
   --color-error: oklch(0.553 0.176 33);
   --color-error-content: oklch(0.985 0.002 250);
 
