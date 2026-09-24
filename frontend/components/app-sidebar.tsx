@@ -1,6 +1,5 @@
 "use client";
 
-import { useLayoutEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -24,6 +23,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { NavUser } from "@/components/nav-user";
+import { SlidingIndicator, useSlidingIndicator } from "@/components/ui/sliding-indicator";
 import { cn } from "@/lib/utils";
 
 /** The sidebar is for work navigation; account actions live in the footer menu. */
@@ -37,56 +37,15 @@ const MENU = [
 
 export function AppSidebar() {
   const pathname = usePathname();
-  const [menuEl, setMenuEl] = useState<HTMLUListElement | null>(null);
-  const [indicator, setIndicator] = useState<{
-    top: number;
-    left: number;
-    width: number;
-    height: number;
-    ready: boolean;
-  }>({
-    top: 0,
-    left: 0,
-    width: 0,
-    height: 0,
-    ready: false,
-  });
 
   const isActive = (item: { url: string; match?: string }) =>
     item.match
       ? pathname.startsWith(item.match)
       : pathname === item.url || pathname.startsWith(`${item.url}/`);
 
-  useLayoutEffect(() => {
-    if (!menuEl) return;
-
-    const updateIndicator = () => {
-      const activeIndex = MENU.findIndex(isActive);
-      const buttons = menuEl.querySelectorAll<HTMLElement>("[data-slot='sidebar-menu-button']");
-      const activeBtn =
-        menuEl.querySelector<HTMLElement>("[data-active]") ??
-        (activeIndex >= 0 ? buttons[activeIndex] : null);
-
-      if (activeBtn) {
-        const menuRect = menuEl.getBoundingClientRect();
-        const btnRect = activeBtn.getBoundingClientRect();
-        setIndicator({
-          top: btnRect.top - menuRect.top,
-          left: btnRect.left - menuRect.left,
-          width: btnRect.width,
-          height: btnRect.height,
-          ready: true,
-        });
-      } else {
-        setIndicator((prev) => ({ ...prev, ready: false }));
-      }
-    };
-
-    updateIndicator();
-    const observer = new ResizeObserver(updateIndicator);
-    observer.observe(menuEl);
-    return () => observer.disconnect();
-  }, [pathname, menuEl]);
+  const { containerRef, indicator } = useSlidingIndicator<HTMLUListElement>({
+    activeKey: pathname,
+  });
 
   /*
    * The collapsed overrides are repeated here on purpose.
@@ -144,18 +103,8 @@ export function AppSidebar() {
             Menu
           </SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu ref={setMenuEl} className="relative gap-1">
-              {indicator.ready && (
-                <div
-                  aria-hidden="true"
-                  className="pointer-events-none absolute left-0 top-0 z-0 rounded-lg bg-sidebar-accent transition-[transform,width,height,opacity] duration-250 ease-[cubic-bezier(0.2,0,0,1)]"
-                  style={{
-                    transform: `translate3d(${indicator.left}px, ${indicator.top}px, 0)`,
-                    width: `${indicator.width}px`,
-                    height: `${indicator.height}px`,
-                  }}
-                />
-              )}
+            <SidebarMenu ref={containerRef} className="relative gap-1">
+              <SlidingIndicator indicator={indicator} />
               {MENU.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
