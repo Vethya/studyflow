@@ -25,7 +25,7 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Callout } from "@/components/ui/callout";
-import { SlidingIndicator, useSlidingIndicator } from "@/components/ui/sliding-indicator";
+import { SidebarNav } from "@/components/ui/sidebar-nav";
 import { PageHeader, PageShell } from "@/components/page-kit";
 import {
   AddPasswordDialog,
@@ -93,10 +93,6 @@ function SettingsContent() {
 
   const [activeTab, setActiveTab] = useState<TabId>("profile");
   const [searchQuery, setSearchQuery] = useState("");
-
-  const { containerRef, indicator } = useSlidingIndicator<HTMLElement>({
-    activeKey: searchQuery ? "search" : activeTab,
-  });
 
   const loadProfile = useCallback((s: AbortSignal) => accountApi.getProfile(s), []);
   const loadPreferences = useCallback((s: AbortSignal) => accountApi.getPreferences(s), []);
@@ -231,40 +227,22 @@ function SettingsContent() {
           </div>
 
           {/* Navigation Tabs */}
-          <nav
-            ref={containerRef}
-            className="relative flex md:flex-col gap-1.5 overflow-x-auto md:overflow-visible pb-1 md:pb-0 scrollbar-none"
-            aria-label="Settings sections"
-          >
-            <SlidingIndicator indicator={indicator} />
-            {TABS.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = !searchQuery && activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  data-active={isActive ? "true" : undefined}
-                  aria-current={isActive ? "page" : undefined}
-                  onClick={() => {
-                    setActiveTab(tab.id);
-                    setSearchQuery("");
-                  }}
-                  className={cn(
-                    "relative z-10 flex shrink-0 whitespace-nowrap items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-left md:w-full",
-                    isActive
-                      ? indicator.ready
-                        ? "bg-transparent text-sidebar-accent-foreground hover:bg-transparent hover:text-sidebar-accent-foreground"
-                        : "bg-sidebar-accent text-sidebar-accent-foreground"
-                      : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
-                  )}
-                >
-                  <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                  <span className="shrink-0 whitespace-nowrap">{tab.label}</span>
-                </button>
-              );
-            })}
-          </nav>
+          <SidebarNav
+            items={TABS.map((tab) => ({
+              id: tab.id,
+              title: tab.label,
+              icon: tab.icon,
+              isActive: !searchQuery && activeTab === tab.id,
+              onClick: () => {
+                setActiveTab(tab.id);
+                setSearchQuery("");
+              },
+            }))}
+            size="sm"
+            orientation="responsive"
+            activeKey={searchQuery ? "search" : activeTab}
+            ariaLabel="Settings sections"
+          />
         </div>
 
         {/* Content Area */}
