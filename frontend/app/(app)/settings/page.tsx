@@ -187,7 +187,7 @@ function SettingsContent() {
   }, [searchMatches]);
 
   return (
-    <PageShell width="narrow">
+    <PageShell>
       <PageHeader title="Settings" description="Your account, and how StudyFlow behaves." />
 
       {googleError && <Callout tone="danger">{googleError}</Callout>}
