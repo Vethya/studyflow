@@ -306,6 +306,7 @@ export function SchedulePreview({
           ) : (
             <ProposalCalendar
               key={proposal.id}
+              isRecoveryProposal={Boolean(proposal.reason)}
               proposedSessions={upcoming}
               recordedSessions={recordedSessions}
               availabilityWindows={availabilityWindows}
@@ -332,16 +333,18 @@ interface CalendarSessionItem {
   plannedDuration: number;
   actualDuration?: number;
   outcome?: SessionOutcome;
-  tone: "proposed" | "missed" | "delayed" | "completed";
+  tone: "default" | "proposed" | "missed" | "delayed" | "completed";
   badge?: string;
 }
 
 function ProposalCalendar({
+  isRecoveryProposal,
   proposedSessions,
   recordedSessions,
   availabilityWindows,
   unavailablePeriods,
 }: {
+  isRecoveryProposal: boolean;
   proposedSessions: StudySession[];
   recordedSessions: StudySession[];
   availabilityWindows?: AvailabilityWindow[];
@@ -360,8 +363,8 @@ function ProposalCalendar({
         plannedDuration: session.plannedDuration,
         actualDuration: session.actualDuration,
         outcome: session.outcome,
-        tone: "proposed",
-        badge: "Proposed",
+        tone: isRecoveryProposal ? "proposed" : "default",
+        badge: isRecoveryProposal ? "Proposed" : undefined,
       });
     }
 
@@ -394,7 +397,7 @@ function ProposalCalendar({
     return list.sort(
       (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime(),
     );
-  }, [proposedSessions, recordedSessions]);
+  }, [isRecoveryProposal, proposedSessions, recordedSessions]);
 
   const earliestWeek = React.useMemo(() => {
     if (allSessions.length === 0) return startOfWeek(new Date());
@@ -445,6 +448,16 @@ function ProposalCalendar({
       allSessions.filter((session) => visibleDays.has(dayKey(new Date(session.startTime)))),
     [allSessions, visibleDays],
   );
+  const visibleProposalStates = React.useMemo(() => {
+    const states = new Set<"proposed" | "missed" | "delayed" | "completed">();
+    for (const session of visibleSessions) {
+      if (session.outcome === "Missed") states.add("missed");
+      else if (session.outcome === "Delayed") states.add("delayed");
+      else if (session.outcome === "Completed") states.add("completed");
+      else if (isRecoveryProposal) states.add("proposed");
+    }
+    return [...states];
+  }, [visibleSessions, isRecoveryProposal]);
   const freeIntervals = React.useMemo(
     () =>
       subtractPeriods(
@@ -531,7 +544,9 @@ function ProposalCalendar({
               ? ` · Partly done (${formatDuration(session.actualDuration ?? 0)} recorded)`
               : session.outcome === "Completed"
                 ? " · Completed"
-                : " · Proposed";
+                : isRecoveryProposal
+                  ? " · Proposed"
+                  : "";
 
         out.push({
           id: session.id,
@@ -550,7 +565,7 @@ function ProposalCalendar({
 
       return out;
     },
-    [visibleSessions, freeIntervals, blockedIntervals, days],
+    [visibleSessions, freeIntervals, blockedIntervals, days, isRecoveryProposal],
   );
   const now = new Date();
   const nowMarker = visibleDays.has(dayKey(now))
@@ -598,8 +613,8 @@ function ProposalCalendar({
         now={nowMarker}
       />
       <GridLegend
-        showProposalTones
-        showSession
+        proposalStates={visibleProposalStates}
+        showSession={!isRecoveryProposal}
       />
     </div>
   );

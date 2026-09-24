@@ -352,40 +352,43 @@ export function WeekGrid({
 export function GridLegend({
   showDeadline = false,
   showSession = false,
-  showProposalTones = false,
+  proposalStates = [],
 }: {
   showDeadline?: boolean;
   showSession?: boolean;
-  showProposalTones?: boolean;
+  proposalStates?: ("proposed" | "missed" | "delayed" | "completed")[];
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-      {showProposalTones ? (
-        <>
-          <span className="flex items-center gap-1.5">
-            <span className="h-3 w-5 rounded-sm border-2 border-primary bg-primary/10" />
-            Proposed
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-3 w-5 rounded-sm border border-deficit bg-deficit/15" />
-            Missed
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-3 w-5 rounded-sm border border-warning bg-warning/20" />
-            Partly done
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-3 w-5 rounded-sm border border-border bg-muted/60" />
-            Completed
-          </span>
-        </>
-      ) : (
-        showSession && (
-          <span className="flex items-center gap-1.5">
-            <span className="h-3 w-5 rounded-sm border border-foreground/70 bg-card" />
-            Study session
-          </span>
-        )
+      {proposalStates.includes("proposed") && (
+        <span className="flex items-center gap-1.5">
+          <span className="h-3 w-5 rounded-sm border-2 border-primary bg-primary/10" />
+          Proposed
+        </span>
+      )}
+      {proposalStates.includes("missed") && (
+        <span className="flex items-center gap-1.5">
+          <span className="h-3 w-5 rounded-sm border border-deficit bg-deficit/15" />
+          Missed
+        </span>
+      )}
+      {proposalStates.includes("delayed") && (
+        <span className="flex items-center gap-1.5">
+          <span className="h-3 w-5 rounded-sm border border-warning bg-warning/20" />
+          Partly done
+        </span>
+      )}
+      {proposalStates.includes("completed") && (
+        <span className="flex items-center gap-1.5">
+          <span className="h-3 w-5 rounded-sm border border-border bg-muted/60" />
+          Completed
+        </span>
+      )}
+      {showSession && (
+        <span className="flex items-center gap-1.5">
+          <span className="h-3 w-5 rounded-sm border border-foreground/70 bg-card" />
+          Study session
+        </span>
       )}
       <span className="flex items-center gap-1.5">
         <span className="h-3 w-5 rounded-sm border border-surplus/40 bg-surplus-soft" />
