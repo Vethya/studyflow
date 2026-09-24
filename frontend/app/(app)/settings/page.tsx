@@ -188,7 +188,7 @@ function SettingsContent() {
 
   return (
     <PageShell>
-      <PageHeader title="Settings" description="Your account, and how StudyFlow behaves." />
+      <PageHeader title="Settings" />
 
       {googleError && <Callout tone="danger">{googleError}</Callout>}
 
@@ -285,8 +285,8 @@ function SettingsContent() {
                   {(searchMatches?.profileName || searchMatches?.profileEmail) && (
                     <div className="space-y-2">
                       <CategoryBadge label="Profile" icon={User} />
-                      <Card>
-                        <CardContent className="divide-y p-0 px-4 sm:px-6">
+                      <Card className="py-0">
+                        <CardContent className="divide-y p-0 px-4">
                           {profile.isLoading ? (
                             <RowSkeleton
                               rows={
@@ -333,8 +333,8 @@ function SettingsContent() {
                     searchMatches?.deleteAccount) && (
                     <div className="space-y-2">
                       <CategoryBadge label="Account & Security" icon={ShieldCheck} />
-                      <Card>
-                        <CardContent className="divide-y p-0 px-4 sm:px-6">
+                      <Card className="py-0">
+                        <CardContent className="divide-y p-0 px-4">
                           {searchMatches.password && (
                             profile.isLoading ? (
                               <RowSkeleton rows={1} />
@@ -423,8 +423,8 @@ function SettingsContent() {
                   {searchMatches?.timezone && (
                     <div className="space-y-2">
                       <CategoryBadge label="Preferences · Timezone" icon={Globe} />
-                      <Card>
-                        <CardContent className="divide-y p-0 px-4 sm:px-6">
+                      <Card className="py-0">
+                        <CardContent className="divide-y p-0 px-4">
                           <Row
                             label={zone?.replace(/_/g, " ") ?? "Not set"}
                             value={
@@ -450,7 +450,7 @@ function SettingsContent() {
                           </Row>
 
                           {preferences.data?.availability_confirmation_required && (
-                            <div className="py-3">
+                            <div className="py-4">
                               <ConfirmTimezone
                                 preferences={preferences.data}
                                 setPreferences={preferences.setData}
@@ -473,8 +473,8 @@ function SettingsContent() {
                   {searchMatches?.appearance && (
                     <div className="space-y-2">
                       <CategoryBadge label="Appearance" icon={Palette} />
-                      <Card>
-                        <CardContent className="p-0 px-4 sm:px-6">
+                      <Card className="py-0">
+                        <CardContent className="p-0 px-4">
                           <Row
                             label="Theme"
                             value="Choose light mode, dark mode, AMOLED black mode, or follow your device."
@@ -493,13 +493,9 @@ function SettingsContent() {
             <>
               {activeTab === "profile" && (
                 <div className="space-y-5">
-                  <SectionHeader
-                    icon={User}
-                    title="Profile"
-                    description="How you appear in StudyFlow."
-                  />
-                  <Card>
-                    <CardContent className="divide-y p-0 px-4 sm:px-6">
+                  <SectionHeader title="Profile" />
+                  <Card className="py-0">
+                    <CardContent className="divide-y p-0 px-4">
                       {profile.isLoading ? (
                         <RowSkeleton rows={2} />
                       ) : (
@@ -532,16 +528,12 @@ function SettingsContent() {
 
               {activeTab === "security" && (
                 <div className="space-y-6">
-                  <SectionHeader
-                    icon={ShieldCheck}
-                    title="Account & Security"
-                    description="How you access your account and manage your data."
-                  />
+                  <SectionHeader title="Account & Security" />
 
                   <div className="space-y-3">
                     <h3 className="text-sm font-medium text-muted-foreground">Sign-in methods</h3>
-                    <Card>
-                      <CardContent className="divide-y p-0 px-4 sm:px-6">
+                    <Card className="py-0">
+                      <CardContent className="divide-y p-0 px-4">
                         {profile.isLoading ? (
                           <RowSkeleton rows={1} />
                         ) : profile.data ? (
@@ -600,8 +592,8 @@ function SettingsContent() {
 
                   <div className="space-y-3">
                     <h3 className="text-sm font-medium text-muted-foreground">Account actions</h3>
-                    <Card>
-                      <CardContent className="divide-y p-0 px-4 sm:px-6">
+                    <Card className="py-0">
+                      <CardContent className="divide-y p-0 px-4">
                         <Row label="Sign out" value="Ends your session on this device only.">
                           <Button variant="outline" size="sm" onClick={() => void signOut()}>
                             <LogOut className="size-3.5 mr-1 text-muted-foreground" />
@@ -630,16 +622,12 @@ function SettingsContent() {
 
               {activeTab === "preferences" && (
                 <div className="space-y-6">
-                  <SectionHeader
-                    icon={SlidersHorizontal}
-                    title="Preferences"
-                    description="Your timezone and study session pacing."
-                  />
+                  <SectionHeader title="Preferences" />
 
                   <div className="space-y-3">
                     <h3 className="text-sm font-medium text-muted-foreground">Timezone</h3>
-                    <Card>
-                      <CardContent className="divide-y p-0 px-4 sm:px-6">
+                    <Card className="py-0">
+                      <CardContent className="divide-y p-0 px-4">
                         {preferences.isLoading ? (
                           <RowSkeleton rows={1} />
                         ) : (
@@ -670,7 +658,7 @@ function SettingsContent() {
 
                             {/* Recurring windows re-confirmation */}
                             {preferences.data?.availability_confirmation_required && (
-                              <div className="py-3">
+                              <div className="py-4">
                                 <ConfirmTimezone
                                   preferences={preferences.data}
                                   setPreferences={preferences.setData}
@@ -692,13 +680,9 @@ function SettingsContent() {
 
               {activeTab === "appearance" && (
                 <div className="space-y-5">
-                  <SectionHeader
-                    icon={Palette}
-                    title="Appearance"
-                    description="How StudyFlow looks on this device."
-                  />
-                  <Card>
-                    <CardContent className="p-0 px-4 sm:px-6">
+                  <SectionHeader title="Appearance" />
+                  <Card className="py-0">
+                    <CardContent className="p-0 px-4">
                       <Row
                         label="Theme"
                         value="Choose light mode, dark mode, AMOLED black mode, or follow your device."
@@ -748,18 +732,15 @@ function SettingsContent() {
 }
 
 function SectionHeader({
-  icon: Icon,
   title,
   description,
 }: {
-  icon: React.ElementType;
   title: string;
   description?: string;
 }) {
   return (
     <div className="border-b pb-3 mb-5">
-      <h2 className="text-lg font-semibold tracking-tight text-foreground flex items-center gap-2">
-        <Icon className="size-5 text-muted-foreground shrink-0" aria-hidden />
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">
         {title}
       </h2>
       {description && (
@@ -800,7 +781,7 @@ function Row({
   return (
     <div
       className={cn(
-        "flex flex-wrap justify-between gap-x-4 gap-y-2 py-3.5",
+        "flex flex-wrap justify-between gap-x-4 gap-y-2 py-4",
         stretch ? "items-stretch" : "items-center",
       )}
     >
@@ -819,7 +800,7 @@ function RowSkeleton({ rows }: { rows: number }) {
   return (
     <>
       {Array.from({ length: rows }).map((_, index) => (
-        <div key={index} className="flex items-center justify-between gap-4 py-3.5">
+        <div key={index} className="flex items-center justify-between gap-4 py-4">
           <div className="space-y-1.5">
             <Skeleton className="h-4 w-24" />
             <Skeleton className="h-4 w-40" />
@@ -926,8 +907,8 @@ function StudySessionsSection({
   }
 
   return (
-    <Card>
-      <CardContent className="p-4 sm:p-6">
+    <Card className="py-0">
+      <CardContent className="p-4">
         {preferences.isLoading ? (
           <Skeleton className="h-28 w-full" />
         ) : (
