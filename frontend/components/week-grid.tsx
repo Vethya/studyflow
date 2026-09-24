@@ -49,6 +49,10 @@ export interface GridBlock {
   settled?: boolean;
   /** Marks a past session still waiting on an outcome (SPEC §12.1). */
   attention?: boolean;
+  /** Optional badge label inside the block (e.g. "Proposed", "Missed", "Partly done"). */
+  badge?: string;
+  /** Explicit tone for proposals and recorded sessions. */
+  tone?: "default" | "proposed" | "missed" | "delayed" | "completed";
   onSelect?: (e?: React.MouseEvent<HTMLElement>) => void;
 }
 
@@ -206,17 +210,33 @@ export function WeekGrid({
 
                   const body = (
                     <>
-                      {block.label && height >= 24 && (
+                      {block.label && height >= 20 && (
                         <span className="block px-1.5 pt-1 text-start">
-                          <span
-                            className={cn(
-                              "block text-[0.6875rem] font-medium leading-tight",
-                              // Two lines only when the block is tall enough
-                              // for a second one to fit without clipping.
-                              height >= 58 ? "line-clamp-2" : "truncate",
+                          <span className="flex items-center justify-between gap-1">
+                            <span
+                              className={cn(
+                                "block text-[0.6875rem] font-medium leading-tight",
+                                // Two lines only when the block is tall enough
+                                // for a second one to fit without clipping.
+                                height >= 58 ? "line-clamp-2" : "truncate",
+                              )}
+                            >
+                              {block.label}
+                            </span>
+                            {block.badge && (
+                              <span
+                                className={cn(
+                                  "inline-flex shrink-0 items-center rounded px-1 py-0 text-[0.5625rem] font-semibold uppercase tracking-wider",
+                                  block.tone === "proposed" && "bg-primary/15 text-primary",
+                                  block.tone === "missed" && "bg-deficit/20 text-deficit font-bold",
+                                  block.tone === "delayed" && "bg-warning/25 text-warning font-bold",
+                                  block.tone === "completed" && "bg-muted text-muted-foreground",
+                                  (!block.tone || block.tone === "default") && "bg-muted text-muted-foreground",
+                                )}
+                              >
+                                {block.badge}
+                              </span>
                             )}
-                          >
-                            {block.label}
                           </span>
                           {block.meta && height >= 38 && (
                             <span className="mt-0.5 block truncate text-[0.625rem] tabular-nums text-muted-foreground">
@@ -238,10 +258,20 @@ export function WeekGrid({
                     "absolute inset-x-1 overflow-hidden rounded-md border transition-all duration-150 ease-out",
                     isSession
                       ? cn(
-                          "z-10 bg-card shadow-xs",
-                          block.settled
-                            ? "border-border text-muted-foreground"
-                            : "border-foreground/70",
+                          "z-10 shadow-xs",
+                          block.tone === "proposed" &&
+                            "border-primary bg-card text-foreground ring-1 ring-primary/40",
+                          block.tone === "missed" &&
+                            "border-deficit/70 bg-deficit/10 text-foreground",
+                          block.tone === "delayed" &&
+                            "border-warning/80 bg-warning/15 text-foreground",
+                          block.tone === "completed" &&
+                            "border-border bg-muted/60 text-muted-foreground",
+                          (!block.tone || block.tone === "default") && (
+                            block.settled
+                              ? "border-border bg-card text-muted-foreground"
+                              : "border-foreground/70 bg-card"
+                          ),
                           block.onSelect &&
                             "cursor-pointer hover:border-foreground hover:bg-muted hover:-translate-y-0.5 hover:shadow-md hover:z-30 active:translate-y-0 active:shadow-xs",
                         )
@@ -284,9 +314,14 @@ export function WeekGrid({
                     <div
                       key={block.id}
                       title={block.title}
+                      aria-label={isSession ? block.title : undefined}
+                      tabIndex={isSession ? 0 : undefined}
                       onMouseEnter={() => onHighlight?.(block.id)}
                       onMouseLeave={() => onHighlight?.(null)}
-                      className={className}
+                      className={cn(
+                        className,
+                        isSession && "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
+                      )}
                       style={{ top, height }}
                     >
                       {body}
@@ -317,12 +352,38 @@ export function WeekGrid({
 export function GridLegend({
   showDeadline = false,
   showSession = false,
+  proposalStates = [],
 }: {
   showDeadline?: boolean;
   showSession?: boolean;
+  proposalStates?: ("proposed" | "missed" | "delayed" | "completed")[];
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+      {proposalStates.includes("proposed") && (
+        <span className="flex items-center gap-1.5">
+          <span className="h-3 w-5 rounded-sm border-2 border-primary bg-primary/10" />
+          Proposed
+        </span>
+      )}
+      {proposalStates.includes("missed") && (
+        <span className="flex items-center gap-1.5">
+          <span className="h-3 w-5 rounded-sm border border-deficit bg-deficit/15" />
+          Missed
+        </span>
+      )}
+      {proposalStates.includes("delayed") && (
+        <span className="flex items-center gap-1.5">
+          <span className="h-3 w-5 rounded-sm border border-warning bg-warning/20" />
+          Partly done
+        </span>
+      )}
+      {proposalStates.includes("completed") && (
+        <span className="flex items-center gap-1.5">
+          <span className="h-3 w-5 rounded-sm border border-border bg-muted/60" />
+          Completed
+        </span>
+      )}
       {showSession && (
         <span className="flex items-center gap-1.5">
           <span className="h-3 w-5 rounded-sm border border-foreground/70 bg-card" />
