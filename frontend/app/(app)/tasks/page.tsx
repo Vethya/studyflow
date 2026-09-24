@@ -251,13 +251,19 @@ function TasksContent() {
             {/* Search leads, because it is what a long list is actually used
                 with. It used to be the fifth control in a wrapped row of seven. */}
             <div className="relative min-w-56 flex-1 basis-64">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
+                type="search"
                 placeholder="Search tasks"
                 aria-label="Search tasks by title"
-                className="h-10 w-full ps-9 pe-9"
+                className="h-10 w-full ps-9 pe-9 [&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-decoration]:appearance-none"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    setSearch("");
+                  }
+                }}
               />
               {search && (
                 <button

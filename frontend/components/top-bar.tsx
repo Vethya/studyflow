@@ -61,7 +61,7 @@ export function TopBar() {
           placeholder="Find a task"
           aria-label="Find a task by title or course"
           maxLength={200}
-          className="h-9 w-full rounded-lg border border-border bg-card ps-9 pe-8 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring"
+          className="h-9 w-full rounded-lg border border-border bg-card ps-9 pe-8 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring [&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-decoration]:appearance-none [&::-webkit-search-results-button]:appearance-none [&::-webkit-search-results-decoration]:appearance-none"
         />
         {query && (
           <button

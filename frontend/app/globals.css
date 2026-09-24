@@ -537,4 +537,12 @@ html.amoled {
   .lucide.icon-strong {
     stroke-width: 1.75;
   }
+
+  /* Strip WebKit search decoration pseudoelements so search inputs do not have unwanted left margin */
+  input[type="search"]::-webkit-search-decoration,
+  input[type="search"]::-webkit-search-cancel-button,
+  input[type="search"]::-webkit-search-results-button,
+  input[type="search"]::-webkit-search-results-decoration {
+    -webkit-appearance: none;
+  }
 }
