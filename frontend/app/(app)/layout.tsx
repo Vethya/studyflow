@@ -8,6 +8,7 @@ import { useEffect } from "react";
 import { Loader2 } from "lucide-react";
 import { useSession } from "@/hooks/use-session";
 import { startStudyFlowWebMcp } from "@/lib/webmcp/register";
+import { AccountTimezoneProvider } from "@/hooks/use-account-timezone";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -40,22 +41,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <SidebarProvider>
-      <AppSidebar />
-      {/* The shell owns the viewport height so only `main` scrolls; without
-          this the document scrolls and takes the sidebar and header with it. */}
-      <SidebarInset className="h-svh overflow-hidden">
-        <header className="flex h-16 shrink-0 items-center gap-3 border-b bg-background px-4 md:px-6">
-          <SidebarTrigger className="-ml-1 shrink-0" />
-          <TopBar />
-        </header>
-        <main
-          key={pathname}
-          className="flex-1 overflow-auto animate-in fade-in-0 duration-200 ease-out"
-        >
-          {children}
-        </main>
-      </SidebarInset>
-    </SidebarProvider>
+    <AccountTimezoneProvider>
+      <SidebarProvider>
+        <AppSidebar />
+        {/* The shell owns the viewport height so only `main` scrolls; without
+            this the document scrolls and takes the sidebar and header with it. */}
+        <SidebarInset className="h-svh overflow-hidden">
+          <header className="flex h-16 shrink-0 items-center gap-3 border-b bg-background px-4 md:px-6">
+            <SidebarTrigger className="-ml-1 shrink-0" />
+            <TopBar />
+          </header>
+          <main
+            key={pathname}
+            className="flex-1 overflow-auto animate-in fade-in-0 duration-200 ease-out"
+          >
+            {children}
+          </main>
+        </SidebarInset>
+      </SidebarProvider>
+    </AccountTimezoneProvider>
   );
 }

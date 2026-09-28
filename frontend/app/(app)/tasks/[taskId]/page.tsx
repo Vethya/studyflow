@@ -32,19 +32,21 @@ import { RecordOutcomeDialog } from "@/components/record-outcome-dialog";
 import { SchedulePreview } from "@/components/schedule-preview";
 import { PersistedEstimateNote } from "@/components/adaptive-estimate";
 import { SectionCard } from "@/components/page-kit";
-import { formatClock } from "@/lib/datetime";
+import { formatClock, formatDate, inTimeZone } from "@/lib/datetime";
 import { applyRecordedOutcome } from "@/lib/outcome-ui";
 import { DAY_NAMES_SHORT } from "@/lib/constants";
 import type { AcademicTask } from "@/types/task";
 import type { StudySession } from "@/types/session";
 import type { ScheduleProposal } from "@/types/schedule";
 import { activeScheduleKey, SWR_KEYS, taskDetailKey } from "@/lib/swr-keys";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
 
 export default function TaskDetailPage({
   params,
 }: {
   params: Promise<{ taskId: string }>;
 }) {
+  const timeZone = useAccountTimezone();
   const { taskId } = use(params);
   const router = useRouter();
 
@@ -244,14 +246,14 @@ export default function TaskDetailPage({
       {/* ── Facts ───────────────────────────────── */}
       <SectionCard title="Details" contentClassName="grid gap-x-8 gap-y-5 sm:grid-cols-2">
           <Fact label="Deadline" emphasis={overdue}>
-            {deadline.toLocaleDateString(undefined, {
+            {formatDate(deadline, timeZone, {
               weekday: "short",
               day: "numeric",
               month: "short",
               year: "numeric",
             })}
             {" · "}
-            {deadline.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+            {formatClock(deadline, timeZone)}
           </Fact>
 
           <Fact label="Original estimate">{formatDuration(task.originalEstimate)}</Fact>
@@ -269,7 +271,7 @@ export default function TaskDetailPage({
           <Fact label="Estimated remaining">{formatDuration(task.remainingDuration)}</Fact>
 
           <Fact label="Created">
-            {new Date(task.createdAt).toLocaleDateString(undefined, {
+            {formatDate(task.createdAt, timeZone, {
               day: "numeric",
               month: "short",
               year: "numeric",
@@ -277,7 +279,7 @@ export default function TaskDetailPage({
           </Fact>
 
           <Fact label="Last updated">
-            {new Date(task.updatedAt).toLocaleDateString(undefined, {
+            {formatDate(task.updatedAt, timeZone, {
               day: "numeric",
               month: "short",
               year: "numeric",
@@ -420,7 +422,8 @@ function SessionRow({
   session: StudySession;
   onRecord: () => void;
 }) {
-  const start = new Date(session.startTime);
+  const timeZone = useAccountTimezone();
+  const start = inTimeZone(session.startTime, timeZone);
   const style = session.outcome ? OUTCOME_STYLE[session.outcome] : null;
   const isPast = new Date(session.endTime) < new Date();
 
@@ -428,8 +431,8 @@ function SessionRow({
     <li className="flex flex-wrap items-center gap-x-4 gap-y-1 px-(--card-spacing) py-2.5">
       <span className="w-40 shrink-0 text-xs tabular-nums text-muted-foreground">
         {DAY_NAMES_SHORT[start.getDay()]} {start.getDate()}{" "}
-        {start.toLocaleDateString(undefined, { month: "short" })} · {formatClock(start)}–
-        {formatClock(session.endTime)}
+        {formatDate(start, timeZone, { month: "short" })} · {formatClock(start, timeZone)}–
+        {formatClock(session.endTime, timeZone)}
       </span>
 
       <span className="shrink-0 text-xs tabular-nums text-muted-foreground">

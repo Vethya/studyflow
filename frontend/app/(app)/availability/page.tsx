@@ -47,6 +47,8 @@ import {
   PopoverTitle,
 } from "@/components/ui/popover";
 import { SWR_KEYS } from "@/lib/swr-keys";
+import { dayKey, formatDate } from "@/lib/datetime";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
 
 /** Display Monday-first while the data itself is indexed 0 = Sunday. */
 const DISPLAY_DAYS = [1, 2, 3, 4, 5, 6, 0];
@@ -58,6 +60,7 @@ function toMinutes(time: string): number {
 }
 
 export default function AvailabilityPage() {
+  const timeZone = useAccountTimezone();
   const triggerRef = useRef<HTMLElement | null>(null);
   const [selectedWindow, setSelectedWindow] = useState<{
     window: AvailabilityWindow;
@@ -546,7 +549,7 @@ export default function AvailabilityPage() {
                 allPeriods.map((period) => {
                   const start = new Date(period.startDate);
                   const end = new Date(period.endDate);
-                  const sameDay = start.toDateString() === end.toDateString();
+                  const sameDay = dayKey(start, timeZone) === dayKey(end, timeZone);
                   return (
                     <div
                       key={period.id}
@@ -560,8 +563,8 @@ export default function AvailabilityPage() {
                           <div className="text-sm font-medium truncate">{period.title}</div>
                           <div className="text-xs text-muted-foreground mt-0.5">
                             {sameDay
-                              ? start.toLocaleDateString("en-US", { month: "short", day: "numeric" })
-                              : `${start.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
+                              ? formatDate(start, timeZone, { month: "short", day: "numeric" })
+                              : `${formatDate(start, timeZone, { month: "short", day: "numeric" })} – ${formatDate(end, timeZone, { month: "short", day: "numeric" })}`}
                           </div>
                         </div>
                       </div>

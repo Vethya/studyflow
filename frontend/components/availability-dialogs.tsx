@@ -23,9 +23,10 @@ import {
 } from "@/components/ui/select";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { DAY_NAMES } from "@/lib/constants";
-import { isoToLocalInput } from "@/lib/datetime";
+import { isoToLocalInput, localInputToIso } from "@/lib/datetime";
 import type { WindowDraft } from "@/lib/api";
 import type { UnavailablePeriod } from "@/types/availability";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
 
 interface AddWindowDialogProps {
   open: boolean;
@@ -207,6 +208,7 @@ export function ExceptionDialog({
   period,
   onSubmit,
 }: ExceptionDialogProps) {
+  const timeZone = useAccountTimezone();
   const [startsAt, setStartsAt] = useState("");
   const [endsAt, setEndsAt] = useState("");
   const [reason, setReason] = useState("");
@@ -226,8 +228,8 @@ export function ExceptionDialog({
     setSession({ open, period });
     setError(null);
     setDiscardOpen(false);
-    const initStartsAt = period ? isoToLocalInput(period.startDate) : "";
-    const initEndsAt = period ? isoToLocalInput(period.endDate) : "";
+    const initStartsAt = period ? isoToLocalInput(period.startDate, timeZone) : "";
+    const initEndsAt = period ? isoToLocalInput(period.endDate, timeZone) : "";
     const initReason = period?.reason ?? "";
     setStartsAt(initStartsAt);
     setEndsAt(initEndsAt);
@@ -254,7 +256,7 @@ export function ExceptionDialog({
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (new Date(endsAt) <= new Date(startsAt)) {
+    if (new Date(localInputToIso(endsAt, timeZone)) <= new Date(localInputToIso(startsAt, timeZone))) {
       setError("The end must come after the start.");
       return;
     }
@@ -264,8 +266,8 @@ export function ExceptionDialog({
     try {
       // Converted to an absolute instant: the API rejects offset-less values.
       await onSubmit({
-        startsAt: new Date(startsAt).toISOString(),
-        endsAt: new Date(endsAt).toISOString(),
+        startsAt: localInputToIso(startsAt, timeZone),
+        endsAt: localInputToIso(endsAt, timeZone),
         reason: reason || undefined,
       });
       onOpenChange(false);

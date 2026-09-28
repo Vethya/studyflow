@@ -5,9 +5,10 @@ import { CalendarOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { formatDuration } from "@/lib/constants";
-import { describeDeadline } from "@/lib/datetime";
+import { describeDeadline, formatDate } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import type { TaskFeasibility } from "@/lib/capacity";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
 
 /**
  * An overload warning: this task needs more hours than remain before it is due.
@@ -23,8 +24,9 @@ import type { TaskFeasibility } from "@/lib/capacity";
  * comparison the definition list was asking the reader to do themselves.
  */
 export function ShortfallCard({ item }: { item: TaskFeasibility }) {
+  const timeZone = useAccountTimezone();
   const { task, requiredMinutes, availableMinutes, shortfallMinutes, relevantPeriods } = item;
-  const due = describeDeadline(task.deadline);
+  const due = describeDeadline(task.deadline, timeZone);
 
   // What share of the required time the student actually has. Guarded against a
   // zero requirement, which would otherwise divide to NaN and blank the bar.
@@ -76,7 +78,7 @@ export function ShortfallCard({ item }: { item: TaskFeasibility }) {
         <span className="font-medium text-foreground">{formatDuration(availableMinutes)}</span>
         {" free before "}
         <span className={cn("font-medium", due.urgent ? "text-deficit" : "text-foreground")}>
-          {new Date(task.deadline).toLocaleDateString(undefined, {
+          {formatDate(task.deadline, timeZone, {
             day: "numeric",
             month: "short",
           })}
