@@ -20,6 +20,27 @@ function rootForKey(key: unknown): string | null {
 }
 
 function rootsForMutation(path: string): string[] {
+  if (path.startsWith("/integrations/google/imports/") && path.endsWith("/classroom")) {
+    return [
+      SWR_KEYS.tasks,
+      SWR_KEYS.taskSearch,
+      "studyflow/task",
+      "studyflow/adaptive-estimate",
+      SWR_KEYS.googleImportStatus,
+      SWR_KEYS.activeSchedule,
+      SWR_KEYS.pendingRevision,
+      SWR_KEYS.effortProgress,
+    ];
+  }
+  if (path.startsWith("/integrations/google/imports/") && path.endsWith("/calendar")) {
+    return [
+      SWR_KEYS.unavailablePeriods,
+      SWR_KEYS.googleImportStatus,
+      SWR_KEYS.activeSchedule,
+      SWR_KEYS.pendingRevision,
+      SWR_KEYS.effortProgress,
+    ];
+  }
   if (path === "/tasks" || path.startsWith("/tasks/")) {
     return [
       SWR_KEYS.tasks,
