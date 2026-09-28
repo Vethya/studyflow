@@ -19,6 +19,7 @@ Security model:
 import base64
 import hashlib
 import hmac
+import logging
 import secrets
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -41,6 +42,8 @@ from studyflow.tasks.service import (
 
 GOOGLE_AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 
+logger = logging.getLogger(__name__)
+
 STATE_LIFETIME = timedelta(minutes=10)
 SNAPSHOT_LIFETIME = timedelta(minutes=30)
 DEFAULT_CALENDAR_HORIZON_DAYS = 28
@@ -60,11 +63,16 @@ class GoogleImportSource(StrEnum):
     CLASSROOM = "google_classroom"
 
 
+CLASSROOM_COURSEWORK_SCOPE = "https://www.googleapis.com/auth/classroom.coursework.me.readonly"
+CLASSROOM_STUDENT_SUBMISSIONS_SCOPE = (
+    "https://www.googleapis.com/auth/classroom.student-submissions.me.readonly"
+)
+
 GOOGLE_IMPORT_SCOPES: Mapping[GoogleImportSource, tuple[str, ...]] = {
     GoogleImportSource.CALENDAR: ("https://www.googleapis.com/auth/calendar.events.readonly",),
     GoogleImportSource.CLASSROOM: (
         "https://www.googleapis.com/auth/classroom.courses.readonly",
-        "https://www.googleapis.com/auth/classroom.coursework.me.readonly",
+        CLASSROOM_COURSEWORK_SCOPE,
     ),
 }
 
@@ -357,6 +365,19 @@ def pkce_challenge(code_verifier: str) -> str:
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
+def _missing_google_import_scopes(
+    source: GoogleImportSource, granted_scopes: frozenset[str]
+) -> set[str]:
+    missing_scopes = set(GOOGLE_IMPORT_SCOPES[source]) - granted_scopes
+    if (
+        source is GoogleImportSource.CLASSROOM
+        and CLASSROOM_COURSEWORK_SCOPE in missing_scopes
+        and CLASSROOM_STUDENT_SUBMISSIONS_SCOPE in granted_scopes
+    ):
+        missing_scopes.remove(CLASSROOM_COURSEWORK_SCOPE)
+    return missing_scopes
+
+
 class GoogleImportService:
     def __init__(
         self,
@@ -432,8 +453,28 @@ class GoogleImportService:
         account = await self._repository.account(pending.account_id)
         if account is None:
             raise InvalidGoogleImportCallbackError
-        token = await self._client.exchange_code(code, pending.code_verifier)
-        if not set(GOOGLE_IMPORT_SCOPES[pending.source]) <= token.scopes:
+        try:
+            token = await self._client.exchange_code(code, pending.code_verifier)
+        except (
+            GoogleImportNotConfiguredError,
+            GoogleImportProviderUnavailableError,
+            InvalidGoogleImportCallbackError,
+        ) as error:
+            logger.warning(
+                "Google import failed source=%s stage=token_exchange error=%s",
+                pending.source.value,
+                type(error).__name__,
+            )
+            raise
+        missing_scopes = _missing_google_import_scopes(pending.source, token.scopes)
+        if missing_scopes:
+            logger.warning(
+                "Google import failed source=%s stage=scope_check "
+                "missing_scopes=%s granted_scopes=%s",
+                pending.source.value,
+                ",".join(sorted(missing_scopes)),
+                ",".join(sorted(token.scopes)),
+            )
             raise GoogleImportPermissionError
         items: list[dict[str, object]]
         if pending.source is GoogleImportSource.CALENDAR:
