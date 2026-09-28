@@ -1,8 +1,11 @@
 import { afterEach, expect, it, vi } from "vitest";
 import {
+  discardImport,
   getImport,
   getStatus,
+  importCalendarItems,
   importClassroomItems,
+  startClassroomImport,
   startCalendarImport,
   trustedGoogleUrl,
 } from "./google-import";
@@ -28,6 +31,27 @@ it("starts a calendar import with the chosen horizon", async () => {
   const [path, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
   expect(path).toBe("/api/v1/integrations/google/calendar/start");
   expect(JSON.parse(String(init.body))).toEqual({ horizon_days: 14 });
+});
+
+it("starts a classroom import and accepts a trusted calendar URL", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+    String(input).includes("calendar")
+      ? Response.json({ authorization_url: "https://accounts.google.com/o/oauth2/auth?state=calendar" })
+      : Response.json({ authorization_url: "https://accounts.google.com/o/oauth2/auth?state=classroom" }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  await expect(startCalendarImport(7)).resolves.toBe(
+    "https://accounts.google.com/o/oauth2/auth?state=calendar",
+  );
+  await expect(startClassroomImport()).resolves.toBe(
+    "https://accounts.google.com/o/oauth2/auth?state=classroom",
+  );
+  expect(fetchMock).toHaveBeenNthCalledWith(
+    2,
+    "/api/v1/integrations/google/classroom/start",
+    expect.objectContaining({ method: "POST", body: "{}" }),
+  );
 });
 
 it("maps both import previews from the wire format", async () => {
@@ -115,6 +139,35 @@ it("sends classroom selections in wire enums", async () => {
   });
 });
 
+it("maps calendar import results and discards an encoded import", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input).endsWith("/calendar")) {
+      return Response.json({
+        created: 2,
+        updated: 1,
+        unchanged: 3,
+        skipped_past: 4,
+        invalidated_future_session_ids: ["session-1"],
+      });
+    }
+    return new Response(null, { status: 204 });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  await expect(importCalendarItems("import/1", ["item-1", "item-2"])).resolves.toEqual({
+    created: 2,
+    updated: 1,
+    unchanged: 3,
+    skippedPast: 4,
+    invalidatedFutureSessionIds: ["session-1"],
+  });
+  await discardImport("import/1");
+  expect(fetchMock).toHaveBeenLastCalledWith(
+    "/api/v1/integrations/google/imports/import%2F1",
+    expect.objectContaining({ method: "DELETE" }),
+  );
+});
+
 it("maps the import status, including when Google was last checked", async () => {
   vi.stubGlobal(
     "fetch",
@@ -132,4 +185,8 @@ it("maps the import status, including when Google was last checked", async () =>
     calendarCheckedAt: null,
     classroomCheckedAt: "2026-09-12T08:00:00Z",
   });
+});
+
+it("rejects malformed authorization URLs", () => {
+  expect(() => trustedGoogleUrl("not a url")).toThrow();
 });
