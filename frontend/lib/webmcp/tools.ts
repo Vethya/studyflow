@@ -336,7 +336,7 @@ export function createStudyFlowTools(): WebMcpTool[] {
             scheduling.getPendingRevision(signal),
             scheduling.listEffortProgress(signal),
           ]);
-        const capacity = assessCapacity(allTasks, windows, periods, horizon);
+        const capacity = assessCapacity(allTasks, windows, periods, horizon, preferences.timezone);
 
         return result(
           {

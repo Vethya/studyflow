@@ -22,6 +22,8 @@ import {
 import { ApiError, googleImport } from "@/lib/api";
 import { describeError, useApi } from "@/hooks/use-api";
 import { CATEGORIES, PRIORITIES, type Category, type Priority } from "@/types/task";
+import { formatClock, formatDate, formatDateTime as formatZonedDateTime } from "@/lib/datetime";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
 
 type CalendarItem = googleImport.CalendarImportItem;
 type ClassroomItem = googleImport.ClassroomImportItem;
@@ -29,11 +31,10 @@ type ClassroomItem = googleImport.ClassroomImportItem;
 const DEFAULT_ESTIMATE_MINUTES = 60;
 const MAX_ESTIMATE_MINUTES = 7 * 24 * 60;
 
-function formatDateTime(value: string, allDay = false): string {
-  const date = new Date(value);
+function formatDateTime(value: string, timeZone: string, allDay = false): string {
   return allDay
-    ? date.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })
-    : date.toLocaleString(undefined, {
+    ? formatDate(value, timeZone, { weekday: "short", day: "numeric", month: "short" })
+    : formatZonedDateTime(value, timeZone, {
         weekday: "short",
         day: "numeric",
         month: "short",
@@ -42,19 +43,16 @@ function formatDateTime(value: string, allDay = false): string {
       });
 }
 
-function formatRange(item: CalendarItem): string {
+function formatRange(item: CalendarItem, timeZone: string): string {
   if (item.allDay) {
     // All-day events end at midnight after their last day.
     const lastDay = new Date(new Date(item.endsAt).getTime() - 1).toISOString();
-    const first = formatDateTime(item.startsAt, true);
-    const last = formatDateTime(lastDay, true);
+    const first = formatDateTime(item.startsAt, timeZone, true);
+    const last = formatDateTime(lastDay, timeZone, true);
     return first === last ? `${first}, all day` : `${first} – ${last}, all day`;
   }
-  const end = new Date(item.endsAt).toLocaleTimeString(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-  return `${formatDateTime(item.startsAt)} – ${end}`;
+  const end = formatClock(item.endsAt, timeZone);
+  return `${formatDateTime(item.startsAt, timeZone)} – ${end}`;
 }
 
 export default function GoogleImportReviewPage({
@@ -129,10 +127,8 @@ function useDiscard(importId: string, destination: string) {
 }
 
 function ExpiryNote({ expiresAt }: { expiresAt: string }) {
-  const time = new Date(expiresAt).toLocaleTimeString(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  const timeZone = useAccountTimezone();
+  const time = formatClock(expiresAt, timeZone);
   return (
     <p className="text-xs text-muted-foreground">
       This list is kept only until {time}. Nothing is added until you confirm.
@@ -151,6 +147,7 @@ function CalendarReview({
   items: CalendarItem[];
   expiresAt: string;
 }) {
+  const timeZone = useAccountTimezone();
   const selectable = useMemo(() => items.filter((item) => item.status !== "unchanged"), [items]);
   const [selected, setSelected] = useState<Set<string>>(
     () =>
@@ -277,7 +274,7 @@ function CalendarReview({
                   />
                   <Label htmlFor={checkboxId} className="min-w-0 flex-1 cursor-pointer flex-col items-start gap-1 font-normal">
                     <span className="block truncate font-medium">{item.title}</span>
-                    <span className="block text-xs text-muted-foreground">{formatRange(item)}</span>
+                    <span className="block text-xs text-muted-foreground">{formatRange(item, timeZone)}</span>
                   </Label>
                   {item.status === "unchanged" && <Badge variant="secondary">Already imported</Badge>}
                   {item.status === "changed" && <Badge variant="outline">Updated in Google</Badge>}
@@ -323,6 +320,7 @@ function ClassroomReview({
   items: ClassroomItem[];
   expiresAt: string;
 }) {
+  const timeZone = useAccountTimezone();
   const [drafts, setDrafts] = useState<Record<string, Draft>>(() =>
     Object.fromEntries(
       items.map((item) => [
@@ -450,7 +448,7 @@ function ClassroomReview({
                     <Label htmlFor={checkboxId} className="min-w-0 flex-1 cursor-pointer flex-col items-start gap-1 font-normal">
                       <span className="block font-medium">{item.title}</span>
                       <span className="block text-xs text-muted-foreground">
-                        {item.course ? `${item.course} · ` : ""}Due {formatDateTime(item.dueAt)}
+                        {item.course ? `${item.course} · ` : ""}Due {formatDateTime(item.dueAt, timeZone)}
                       </span>
                     </Label>
                     {disabled && <Badge variant="secondary">Already a task</Badge>}

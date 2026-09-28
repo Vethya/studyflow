@@ -37,6 +37,7 @@ import {
 } from "@/lib/api/adaptive-contract";
 import type { AdaptiveEstimate } from "@/types/progress";
 import { adaptiveEstimateKey } from "@/lib/swr-keys";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
 
 interface TaskFormDialogProps {
   open: boolean;
@@ -65,6 +66,7 @@ const EMPTY: TaskFormState = {
 };
 
 export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDialogProps) {
+  const timeZone = useAccountTimezone();
   const [form, setForm] = useState(EMPTY);
   const [initialForm, setInitialForm] = useState(EMPTY);
   const [discardOpen, setDiscardOpen] = useState(false);
@@ -99,7 +101,7 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
             title: task.title,
             category: task.category,
             priority: task.priority,
-            deadline: isoToLocalInput(task.deadline),
+            deadline: isoToLocalInput(task.deadline, timeZone),
             originalEstimate: task.originalEstimate,
             plannedSource: task.plannedSource,
             course: task.course ?? "",
@@ -207,7 +209,7 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
       title: form.title,
       category: form.category,
       priority: form.priority,
-      deadline: localInputToIso(form.deadline),
+      deadline: localInputToIso(form.deadline, timeZone),
       // The selected source tells the backend whether its adaptive snapshot
       // should drive planning. Original remains the student's entered value.
       originalEstimate: Number(form.originalEstimate),
@@ -322,7 +324,7 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
                 id="task-deadline"
                 type="datetime-local"
                 value={form.deadline}
-                min={nowLocalInput()}
+                min={nowLocalInput(timeZone)}
                 onChange={(e) => setForm({ ...form, deadline: e.target.value })}
                 disabled={isSaving}
                 required

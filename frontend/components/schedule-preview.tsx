@@ -9,7 +9,15 @@ import { DetailDrawer } from "@/components/detail-drawer";
 import { OverloadWarningList } from "@/components/overload-warning-list";
 import { UnscheduledWorkList } from "@/components/unscheduled-work-list";
 import { DAY_NAMES_SHORT, formatDuration } from "@/lib/constants";
-import { formatClock } from "@/lib/datetime";
+import {
+  addZonedDays,
+  dayKey,
+  formatClock,
+  formatDate,
+  inTimeZone,
+  minutesSinceMidnight,
+  startOfZonedDay,
+} from "@/lib/datetime";
 import { scheduling } from "@/lib/api";
 import { expandUnavailablePeriods, expandWindows, subtractPeriods } from "@/lib/capacity";
 import { describeError, useApi } from "@/hooks/use-api";
@@ -18,37 +26,20 @@ import { GridLegend, WeekGrid, type GridBlock, type GridColumn } from "@/compone
 import type { AvailabilityWindow, UnavailablePeriod } from "@/types/availability";
 import type { ScheduleProposal, ScheduleScenario } from "@/types/schedule";
 import type { SessionOutcome, StudySession } from "@/types/session";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
 
 const DEFAULT_RANGE = { start: 8, end: 22 };
 
-function dayKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function startOfWeek(date: Date): Date {
-  const start = new Date(date);
-  start.setHours(0, 0, 0, 0);
+function startOfWeek(date: Date, timeZone: string): Date {
+  const start = startOfZonedDay(date, timeZone);
   start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
   return start;
 }
 
-function addCalendarDays(date: Date, days: number): Date {
-  const result = new Date(date);
-  result.setDate(result.getDate() + days);
-  return result;
-}
-
-function minutesSinceMidnight(date: Date): number {
-  return date.getHours() * 60 + date.getMinutes();
-}
-
-function formatWeekRange(start: Date): string {
-  const end = addCalendarDays(start, 6);
-  const startLabel = start.toLocaleDateString(undefined, { day: "numeric", month: "short" });
-  const endLabel = end.toLocaleDateString(undefined, {
+function formatWeekRange(start: Date, timeZone: string): string {
+  const end = addZonedDays(start, 6, timeZone);
+  const startLabel = formatDate(start, timeZone, { day: "numeric", month: "short" });
+  const endLabel = formatDate(end, timeZone, {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -98,6 +89,7 @@ export function SchedulePreview({
   unavailablePeriods?: UnavailablePeriod[];
   existingSessions?: StudySession[];
 }) {
+  const timeZone = useAccountTimezone();
   const [busy, setBusy] = React.useState<"accept" | "reject" | null>(null);
 
   const loadActiveSessions = React.useCallback(
@@ -239,14 +231,14 @@ export function SchedulePreview({
                   <span className="font-medium text-foreground">Upcoming sessions being replaced:</span>
                   <ul className="mt-1 space-y-1 pl-3 list-disc">
                     {activeUpcoming.slice(0, 5).map((s) => {
-                      const start = new Date(s.startTime);
-                      const dateStr = `${DAY_NAMES_SHORT[start.getDay()]} ${start.getDate()} ${start.toLocaleDateString(undefined, { month: "short" })}`;
+                      const start = inTimeZone(s.startTime, timeZone);
+                      const dateStr = `${DAY_NAMES_SHORT[start.getDay()]} ${start.getDate()} ${formatDate(start, timeZone, { month: "short" })}`;
                       return (
                         <li key={s.id}>
                           <span className="font-medium text-foreground">{s.taskTitle ?? "Scheduled study"}</span>
                           {" — "}
                           <span>
-                            {dateStr}, {formatClock(start)} ({formatDuration(s.plannedDuration)})
+                            {dateStr}, {formatClock(start, timeZone)} ({formatDuration(s.plannedDuration)})
                           </span>
                         </li>
                       );
@@ -350,6 +342,7 @@ function ProposalCalendar({
   availabilityWindows?: AvailabilityWindow[];
   unavailablePeriods?: UnavailablePeriod[];
 }) {
+  const timeZone = useAccountTimezone();
   const allSessions: CalendarSessionItem[] = React.useMemo(() => {
     const list: CalendarSessionItem[] = [];
 
@@ -400,53 +393,54 @@ function ProposalCalendar({
   }, [isRecoveryProposal, proposedSessions, recordedSessions]);
 
   const earliestWeek = React.useMemo(() => {
-    if (allSessions.length === 0) return startOfWeek(new Date());
-    const earliestSessionWeek = startOfWeek(new Date(allSessions[0].startTime));
-    const currentWeek = startOfWeek(new Date());
+    if (allSessions.length === 0) return startOfWeek(new Date(), timeZone);
+    const earliestSessionWeek = startOfWeek(new Date(allSessions[0].startTime), timeZone);
+    const currentWeek = startOfWeek(new Date(), timeZone);
     return earliestSessionWeek.getTime() < currentWeek.getTime()
       ? earliestSessionWeek
       : currentWeek;
-  }, [allSessions]);
+  }, [allSessions, timeZone]);
 
   const defaultAnchor = React.useMemo(() => {
-    if (allSessions.length === 0) return startOfWeek(new Date());
-    const currentWeek = startOfWeek(new Date());
+    if (allSessions.length === 0) return startOfWeek(new Date(), timeZone);
+    const currentWeek = startOfWeek(new Date(), timeZone);
     const hasCurrentWeek = allSessions.some(
-      (s) => startOfWeek(new Date(s.startTime)).getTime() === currentWeek.getTime(),
+      (s) => startOfWeek(new Date(s.startTime), timeZone).getTime() === currentWeek.getTime(),
     );
     if (hasCurrentWeek) return currentWeek;
     if (proposedSessions.length > 0) {
-      return startOfWeek(new Date(proposedSessions[0].startTime));
+      return startOfWeek(new Date(proposedSessions[0].startTime), timeZone);
     }
     return currentWeek;
-  }, [allSessions, proposedSessions]);
+  }, [allSessions, proposedSessions, timeZone]);
 
   const lastWeek = React.useMemo(() => {
-    if (allSessions.length === 0) return startOfWeek(new Date());
+    if (allSessions.length === 0) return startOfWeek(new Date(), timeZone);
     const latestSessionWeek = startOfWeek(
       new Date(allSessions[allSessions.length - 1].startTime),
+      timeZone,
     );
-    const currentWeek = startOfWeek(new Date());
+    const currentWeek = startOfWeek(new Date(), timeZone);
     return latestSessionWeek.getTime() > currentWeek.getTime()
       ? latestSessionWeek
       : currentWeek;
-  }, [allSessions]);
+  }, [allSessions, timeZone]);
 
   const [anchor, setAnchor] = React.useState(defaultAnchor);
 
   const days = React.useMemo(
-    () => Array.from({ length: 7 }, (_, index) => addCalendarDays(anchor, index)),
-    [anchor],
+    () => Array.from({ length: 7 }, (_, index) => addZonedDays(anchor, index, timeZone)),
+    [anchor, timeZone],
   );
   const rangeEnd = React.useMemo(
-    () => addCalendarDays(anchor, 7),
-    [anchor],
+    () => addZonedDays(anchor, 7, timeZone),
+    [anchor, timeZone],
   );
-  const visibleDays = React.useMemo(() => new Set(days.map(dayKey)), [days]);
+  const visibleDays = React.useMemo(() => new Set(days.map((day) => dayKey(day, timeZone))), [days, timeZone]);
   const visibleSessions = React.useMemo(
     () =>
-      allSessions.filter((session) => visibleDays.has(dayKey(new Date(session.startTime)))),
-    [allSessions, visibleDays],
+      allSessions.filter((session) => visibleDays.has(dayKey(new Date(session.startTime), timeZone))),
+    [allSessions, visibleDays, timeZone],
   );
   const visibleProposalStates = React.useMemo(() => {
     const states = new Set<"proposed" | "missed" | "delayed" | "completed">();
@@ -461,14 +455,14 @@ function ProposalCalendar({
   const freeIntervals = React.useMemo(
     () =>
       subtractPeriods(
-        expandWindows(availabilityWindows ?? [], anchor, rangeEnd),
+        expandWindows(availabilityWindows ?? [], anchor, rangeEnd, timeZone),
         unavailablePeriods ?? [],
       ),
-    [availabilityWindows, unavailablePeriods, anchor, rangeEnd],
+    [availabilityWindows, unavailablePeriods, anchor, rangeEnd, timeZone],
   );
   const blockedIntervals = React.useMemo(
-    () => expandUnavailablePeriods(unavailablePeriods ?? [], anchor, rangeEnd),
-    [unavailablePeriods, anchor, rangeEnd],
+    () => expandUnavailablePeriods(unavailablePeriods ?? [], anchor, rangeEnd, timeZone),
+    [unavailablePeriods, anchor, rangeEnd, timeZone],
   );
   const hourRange = React.useMemo(() => {
     const intervals = [
@@ -484,8 +478,8 @@ function ProposalCalendar({
     let min = 24;
     let max = 0;
     for (const interval of intervals) {
-      const start = interval.start;
-      const end = interval.end;
+      const start = inTimeZone(interval.start, timeZone);
+      const end = inTimeZone(interval.end, timeZone);
       min = Math.min(min, start.getHours());
       max = Math.max(max, end.getHours() + 1);
     }
@@ -493,16 +487,16 @@ function ProposalCalendar({
       start: Math.max(0, min - 1),
       end: Math.min(24, Math.max(max + 1, min + 6)),
     };
-  }, [visibleSessions, freeIntervals, blockedIntervals]);
+  }, [visibleSessions, freeIntervals, blockedIntervals, timeZone]);
   const columns: GridColumn[] = React.useMemo(() => {
-    const today = dayKey(new Date());
+    const today = dayKey(new Date(), timeZone);
     return days.map((day) => ({
-      key: dayKey(day),
-      label: DAY_NAMES_SHORT[day.getDay()],
-      sublabel: String(day.getDate()),
-      isToday: dayKey(day) === today,
+      key: dayKey(day, timeZone),
+      label: DAY_NAMES_SHORT[inTimeZone(day, timeZone).getDay()],
+      sublabel: String(inTimeZone(day, timeZone).getDate()),
+      isToday: dayKey(day, timeZone) === today,
     }));
-  }, [days]);
+  }, [days, timeZone]);
   const blocks: GridBlock[] = React.useMemo(
     () => {
       const out: GridBlock[] = [];
@@ -514,16 +508,16 @@ function ProposalCalendar({
       ) => {
         intervals.forEach((interval, index) => {
           for (const day of days) {
-            const dayStart = new Date(day);
-            const dayEnd = addCalendarDays(dayStart, 1);
+            const dayStart = startOfZonedDay(day, timeZone);
+            const dayEnd = addZonedDays(dayStart, 1, timeZone);
             const start = interval.start < dayStart ? dayStart : interval.start;
             const end = interval.end > dayEnd ? dayEnd : interval.end;
             if (end <= start) continue;
             out.push({
-              id: `${prefix}-${index}-${dayKey(day)}`,
-              columnKey: dayKey(day),
-              start: minutesSinceMidnight(start),
-              end: minutesSinceMidnight(end) || 1440,
+              id: `${prefix}-${index}-${dayKey(day, timeZone)}`,
+              columnKey: dayKey(day, timeZone),
+              start: minutesSinceMidnight(start, timeZone),
+              end: minutesSinceMidnight(end, timeZone) || 1440,
               variant,
               title: variant === "blocked" ? "Blocked time" : "Free to study",
             });
@@ -550,26 +544,26 @@ function ProposalCalendar({
 
         out.push({
           id: session.id,
-          columnKey: dayKey(start),
-          start: minutesSinceMidnight(start),
-          end: minutesSinceMidnight(end) || 1440,
+          columnKey: dayKey(start, timeZone),
+          start: minutesSinceMidnight(start, timeZone),
+          end: minutesSinceMidnight(end, timeZone) || 1440,
           variant: "session",
           label: session.taskTitle,
           badge: session.badge,
           tone: session.tone,
           settled: session.outcome === "Completed",
-          meta: `${formatClock(start)}–${formatClock(end)}`,
-          title: `${session.taskTitle}${outcomeDetail} · ${formatClock(start)}–${formatClock(end)} · ${formatDuration(session.plannedDuration)}`,
+          meta: `${formatClock(start, timeZone)}–${formatClock(end, timeZone)}`,
+          title: `${session.taskTitle}${outcomeDetail} · ${formatClock(start, timeZone)}–${formatClock(end, timeZone)} · ${formatDuration(session.plannedDuration)}`,
         });
       }
 
       return out;
     },
-    [visibleSessions, freeIntervals, blockedIntervals, days, isRecoveryProposal],
+    [visibleSessions, freeIntervals, blockedIntervals, days, isRecoveryProposal, timeZone],
   );
   const now = new Date();
-  const nowMarker = visibleDays.has(dayKey(now))
-    ? { columnKey: dayKey(now), minutes: minutesSinceMidnight(now) }
+  const nowMarker = visibleDays.has(dayKey(now, timeZone))
+    ? { columnKey: dayKey(now, timeZone), minutes: minutesSinceMidnight(now, timeZone) }
     : undefined;
   const canGoBack = anchor.getTime() > earliestWeek.getTime();
   const canGoForward = anchor.getTime() < lastWeek.getTime();
@@ -578,14 +572,14 @@ function ProposalCalendar({
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3">
         <span className="text-xs tabular-nums text-muted-foreground">
-          {formatWeekRange(anchor)}
+          {formatWeekRange(anchor, timeZone)}
         </span>
         <div className="flex items-center rounded-lg border bg-card">
           <Button
             variant="ghost"
             size="icon-sm"
             className="rounded-e-none"
-            onClick={() => setAnchor(addCalendarDays(anchor, -7))}
+            onClick={() => setAnchor(addZonedDays(anchor, -7, timeZone))}
             disabled={!canGoBack}
             aria-label="Previous week"
           >
@@ -595,7 +589,7 @@ function ProposalCalendar({
             variant="ghost"
             size="icon-sm"
             className="rounded-s-none"
-            onClick={() => setAnchor(addCalendarDays(anchor, 7))}
+            onClick={() => setAnchor(addZonedDays(anchor, 7, timeZone))}
             disabled={!canGoForward}
             aria-label="Next week"
           >

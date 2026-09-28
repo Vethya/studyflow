@@ -8,7 +8,7 @@ import { Callout } from "@/components/ui/callout";
 import { CheckCircle2, Clock, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDuration, CATEGORY_CONFIG, STATUS_CONFIG, DAY_NAMES_SHORT } from "@/lib/constants";
-import { formatClock } from "@/lib/datetime";
+import { formatClock, formatDate, inTimeZone } from "@/lib/datetime";
 import { scheduling, tasks as tasksApi } from "@/lib/api";
 import { describeError, useApi } from "@/hooks/use-api";
 import {
@@ -22,6 +22,7 @@ import {
 import type { EffortProgress } from "@/types/progress";
 import type { StudySession } from "@/types/session";
 import { activeScheduleKey, effortProgressKey, SWR_KEYS } from "@/lib/swr-keys";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
 
 /**
  * Effort progress = time worked ÷ (time worked + estimated time remaining).
@@ -274,7 +275,8 @@ const OUTCOME_STYLE = {
 } as const;
 
 function HistoryRow({ session }: { session: StudySession }) {
-  const start = new Date(session.startTime);
+  const timeZone = useAccountTimezone();
+  const start = inTimeZone(session.startTime, timeZone);
   const style = OUTCOME_STYLE[session.outcome!];
 
   return (
@@ -294,7 +296,7 @@ function HistoryRow({ session }: { session: StudySession }) {
       <div className="flex items-baseline gap-x-3 text-xs text-muted-foreground sm:contents">
         <span className="shrink-0 tabular-nums sm:order-1">
           {DAY_NAMES_SHORT[start.getDay()]} {start.getDate()}{" "}
-          {start.toLocaleDateString(undefined, { month: "short" })} · {formatClock(start)}
+          {formatDate(start, timeZone, { month: "short" })} · {formatClock(start, timeZone)}
         </span>
         <span className={cn("flex shrink-0 items-center gap-1.5 sm:order-3", style.tone)}>
           <style.icon className="size-3.5" aria-hidden />

@@ -5,17 +5,15 @@
  * availability windows, one-off unavailable periods, and the planned duration
  * of tasks that are still open. Nothing is estimated or invented.
  *
- * Times are computed in the browser's local zone. Availability windows are
- * stored as local wall-clock times against the account's configured timezone,
- * so a student whose browser and account disagree will see figures shifted by
- * the offset between them — the timezone settings page surfaces that mismatch.
+ * Availability windows are wall-clock values in the account timezone. Every
+ * calendar boundary below must therefore use that timezone, never the device.
  */
 
 import type { AvailabilityWindow, UnavailablePeriod } from "@/types/availability";
 import type { AcademicTask } from "@/types/task";
+import { addZonedDays, dayKey as zonedDayKey, inTimeZone, startOfZonedDay } from "@/lib/datetime";
 
 const MINUTE = 60_000;
-const DAY = 24 * 60 * MINUTE;
 
 export interface Interval {
   start: Date;
@@ -35,11 +33,9 @@ export function totalMinutes(intervals: Interval[]): number {
   return intervals.reduce((sum, interval) => sum + intervalMinutes(interval), 0);
 }
 
-/** Midnight at the start of the day `date` falls in. */
-export function startOfDay(date: Date): Date {
-  const copy = new Date(date);
-  copy.setHours(0, 0, 0, 0);
-  return copy;
+/** Midnight in the account timezone at the start of `date`'s calendar day. */
+export function startOfDay(date: Date, timeZone: string): Date {
+  return startOfZonedDay(date, timeZone);
 }
 
 /**
@@ -51,13 +47,14 @@ export function expandWindows(
   windows: AvailabilityWindow[],
   from: Date,
   to: Date,
+  timeZone: string,
 ): Interval[] {
   const intervals: Interval[] = [];
   // Start a day early so a window that began yesterday and crosses midnight
   // still contributes its portion of `from`.
-  const first = startOfDay(new Date(from.getTime() - DAY));
+  const first = addZonedDays(startOfDay(from, timeZone), -1, timeZone);
 
-  for (let day = new Date(first); day < to; day = new Date(day.getTime() + DAY)) {
+  for (let day = first; day < to; day = addZonedDays(day, 1, timeZone)) {
     for (const window of windows) {
       if (day.getDay() !== window.dayOfWeek) continue;
 
@@ -65,10 +62,11 @@ export function expandWindows(
       const endMinutes = minutesOf(window.endTime);
       const spansMidnight = endMinutes <= startMinutes;
 
-      const start = new Date(day.getTime() + startMinutes * MINUTE);
-      const end = new Date(
-        day.getTime() + (spansMidnight ? endMinutes + 24 * 60 : endMinutes) * MINUTE,
-      );
+      const start = inTimeZone(day, timeZone);
+      start.setHours(Math.floor(startMinutes / 60), startMinutes % 60, 0, 0);
+      const end = inTimeZone(day, timeZone);
+      end.setHours(Math.floor(endMinutes / 60), endMinutes % 60, 0, 0);
+      if (spansMidnight) end.setDate(end.getDate() + 1);
 
       // Clip to the requested range.
       const clipped = {
@@ -114,6 +112,7 @@ export function expandUnavailablePeriods(
   periods: UnavailablePeriod[],
   from: Date,
   to: Date,
+  timeZone: string,
 ): Interval[] {
   const intervals: Interval[] = [];
 
@@ -125,11 +124,11 @@ export function expandUnavailablePeriods(
     if (end <= start) continue;
 
     for (
-      let day = startOfDay(start);
+      let day = startOfDay(start, timeZone);
       day < end;
-      day = new Date(day.getTime() + DAY)
+      day = addZonedDays(day, 1, timeZone)
     ) {
-      const dayEnd = new Date(day.getTime() + DAY);
+      const dayEnd = addZonedDays(day, 1, timeZone);
       const clippedStart = start > day ? start : day;
       const clippedEnd = end < dayEnd ? end : dayEnd;
       if (clippedEnd > clippedStart) {
@@ -157,8 +156,9 @@ export function availableMinutes(
   periods: UnavailablePeriod[],
   from: Date,
   to: Date,
+  timeZone: string,
 ): number {
-  return totalMinutes(subtractPeriods(expandWindows(windows, from, to), periods));
+  return totalMinutes(subtractPeriods(expandWindows(windows, from, to, timeZone), periods));
 }
 
 export interface CapacityVerdict {
@@ -189,9 +189,10 @@ export function assessCapacity(
   windows: AvailabilityWindow[],
   periods: UnavailablePeriod[],
   days: number,
+  timeZone: string,
   now: Date = new Date(),
 ): CapacityVerdict {
-  const to = new Date(now.getTime() + days * DAY);
+  const to = addZonedDays(now, days, timeZone);
 
   const due = tasks.filter((task) => {
     if (!OPEN_STATUSES.has(task.status)) return false;
@@ -199,7 +200,7 @@ export function assessCapacity(
     return new Date(task.deadline) < to;
   });
 
-  const available = availableMinutes(windows, periods, now, to);
+  const available = availableMinutes(windows, periods, now, to, timeZone);
   const committed = due.reduce((sum, task) => sum + task.remainingDuration, 0);
 
   return {
@@ -230,12 +231,13 @@ export function minutesByDay(
   periods: UnavailablePeriod[],
   from: Date,
   to: Date,
+  timeZone: string,
 ): Map<string, number> {
   const byDay = new Map<string, number>();
-  for (const interval of subtractPeriods(expandWindows(windows, from, to), periods)) {
+  for (const interval of subtractPeriods(expandWindows(windows, from, to, timeZone), periods)) {
     // Attribute an interval to the day it starts on; windows that cross
     // midnight are rare and the whole block belongs to that evening's study.
-    const key = dayKey(interval.start);
+    const key = dayKey(interval.start, timeZone);
     byDay.set(key, (byDay.get(key) ?? 0) + intervalMinutes(interval));
   }
   return byDay;
@@ -280,6 +282,7 @@ export function analyseFeasibility(
   tasks: AcademicTask[],
   windows: AvailabilityWindow[],
   periods: UnavailablePeriod[],
+  timeZone: string,
   now: Date = new Date(),
 ): TaskFeasibility[] {
   const open = tasks
@@ -291,7 +294,7 @@ export function analyseFeasibility(
     const deadline = new Date(task.deadline);
     // An overdue deadline leaves no runway at all.
     const capacity =
-      deadline <= now ? 0 : availableMinutes(windows, periods, now, deadline);
+      deadline <= now ? 0 : availableMinutes(windows, periods, now, deadline, timeZone);
     const free = Math.max(0, capacity - consumed);
     const required = task.remainingDuration;
     consumed += required;
@@ -312,9 +315,6 @@ export function analyseFeasibility(
 }
 
 /** Local-date key, `YYYY-MM-DD`. Not UTC — these are wall-clock days. */
-export function dayKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+export function dayKey(date: Date, timeZone: string): string {
+  return zonedDayKey(date, timeZone);
 }

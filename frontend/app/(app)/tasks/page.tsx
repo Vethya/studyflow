@@ -51,6 +51,7 @@ import { localInputToIso } from "@/lib/datetime";
 import { CATEGORIES, PRIORITIES, TASK_STATUSES } from "@/types/task";
 import type { AcademicTask, Category, Priority, TaskStatus } from "@/types/task";
 import { taskListKey } from "@/lib/swr-keys";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
 
 const ANY = "any";
 
@@ -65,6 +66,7 @@ const SORT_LABELS: Record<SortKey, string> = {
 };
 
 function TasksContent() {
+  const timeZone = useAccountTimezone();
   const searchParams = useSearchParams();
   // Everything except the title search is a real backend query parameter.
   const [status, setStatus] = useState<TaskStatus | null>(null);
@@ -92,9 +94,9 @@ function TasksContent() {
       category: category ?? undefined,
       priority: priority ?? undefined,
       course: appliedCourse || undefined,
-      deadlineTo: dueBefore ? localInputToIso(dueBefore) : undefined,
+      deadlineTo: dueBefore ? localInputToIso(dueBefore, timeZone) : undefined,
     }),
-    [status, category, priority, appliedCourse, dueBefore],
+    [status, category, priority, appliedCourse, dueBefore, timeZone],
   );
   const load = useCallback(
     (signal: AbortSignal) => tasksApi.listTasks(filters, signal),
@@ -619,9 +621,10 @@ function TaskRow({
   onFinish: () => void;
   onDelete: () => void;
 }) {
+  const timeZone = useAccountTimezone();
   const category = CATEGORY_CONFIG[task.category];
   const statusConfig = STATUS_CONFIG[task.status];
-  const due = describeDeadline(task.deadline);
+  const due = describeDeadline(task.deadline, timeZone);
 
   return (
     <li className="group relative py-3 pl-6 pr-14 transition-colors hover:bg-muted/40 lg:pr-6">

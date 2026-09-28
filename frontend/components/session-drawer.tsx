@@ -8,10 +8,11 @@ import { Badge } from "@/components/ui/badge";
 import { Callout } from "@/components/ui/callout";
 import { DetailDrawer } from "@/components/detail-drawer";
 import { formatDuration, CATEGORY_CONFIG } from "@/lib/constants";
-import { describeDeadline, formatClock } from "@/lib/datetime";
+import { describeDeadline, formatClock, formatDate } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import type { StudySession } from "@/types/session";
 import type { AcademicTask } from "@/types/task";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
 
 const OUTCOME_STYLE = {
   Completed: { label: "Finished", icon: CheckCircle2, tone: "text-surplus" },
@@ -46,6 +47,7 @@ export function SessionDrawer({
   onDeleteTask: () => void;
   onRecordOutcome: () => void;
 }) {
+  const timeZone = useAccountTimezone();
   // Keep the dialog root mounted before the first session is selected. If the
   // root mounts only when open=true, Base UI has no opening transition phase.
   if (!session) {
@@ -60,7 +62,7 @@ export function SessionDrawer({
   const end = new Date(session.endTime);
   const isPast = end < new Date();
   const outcome = session.outcome ? OUTCOME_STYLE[session.outcome] : null;
-  const due = task ? describeDeadline(task.deadline) : null;
+  const due = task ? describeDeadline(task.deadline, timeZone) : null;
 
   return (
     <DetailDrawer
@@ -70,13 +72,13 @@ export function SessionDrawer({
       title={session.taskTitle}
       description={
         <>
-          {start.toLocaleDateString(undefined, {
+          {formatDate(start, timeZone, {
             weekday: "long",
             day: "numeric",
             month: "long",
           })}
           {" · "}
-          {formatClock(start)}–{formatClock(end)}
+          {formatClock(start, timeZone)}–{formatClock(end, timeZone)}
         </>
       }
       footer={
@@ -144,7 +146,7 @@ export function SessionDrawer({
           {task && due && (
             <Fact
               label="Task deadline"
-              value={new Date(task.deadline).toLocaleDateString(undefined, {
+              value={formatDate(task.deadline, timeZone, {
                 day: "numeric",
                 month: "short",
               })}

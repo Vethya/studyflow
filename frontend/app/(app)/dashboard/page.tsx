@@ -22,7 +22,7 @@ import { ShortfallCard } from "@/components/shortfall-card";
 import { RecordOutcomeDialog } from "@/components/record-outcome-dialog";
 import { PendingPlanBanner, SchedulePreview } from "@/components/schedule-preview";
 import { UnscheduledWorkList } from "@/components/unscheduled-work-list";
-import { formatClock } from "@/lib/datetime";
+import { addZonedDays, dayKey, formatClock, formatDate } from "@/lib/datetime";
 import { applyRecordedOutcome } from "@/lib/outcome-ui";
 import { EmptyState, Figure, PageHeader, PageShell } from "@/components/page-kit";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -45,6 +45,7 @@ import {
 import { describeError, useApi } from "@/hooks/use-api";
 import { useSession } from "@/hooks/use-session";
 import { useNow } from "@/hooks/use-now";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
 import { activeScheduleKey, SWR_KEYS } from "@/lib/swr-keys";
 import type { AcademicTask } from "@/types/task";
 import type { StudySession } from "@/types/session";
@@ -57,6 +58,7 @@ const HORIZONS = [
 ];
 
 export default function DashboardPage() {
+  const timeZone = useAccountTimezone();
   const { account } = useSession();
   const now = useNow();
   const [horizon, setHorizon] = useState(7);
@@ -93,23 +95,23 @@ export default function DashboardPage() {
   const hasWindows = allWindows.length > 0;
 
   const verdict = useMemo(
-    () => assessCapacity(allTasks, allWindows, allPeriods, horizon),
-    [allTasks, allWindows, allPeriods, horizon],
+    () => assessCapacity(allTasks, allWindows, allPeriods, horizon, timeZone),
+    [allTasks, allWindows, allPeriods, horizon, timeZone],
   );
 
   // An overload explanation is per task, not one global figure — a student can
   // be comfortably under capacity overall and still have one task that cannot
   // fit before its own deadline.
   const feasibility = useMemo(
-    () => analyseFeasibility(allTasks, allWindows, allPeriods),
-    [allTasks, allWindows, allPeriods],
+    () => analyseFeasibility(allTasks, allWindows, allPeriods, timeZone),
+    [allTasks, allWindows, allPeriods, timeZone],
   );
   const overloaded = useMemo(() => feasibility.filter((f) => f.isOverloaded), [feasibility]);
 
   const todayRemaining = useMemo(() => {
-    const endOfDay = new Date(startOfDay(now).getTime() + 24 * 60 * 60_000);
-    return availableMinutes(allWindows, allPeriods, now, endOfDay);
-  }, [allWindows, allPeriods, now]);
+    const endOfDay = addZonedDays(startOfDay(now, timeZone), 1, timeZone);
+    return availableMinutes(allWindows, allPeriods, now, endOfDay, timeZone);
+  }, [allWindows, allPeriods, now, timeZone]);
 
   const openWork = useMemo(
     () => feasibility.reduce((sum, f) => sum + f.requiredMinutes, 0),
@@ -142,23 +144,23 @@ export default function DashboardPage() {
 
   /** Study minutes still scheduled between now and midnight (SPEC §17.2). */
   const workloadToday = useMemo(() => {
-    const endOfDay = new Date(startOfDay(now).getTime() + 24 * 60 * 60_000);
+    const endOfDay = addZonedDays(startOfDay(now, timeZone), 1, timeZone);
     return sessions
       .filter((session) => {
         const start = new Date(session.startTime);
         return !session.outcome && start >= now && start < endOfDay;
       })
       .reduce((sum, session) => sum + session.plannedDuration, 0);
-  }, [sessions, now]);
+  }, [sessions, now, timeZone]);
 
   /**
    * Weekly effort progress: minutes worked this week against minutes planned
    * for it. Effort, not content completion (SPEC §13).
    */
   const weeklyEffort = useMemo(() => {
-    const start = startOfDay(now);
+    const start = startOfDay(now, timeZone);
     start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
-    const end = new Date(start.getTime() + 7 * 24 * 60 * 60_000);
+    const end = addZonedDays(start, 7, timeZone);
     const week = sessions.filter((session) => {
       const at = new Date(session.startTime);
       return at >= start && at < end;
@@ -166,7 +168,7 @@ export default function DashboardPage() {
     const planned = week.reduce((sum, session) => sum + session.plannedDuration, 0);
     const worked = week.reduce((sum, session) => sum + (session.actualDuration ?? 0), 0);
     return { planned, worked, percent: planned > 0 ? Math.round((worked / planned) * 100) : 0 };
-  }, [sessions, now]);
+  }, [sessions, now, timeZone]);
 
   /**
    * Unscheduled Work in the SPEC §5.4 sense: open work with no valid session.
@@ -555,6 +557,7 @@ function NextSession({
   workloadToday: number;
   hasSessions: boolean;
 }) {
+  const timeZone = useAccountTimezone();
   if (isLoading) return <Skeleton className="h-44 w-full rounded-xl" />;
 
   if (!session) {
@@ -578,14 +581,14 @@ function NextSession({
   }
 
   const start = new Date(session.startTime);
-  const today = start.toDateString() === new Date().toDateString();
+  const today = dayKey(start, timeZone) === dayKey(new Date(), timeZone);
   const when = today
-    ? `Today at ${formatClock(start)}`
-    : `${start.toLocaleDateString(undefined, {
+    ? `Today at ${formatClock(start, timeZone)}`
+    : `${formatDate(start, timeZone, {
         weekday: "long",
         day: "numeric",
         month: "short",
-      })} at ${formatClock(start)}`;
+      })} at ${formatClock(start, timeZone)}`;
 
   return (
     <Card>
@@ -649,7 +652,8 @@ function Verdict({ balance, count, days }: { balance: number; count: number; day
 }
 
 function TaskRow({ task }: { task: AcademicTask }) {
-  const due = describeDeadline(task.deadline);
+  const timeZone = useAccountTimezone();
+  const due = describeDeadline(task.deadline, timeZone);
   const category = CATEGORY_CONFIG[task.category];
 
   return (

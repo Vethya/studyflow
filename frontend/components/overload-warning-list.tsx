@@ -6,19 +6,18 @@ import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { formatDuration } from "@/lib/constants";
 import type { OverloadWarning, RelevantUnavailablePeriod } from "@/types/schedule";
+import { formatDateTime } from "@/lib/datetime";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
 
-function formatDateTime(value: string): string {
-  return new Date(value).toLocaleString(undefined, {
+function describePeriod(period: RelevantUnavailablePeriod, timeZone: string): string {
+  const options: Intl.DateTimeFormatOptions = {
     weekday: "short",
     day: "numeric",
     month: "short",
     hour: "numeric",
     minute: "2-digit",
-  });
-}
-
-function describePeriod(period: RelevantUnavailablePeriod): string {
-  const range = `${formatDateTime(period.startsAt)} – ${formatDateTime(period.endsAt)}`;
+  };
+  const range = `${formatDateTime(period.startsAt, timeZone, options)} – ${formatDateTime(period.endsAt, timeZone, options)}`;
   return period.reason ? `${period.reason} (${range})` : range;
 }
 
@@ -29,6 +28,7 @@ function describePeriod(period: RelevantUnavailablePeriod): string {
  * controls. StudyFlow never applies a remedy itself, so both are links out.
  */
 export function OverloadWarningList({ warnings }: { warnings: OverloadWarning[] }) {
+  const timeZone = useAccountTimezone();
   return (
     <ul className="space-y-2" aria-label="Tasks that do not fit">
       {warnings.map((warning) => (
@@ -76,7 +76,15 @@ export function OverloadWarningList({ warnings }: { warnings: OverloadWarning[] 
             <dl className="mt-0.5 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
               <div>
                 <dt>Deadline</dt>
-                <dd className="font-medium text-foreground">{formatDateTime(warning.deadline)}</dd>
+                <dd className="font-medium text-foreground">
+                  {formatDateTime(warning.deadline, timeZone, {
+                    weekday: "short",
+                    day: "numeric",
+                    month: "short",
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
+                </dd>
               </div>
               <div>
                 <dt>Needs</dt>
@@ -105,7 +113,7 @@ export function OverloadWarningList({ warnings }: { warnings: OverloadWarning[] 
                   <p>Blocked time before this deadline:</p>
                   <ul className="mt-0.5 list-disc ps-4">
                     {warning.relevantUnavailablePeriods.map((period) => (
-                      <li key={period.id}>{describePeriod(period)}</li>
+                      <li key={period.id}>{describePeriod(period, timeZone)}</li>
                     ))}
                   </ul>
                 </div>

@@ -30,6 +30,7 @@ import {
   type StudySession,
 } from "@/types/session";
 import type { OutcomeResult } from "@/lib/api";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
 
 const OPTIONS: {
   value: SessionOutcome;
@@ -68,6 +69,7 @@ export function RecordOutcomeDialog({
   onOpenChange: (open: boolean) => void;
   onRecorded: (result: OutcomeResult) => void;
 }) {
+  const timeZone = useAccountTimezone();
   const [outcome, setOutcome] = React.useState<SessionOutcome>("Missed");
   const [worked, setWorked] = React.useState("");
   const [remaining, setRemaining] = React.useState("");
@@ -192,8 +194,8 @@ export function RecordOutcomeDialog({
           <DialogHeader>
             <DialogTitle>How did it go?</DialogTitle>
             <DialogDescription>
-              {session.taskTitle} · {formatClock(session.startTime)}–
-              {formatClock(session.endTime)} · {formatDuration(planned)} planned
+              {session.taskTitle} · {formatClock(session.startTime, timeZone)}–
+              {formatClock(session.endTime, timeZone)} · {formatDuration(planned)} planned
             </DialogDescription>
           </DialogHeader>
 

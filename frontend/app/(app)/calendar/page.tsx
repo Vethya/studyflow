@@ -20,7 +20,15 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DAY_NAMES_SHORT, formatDuration, CATEGORY_CONFIG } from "@/lib/constants";
-import { describeDeadline, formatClock } from "@/lib/datetime";
+import {
+  addZonedDays,
+  describeDeadline,
+  formatClock,
+  formatDate,
+  inTimeZone,
+  minutesSinceMidnight,
+  zonedCalendarDate,
+} from "@/lib/datetime";
 import { applyRecordedOutcome } from "@/lib/outcome-ui";
 import {
   dayKey,
@@ -58,27 +66,21 @@ import type { AcademicTask } from "@/types/task";
 import type { StudySession } from "@/types/session";
 import type { ScheduleProposal } from "@/types/schedule";
 import { activeScheduleKey, SWR_KEYS } from "@/lib/swr-keys";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
 
 const DEFAULT_RANGE = { start: 8, end: 22 };
 
-function weekStart(date: Date): Date {
-  const day = startOfDay(date);
+function weekStart(date: Date, timeZone: string): Date {
+  const day = startOfDay(date, timeZone);
   day.setDate(day.getDate() - ((day.getDay() + 6) % 7));
   return day;
 }
 
-function addCalendarDays(date: Date, days: number): Date {
-  const result = new Date(date);
-  result.setDate(result.getDate() + days);
-  return result;
-}
-
-const minutesSinceMidnight = (date: Date) => date.getHours() * 60 + date.getMinutes();
-
 export default function CalendarPage() {
+  const timeZone = useAccountTimezone();
   const { mutate } = useSWRConfig();
   const isMobile = useIsMobile();
-  const [anchor, setAnchor] = useState<Date>(() => new Date());
+  const [anchor, setAnchor] = useState<Date>(() => startOfDay(new Date(), timeZone));
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<AcademicTask | null>(null);
 
@@ -123,24 +125,24 @@ export default function CalendarPage() {
   const pendingPlan = revision.data ?? proposal;
 
   const days = useMemo(() => {
-    if (isMobile) return [startOfDay(anchor)];
-    const start = weekStart(anchor);
-    return Array.from({ length: 7 }, (_, i) => addCalendarDays(start, i));
-  }, [anchor, isMobile]);
+    if (isMobile) return [startOfDay(anchor, timeZone)];
+    const start = weekStart(anchor, timeZone);
+    return Array.from({ length: 7 }, (_, i) => addZonedDays(start, i, timeZone));
+  }, [anchor, isMobile, timeZone]);
 
   const rangeStart = days[0];
   const rangeEnd = useMemo(
-    () => addCalendarDays(days[days.length - 1], 1),
-    [days],
+    () => addZonedDays(days[days.length - 1], 1, timeZone),
+    [days, timeZone],
   );
 
   const freeIntervals = useMemo(
-    () => subtractPeriods(expandWindows(allWindows, rangeStart, rangeEnd), allPeriods),
-    [allWindows, allPeriods, rangeStart, rangeEnd],
+    () => subtractPeriods(expandWindows(allWindows, rangeStart, rangeEnd, timeZone), allPeriods),
+    [allWindows, allPeriods, rangeStart, rangeEnd, timeZone],
   );
   const blockedIntervals = useMemo(
-    () => expandUnavailablePeriods(allPeriods, rangeStart, rangeEnd),
-    [allPeriods, rangeStart, rangeEnd],
+    () => expandUnavailablePeriods(allPeriods, rangeStart, rangeEnd, timeZone),
+    [allPeriods, rangeStart, rangeEnd, timeZone],
   );
 
   // Use clipped periods so historical and far-future blocks cannot stretch
@@ -158,29 +160,29 @@ export default function CalendarPage() {
       max = Math.max(max, w.endTime.slice(3, 5) === "00" ? endHour : endHour + 1);
     }
     for (const session of sessions) {
-      min = Math.min(min, new Date(session.startTime).getHours());
-      max = Math.max(max, new Date(session.endTime).getHours() + 1);
+      min = Math.min(min, inTimeZone(session.startTime, timeZone).getHours());
+      max = Math.max(max, inTimeZone(session.endTime, timeZone).getHours() + 1);
     }
     for (const interval of blockedIntervals) {
-      min = Math.min(min, interval.start.getHours());
-      max = Math.max(max, interval.end.getHours() + 1);
+      min = Math.min(min, inTimeZone(interval.start, timeZone).getHours());
+      max = Math.max(max, inTimeZone(interval.end, timeZone).getHours() + 1);
     }
     if (min > max) return DEFAULT_RANGE;
     return { start: Math.max(0, min - 1), end: Math.min(24, Math.max(max + 1, min + 6)) };
-  }, [allWindows, blockedIntervals, sessions]);
+  }, [allWindows, blockedIntervals, sessions, timeZone]);
   const columns: GridColumn[] = useMemo(() => {
-    const todayKey = dayKey(new Date());
+    const todayKey = dayKey(new Date(), timeZone);
     return days.map((day) => ({
-      key: dayKey(day),
-      label: DAY_NAMES_SHORT[day.getDay()],
-      sublabel: String(day.getDate()),
-      isToday: dayKey(day) === todayKey,
+      key: dayKey(day, timeZone),
+      label: DAY_NAMES_SHORT[inTimeZone(day, timeZone).getDay()],
+      sublabel: String(inTimeZone(day, timeZone).getDate()),
+      isToday: dayKey(day, timeZone) === todayKey,
     }));
-  }, [days]);
+  }, [days, timeZone]);
 
   const blocks: GridBlock[] = useMemo(() => {
     const out: GridBlock[] = [];
-    const visible = new Set(days.map(dayKey));
+    const visible = new Set(days.map((day) => dayKey(day, timeZone)));
 
     const pushCapacity = (
       intervals: { start: Date; end: Date }[],
@@ -189,16 +191,16 @@ export default function CalendarPage() {
     ) => {
       intervals.forEach((interval, index) => {
         for (const day of days) {
-          const dayStart = startOfDay(day);
-          const dayEnd = addCalendarDays(dayStart, 1);
+          const dayStart = startOfDay(day, timeZone);
+          const dayEnd = addZonedDays(dayStart, 1, timeZone);
           const start = interval.start < dayStart ? dayStart : interval.start;
           const end = interval.end > dayEnd ? dayEnd : interval.end;
           if (end <= start) continue;
           out.push({
-            id: `${prefix}-${index}-${dayKey(day)}`,
-            columnKey: dayKey(day),
-            start: minutesSinceMidnight(start),
-            end: minutesSinceMidnight(end) === 0 ? 1440 : minutesSinceMidnight(end),
+            id: `${prefix}-${index}-${dayKey(day, timeZone)}`,
+            columnKey: dayKey(day, timeZone),
+            start: minutesSinceMidnight(start, timeZone),
+            end: minutesSinceMidnight(end, timeZone) === 0 ? 1440 : minutesSinceMidnight(end, timeZone),
             variant,
             title: variant === "blocked" ? "Blocked time" : "Free to study",
           });
@@ -211,17 +213,17 @@ export default function CalendarPage() {
 
     for (const session of sessions) {
       const start = new Date(session.startTime);
-      const key = dayKey(start);
+      const key = dayKey(start, timeZone);
       if (!visible.has(key)) continue;
       out.push({
         id: session.id,
         columnKey: key,
-        start: minutesSinceMidnight(start),
-        end: minutesSinceMidnight(new Date(session.endTime)),
+        start: minutesSinceMidnight(start, timeZone),
+        end: minutesSinceMidnight(session.endTime, timeZone),
         variant: "session",
         label: session.taskTitle,
-        meta: `${formatClock(session.startTime)}–${formatClock(session.endTime)}`,
-        title: `${session.taskTitle} · ${formatClock(session.startTime)}–${formatClock(session.endTime)}`,
+        meta: `${formatClock(session.startTime, timeZone)}–${formatClock(session.endTime, timeZone)}`,
+        title: `${session.taskTitle} · ${formatClock(session.startTime, timeZone)}–${formatClock(session.endTime, timeZone)}`,
         settled: Boolean(session.outcome),
         attention: session.isAwaitingOutcome,
         onSelect: () => {
@@ -232,23 +234,23 @@ export default function CalendarPage() {
     }
 
     return out;
-  }, [freeIntervals, blockedIntervals, sessions, days]);
+  }, [freeIntervals, blockedIntervals, sessions, days, timeZone]);
 
   const deadlinesByDay = useMemo(() => {
     const map = new Map<string, AcademicTask[]>();
     for (const task of allTasks) {
       if (task.status === "Completed") continue;
-      const key = dayKey(new Date(task.deadline));
+      const key = dayKey(new Date(task.deadline), timeZone);
       const bucket = map.get(key);
       if (bucket) bucket.push(task);
       else map.set(key, [task]);
     }
     return map;
-  }, [allTasks]);
+  }, [allTasks, timeZone]);
 
   const agenda = useMemo(() => {
-    const from = startOfDay(new Date());
-    const to = addCalendarDays(from, 14);
+    const from = startOfDay(new Date(), timeZone);
+    const to = addZonedDays(from, 14, timeZone);
     return allTasks
       .filter((task) => task.status !== "Completed")
       .filter((task) => {
@@ -256,7 +258,7 @@ export default function CalendarPage() {
         return due >= from && due < to;
       })
       .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
-  }, [allTasks]);
+  }, [allTasks, timeZone]);
 
   /** Task groups the sidebar shows (SPEC §17.3). */
   const grouped = useMemo(() => {
@@ -281,30 +283,30 @@ export default function CalendarPage() {
   const weekSummary = useMemo(() => {
     const free = totalMinutes(freeIntervals);
     const blocked = totalMinutes(blockedIntervals);
-    const visible = new Set(days.map(dayKey));
+    const visible = new Set(days.map((day) => dayKey(day, timeZone)));
     const scheduled = sessions
-      .filter((session) => visible.has(dayKey(new Date(session.startTime))))
+      .filter((session) => visible.has(dayKey(new Date(session.startTime), timeZone)))
       .reduce((sum, session) => sum + session.plannedDuration, 0);
-    const due = days.reduce((sum, day) => sum + (deadlinesByDay.get(dayKey(day))?.length ?? 0), 0);
+    const due = days.reduce((sum, day) => sum + (deadlinesByDay.get(dayKey(day, timeZone))?.length ?? 0), 0);
     return { free, blocked, scheduled, due };
-  }, [freeIntervals, blockedIntervals, sessions, days, deadlinesByDay]);
+  }, [freeIntervals, blockedIntervals, sessions, days, deadlinesByDay, timeZone]);
 
   const now = new Date();
-  const nowMarker = days.some((day) => dayKey(day) === dayKey(now))
-    ? { columnKey: dayKey(now), minutes: minutesSinceMidnight(now) }
+  const nowMarker = days.some((day) => dayKey(day, timeZone) === dayKey(now, timeZone))
+    ? { columnKey: dayKey(now, timeZone), minutes: minutesSinceMidnight(now, timeZone) }
     : undefined;
 
   const title = isMobile
-    ? anchor.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })
-    : `${days[0].toLocaleDateString(undefined, { day: "numeric", month: "short" })} – ${days[6].toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`;
+    ? formatDate(anchor, timeZone, { weekday: "long", day: "numeric", month: "long" })
+    : `${formatDate(days[0], timeZone, { day: "numeric", month: "short" })} – ${formatDate(days[6], timeZone, { day: "numeric", month: "short", year: "numeric" })}`;
 
   const shift = (direction: number) =>
-    setAnchor(addCalendarDays(anchor, direction * (isMobile ? 1 : 7)));
+    setAnchor(addZonedDays(anchor, direction * (isMobile ? 1 : 7), timeZone));
 
   /** Whether the view is already showing today (mobile) or this week. */
   const isCurrentPeriod = isMobile
-    ? dayKey(anchor) === dayKey(now)
-    : dayKey(weekStart(anchor)) === dayKey(weekStart(now));
+    ? dayKey(anchor, timeZone) === dayKey(now, timeZone)
+    : dayKey(weekStart(anchor, timeZone), timeZone) === dayKey(weekStart(now, timeZone), timeZone);
 
   const selectedTask = selectedSession
     ? (allTasks.find((task) => task.id === selectedSession.taskId) ?? null)
@@ -363,7 +365,7 @@ export default function CalendarPage() {
                 variant="ghost"
                 size="sm"
                 className="rounded-none border-x px-3.5 disabled:opacity-100 disabled:text-muted-foreground"
-                onClick={() => setAnchor(new Date())}
+                onClick={() => setAnchor(startOfDay(new Date(), timeZone))}
                 disabled={isCurrentPeriod}
               >
                 {isMobile ? "Today" : "This week"}
@@ -392,7 +394,9 @@ export default function CalendarPage() {
                 <DatePicker
                   mode="single"
                   selected={anchor}
-                  onSelect={(date) => date && setAnchor(date)}
+                  onSelect={(date) => date && setAnchor(
+                    zonedCalendarDate(date.getFullYear(), date.getMonth(), date.getDate(), timeZone),
+                  )}
                   autoFocus
                 />
               </PopoverContent>
@@ -507,7 +511,7 @@ export default function CalendarPage() {
                       <Link
                         key={task.id}
                         href={`/tasks/${task.id}`}
-                        title={`${task.title} — due ${formatClock(task.deadline)}`}
+                        title={`${task.title} — due ${formatClock(task.deadline, timeZone)}`}
                         className="block rounded-sm bg-deficit-soft px-1.5 py-1 text-start text-[0.6875rem] font-medium leading-tight text-foreground transition-colors hover:bg-deficit/20"
                       >
                         <span className="line-clamp-2">{task.title}</span>
@@ -578,7 +582,7 @@ export default function CalendarPage() {
           <ul className="divide-y">
             {agenda.map((task) => {
               const due = new Date(task.deadline);
-              const phrase = describeDeadline(task.deadline);
+              const phrase = describeDeadline(task.deadline, timeZone);
               return (
                 <li key={task.id}>
                   <Link
@@ -601,13 +605,13 @@ export default function CalendarPage() {
 
                     <div className="flex items-baseline gap-x-3 text-xs text-muted-foreground sm:contents">
                       <span className="shrink-0 tabular-nums sm:order-1">
-                        {due.toLocaleDateString(undefined, {
+                        {formatDate(due, timeZone, {
                           weekday: "short",
                           day: "numeric",
                           month: "short",
                         })}
                         {" · "}
-                        {formatClock(due)}
+                        {formatClock(due, timeZone)}
                       </span>
                       <span className="truncate sm:order-3">
                         {CATEGORY_CONFIG[task.category].label}
