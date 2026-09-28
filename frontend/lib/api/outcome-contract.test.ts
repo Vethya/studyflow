@@ -60,4 +60,10 @@ describe("toWireOutcome", () => {
       toWireOutcome({ outcome: "Delayed", actualMinutes: 30 }, false),
     ).toThrow("Delayed outcomes require remaining minutes");
   });
+
+  it("rejects an unsupported runtime outcome", () => {
+    expect(() => toWireOutcome({ outcome: "Unknown", actualMinutes: 0 } as never, false)).toThrow(
+      "Unsupported session outcome: Unknown",
+    );
+  });
 });

@@ -6,5 +6,16 @@ export default defineConfig({
   test: {
     environment: "node",
     exclude: [...configDefaults.exclude, "e2e/**"],
+    coverage: {
+      provider: "v8",
+      include: ["lib/api/**/*.ts"],
+      reporter: ["text", "json", "json-summary", "html"],
+      thresholds: {
+        statements: 100,
+        branches: 100,
+        functions: 100,
+        lines: 100,
+      },
+    },
   },
 });
