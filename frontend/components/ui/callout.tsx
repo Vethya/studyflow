@@ -69,19 +69,19 @@ export function Callout({
   return (
     <div
       role={tone === "danger" || tone === "warning" ? "alert" : undefined}
-      className={cn("rounded-lg border bg-card px-4 py-3", className)}
+      className={cn("min-w-0 rounded-lg border bg-card px-4 py-3", className)}
     >
       <div className="flex items-start gap-3">
         <Icon className={cn("mt-0.5 size-4 shrink-0", config.icon)} aria-hidden />
 
         <div className="min-w-0 flex-1">
           {title && (
-            <p className={cn("text-sm font-medium leading-snug", config.title)}>{title}</p>
+            <p className={cn("wrap-break-word text-sm font-medium leading-snug", config.title)}>{title}</p>
           )}
           {children && (
             <div
               className={cn(
-                "text-sm leading-relaxed text-muted-foreground",
+                "wrap-break-word text-sm leading-relaxed text-muted-foreground",
                 title && "mt-1",
               )}
             >

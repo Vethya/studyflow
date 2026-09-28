@@ -39,7 +39,7 @@ export function UnscheduledWorkList({ items }: { items: UnscheduledWork[] }) {
             </span>
           </div>
 
-          <p className="mt-1 text-xs text-muted-foreground">{item.reason}</p>
+          <p className="mt-1 wrap-break-word text-xs text-muted-foreground">{item.reason}</p>
 
           <div className="mt-2.5 flex flex-wrap gap-2">
             <Button

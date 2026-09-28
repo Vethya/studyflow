@@ -183,10 +183,10 @@ export default function TaskDetailPage({
           </Badge>
         </div>
 
-        <h1 className="font-display text-3xl font-bold tracking-tight">{task.title}</h1>
+        <h1 className="wrap-break-word font-display text-3xl font-bold tracking-tight">{task.title}</h1>
 
         {task.course && (
-          <p className="text-sm text-muted-foreground">{task.course}</p>
+          <p className="wrap-break-word text-sm text-muted-foreground">{task.course}</p>
         )}
       </header>
 
@@ -290,7 +290,7 @@ export default function TaskDetailPage({
             <div className="sm:col-span-2">
               <Separator className="mb-5" />
               <p className="eyebrow">Notes</p>
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed">{task.notes}</p>
+              <p className="mt-2 whitespace-pre-wrap wrap-break-word text-sm leading-relaxed">{task.notes}</p>
             </div>
           )}
       </SectionCard>

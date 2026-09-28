@@ -446,8 +446,8 @@ function ClassroomReview({
                       onCheckedChange={(checked) => update(item.id, { selected: checked === true })}
                     />
                     <Label htmlFor={checkboxId} className="min-w-0 flex-1 cursor-pointer flex-col items-start gap-1 font-normal">
-                      <span className="block font-medium">{item.title}</span>
-                      <span className="block text-xs text-muted-foreground">
+                      <span className="block wrap-break-word font-medium">{item.title}</span>
+                      <span className="block wrap-break-word text-xs text-muted-foreground">
                         {item.course ? `${item.course} · ` : ""}Due {formatDateTime(item.dueAt, timeZone)}
                       </span>
                     </Label>
