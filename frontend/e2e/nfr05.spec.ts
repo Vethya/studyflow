@@ -418,7 +418,7 @@ for (const viewport of VIEWPORTS) {
       await page.getByLabel("Email").focus();
       await page.keyboard.type(MOCK_ACCOUNT.email);
       await page.keyboard.press("Tab");
-      const passwordInput = page.getByRole("textbox", { name: "Password" });
+      const passwordInput = page.getByLabel("Password", { exact: true });
       await passwordInput.type("nfr05-password");
       await expect(passwordInput).toBeFocused();
       const loginResponse = page.waitForResponse(
