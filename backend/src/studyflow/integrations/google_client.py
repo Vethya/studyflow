@@ -68,11 +68,13 @@ class HttpGoogleImportClient:
         if response.status_code == 429 or response.status_code >= 500:
             raise GoogleImportProviderUnavailableError
         if response.status_code != 200:
+            reason = _token_error(response)
             logger.warning(
-                "Google import token exchange rejected",
-                extra={"status": response.status_code, "reason": _token_error(response)},
+                "Google import request rejected stage=token_exchange status=%s reason=%s",
+                response.status_code,
+                reason or "unknown",
             )
-            if _token_error(response) in {"invalid_client", "unauthorized_client"}:
+            if reason in {"invalid_client", "unauthorized_client"}:
                 raise GoogleImportNotConfiguredError
             raise InvalidGoogleImportCallbackError
         payload = _json_object(response)
@@ -189,6 +191,7 @@ class HttpGoogleImportClient:
             page_token = next_token
 
     async def _get(self, url: str, params: Mapping[str, str], access_token: str) -> dict[str, Any]:
+        source, endpoint = _request_context(url)
         try:
             response = await self._http.get(
                 url,
@@ -199,13 +202,23 @@ class HttpGoogleImportClient:
                 },
             )
         except httpx.RequestError as error:
+            logger.warning(
+                "Google import failed source=%s stage=fetch_google_data endpoint=%s error=%s",
+                source,
+                endpoint,
+                type(error).__name__,
+            )
             raise GoogleImportProviderUnavailableError from error
         if response.status_code == 200:
             return _json_object(response)
         reason = _api_error_reason(response)
         logger.warning(
-            "Google import API request rejected",
-            extra={"status": response.status_code, "reason": reason},
+            "Google import request rejected source=%s stage=fetch_google_data "
+            "endpoint=%s status=%s reason=%s",
+            source,
+            endpoint,
+            response.status_code,
+            reason or "unknown",
         )
         if response.status_code == 429 or response.status_code >= 500:
             raise GoogleImportProviderUnavailableError
@@ -220,6 +233,18 @@ class HttpGoogleImportClient:
 
 def _rfc3339(value: datetime) -> str:
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _request_context(url: str) -> tuple[str, str]:
+    if url == CALENDAR_EVENTS_ENDPOINT:
+        return "google_calendar", "calendar_events"
+    if url == f"{CLASSROOM_API}/courses":
+        return "google_classroom", "classroom_courses"
+    if url.endswith("/courseWork/-/studentSubmissions"):
+        return "google_classroom", "classroom_student_submissions"
+    if url.endswith("/courseWork"):
+        return "google_classroom", "classroom_coursework"
+    return "unknown", "unknown"
 
 
 def _json_object(response: httpx.Response) -> dict[str, Any]:
