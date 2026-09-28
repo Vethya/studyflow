@@ -599,7 +599,7 @@ function NextSession({
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-1">
-        <p className="font-display text-lg font-bold leading-tight tracking-tight">
+        <p className="wrap-break-word font-display text-lg font-bold leading-tight tracking-tight">
           {session.taskTitle}
         </p>
         <p className="text-sm text-muted-foreground">{when}</p>

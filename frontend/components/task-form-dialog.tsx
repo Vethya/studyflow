@@ -249,7 +249,7 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
         else if (!requestClose()) details?.cancel?.();
       }}
     >
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-x-hidden overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit task" : "Add task"}</DialogTitle>
           <DialogDescription>
@@ -257,7 +257,7 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="min-w-0 space-y-4">
           {error && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
@@ -374,7 +374,7 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
             />
           </div>
 
-          <div className="space-y-1.5">
+          <div className="min-w-0 space-y-1.5">
             <Label htmlFor="task-notes" className="text-xs font-medium">Notes (optional)</Label>
             <Textarea
               id="task-notes"

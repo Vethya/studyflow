@@ -74,7 +74,7 @@ export function DetailDrawer({
           )}
         </SheetHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto wrap-break-word px-5 py-4">{children}</div>
 
         {footer && (
           <SheetFooter className="flex-row flex-wrap justify-end gap-2 border-t px-5 py-3">
