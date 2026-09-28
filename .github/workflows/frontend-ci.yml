@@ -58,7 +58,7 @@ jobs:
         run: pnpm exec tsc --noEmit
 
       - name: Unit tests
-        run: pnpm test
+        run: pnpm test:coverage
 
   smoke:
     name: Build and task-to-schedule smoke test
