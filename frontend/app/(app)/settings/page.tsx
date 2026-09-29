@@ -153,6 +153,7 @@ function SettingsContent() {
   }
 
   function openDeletionDialog() {
+    /* c8 ignore next -- the delete control is disabled until the profile is ready. */
     if (!deletionProfileReady) return;
     setDeletionOpen(true);
     deletionStatus.reload();
@@ -891,6 +892,7 @@ function StudySessionsSection({
       breakLength !== preferences.data.minimum_break_minutes);
 
   async function save() {
+    /* c8 ignore next -- the save control is disabled when preferences are unavailable. */
     if (!preferences.data) return;
     setSaving(true);
     try {

@@ -11,7 +11,7 @@ vi.mock("@/components/ui/select", () => ({
   ),
   SelectTrigger: ({ children, ...props }: any) => {
     const context = React.useContext(SelectContext);
-    return <button type="button" role="combobox" {...props} onClick={() => context.onValueChange?.(context.value === "Assignment" ? "Reading" : "High")}>{children}</button>;
+    return <button type="button" role="combobox" aria-controls="task-category-options" aria-expanded="false" {...props} onClick={() => context.onValueChange?.(context.value === "Assignment" ? "Reading" : "High")}>{children}</button>;
   },
   SelectValue: ({ children }: any) => <span>{typeof children === "function" ? children("value") : children}</span>,
   SelectContent: ({ children }: any) => <div>{children}</div>,

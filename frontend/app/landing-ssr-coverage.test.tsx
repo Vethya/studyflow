@@ -10,7 +10,7 @@ vi.mock("gsap", () => ({ default: { registerPlugin: vi.fn() } }));
 
 describe("landing page server module", () => {
   it("loads without a browser global", async () => {
-    const module = await import("./page");
-    expect(module.default).toBeTypeOf("function");
+    const landingModule = await import("./page");
+    expect(landingModule.default).toBeTypeOf("function");
   });
 });

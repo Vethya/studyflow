@@ -21,7 +21,7 @@ vi.mock("./ui/select", () => ({
   SelectContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   SelectItem: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   SelectTrigger: ({ children, ...props }: { children: React.ReactNode }) => <button type="button" {...props}>{children}</button>,
-  SelectValue: ({ children }: { children: React.ReactNode }) => <span>{typeof children === "function" ? children("unknown") : children}</span>,
+  SelectValue: ({ children }: { children: React.ReactNode | ((value: string) => React.ReactNode) }) => <span>{typeof children === "function" ? children("unknown") : children}</span>,
 }));
 
 import { ThemeSelector } from "./theme-selector";

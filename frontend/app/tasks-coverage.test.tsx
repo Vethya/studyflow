@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import React, { createContext, useContext, useState } from "react";
+import React, { createContext, useContext } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -50,7 +50,7 @@ const SelectContext = createContext<{ value: string; change: (value: string) => 
 vi.mock("@/components/ui/select", () => ({
   Select: ({ value, onValueChange, children }: any) => <SelectContext.Provider value={{ value, change: onValueChange }}><div data-select-value={value}>{children}{value === "deadline" && <button onClick={() => onValueChange("unknown-sort")}>Unknown sort</button>}</div></SelectContext.Provider>,
   SelectTrigger: ({ children, ...props }: any) => <button {...props}>{children}</button>,
-  SelectValue: ({ children }: any) => <span>{typeof children === "function" ? children(useContext(SelectContext).value) : children}</span>,
+  SelectValue: ({ children }: any) => { const context = useContext(SelectContext); return <span>{typeof children === "function" ? children(context.value) : children}</span>; },
   SelectContent: ({ children }: any) => { const context = useContext(SelectContext); return <div>{children}<button onClick={() => context.change("")}>Select empty</button></div>; },
   SelectItem: ({ value, children }: any) => { const context = useContext(SelectContext); return <button onClick={() => context.change(value)}>{children}</button>; },
 }));
@@ -165,7 +165,7 @@ describe("tasks page", () => {
   state.tasks = [task({ status: "In Progress" })];
   state.params = new URLSearchParams();
   state.mode = "normal";
-  state.api.finish.mockRejectedValueOnce(new ApiError(409));
+    state.api.finish.mockRejectedValueOnce(new ApiError(409, "conflict"));
     render(<TasksPage />);
     screen.getAllByRole("button", { name: /Actions for/ })[0].click();
     screen.getByRole("button", { name: "Finish early" }).click();

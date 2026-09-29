@@ -21,8 +21,6 @@ const THEME_OPTIONS = [
   { value: "amoled", label: "AMOLED", Icon: MoonStar },
 ] as const;
 
-type ThemeName = (typeof THEME_OPTIONS)[number]["value"];
-
 export function ThemeOptionIcon({
   theme,
   className,

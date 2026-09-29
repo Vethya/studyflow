@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("react-day-picker", () => ({
@@ -47,23 +47,23 @@ describe("calendar and chart edge branches", () => {
     const Icon = () => <span data-testid="icon" />;
     render(<div>
       <ChartStyle id="empty" config={{}} />
-      <ChartStyle id="fallback" config={{ noColor: { label: "No color", theme: { light: "" } } }} />
+      <ChartStyle id="fallback" config={{ noColor: { label: "No color", theme: { light: "", dark: "" } } }} />
       <ChartContainer config={{ value: { label: "Value", color: "red" }, icon: { label: "Icon", color: "blue", icon: Icon } }}>
         <ChartTooltipContent active={false} payload={[]} />
         <ChartTooltipContent active={false} payload={[null as any]} />
-        <ChartTooltipContent active payload={[{ dataKey: "value", name: "Value", value: 10, color: "red", payload: { value: "value" } }]} indicator="line" label="value" labelFormatter={(value) => `Label ${value}`} />
-        <ChartTooltipContent active payload={[{ value: 13, payload: {} }]} label="missing" />
-        <ChartTooltipContent active payload={[{ value: 14, payload: {} }]} />
-        <ChartTooltipContent active payload={[{ dataKey: "unknown", name: "Unknown", value: 11 }]} />
-        <ChartTooltipContent active payload={[{ dataKey: "value", value: "icon", name: "Value", payload: { value: "value" } }]} />
-        <ChartTooltipContent active payload={[{ dataKey: "icon", name: "Icon", value: "text", payload: { icon: "icon" } }, { dataKey: "none", type: "none", value: 0 }]} hideIndicator />
-        <ChartTooltipContent active payload={[{ dataKey: "icon", value: 12, payload: { icon: "icon" } }]} indicator="dashed" nameKey="icon" />
-        <ChartTooltipContent active payload={[{ dataKey: "value", name: "Value", value: 12 }]} formatter={(value) => <span>Formatted {String(value)}</span>} />
-        <ChartTooltipContent active payload={[{ dataKey: "value", name: "Value", value: null }]} hideLabel hideIndicator />
+        <ChartTooltipContent active payload={[{ dataKey: "value", name: "Value", value: 10, color: "red", graphicalItemId: "value", payload: { value: "value" } }]} indicator="line" label="value" labelFormatter={(value) => `Label ${value}`} />
+        <ChartTooltipContent active payload={[{ graphicalItemId: "value", value: 13, payload: {} }]} label="missing" />
+        <ChartTooltipContent active payload={[{ graphicalItemId: "value", value: 14, payload: {} }]} />
+        <ChartTooltipContent active payload={[{ dataKey: "unknown", name: "Unknown", value: 11, graphicalItemId: "unknown" }]} />
+        <ChartTooltipContent active payload={[{ dataKey: "value", value: "icon", name: "Value", graphicalItemId: "value", payload: { value: "value" } }]} />
+        <ChartTooltipContent active payload={[{ dataKey: "icon", name: "Icon", value: "text", graphicalItemId: "icon", payload: { icon: "icon" } }, { dataKey: "none", type: "none", value: 0, graphicalItemId: "none" }]} hideIndicator />
+        <ChartTooltipContent active payload={[{ dataKey: "icon", value: 12, graphicalItemId: "icon", payload: { icon: "icon" } }]} indicator="dashed" nameKey="icon" />
+        <ChartTooltipContent active payload={[{ dataKey: "value", name: "Value", value: 12, graphicalItemId: "value" }]} formatter={(value) => <span>Formatted {String(value)}</span>} />
+        <ChartTooltipContent active payload={[{ dataKey: "value", name: "Value", value: null as unknown as number, graphicalItemId: "value" }]} hideLabel hideIndicator />
         <ChartLegendContent />
-        <ChartLegendContent verticalAlign="top" hideIcon payload={[{ dataKey: "value", color: "red" }, { dataKey: "icon", color: "blue" }]} />
-        <ChartLegendContent payload={[{ dataKey: "icon", color: "blue" }]} />
-        <ChartLegendContent payload={[{ dataKey: "alias", color: "green", payload: { alias: "value" } }]} />
+        <ChartLegendContent verticalAlign="top" hideIcon payload={[{ dataKey: "value", value: "Value", color: "red" }, { dataKey: "icon", value: "Icon", color: "blue" }]} />
+        <ChartLegendContent payload={[{ dataKey: "icon", value: "Icon", color: "blue" }]} />
+        <ChartLegendContent payload={[{ dataKey: "alias", value: "Alias", color: "green", payload: { alias: "value" } }]} />
         <ChartLegendContent payload={[{ value: "fallback", color: "purple" }]} />
       </ChartContainer>
     </div>);
@@ -72,6 +72,6 @@ describe("calendar and chart edge branches", () => {
   });
 
   it("rejects chart content rendered without its provider", () => {
-    expect(() => render(<ChartTooltipContent active payload={[{ dataKey: "value", value: 1 }]} />)).toThrow("useChart must be used");
+    expect(() => render(<ChartTooltipContent active payload={[{ dataKey: "value", value: 1, graphicalItemId: "value" }]} />)).toThrow("useChart must be used");
   });
 });

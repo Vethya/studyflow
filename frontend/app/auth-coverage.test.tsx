@@ -29,12 +29,12 @@ vi.mock("@/components/ui/select", () => {
   const SelectContext = React.createContext<{ onValueChange?: (value: string) => void }>({});
   return {
     Select: ({ onValueChange, children }: any) => <SelectContext.Provider value={{ onValueChange }}><div><button type="button" onClick={() => onValueChange?.("")}>Invoke empty timezone</button>{children}</div></SelectContext.Provider>,
-    SelectTrigger: ({ children, ...props }: any) => <button type="button" role="combobox" {...props}>{children}</button>,
+    SelectTrigger: ({ children, ...props }: any) => <button type="button" role="combobox" aria-controls="timezone-options" aria-expanded="false" {...props}>{children}</button>,
     SelectValue: ({ children }: any) => <span>{typeof children === "function" ? children("") : children}</span>,
     SelectContent: ({ children }: any) => <div>{children}</div>,
     SelectGroup: ({ children }: any) => <div>{children}</div>,
     SelectLabel: ({ children }: any) => <span>{children}</span>,
-    SelectItem: ({ value, children }: any) => { const context = React.useContext(SelectContext); return <button type="button" role="option" onClick={() => context.onValueChange?.(value)}>{children}</button>; },
+    SelectItem: ({ value, children }: any) => { const context = React.useContext(SelectContext); return <button type="button" role="option" aria-selected="false" onClick={() => context.onValueChange?.(value)}>{children}</button>; },
   };
 });
 
@@ -49,7 +49,15 @@ vi.mock("@/lib/api", () => {
     status: number;
     detail: string;
     fieldErrors: Record<string, string>;
-    constructor(status: number, detail = "API error", fieldErrors: Record<string, string> = {}) {
+    constructor(
+      status: number,
+      detail = "API error",
+      _retryAfterSeconds: number | null = null,
+      _code: string | null = null,
+      fieldErrors: Record<string, string> = {},
+    ) {
+      void _retryAfterSeconds;
+      void _code;
       super(detail);
       this.status = status;
       this.detail = detail;
@@ -95,7 +103,7 @@ describe("auth entry points", () => {
     await waitFor(() => expect(screen.getByText("Check your inbox")).toBeTruthy());
     screen.getByRole("button", { name: "Send another link" }).click();
     await waitFor(() => expect(screen.getByRole("heading", { name: "Set or reset password" })).toBeTruthy());
-    state.auth.forgotPassword.mockRejectedValueOnce(new ApiError(429));
+    state.auth.forgotPassword.mockRejectedValueOnce(new ApiError(429, "rate limited"));
     fireEvent.submit(form());
     await waitFor(() => expect(screen.getByText(/Too many reset requests/)).toBeTruthy());
     state.auth.forgotPassword.mockRejectedValueOnce(new Error("mail down"));
@@ -113,13 +121,13 @@ describe("auth entry points", () => {
     fireEvent.submit(form());
     await waitFor(() => expect(screen.getByText(/Enter a valid email address/)).toBeTruthy());
     fireEvent.change(email, { target: { value: "student@example.com" } });
-    state.auth.register.mockRejectedValueOnce(new ApiError(429));
+    state.auth.register.mockRejectedValueOnce(new ApiError(429, "rate limited"));
     fireEvent.submit(form());
     await waitFor(() => expect(screen.getByText(/Too many registration attempts/)).toBeTruthy());
-    state.auth.register.mockRejectedValueOnce(new ApiError(422, "invalid", { email: "Email is invalid" }));
+    state.auth.register.mockRejectedValueOnce(new ApiError(422, "invalid", null, null, { email: "Email is invalid" }));
     fireEvent.submit(form());
     await waitFor(() => expect(screen.getByText("Email is invalid")).toBeTruthy());
-    state.auth.register.mockRejectedValueOnce(new ApiError(422));
+    state.auth.register.mockRejectedValueOnce(new ApiError(422, "invalid"));
     fireEvent.submit(form());
     await waitFor(() => expect(screen.getByText("Enter a valid email address.")).toBeTruthy());
     state.auth.register.mockRejectedValueOnce(new Error("registration down"));
@@ -185,12 +193,12 @@ describe("auth entry points", () => {
     rejectChallenge?.(new Error("late challenge failure"));
     render(<GoogleLinkPage />);
     await waitFor(() => expect((screen.getByRole("button", { name: "Connect and sign in" }) as HTMLButtonElement).disabled).toBe(false));
-    state.auth.linkGoogleAccount.mockRejectedValueOnce(new ApiError(429));
+    state.auth.linkGoogleAccount.mockRejectedValueOnce(new ApiError(429, "rate limited"));
     fireEvent.change(screen.getByLabelText("Your StudyFlow password"), { target: { value: "secret" } });
     fireEvent.submit(form());
     await waitFor(() => expect(auth.linkGoogleAccount).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByText(/Too many attempts/)).toBeTruthy());
-    state.auth.linkGoogleAccount.mockRejectedValueOnce(new ApiError(400));
+    state.auth.linkGoogleAccount.mockRejectedValueOnce(new ApiError(400, "expired"));
     fireEvent.submit(form());
     await waitFor(() => expect(screen.getByText(/link request has expired/)).toBeTruthy());
     state.auth.linkGoogleAccount.mockRejectedValueOnce(new Error("link failed"));
@@ -202,7 +210,7 @@ describe("auth entry points", () => {
     await waitFor(() => expect(state.router.replace).toHaveBeenCalledWith("/dashboard"));
     cleanup();
 
-    state.auth.checkGoogleLinkChallenge.mockRejectedValueOnce(new ApiError(401));
+    state.auth.checkGoogleLinkChallenge.mockRejectedValueOnce(new ApiError(401, "unauthenticated"));
     render(<GoogleLinkPage />);
     await waitFor(() => expect(state.router.replace).toHaveBeenCalledWith("/login"));
     cleanup();
@@ -242,7 +250,7 @@ describe("email verification", () => {
     fireEvent.change(screen.getByLabelText(/Resend to/), { target: { value: "student@example.com" } });
     fireEvent.submit(form());
     await waitFor(() => expect(screen.getByText("Sent again")).toBeTruthy());
-    state.auth.resendVerification.mockRejectedValueOnce(new ApiError(429));
+    state.auth.resendVerification.mockRejectedValueOnce(new ApiError(429, "rate limited"));
     fireEvent.submit(form());
     await waitFor(() => expect(auth.resendVerification).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.getByText(/Too many resend attempts/)).toBeTruthy());
@@ -281,7 +289,7 @@ describe("email verification", () => {
     screen.getByRole("button", { name: "Invoke empty timezone" }).click();
     const timezoneOption = screen.queryByRole("option", { name: /Phnom Penh|UTC/ });
     if (timezoneOption) timezoneOption.click();
-    state.auth.completeRegistration.mockRejectedValueOnce(new ApiError(422, "invalid", { name: "Name rejected" }));
+    state.auth.completeRegistration.mockRejectedValueOnce(new ApiError(422, "invalid", null, null, { name: "Name rejected" }));
     fireEvent.submit(form());
     await waitFor(() => expect(screen.getByText("Name rejected")).toBeTruthy());
     state.auth.completeRegistration.mockRejectedValueOnce(new Error("completion failed"));

@@ -23,6 +23,7 @@ import { NavUser } from "./nav-user";
 import { SidebarProvider } from "./ui/sidebar";
 import { Button } from "./ui/button";
 import type { AcademicTask } from "@/types/task";
+import type { OverloadWarning } from "@/types/schedule";
 
 const { useApiMock, useSessionMock, useThemeMock, searchTasksMock, signOutMock } = vi.hoisted(() => ({
   useApiMock: vi.fn(),
@@ -93,7 +94,7 @@ describe("shared content components", () => {
 
   it("renders overload warnings, shortfalls, and every week-grid state", () => {
     const click = vi.fn();
-    const warning = { taskId: "task-1", taskTitle: "Read chapter", deadline: "2099-09-15T12:00:00Z", requiredMinutes: 120, availableMinutes: 30, shortfallMinutes: 90, remedies: ["extend_deadline", "add_availability"] as const, relevantUnavailablePeriods: [{ id: "p", startsAt: "2099-09-14T10:00:00Z", endsAt: "2099-09-14T11:00:00Z", reason: "Class" }] };
+    const warning: OverloadWarning = { taskId: "task-1", taskTitle: "Read chapter", deadline: "2099-09-15T12:00:00Z", requiredMinutes: 120, availableMinutes: 30, shortfallMinutes: 90, remedies: ["extend_deadline", "add_availability"], relevantUnavailablePeriods: [{ id: "p", startsAt: "2099-09-14T10:00:00Z", endsAt: "2099-09-14T11:00:00Z", reason: "Class" }] };
     const blocks = [
       { id: "available", columnKey: "mon", start: 9 * 60, end: 10 * 60, variant: "available" as const, title: "Free", onSelect: click },
       { id: "blocked", columnKey: "mon", start: 10 * 60, end: 10 * 60 + 10, variant: "blocked" as const, title: "Blocked", attention: true },
@@ -115,7 +116,7 @@ describe("shared content components", () => {
     render(
       <div>
         <CapacityBar available={100} committed={0} />
-        <AdaptiveEstimateNote estimate={{ category: "Assignment", originalEstimate: 60, adaptiveEstimate: 90, plannedDuration: 60, plannedSource: "Original", factor: 1.5, basedOnTasks: 2, isCategorySpecific: true }} />
+        <AdaptiveEstimateNote estimate={{ category: "Assignment", originalEstimate: 60, adaptiveEstimate: 90, plannedDuration: 60, plannedSource: "Original", factor: 1.5, basedOnTasks: 2, isCategorySpecific: true, needsAcknowledgment: false }} />
         <PersistedEstimateNote originalEstimate={60} adaptiveEstimate={90} plannedDuration={60} plannedSource="Original" />
       </div>,
     );

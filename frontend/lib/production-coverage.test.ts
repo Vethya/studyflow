@@ -345,7 +345,7 @@ describe("cache keys, theme, and contracts", () => {
     expect(effortProgressKey(null, null, false)).toBeNull();
     expect(effortProgressKey([task()], null, true)).toBeNull();
     expect(effortProgressKey([task()], { id: "s", sessions: [], createdAt: "", isActive: true }, false)).toHaveLength(3);
-    expect(effortProgressKey([task()], { id: "s", sessions: [{ id: "session", startTime: "", endTime: "", plannedDuration: 30, outcome: "Completed", actualDuration: 25 }], createdAt: "", isActive: true }, false)).toHaveLength(3);
+    expect(effortProgressKey([task()], { id: "s", sessions: [{ id: "session", taskId: "task-1", taskTitle: "Read", category: "Reading", startTime: "", endTime: "", plannedDuration: 30, outcome: "Completed", actualDuration: 25, isAwaitingOutcome: false }], createdAt: "", isActive: true }, false)).toHaveLength(3);
     expect(adaptiveEstimateKey("Reading", 60)).toEqual(["studyflow/adaptive-estimate", "Reading", 60]);
   });
 
@@ -400,7 +400,7 @@ describe("cache keys, theme, and contracts", () => {
     expect(resolveEstimateChoiceAction(60, null, "adaptive")).toMatchObject({ type: "select" });
     expect(resolvePreviewSelection(60, null, "Adaptive", false)).toEqual({ originalEstimate: 60, plannedSource: "Adaptive" });
     expect(resolvePreviewSelection(60, toAdaptiveEstimate(estimate), "Original", true).plannedSource).toBe("Original");
-    expect(toAdaptiveEstimate({ ...estimate, acknowledgment_required: false }).needsAcknowledgment).toBe(false);
+    expect(toAdaptiveEstimate({ ...estimate, acknowledgment_required: false })?.needsAcknowledgment).toBe(false);
     expect(toAdaptiveEstimate({ ...estimate, available: false })).toBeNull();
     expect(toAdaptiveEstimate({ ...estimate, correction_factor: "bad" })).toBeNull();
 

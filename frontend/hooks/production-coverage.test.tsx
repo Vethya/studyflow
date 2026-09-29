@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import React, { useState } from "react";
+import React from "react";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SWRConfig } from "swr";
 
 const mocks = vi.hoisted(() => ({
@@ -22,9 +22,9 @@ vi.mock("@/hooks/use-api", () => ({
 vi.mock("@/lib/api", () => {
   class MockApiError extends Error {
     isUnauthenticated: boolean;
-    constructor(message: string, isUnauthenticated = false) {
-      super(message);
-      this.isUnauthenticated = isUnauthenticated;
+    constructor(status: number, detail: string) {
+      super(detail);
+      this.isUnauthenticated = status === 401;
     }
   }
   return {
@@ -141,7 +141,7 @@ describe("useApi and useSession edge cases", () => {
     expect(mocks.replace).toHaveBeenCalledWith("/login");
     cleanup();
 
-    mocks.getSession.mockRejectedValueOnce(new ApiError("expired", true));
+    mocks.getSession.mockRejectedValueOnce(new ApiError(401, "expired"));
     render(<SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}><SessionProvider><SessionProbe /></SessionProvider></SWRConfig>);
     await waitFor(() => expect(screen.getByText("unauthenticated:none")).toBeTruthy());
     cleanup();

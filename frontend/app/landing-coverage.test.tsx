@@ -6,8 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({ status: "loading" }));
 
 vi.mock("@/hooks/use-session", () => ({ useSession: () => ({ status: state.status }) }));
-vi.mock("next/image", () => ({ default: (props: React.ImgHTMLAttributes<HTMLImageElement>) => <img {...props} /> }));
-vi.mock("@gsap/react", () => ({ useGSAP: (callback: () => void) => { React.useEffect(callback, []); } }));
+vi.mock("next/image", () => ({ default: (props: React.ImgHTMLAttributes<HTMLImageElement>) => {
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img alt="" {...props} />;
+} }));
+vi.mock("@gsap/react", () => ({ useGSAP: (callback: () => void) => { React.useEffect(() => { callback(); }, [callback]); } }));
 vi.mock("gsap/dist/ScrollTrigger", () => ({ ScrollTrigger: { create: ({ onEnter }: { onEnter?: () => void }) => { onEnter?.(); } } }));
 vi.mock("gsap", () => {
   const animate = (target: unknown, vars?: { val?: number; onUpdate?: () => void }) => {

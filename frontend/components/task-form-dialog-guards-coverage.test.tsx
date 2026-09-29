@@ -14,18 +14,20 @@ const estimate = {
   historyCount: 4,
 };
 
+const swrState = vi.hoisted(() => ({ error: null as Error | null }));
+
 vi.mock("swr", () => ({
-  default: (_key: unknown, _fetcher: unknown, options: { onSuccess?: (value: typeof estimate) => void }) => {
+  default: function useSWRMock(_key: unknown, _fetcher: unknown, options: { onSuccess?: (value: typeof estimate) => void }) {
     const called = React.useRef(false);
     React.useEffect(() => {
       if (!called.current) {
         called.current = true;
         options.onSuccess?.(estimate);
       }
-    }, []);
+    }, [options]);
     return {
       data: estimate,
-      error: null,
+      error: swrState.error,
       mutate: vi.fn((updater?: (current: typeof estimate | undefined) => unknown) => updater?.(undefined)),
     };
   },
@@ -57,7 +59,10 @@ vi.mock("@/lib/api", () => ({ ApiError: class ApiError extends Error {}, tasks: 
 
 import { TaskFormDialog } from "./task-form-dialog";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  swrState.error = null;
+});
 
 const task = {
   id: "task-1",
@@ -91,4 +96,9 @@ it("covers the guarded preview callback, close guard, and empty mutate cache", a
   cleanup();
   render(<TaskFormDialog open task={{ ...task, estimateFrozen: true }} onOpenChange={vi.fn()} onSaved={vi.fn()} />);
   await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).toBeTruthy());
+
+  cleanup();
+  swrState.error = new Error("preview unavailable");
+  render(<TaskFormDialog open task={task} onOpenChange={vi.fn()} onSaved={vi.fn()} />);
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeTruthy();
 });

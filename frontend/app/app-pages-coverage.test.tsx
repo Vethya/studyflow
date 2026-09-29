@@ -238,7 +238,7 @@ describe("dashboard and progress pages", () => {
 
   it("covers dashboard loading, error, empty, and no-session branches", async () => {
     state.mode = "loading";
-    const { rerender } = render(<DashboardPage />);
+    render(<DashboardPage />);
     expect(screen.getAllByText("loading").length).toBeGreaterThan(0);
     cleanup();
     state.mode = "error";

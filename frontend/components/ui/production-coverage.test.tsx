@@ -10,7 +10,6 @@ import { Button } from "./button";
 import { Calendar } from "./calendar";
 import { Callout } from "./callout";
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./card";
-import { Checkbox } from "./checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./collapsible";
 import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator, CommandShortcut } from "./command";
 import { ConfirmDialog } from "./confirm-dialog";
@@ -161,14 +160,14 @@ describe("interactive primitive wrappers", () => {
   it("covers command, menu, select, tabs, calendar, scroll area, and chart content", () => {
     render(<div>
       <Command><CommandInput placeholder="Search" /><CommandList><CommandEmpty>Nothing</CommandEmpty><CommandGroup heading="Group"><CommandItem>One<CommandShortcut>⌘1</CommandShortcut></CommandItem></CommandGroup><CommandSeparator /></CommandList></Command>
-      <CommandDialog open onOpenChange={vi.fn}><Command><CommandInput /><CommandList><CommandItem>Dialog item</CommandItem></CommandList></Command></CommandDialog>
+      <CommandDialog open onOpenChange={() => undefined}><Command><CommandInput /><CommandList><CommandItem>Dialog item</CommandItem></CommandList></Command></CommandDialog>
       <DropdownMenu open><DropdownMenuTrigger>Menu</DropdownMenuTrigger><DropdownMenuPortal><DropdownMenuContent><DropdownMenuGroup><DropdownMenuLabel inset>Menu label</DropdownMenuLabel><DropdownMenuItem inset>Item<DropdownMenuShortcut>⌘I</DropdownMenuShortcut></DropdownMenuItem><DropdownMenuItem variant="destructive">Delete</DropdownMenuItem><DropdownMenuCheckboxItem checked>Checked</DropdownMenuCheckboxItem><DropdownMenuRadioGroup value="one"><DropdownMenuRadioItem value="one">Radio</DropdownMenuRadioItem></DropdownMenuRadioGroup><DropdownMenuSeparator /><DropdownMenuSub open><DropdownMenuSubTrigger inset>More</DropdownMenuSubTrigger><DropdownMenuSubContent><DropdownMenuItem>Sub item</DropdownMenuItem></DropdownMenuSubContent></DropdownMenuSub></DropdownMenuGroup></DropdownMenuContent></DropdownMenuPortal></DropdownMenu>
       <Select defaultValue="one"><SelectTrigger size="sm"><SelectValue placeholder="Pick" /></SelectTrigger><SelectContent><SelectScrollUpButton /><SelectGroup><SelectLabel>Options</SelectLabel><SelectItem value="one">One</SelectItem><SelectSeparator /><SelectItem value="two">Two</SelectItem></SelectGroup><SelectScrollDownButton /></SelectContent></Select>
       <Tabs defaultValue="one" orientation="vertical"><TabsList variant="line"><TabsTrigger value="one">One</TabsTrigger><TabsTrigger value="two">Two</TabsTrigger></TabsList><TabsContent value="one">Tab one</TabsContent><TabsContent value="two">Tab two</TabsContent></Tabs>
       <Calendar month={new Date("2026-09-01T00:00:00Z")} showWeekNumber captionLayout="dropdown" />
       <ScrollArea><p>Scrollable</p><ScrollBar orientation="horizontal" /></ScrollArea>
       <ChartStyle id="chart-1" config={{ a: { color: "red" }, b: { theme: { light: "blue", dark: "black" } } }} />
-      <ChartContainer id="chart-1" config={{ a: { label: "Alpha", color: "red" }, b: { label: "Beta", theme: { light: "blue", dark: "black" } } }}><><div /><ChartTooltipContent active payload={[{ dataKey: "a", name: "A", value: 123, color: "red", payload: { a: "a" } }]} label="a" /><ChartLegendContent payload={[{ dataKey: "a", color: "red", type: "line" }]} /></></ChartContainer>
+      <ChartContainer id="chart-1" config={{ a: { label: "Alpha", color: "red" }, b: { label: "Beta", theme: { light: "blue", dark: "black" } } }}><><div /><ChartTooltipContent active payload={[{ dataKey: "a", name: "A", value: 123, color: "red", graphicalItemId: "a", payload: { a: "a" } }]} label="a" /><ChartLegendContent payload={[{ dataKey: "a", value: "A", color: "red", type: "line" }]} /></></ChartContainer>
     </div>);
     expect(screen.getByText("Tab one")).toBeTruthy();
     expect(screen.getAllByText("Alpha").length).toBeGreaterThan(0);

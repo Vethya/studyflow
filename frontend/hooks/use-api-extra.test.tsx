@@ -7,12 +7,12 @@ import { describeError, useApi } from "./use-api";
 
 afterEach(cleanup);
 
-function Probe({ loader }: { loader: (signal: AbortSignal) => Promise<any> }) {
+function Probe({ loader }: { loader: (signal: AbortSignal) => Promise<unknown> }) {
   const resource = useApi("extra-api-key", loader);
   return (
     <div>
       <output>{resource.error ? describeError(resource.error) : String(resource.data)}</output>
-      <button onClick={() => resource.setData((current) => `${current ?? "empty"}-updated`)}>update</button>
+      <button onClick={() => resource.setData((current: unknown) => `${current ?? "empty"}-updated`)}>update</button>
     </div>
   );
 }

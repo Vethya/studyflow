@@ -46,7 +46,7 @@ beforeEach(() => {
   });
   setPasswordMock.mockResolvedValue(undefined);
   changePasswordMock.mockResolvedValue(undefined);
-  updatePreferencesMock.mockResolvedValue({ timezone: "Asia/Tokyo", preferred_session_length_minutes: 60, minimum_break_minutes: 10 });
+  updatePreferencesMock.mockResolvedValue({ timezone: "Asia/Tokyo", preferred_session_length_minutes: 60, minimum_break_minutes: 10, availability_confirmation_required: false });
   updateProfileMock.mockResolvedValue({ name: "New Name", email: "student@example.com", password_set: false });
   prepareDeletionMock.mockResolvedValue(undefined);
   confirmDeletionMock.mockResolvedValue(undefined);
@@ -161,7 +161,7 @@ it("covers password validation, discard, and API errors", async () => {
 });
 
 it("covers timezone and name saves plus account deletion paths", async () => {
-  const preferences = { timezone: "UTC", preferred_session_length_minutes: 60, minimum_break_minutes: 10 };
+  const preferences = { timezone: "UTC", preferred_session_length_minutes: 60, minimum_break_minutes: 10, availability_confirmation_required: false };
   const onSaved = vi.fn();
   render(<ChangeTimezoneDialog open onOpenChange={vi.fn()} preferences={preferences} onSaved={onSaved} />);
   fireEvent.submit(document.querySelector("form")!);
@@ -201,7 +201,7 @@ it("covers timezone and name saves plus account deletion paths", async () => {
   await waitFor(() => expect(startGoogle).toHaveBeenCalled());
   cleanup();
   const expired = vi.fn();
-  confirmDeletionMock.mockRejectedValueOnce(new ApiError(400));
+  confirmDeletionMock.mockRejectedValueOnce(new ApiError(400, "bad request"));
   render(<AccountDeletionDialog open onOpenChange={vi.fn()} passwordSet={false} googleReady onStartGoogle={startGoogle} onGoogleChallengeExpired={expired} onDeleted={onDeleted} />);
   fireEvent.change(screen.getByLabelText("Type DELETE to confirm"), { target: { value: "DELETE" } });
   screen.getByRole("button", { name: "Delete account" }).click();
@@ -246,7 +246,7 @@ it("covers clean closes and repeated close requests while discarding", async () 
 });
 
 it("covers cancelled and failed profile/timezone/deletion flows", async () => {
-  const preferences = { timezone: "UTC", preferred_session_length_minutes: 60, minimum_break_minutes: 10 };
+  const preferences = { timezone: "UTC", preferred_session_length_minutes: 60, minimum_break_minutes: 10, availability_confirmation_required: false };
   const onOpenChange = vi.fn();
   render(<ChangeTimezoneDialog open onOpenChange={onOpenChange} preferences={null} onSaved={vi.fn()} />);
   fireEvent.submit(screen.getByRole("dialog").querySelector("form")!);

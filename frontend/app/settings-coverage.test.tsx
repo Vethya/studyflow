@@ -42,7 +42,7 @@ vi.mock("@/components/page-kit", () => ({
   PageHeader: ({ title }: any) => <header><h1>{title}</h1></header>,
 }));
 vi.mock("@/components/ui/button", () => ({
-  Button: ({ children, onClick, disabled: _disabled, render: _render, ...props }: any) => <button {...props} onClick={onClick}>{children}</button>,
+  Button: ({ children, onClick, ...props }: any) => <button {...props} onClick={onClick}>{children}</button>,
 }));
 vi.mock("@/components/ui/sidebar-nav", () => ({
   SidebarNav: ({ items }: any) => <nav>{items.map((item: any) => <button key={item.id} onClick={item.onClick}>{item.title}</button>)}</nav>,
@@ -242,7 +242,7 @@ describe("settings page", () => {
   it("covers optional settings data, loading rows, and alternate events", async () => {
     state.profile = null as any;
     state.preferences = null as any;
-    const view = render(<SettingsPage />);
+    render(<SettingsPage />);
     const search = screen.getByRole("textbox", { name: "Search settings" });
     fireEvent.change(search, { target: { value: "profile" } });
     expect(screen.getByText("—")).toBeTruthy();
@@ -316,7 +316,7 @@ describe("settings page", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "Account & Security" })).toBeTruthy());
     expect(screen.queryByText("Password")).toBeNull();
     const unavailableDelete = screen.getByRole("button", { name: "Delete account" });
-    unavailableDelete.removeAttribute("disabled");
+    (unavailableDelete as HTMLButtonElement).disabled = false;
     fireEvent.click(unavailableDelete);
     expect(screen.queryByRole("dialog")).toBeNull();
 
@@ -327,7 +327,7 @@ describe("settings page", () => {
     screen.getByRole("button", { name: "Preferences" }).click();
     await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeTruthy());
     const unavailableSave = screen.getByRole("button", { name: "Save" });
-    unavailableSave.removeAttribute("disabled");
+    (unavailableSave as HTMLButtonElement).disabled = false;
     fireEvent.click(unavailableSave);
   });
 });
