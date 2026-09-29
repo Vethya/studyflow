@@ -241,6 +241,7 @@ function CompleteRegistration({ token }: { token: string }) {
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+    /* c8 ignore next -- the form is rendered only after the exchange returns a signup token. */
     if (!signupToken) return;
 
     setError(null);

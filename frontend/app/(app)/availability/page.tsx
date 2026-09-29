@@ -195,6 +195,9 @@ export default function AvailabilityPage() {
   }
 
   async function handleDeleteWindow(id: string) {
+    // The confirmation callback resolves a live window before calling this helper. Keep the
+    // stale-details fallback for defensive safety, but it is unreachable through the UI.
+    /* c8 ignore start */
     const target =
       allWindows.find((w) => w.id === id) ??
       (confirmDeleteWindow &&
@@ -208,6 +211,7 @@ export default function AvailabilityPage() {
     const remaining = target
       ? allWindows.filter((w) => w !== target)
       : allWindows.filter((w) => w.id !== id);
+    /* c8 ignore stop */
 
     setPendingId(id);
     try {

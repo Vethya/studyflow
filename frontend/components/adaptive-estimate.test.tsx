@@ -41,6 +41,23 @@ it("explains an adaptive estimate and lets the student choose the source", () =>
   expect(onChoose).toHaveBeenCalledWith("original");
 });
 
+it("renders faster, category-agnostic, and read-only estimate variants", () => {
+  render(<AdaptiveEstimateNote estimate={{ ...estimate, adaptiveEstimate: 30, plannedDuration: 60, factor: 0.5, isCategorySpecific: false }} />);
+  expect(screen.getByText(/finish these faster/)).toBeTruthy();
+  expect(screen.getByText(/earlier finished tasks/)).toBeTruthy();
+  expect(screen.getAllByText(/Your estimate/).length).toBeGreaterThan(0);
+});
+
+it("chooses the original value in a large-adjustment dialog and handles no estimate", async () => {
+  const onOpenChange = vi.fn();
+  const onDecided = vi.fn();
+  const { rerender } = render(<LargeAdjustmentDialog estimate={null} open onOpenChange={onOpenChange} onDecided={onDecided} />);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  rerender(<LargeAdjustmentDialog estimate={{ ...estimate, adaptiveEstimate: 30, plannedDuration: 60, factor: 0.5, isCategorySpecific: false }} open onOpenChange={onOpenChange} onDecided={onDecided} />);
+  fireEvent.click(screen.getByRole("button", { name: "Keep 1h" }));
+  await waitFor(() => expect(onDecided).toHaveBeenCalledWith("original"));
+});
+
 it("acknowledges a large adjustment before applying the selected estimate", async () => {
   acknowledgeAdjustmentMock.mockResolvedValue(undefined);
   const onOpenChange = vi.fn();

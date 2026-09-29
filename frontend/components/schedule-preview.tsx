@@ -329,7 +329,7 @@ interface CalendarSessionItem {
   badge?: string;
 }
 
-function ProposalCalendar({
+export function ProposalCalendar({
   isRecoveryProposal,
   proposedSessions,
   recordedSessions,

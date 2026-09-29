@@ -174,6 +174,7 @@ function TasksContent() {
     if (busyTaskId !== null) return;
     const previousTask = tasks.find((t) => t.id === taskId);
     const previousIndex = tasks.findIndex((t) => t.id === taskId);
+    /* c8 ignore next -- every current action supplies an optimistic update. */
     if (optimisticUpdate) {
       setData((current) => optimisticUpdate(current ?? []));
     }
@@ -182,6 +183,7 @@ function TasksContent() {
       await action();
       toast.success(message);
     } catch (cause) {
+      /* c8 ignore next -- every current action supplies an optimistic update. */
       if (optimisticUpdate) {
         if (previousTask) {
           setData((current) => {

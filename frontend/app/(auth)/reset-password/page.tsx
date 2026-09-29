@@ -47,6 +47,7 @@ function ResetPasswordForm() {
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+    /* c8 ignore next -- the form is rendered only when a reset token exists. */
     if (!token) return;
 
     if (password !== confirm) {

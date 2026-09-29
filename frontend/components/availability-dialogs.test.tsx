@@ -66,3 +66,86 @@ it("shows an error instead of submitting an exception that ends first", async ()
   expect(await screen.findByText("The end must come after the start.")).toBeTruthy();
   expect(onSubmit).not.toHaveBeenCalled();
 });
+
+it("guards dirty window changes, handles save failures, and resets on reopen", async () => {
+  const onSubmit = vi.fn().mockRejectedValueOnce(new Error("window failed"));
+  const onOpenChange = vi.fn();
+  const { rerender } = render(<AddWindowDialog open onOpenChange={onOpenChange} onSubmit={onSubmit} />);
+  fireEvent.change(screen.getByLabelText("Start"), { target: { value: "19:00" } });
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Discard changes" }));
+  expect(onOpenChange).toHaveBeenCalledWith(false);
+
+  rerender(<AddWindowDialog open onOpenChange={onOpenChange} onSubmit={onSubmit} />);
+  fireEvent.click(screen.getByRole("button", { name: "Add window" }));
+  expect(await screen.findByText("window failed")).toBeTruthy();
+});
+
+it("seeds and saves an edited exception, including a failed save and discard", async () => {
+  const period = { id: "p", title: "Exam", startDate: "2026-10-02T02:00:00.000Z", endDate: "2026-10-02T05:00:00.000Z", reason: "Exam" };
+  const onSubmit = vi.fn().mockRejectedValueOnce(new Error("exception failed"));
+  const onOpenChange = vi.fn();
+  const { rerender } = render(<ExceptionDialog open period={period} onOpenChange={onOpenChange} onSubmit={onSubmit} />);
+  expect((screen.getByLabelText("Reason (optional)") as HTMLInputElement).value).toBe("Exam");
+  fireEvent.change(screen.getByLabelText("Reason (optional)"), { target: { value: "Changed" } });
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Discard changes" }));
+  expect(onOpenChange).toHaveBeenCalledWith(false);
+
+  rerender(<ExceptionDialog open period={period} onOpenChange={onOpenChange} onSubmit={onSubmit} />);
+  fireEvent.change(screen.getByLabelText("Reason (optional)"), { target: { value: "Changed" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+  expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ reason: "Changed" }));
+  expect(await screen.findByText("exception failed")).toBeTruthy();
+});
+
+it("covers clean closes and repeated dirty close requests", async () => {
+  const closed = vi.fn();
+  render(<AddWindowDialog open onOpenChange={closed} onSubmit={vi.fn()} />);
+  screen.getByRole("button", { name: "Cancel" }).click();
+  expect(closed).toHaveBeenCalledWith(false);
+
+  cleanup();
+  const dirtyClosed = vi.fn();
+  render(<AddWindowDialog open onOpenChange={dirtyClosed} onSubmit={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Start"), { target: { value: "19:00" } });
+  screen.getByRole("button", { name: "Cancel" }).click();
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(dirtyClosed).not.toHaveBeenCalled();
+
+  cleanup();
+  const exceptionClosed = vi.fn();
+  render(<ExceptionDialog open onOpenChange={exceptionClosed} onSubmit={vi.fn()} />);
+  screen.getByRole("button", { name: "Cancel" }).click();
+  expect(exceptionClosed).toHaveBeenCalledWith(false);
+
+  cleanup();
+  const dirtyExceptionClosed = vi.fn();
+  render(<ExceptionDialog open onOpenChange={dirtyExceptionClosed} onSubmit={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Reason (optional)"), { target: { value: "Trip" } });
+  screen.getByRole("button", { name: "Cancel" }).click();
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(dirtyExceptionClosed).not.toHaveBeenCalled();
+});
+
+it("resets reopened forms, changes the weekday, and handles non-Error failures", async () => {
+  const onSubmit = vi.fn().mockRejectedValueOnce("window failed without an Error");
+  const onOpenChange = vi.fn();
+  const view = render(<AddWindowDialog open={false} onOpenChange={onOpenChange} onSubmit={onSubmit} />);
+  view.rerender(<AddWindowDialog open onOpenChange={onOpenChange} onSubmit={onSubmit} />);
+  const day = screen.getByRole("combobox");
+  fireEvent.mouseDown(day);
+  await waitFor(() => expect(screen.getByText("Friday")).toBeTruthy());
+  fireEvent.click(screen.getByText("Friday"));
+  fireEvent.click(screen.getByRole("button", { name: "Add window" }));
+  expect(await screen.findByText("Could not save the window.")).toBeTruthy();
+
+  cleanup();
+  const exceptionSubmit = vi.fn().mockRejectedValueOnce("exception failed without an Error");
+  render(<ExceptionDialog open onOpenChange={onOpenChange} onSubmit={exceptionSubmit} />);
+  fireEvent.change(screen.getByLabelText("Starts"), { target: { value: "2026-10-02T09:00" } });
+  fireEvent.change(screen.getByLabelText("Ends"), { target: { value: "2026-10-02T10:00" } });
+  fireEvent.click(screen.getByRole("button", { name: "Add exception" }));
+  expect(await screen.findByText("Could not save the exception.")).toBeTruthy();
+});

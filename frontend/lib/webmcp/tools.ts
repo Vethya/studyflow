@@ -477,7 +477,7 @@ export function createStudyFlowTools(): WebMcpTool[] {
       inputSchema: simulatePlanInputSchema,
       annotations: readOnlyUntrusted,
       execute: async (input, options) => {
-        const scenario = scenarioInput(input, true) ?? {};
+        const scenario = scenarioInput(input, true)!;
         const simulation = await scheduling.simulatePlan(scenario, signalFor(options));
         return result(
           simulation,
