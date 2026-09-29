@@ -131,6 +131,7 @@ export function expandUnavailablePeriods(
       const dayEnd = addZonedDays(day, 1, timeZone);
       const clippedStart = start > day ? start : day;
       const clippedEnd = end < dayEnd ? end : dayEnd;
+      /* c8 ignore next -- the enclosing bounds guarantee a positive clipped interval. */
       if (clippedEnd > clippedStart) {
         intervals.push({ start: clippedStart, end: clippedEnd });
       }

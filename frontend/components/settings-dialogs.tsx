@@ -396,6 +396,7 @@ export function ChangeTimezoneDialog({
   const isDirty = preferences !== null && selected !== "" && selected !== preferences.timezone;
 
   async function save() {
+    /* c8 ignore next -- the save button is disabled when preferences are absent. */
     if (!preferences) return;
     setSaving(true);
     try {

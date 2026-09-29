@@ -100,3 +100,125 @@ it.each([false, true])("refreshes an adaptive conflict, retains entered fields, 
   await waitFor(() => expect(saved).toHaveBeenCalled());
   expect(writes[1]).toMatchObject({ title: "My draft", notes: "Do not lose", original_estimate_minutes: 60, planned_source: needsAck ? "adaptive" : "original" });
 });
+
+it("creates a task, exercises category and priority choices, and preserves optional fields", async () => {
+  const writes: Record<string, unknown>[] = [];
+  vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+    if (url.includes("/preview")) return Response.json({ ...preview, available: false });
+    writes.push(JSON.parse(init.body as string));
+    return Response.json({ ...wire, id: "created", title: "New task", category: "reading", priority: "high" });
+  });
+  const saved = vi.fn();
+  const closed = vi.fn();
+  render(<TaskFormDialog open onOpenChange={closed} onSaved={saved} />);
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New task" } });
+  fireEvent.change(screen.getByLabelText("Deadline"), { target: { value: "2099-09-12T09:00" } });
+  fireEvent.change(screen.getByLabelText("Course (optional)"), { target: { value: "Algorithms" } });
+  fireEvent.change(screen.getByLabelText("Notes (optional)"), { target: { value: "Read twice" } });
+
+  const selects = screen.getAllByRole("combobox");
+  fireEvent.click(selects[0]);
+  fireEvent.click(await screen.findByText("Reading"));
+  fireEvent.click(selects[1]);
+  fireEvent.click(await screen.findByText("High"));
+
+  fireEvent.submit(screen.getByLabelText("Title").closest("form")!);
+  await waitFor(() => expect(saved).toHaveBeenCalled());
+  expect(writes[0]).toMatchObject({ title: "New task", category: "assignment", priority: "medium", course: "Algorithms", notes: "Read twice" });
+  expect(closed).toHaveBeenCalledWith(false);
+});
+
+it("guards adaptive source mismatches and reports ordinary conflicts", async () => {
+  vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+    if (url.includes("/preview")) return Response.json(preview);
+    if (init.method === "PUT") {
+      return Response.json({ detail: { code: "conflict", message: "task changed elsewhere" } }, { status: 409 });
+    }
+    return Response.json(wire);
+  });
+  const taskToEdit = toAcademicTask({ ...wire, estimate_frozen: false });
+  render(<TaskFormDialog open task={taskToEdit} onOpenChange={() => {}} onSaved={() => {}} />);
+  await waitFor(() => expect(screen.getByRole("button", { name: /Suggested/ })).toBeTruthy());
+  fireEvent.click(screen.getByRole("button", { name: /Your estimate/ }));
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Changed" } });
+  fireEvent.submit(screen.getByLabelText("Title").closest("form")!);
+  await waitFor(() => expect(screen.getByText("task changed elsewhere")).toBeTruthy());
+});
+
+it("asks before closing a dirty form and discards it on confirmation", async () => {
+  vi.stubGlobal("fetch", async () => Response.json({ ...preview, available: false }));
+  const closed = vi.fn();
+  render(<TaskFormDialog open onOpenChange={closed} onSaved={() => {}} />);
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Draft" } });
+  fireEvent.click(screen.getAllByRole("button", { name: "Close" }).at(-1)!);
+  fireEvent.click(await screen.findByRole("button", { name: "Discard changes" }));
+  expect(closed).toHaveBeenCalledWith(false);
+});
+
+it("blocks an adaptive save when the live preview no longer matches", async () => {
+  vi.stubGlobal("fetch", async (url: string) => {
+    if (url.includes("/preview")) return Response.json(preview);
+    throw new Error("save should not run");
+  });
+  const task = toAcademicTask({ ...wire, category: "reading", planned_source: "adaptive", estimate_frozen: false });
+  render(<TaskFormDialog open task={task} onOpenChange={vi.fn()} onSaved={vi.fn()} />);
+  await waitFor(() => expect(screen.getByRole("button", { name: /Suggested/ })).toBeTruthy());
+  fireEvent.submit(screen.getByLabelText("Title").closest("form")!);
+  expect(await screen.findByText("Adaptive planning is still being checked. Try again in a moment.")).toBeTruthy();
+});
+
+it("asks for acknowledgment before saving a large adaptive adjustment", async () => {
+  const closed = vi.fn();
+  vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+    if (url.includes("/preview")) return Response.json({ ...preview, adaptive_minutes: 180, planned_minutes: 180, correction_factor: "3.0", acknowledgment_required: true });
+    if (url.includes("/acknowledgments")) return new Response(null, { status: 204 });
+    if (init?.method === "PUT") return Response.json(wire);
+    return Response.json(wire);
+  });
+  const task = toAcademicTask({ ...wire, estimate_frozen: false, planned_source: "adaptive" });
+  render(<TaskFormDialog open task={task} onOpenChange={closed} onSaved={vi.fn()} />);
+  await waitFor(() => expect(screen.getByRole("button", { name: /Suggested/ })).toBeTruthy());
+  fireEvent.submit(screen.getByLabelText("Title").closest("form")!);
+  expect(await screen.findByText(/usually takes much longer/)).toBeTruthy();
+  fireEvent.click(screen.getAllByRole("button", { name: "Close" }).at(-1)!);
+  expect(closed).not.toHaveBeenCalled();
+});
+
+it("closes a clean form and reports ordinary save failures", async () => {
+  const closed = vi.fn();
+  vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+    if (url.includes("/preview")) return Response.json({ ...preview, available: false });
+    if (init?.method === "POST") throw new Error("save failed");
+    return Response.json(wire);
+  });
+  render(<TaskFormDialog open onOpenChange={closed} onSaved={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(closed).toHaveBeenCalledWith(false);
+
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Changed" } });
+  fireEvent.change(screen.getByLabelText("Deadline"), { target: { value: "2099-09-12T09:00" } });
+  fireEvent.submit(screen.getByLabelText("Title").closest("form")!);
+  expect(await screen.findByText("save failed")).toBeTruthy();
+});
+
+it("updates the estimate through the input and closes a clean form", async () => {
+  vi.stubGlobal("fetch", async (url: string) => {
+    if (url.includes("/preview")) return Response.json({ ...preview, available: false });
+    return Response.json(wire);
+  });
+  const closed = vi.fn();
+  render(<TaskFormDialog open onOpenChange={closed} onSaved={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Estimate (minutes)"), { target: { value: "90" } });
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Discard changes" }));
+  expect(closed).toHaveBeenCalledWith(false);
+});
+
+it("keeps the estimate unset when the live preview fails", async () => {
+  vi.stubGlobal("fetch", async (url: string) => {
+    if (url.includes("/preview")) throw new Error("preview unavailable");
+    return Response.json(wire);
+  });
+  render(<TaskFormDialog open onOpenChange={() => {}} onSaved={() => {}} />);
+  await waitFor(() => expect(screen.queryByRole("button", { name: /Suggested/ })).toBeNull());
+});

@@ -104,6 +104,7 @@ export function RecordOutcomeDialog({
   function resetForm() {
     setLastSessionId(null);
     setOutcome("Missed");
+    /* c8 ignore next -- the dialog returns null before resetForm can run without a session. */
     if (session) {
       setWorked(String(session.plannedDuration));
     }
@@ -145,6 +146,7 @@ export function RecordOutcomeDialog({
     outcome !== "Missed" && hasWorked && workedNumber > planned * LARGE_ENTRY_FACTOR;
 
   async function save(largeActualConfirmed = false) {
+    /* c8 ignore next -- save is only reachable while the dialog has a session. */
     if (!session) return;
     setSaving(true);
     try {

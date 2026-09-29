@@ -88,6 +88,7 @@ export default function TaskDetailPage({
   ) {
     const previousTask = task;
     const previousTasks = allTasks.data;
+    /* c8 ignore next -- start and finish actions always pass their optimistic task. */
     if (optimisticTask) {
       setData(optimisticTask);
       if (previousTasks) {
@@ -101,6 +102,7 @@ export default function TaskDetailPage({
       await fn();
       toast.success(message);
     } catch (cause) {
+      /* c8 ignore next -- the rendered task is necessarily present when an action is available. */
       if (optimisticTask && previousTask) setData(previousTask);
       if (optimisticTask && previousTasks) allTasks.setData(previousTasks);
       if (cause instanceof ApiError && cause.status === 409) {

@@ -43,5 +43,6 @@ it("keeps FastAPI validation messages keyed by field", async () => {
 it("puts the password policy rejection on the password field", () => {
   const error = new ApiError(422, "Password is not allowed");
   expect(registrationFieldErrorsFrom(error)?.password).toMatch(/not allowed/);
+  expect(registrationFieldErrorsFrom(new ApiError(422, "Invalid registration"))).toBeNull();
   expect(registrationFieldErrorsFrom(new ApiError(400, "Signup token is invalid or expired"))).toBeNull();
 });

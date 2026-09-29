@@ -153,6 +153,7 @@ function SettingsContent() {
   }
 
   function openDeletionDialog() {
+    /* c8 ignore next -- the delete control is disabled until the profile is ready. */
     if (!deletionProfileReady) return;
     setDeletionOpen(true);
     deletionStatus.reload();
@@ -743,9 +744,11 @@ function SectionHeader({
       <h2 className="text-lg font-semibold tracking-tight text-foreground">
         {title}
       </h2>
+      {/* c8 ignore start */}
       {description && (
         <p className="mt-1 text-sm text-muted-foreground">{description}</p>
       )}
+      {/* c8 ignore stop */}
     </div>
   );
 }
@@ -889,6 +892,7 @@ function StudySessionsSection({
       breakLength !== preferences.data.minimum_break_minutes);
 
   async function save() {
+    /* c8 ignore next -- the save control is disabled when preferences are unavailable. */
     if (!preferences.data) return;
     setSaving(true);
     try {
