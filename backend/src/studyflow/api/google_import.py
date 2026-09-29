@@ -3,6 +3,7 @@
 import logging
 from datetime import datetime
 from typing import Annotated, Literal, cast
+from urllib.parse import urlencode
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -70,6 +71,15 @@ class CalendarImportStartRequest(BaseModel):
 
 class ClassroomImportStartRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class MobileGoogleImportStartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source: GoogleImportSource
+    horizon_days: Annotated[int, Field(ge=1, le=MAX_CALENDAR_HORIZON_DAYS)] = (
+        DEFAULT_CALENDAR_HORIZON_DAYS
+    )
 
 
 class CalendarImportItemResponse(BaseModel):
@@ -255,6 +265,76 @@ async def start_google_classroom_import(
         imports,
         rate_limit,
     )
+
+
+@router.post(
+    "/mobile/start",
+    response_model=GoogleImportStartResponse,
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
+        status.HTTP_429_TOO_MANY_REQUESTS: {"model": GoogleImportError},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": GoogleImportError},
+    },
+)
+async def start_mobile_google_import(
+    payload: MobileGoogleImportStartRequest,
+    principal: Annotated[SessionPrincipal, Depends(require_session)],
+    http_request: Request,
+    imports: Annotated[GoogleImports, Depends(get_google_imports)],
+    rate_limit: Annotated[GoogleImportStartRateLimit, Depends(get_google_import_start_rate_limit)],
+) -> GoogleImportStartResponse:
+    redirect_uri = getattr(
+        http_request.app.state.settings, "google_mobile_import_redirect_uri", None
+    )
+    if redirect_uri is None:
+        raise HTTPException(status_code=503, detail=NOT_CONFIGURED)
+    try:
+        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        await rate_limit.check(client_ip, str(principal.account_id))
+        started = await imports.start(
+            principal.account_id,
+            payload.source,
+            payload.horizon_days,
+            redirect_uri=redirect_uri,
+        )
+    except GoogleImportStartRateLimitExceeded as error:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many Google import attempts",
+            headers={"Retry-After": "900"},
+        ) from error
+    except GoogleImportNotConfiguredError as error:
+        raise HTTPException(status_code=503, detail=NOT_CONFIGURED) from error
+    return GoogleImportStartResponse(authorization_url=started.authorization_url)
+
+
+def _mobile_import_callback(error: str | None = None, **params: str) -> RedirectResponse:
+    query = urlencode({"error": error, **params} if error is not None else params)
+    return RedirectResponse(
+        f"studyflow://import/google?{query}",
+        status_code=status.HTTP_303_SEE_OTHER,
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )
+
+
+@router.get("/mobile/callback", response_class=RedirectResponse)
+async def complete_mobile_google_import(
+    imports: Annotated[GoogleImports, Depends(get_google_imports)],
+    state: Annotated[str | None, Query(max_length=512)] = None,
+    code: Annotated[str | None, Query(max_length=2048)] = None,
+    error: Annotated[str | None, Query(max_length=200)] = None,
+) -> RedirectResponse:
+    if error is not None or not state or not code:
+        return _mobile_import_callback(error="denied" if error == "access_denied" else "invalid")
+    try:
+        snapshot_id = await imports.complete_mobile(code, state)
+    except GoogleImportPermissionError:
+        return _mobile_import_callback(error="permission")
+    except GoogleImportProviderUnavailableError:
+        return _mobile_import_callback(error="unavailable")
+    except (InvalidGoogleImportCallbackError, GoogleImportNotConfiguredError):
+        return _mobile_import_callback(error="invalid")
+    return _mobile_import_callback(snapshot_id=str(snapshot_id))
 
 
 def _redirect(request: Request, path: str) -> RedirectResponse:

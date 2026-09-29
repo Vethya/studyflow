@@ -101,6 +101,7 @@ class OIDCStateRecord:
     timezone: str
     link_account_id: UUID | None = None
     deletion_account_id: UUID | None = None
+    redirect_uri: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +129,8 @@ class OIDCRepository(Protocol):
         timezone: str,
         expires_at: datetime,
         link_account_id: UUID | None = None,
+        deletion_account_id: UUID | None = None,
+        redirect_uri: str | None = None,
     ) -> None: ...
     async def consume_state(self, state_hash: str, now: datetime) -> OIDCStateRecord | None: ...
     async def restore_state(
@@ -161,7 +164,9 @@ class OIDCDeletionRepository(Protocol):
 
 
 class GoogleProvider(Protocol):
-    async def exchange(self, code: str, expected_nonce_hash: str) -> GoogleClaims: ...
+    async def exchange(
+        self, code: str, expected_nonce_hash: str, redirect_uri: str | None = None
+    ) -> GoogleClaims: ...
 
 
 class SessionIssuer(Protocol):
@@ -172,8 +177,10 @@ class SessionIssuer(Protocol):
 
 class OIDCLogin(Protocol):
     async def start(self, timezone: str) -> OIDCStart: ...
+    async def start_mobile(self, timezone: str, redirect_uri: str) -> OIDCStart: ...
     async def start_link(self, account_id: UUID, timezone: str) -> OIDCStart: ...
     async def complete(self, code: str, state: str, state_cookie: str) -> OIDCLoginResult: ...
+    async def complete_mobile(self, code: str, state: str) -> OIDCLoginResult: ...
 
 
 class AccountDeletionOIDC(Protocol):
@@ -208,17 +215,22 @@ class OIDCLoginService:
         timezone: str,
         link_account_id: UUID | None = None,
         deletion_account_id: UUID | None = None,
+        redirect_uri: str | None = None,
     ) -> OIDCStart:
         state = self._token_factory()
         nonce = self._token_factory()
         if deletion_account_id is None:
-            await self._repository.store_state(
+            state_args = (
                 hash_oidc_secret(state),
                 hash_oidc_secret(nonce),
                 timezone,
                 self._clock() + timedelta(minutes=10),
                 link_account_id,
             )
+            if redirect_uri is None:
+                await self._repository.store_state(*state_args)
+            else:
+                await self._repository.store_state(*state_args, redirect_uri=redirect_uri)
         else:
             deletion_repository = cast(OIDCDeletionRepository, self._repository)
             await deletion_repository.store_state(
@@ -232,7 +244,7 @@ class OIDCLoginService:
         query = urlencode(
             {
                 "client_id": self._client_id,
-                "redirect_uri": self._redirect_uri,
+                "redirect_uri": redirect_uri or self._redirect_uri,
                 "response_type": "code",
                 "scope": OIDC_SCOPES,
                 "state": state,
@@ -256,6 +268,9 @@ class OIDCLoginService:
     async def start(self, timezone: str) -> OIDCStart:
         return await self._start(timezone)
 
+    async def start_mobile(self, timezone: str, redirect_uri: str) -> OIDCStart:
+        return await self._start(timezone, redirect_uri=redirect_uri)
+
     async def start_link(self, account_id: UUID, timezone: str) -> OIDCStart:
         return await self._start(timezone, account_id)
 
@@ -271,7 +286,12 @@ class OIDCLoginService:
         if state_record is None:
             raise InvalidOIDCResponseError
         try:
-            claims = await self._provider.exchange(code, state_record.nonce_hash)
+            if state_record.redirect_uri is None:
+                claims = await self._provider.exchange(code, state_record.nonce_hash)
+            else:
+                claims = await self._provider.exchange(
+                    code, state_record.nonce_hash, state_record.redirect_uri
+                )
         except OIDCProviderUnavailableError as error:
             if error.retry_same_callback:
                 error.retry_same_callback = await self._repository.restore_state(
@@ -329,6 +349,9 @@ class OIDCLoginService:
             avatar_url=account.avatar_url,
         )
 
+    async def complete_mobile(self, code: str, state: str) -> OIDCLoginResult:
+        return await self.complete(code, state, state)
+
 
 class GoogleOIDCProvider:
     def __init__(
@@ -343,7 +366,12 @@ class GoogleOIDCProvider:
         self._client_secret = client_secret
         self._redirect_uri = redirect_uri
 
-    async def exchange(self, code: str, expected_nonce_hash: str) -> GoogleClaims:
+    async def exchange(
+        self,
+        code: str,
+        expected_nonce_hash: str,
+        redirect_uri: str | None = None,
+    ) -> GoogleClaims:
         token_exchanged = False
         try:
             token_response = await self._http_client.post(
@@ -352,7 +380,7 @@ class GoogleOIDCProvider:
                     "code": code,
                     "client_id": self._client_id,
                     "client_secret": self._client_secret,
-                    "redirect_uri": self._redirect_uri,
+                    "redirect_uri": redirect_uri or self._redirect_uri,
                     "grant_type": "authorization_code",
                 },
             )
@@ -486,6 +514,9 @@ class UnconfiguredOIDCLogin:
     async def start(self, timezone: str) -> OIDCStart:
         raise OIDCNotConfiguredError
 
+    async def start_mobile(self, timezone: str, redirect_uri: str) -> OIDCStart:
+        raise OIDCNotConfiguredError
+
     async def start_link(self, account_id: UUID, timezone: str) -> OIDCStart:
         raise OIDCNotConfiguredError
 
@@ -493,6 +524,9 @@ class UnconfiguredOIDCLogin:
         raise OIDCNotConfiguredError
 
     async def complete(self, code: str, state: str, state_cookie: str) -> OIDCLoginResult:
+        raise OIDCNotConfiguredError
+
+    async def complete_mobile(self, code: str, state: str) -> OIDCLoginResult:
         raise OIDCNotConfiguredError
 
 

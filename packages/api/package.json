@@ -1,0 +1,12 @@
+{
+  "name": "@studyflow/api",
+  "version": "0.1.0",
+  "private": true,
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@studyflow/domain": "workspace:*"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "studyflow",
+  "private": true,
+  "packageManager": "pnpm@10.25.0",
+  "scripts": {
+    "typecheck:mobile": "pnpm --filter @studyflow/mobile typecheck",
+    "lint:mobile": "pnpm --filter @studyflow/mobile lint"
+  }
+}

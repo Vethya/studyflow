@@ -34,6 +34,7 @@ class GoogleImportState(Base):
     source: Mapped[str] = mapped_column(String(32))
     code_verifier: Mapped[str] = mapped_column(String(128))
     horizon_days: Mapped[int] = mapped_column(Integer)
+    redirect_uri: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-ink: 25 31 38;
+    --color-muted: 92 103 116;
+    --color-canvas: 248 250 252;
+    --color-surface: 255 255 255;
+    --color-elevated: 237 242 247;
+    --color-line: 214 222 230;
+    --color-accent: 74 139 35;
+    --color-danger: 190 48 63;
+  }
+
+  .dark:root {
+    --color-ink: 245 247 250;
+    --color-muted: 165 172 184;
+    --color-canvas: 8 9 10;
+    --color-surface: 17 20 24;
+    --color-elevated: 26 31 38;
+    --color-line: 40 48 58;
+    --color-accent: 155 225 93;
+    --color-danger: 255 123 134;
+  }
+}

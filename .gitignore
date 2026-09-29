@@ -7,6 +7,14 @@ __pycache__/
 .coverage
 htmlcov/
 
+# JavaScript and Expo dependencies/build output
+node_modules/
+.expo/
+dist/
+web-build/
+.metro-health-check*
+*.tsbuildinfo
+
 # Virtual environments
 .venv/
 
@@ -33,6 +41,7 @@ studyflow-backup-private-key.age
 
 # Local agent/tooling configuration
 .claude/settings.local.json
+/mobile/.claude/
 .codex/
 
 # Machine-specific Compose overrides (see the header in the file itself)

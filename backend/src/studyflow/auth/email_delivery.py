@@ -47,14 +47,17 @@ class SmtpAuthenticationEmailSender:
         transport: EmailTransport,
         from_address: str,
         public_app_url: str,
+        mobile_app_scheme: str = "studyflow",
     ) -> None:
         self._transport = transport
         self._from_address = from_address
         self._public_app_url = public_app_url.rstrip("/")
+        self._mobile_app_scheme = mobile_app_scheme
 
     async def send_verification(self, email: str, token: str) -> None:
         query = urlencode({"token": token})
         verification_url = f"{self._public_app_url}/verify-email?{query}"
+        mobile_verification_url = f"{self._mobile_app_scheme}://verify-email?{query}"
         message = EmailMessage()
         message["To"] = email
         message["From"] = self._from_address
@@ -62,6 +65,8 @@ class SmtpAuthenticationEmailSender:
         message.set_content(
             "Verify your StudyFlow email using this single-use link:\n\n"
             f"{verification_url}\n\n"
+            "Or open it in the StudyFlow mobile app:\n\n"
+            f"{mobile_verification_url}\n\n"
             "This link expires in eight hours."
         )
         await self._transport.send(message)
@@ -69,6 +74,7 @@ class SmtpAuthenticationEmailSender:
     async def send_password_reset(self, email: str, token: str) -> None:
         query = urlencode({"token": token})
         reset_url = f"{self._public_app_url}/reset-password?{query}"
+        mobile_reset_url = f"{self._mobile_app_scheme}://reset-password?{query}"
         message = EmailMessage()
         message["To"] = email
         message["From"] = self._from_address
@@ -76,6 +82,8 @@ class SmtpAuthenticationEmailSender:
         message.set_content(
             "Reset your StudyFlow password using this single-use link:\n\n"
             f"{reset_url}\n\n"
+            "Or open it in the StudyFlow mobile app:\n\n"
+            f"{mobile_reset_url}\n\n"
             "This link expires in one hour. Ignore this email if you did not request it."
         )
         await self._transport.send(message)

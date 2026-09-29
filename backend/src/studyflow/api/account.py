@@ -13,6 +13,7 @@ from studyflow.accounts.password import AccountPasswords, InvalidCurrentPassword
 from studyflow.accounts.preferences import AccountPreferences, StudyPreferences
 from studyflow.accounts.profile import AccountProfile, AccountProfiles
 from studyflow.auth.cookies import CookiePolicy
+from studyflow.auth.mobile_tokens import MobileTokenService
 from studyflow.auth.oidc import OIDCAccountLinking
 from studyflow.auth.passwords import (
     KNOWN_BREACH_MESSAGE,
@@ -88,6 +89,15 @@ class AccountDeletionConfirmRequest(BaseModel):
     confirmation: Literal["DELETE"]
 
 
+class MobileAccountDeletionPrepareRequest(BaseModel):
+    current_password: Annotated[str, Field(min_length=1, max_length=128)]
+
+
+class MobileAccountDeletionConfirmRequest(BaseModel):
+    challenge: Annotated[str, Field(min_length=20, max_length=512)]
+    confirmation: Literal["DELETE"]
+
+
 class AccountDeletionStatusResponse(BaseModel):
     ready: bool
 
@@ -100,6 +110,10 @@ class LinkedIdentityResponse(BaseModel):
 
 def get_session_authentication(request: Request) -> SessionAuthentication:
     return cast(SessionAuthentication, request.app.state.session_authentication)
+
+
+def get_mobile_tokens(request: Request) -> MobileTokenService:
+    return cast(MobileTokenService, request.app.state.mobile_tokens)
 
 
 def get_cookie_policy(request: Request) -> CookiePolicy:
@@ -141,6 +155,18 @@ async def require_session(
     request: Request,
     authentication: Annotated[SessionAuthentication, Depends(get_session_authentication)],
 ) -> SessionPrincipal:
+    authorization = request.headers.get("Authorization")
+    if authorization is not None and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+        if token:
+            mobile_principal = await get_mobile_tokens(request).authenticate_access(token)
+            if mobile_principal is not None:
+                return SessionPrincipal(
+                    mobile_principal.account_id,
+                    mobile_principal.email,
+                    mobile_principal.name,
+                    mobile_principal.avatar_url,
+                )
     session_token = request.cookies.get(get_cookie_policy(request).session_name)
     principal = (
         await authentication.authenticate(session_token) if session_token is not None else None
@@ -155,6 +181,18 @@ async def require_csrf_session(
     authentication: Annotated[SessionAuthentication, Depends(get_session_authentication)],
     csrf_token: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
 ) -> SessionPrincipal:
+    authorization = request.headers.get("Authorization")
+    if authorization is not None and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+        if token:
+            mobile_principal = await get_mobile_tokens(request).authenticate_access(token)
+            if mobile_principal is not None:
+                return SessionPrincipal(
+                    mobile_principal.account_id,
+                    mobile_principal.email,
+                    mobile_principal.name,
+                    mobile_principal.avatar_url,
+                )
     session_token = request.cookies.get(get_cookie_policy(request).session_name)
     if session_token is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
@@ -439,4 +477,59 @@ async def confirm_account_deletion(
             detail="Account deletion confirmation is missing or expired",
         )
     cookie_policy.clear_authentication(response)
-    cookie_policy.clear_account_deletion(response)
+
+
+@router.post(
+    "/mobile/deletion/prepare",
+    response_model=dict[str, str],
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": AccountError},
+        status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
+        status.HTTP_429_TOO_MANY_REQUESTS: {"model": AccountError},
+    },
+)
+async def prepare_mobile_account_deletion(
+    payload: MobileAccountDeletionPrepareRequest,
+    http_request: Request,
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    deletion: Annotated[AccountDeletion, Depends(get_account_deletion)],
+    rate_limit: Annotated[AccountDeletionRateLimit, Depends(get_account_deletion_rate_limit)],
+) -> dict[str, str]:
+    try:
+        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        await rate_limit.check(client_ip, str(principal.account_id))
+        challenge = await deletion.prepare_with_password(
+            principal.account_id, payload.current_password
+        )
+    except AccountDeletionRateLimitExceeded as error:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many account deletion attempts",
+            headers={"Retry-After": "900"},
+        ) from error
+    except InvalidCurrentPasswordError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect",
+        ) from error
+    return {"challenge": challenge}
+
+
+@router.post(
+    "/mobile/deletion/confirm",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": AccountError},
+        status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
+    },
+)
+async def confirm_mobile_account_deletion(
+    payload: MobileAccountDeletionConfirmRequest,
+    principal: Annotated[SessionPrincipal, Depends(require_csrf_session)],
+    deletion: Annotated[AccountDeletion, Depends(get_account_deletion)],
+) -> None:
+    if not await deletion.confirm(principal.account_id, payload.challenge):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Account deletion confirmation is missing or expired",
+        )

@@ -11,6 +11,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.login import LoginAccount
+from studyflow.auth.mobile_tokens import (
+    MOBILE_ACCESS_TOKEN_TYPE,
+    MOBILE_REFRESH_TOKEN_TYPE,
+    MobileTokenPrincipal,
+)
 from studyflow.auth.oidc import (
     GoogleClaims,
     LinkedIdentity,
@@ -25,6 +30,8 @@ from studyflow.database.models import (
     AuthenticationAccountDeletionChallenge,
     AuthenticationEmailToken,
     AuthenticationIdentity,
+    AuthenticationMobileOAuthCode,
+    AuthenticationMobileToken,
     AuthenticationOIDCLinkChallenge,
     AuthenticationOIDCState,
     AuthenticationRegistration,
@@ -378,6 +385,183 @@ class SqlAlchemySessionAuthenticationRepository:
         return True
 
 
+class SqlAlchemyMobileTokenRepository:
+    def __init__(self, database: SessionTransactions) -> None:
+        self._database = database
+
+    @staticmethod
+    def _principal(account: StudentAccount) -> MobileTokenPrincipal:
+        return MobileTokenPrincipal(
+            account.id,
+            account.email,
+            account.name,
+            getattr(account, "avatar_url", None),
+        )
+
+    async def issue(
+        self,
+        account_id: UUID,
+        access_token_hash: str,
+        refresh_token_hash: str,
+        now: datetime,
+        access_expires_at: datetime,
+        refresh_expires_at: datetime,
+    ) -> MobileTokenPrincipal | None:
+        async with self._database.transaction() as session:
+            account = await session.get(StudentAccount, account_id)
+            if account is None:
+                return None
+            await session.execute(
+                delete(AuthenticationMobileToken).where(
+                    (AuthenticationMobileToken.expires_at <= now)
+                    | (AuthenticationMobileToken.revoked_at.is_not(None))
+                )
+            )
+            session.add_all(
+                [
+                    AuthenticationMobileToken(
+                        account_id=account_id,
+                        token_hash=access_token_hash,
+                        token_type=MOBILE_ACCESS_TOKEN_TYPE,
+                        expires_at=access_expires_at,
+                    ),
+                    AuthenticationMobileToken(
+                        account_id=account_id,
+                        token_hash=refresh_token_hash,
+                        token_type=MOBILE_REFRESH_TOKEN_TYPE,
+                        expires_at=refresh_expires_at,
+                    ),
+                ]
+            )
+            return self._principal(account)
+
+    async def rotate(
+        self,
+        refresh_token_hash: str,
+        access_token_hash: str,
+        new_refresh_token_hash: str,
+        now: datetime,
+        access_expires_at: datetime,
+        refresh_expires_at: datetime,
+    ) -> MobileTokenPrincipal | None:
+        async with self._database.transaction() as session:
+            row = (
+                await session.execute(
+                    select(AuthenticationMobileToken, StudentAccount)
+                    .join(StudentAccount, StudentAccount.id == AuthenticationMobileToken.account_id)
+                    .where(
+                        AuthenticationMobileToken.token_hash == refresh_token_hash,
+                        AuthenticationMobileToken.token_type == MOBILE_REFRESH_TOKEN_TYPE,
+                        AuthenticationMobileToken.revoked_at.is_(None),
+                        AuthenticationMobileToken.expires_at > now,
+                    )
+                    .with_for_update()
+                )
+            ).one_or_none()
+            if row is None:
+                return None
+            token, account = row
+            token.revoked_at = now
+            session.add_all(
+                [
+                    AuthenticationMobileToken(
+                        account_id=account.id,
+                        token_hash=access_token_hash,
+                        token_type=MOBILE_ACCESS_TOKEN_TYPE,
+                        expires_at=access_expires_at,
+                    ),
+                    AuthenticationMobileToken(
+                        account_id=account.id,
+                        token_hash=new_refresh_token_hash,
+                        token_type=MOBILE_REFRESH_TOKEN_TYPE,
+                        expires_at=refresh_expires_at,
+                    ),
+                ]
+            )
+            return self._principal(account)
+
+    async def authenticate_access(
+        self, access_token_hash: str, now: datetime
+    ) -> MobileTokenPrincipal | None:
+        async with self._database.transaction() as session:
+            row = (
+                await session.execute(
+                    select(AuthenticationMobileToken, StudentAccount)
+                    .join(StudentAccount, StudentAccount.id == AuthenticationMobileToken.account_id)
+                    .where(
+                        AuthenticationMobileToken.token_hash == access_token_hash,
+                        AuthenticationMobileToken.token_type == MOBILE_ACCESS_TOKEN_TYPE,
+                        AuthenticationMobileToken.revoked_at.is_(None),
+                        AuthenticationMobileToken.expires_at > now,
+                    )
+                )
+            ).one_or_none()
+        if row is None:
+            return None
+        _, account = row
+        return self._principal(account)
+
+    async def create_oauth_code(
+        self, account_id: UUID, code_hash: str, now: datetime, expires_at: datetime
+    ) -> bool:
+        async with self._database.transaction() as session:
+            account = await session.get(StudentAccount, account_id)
+            if account is None:
+                return False
+            await session.execute(
+                delete(AuthenticationMobileOAuthCode).where(
+                    (AuthenticationMobileOAuthCode.expires_at <= now)
+                    | (AuthenticationMobileOAuthCode.consumed_at.is_not(None))
+                )
+            )
+            session.add(
+                AuthenticationMobileOAuthCode(
+                    account_id=account_id,
+                    code_hash=code_hash,
+                    expires_at=expires_at,
+                )
+            )
+        return True
+
+    async def consume_oauth_code(self, code_hash: str, now: datetime) -> UUID | None:
+        async with self._database.transaction() as session:
+            code = await session.scalar(
+                select(AuthenticationMobileOAuthCode)
+                .where(
+                    AuthenticationMobileOAuthCode.code_hash == code_hash,
+                    AuthenticationMobileOAuthCode.consumed_at.is_(None),
+                    AuthenticationMobileOAuthCode.expires_at > now,
+                )
+                .with_for_update()
+            )
+            if code is None:
+                return None
+            code.consumed_at = now
+            return code.account_id
+
+    async def revoke(
+        self,
+        now: datetime,
+        access_token_hash: str | None = None,
+        refresh_token_hash: str | None = None,
+    ) -> bool:
+        hashes = [
+            token_hash for token_hash in (access_token_hash, refresh_token_hash) if token_hash
+        ]
+        if not hashes:
+            return False
+        async with self._database.transaction() as session:
+            result = await session.execute(
+                update(AuthenticationMobileToken)
+                .where(
+                    AuthenticationMobileToken.token_hash.in_(hashes),
+                    AuthenticationMobileToken.revoked_at.is_(None),
+                )
+                .values(revoked_at=now)
+            )
+        return bool(getattr(result, "rowcount", 0))
+
+
 class SqlAlchemyVerificationResendRepository:
     def __init__(self, database: SessionTransactions) -> None:
         self._database = database
@@ -477,6 +661,7 @@ class SqlAlchemyOIDCRepository:
         expires_at: datetime,
         link_account_id: UUID | None = None,
         deletion_account_id: UUID | None = None,
+        redirect_uri: str | None = None,
     ) -> None:
         async with self._database.transaction() as session:
             await session.execute(
@@ -491,6 +676,7 @@ class SqlAlchemyOIDCRepository:
                     timezone=timezone,
                     link_account_id=link_account_id,
                     deletion_account_id=deletion_account_id,
+                    redirect_uri=redirect_uri,
                     expires_at=expires_at,
                 )
             )
@@ -514,6 +700,7 @@ class SqlAlchemyOIDCRepository:
                 row.timezone,
                 row.link_account_id,
                 row.deletion_account_id,
+                row.redirect_uri,
             )
 
     async def restore_state(self, state_hash: str, consumed_at: datetime, now: datetime) -> bool:

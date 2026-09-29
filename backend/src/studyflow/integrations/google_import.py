@@ -126,6 +126,7 @@ class PendingGoogleImport:
     source: GoogleImportSource
     code_verifier: str
     horizon_days: int
+    redirect_uri: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,6 +285,7 @@ class GoogleImportRepository(Protocol):
         horizon_days: int,
         now: datetime,
         expires_at: datetime,
+        redirect_uri: str | None = None,
     ) -> None: ...
     async def consume_state(self, state_hash: str, now: datetime) -> PendingGoogleImport | None: ...
     async def store_snapshot(
@@ -323,7 +325,9 @@ class GoogleImportRepository(Protocol):
 
 
 class GoogleImportClient(Protocol):
-    async def exchange_code(self, code: str, code_verifier: str) -> GrantedGoogleToken: ...
+    async def exchange_code(
+        self, code: str, code_verifier: str, redirect_uri: str | None = None
+    ) -> GrantedGoogleToken: ...
     async def calendar_events(
         self, access_token: str, time_min: datetime, time_max: datetime
     ) -> list[dict[str, Any]]: ...
@@ -335,9 +339,14 @@ class GoogleImports(Protocol):
     def configured(self) -> bool: ...
     async def status(self, account_id: UUID) -> GoogleImportStatus: ...
     async def start(
-        self, account_id: UUID, source: GoogleImportSource, horizon_days: int
+        self,
+        account_id: UUID,
+        source: GoogleImportSource,
+        horizon_days: int,
+        redirect_uri: str | None = None,
     ) -> GoogleImportStart: ...
     async def complete(self, code: str, state: str, state_cookie: str) -> UUID: ...
+    async def complete_mobile(self, code: str, state: str) -> UUID: ...
     async def preview(
         self, account_id: UUID, snapshot_id: UUID
     ) -> CalendarImportPreview | ClassroomImportPreview: ...
@@ -407,7 +416,11 @@ class GoogleImportService:
         return GoogleImportStatus(True, await self._repository.last_checked(account_id))
 
     async def start(
-        self, account_id: UUID, source: GoogleImportSource, horizon_days: int
+        self,
+        account_id: UUID,
+        source: GoogleImportSource,
+        horizon_days: int,
+        redirect_uri: str | None = None,
     ) -> GoogleImportStart:
         if not 1 <= horizon_days <= MAX_CALENDAR_HORIZON_DAYS:
             raise ValueError("horizon_days must be between 1 and 90")
@@ -417,7 +430,7 @@ class GoogleImportService:
         state = self._token_factory()
         code_verifier = self._verifier_factory()
         now = self._clock()
-        await self._repository.store_state(
+        state_args = (
             account_id,
             hash_import_state(state),
             source,
@@ -426,10 +439,14 @@ class GoogleImportService:
             now,
             now + STATE_LIFETIME,
         )
+        if redirect_uri is None:
+            await self._repository.store_state(*state_args)
+        else:
+            await self._repository.store_state(*state_args, redirect_uri=redirect_uri)
         query = urlencode(
             {
                 "client_id": self._client_id,
-                "redirect_uri": self._redirect_uri,
+                "redirect_uri": redirect_uri or self._redirect_uri,
                 "response_type": "code",
                 "scope": " ".join(GOOGLE_IMPORT_SCOPES[source]),
                 "state": state,
@@ -444,7 +461,15 @@ class GoogleImportService:
         return GoogleImportStart(f"{GOOGLE_AUTHORIZATION_ENDPOINT}?{query}", state)
 
     async def complete(self, code: str, state: str, state_cookie: str) -> UUID:
-        if not hmac.compare_digest(state.encode(), state_cookie.encode()):
+        return await self._complete(code, state, state_cookie)
+
+    async def complete_mobile(self, code: str, state: str) -> UUID:
+        return await self._complete(code, state, None)
+
+    async def _complete(self, code: str, state: str, state_cookie: str | None) -> UUID:
+        if state_cookie is not None and not hmac.compare_digest(
+            state.encode(), state_cookie.encode()
+        ):
             raise InvalidGoogleImportCallbackError
         now = self._clock()
         pending = await self._repository.consume_state(hash_import_state(state), now)
@@ -454,7 +479,12 @@ class GoogleImportService:
         if account is None:
             raise InvalidGoogleImportCallbackError
         try:
-            token = await self._client.exchange_code(code, pending.code_verifier)
+            if pending.redirect_uri is None:
+                token = await self._client.exchange_code(code, pending.code_verifier)
+            else:
+                token = await self._client.exchange_code(
+                    code, pending.code_verifier, pending.redirect_uri
+                )
         except (
             GoogleImportNotConfiguredError,
             GoogleImportProviderUnavailableError,
@@ -616,11 +646,18 @@ class UnconfiguredGoogleImports:
         return GoogleImportStatus(False, {})
 
     async def start(
-        self, account_id: UUID, source: GoogleImportSource, horizon_days: int
+        self,
+        account_id: UUID,
+        source: GoogleImportSource,
+        horizon_days: int,
+        redirect_uri: str | None = None,
     ) -> GoogleImportStart:
         raise GoogleImportNotConfiguredError
 
     async def complete(self, code: str, state: str, state_cookie: str) -> UUID:
+        raise GoogleImportNotConfiguredError
+
+    async def complete_mobile(self, code: str, state: str) -> UUID:
         raise GoogleImportNotConfiguredError
 
     async def preview(

@@ -49,7 +49,9 @@ class HttpGoogleImportClient:
         self._client_secret = client_secret
         self._redirect_uri = redirect_uri
 
-    async def exchange_code(self, code: str, code_verifier: str) -> GrantedGoogleToken:
+    async def exchange_code(
+        self, code: str, code_verifier: str, redirect_uri: str | None = None
+    ) -> GrantedGoogleToken:
         try:
             response = await self._http.post(
                 GOOGLE_TOKEN_ENDPOINT,
@@ -57,7 +59,7 @@ class HttpGoogleImportClient:
                     "code": code,
                     "client_id": self._client_id,
                     "client_secret": self._client_secret,
-                    "redirect_uri": self._redirect_uri,
+                    "redirect_uri": redirect_uri or self._redirect_uri,
                     "grant_type": "authorization_code",
                     "code_verifier": code_verifier,
                 },

@@ -31,6 +31,7 @@ from studyflow.auth.email_delivery import (
     SmtpAuthenticationEmailSender,
 )
 from studyflow.auth.login import Login, LoginService
+from studyflow.auth.mobile_tokens import MobileTokenService
 from studyflow.auth.oidc import (
     GoogleOIDCProvider,
     OIDCAccountLinking,
@@ -72,6 +73,7 @@ from studyflow.auth.repositories import (
     SessionTransactions,
     SqlAlchemyEmailVerificationRepository,
     SqlAlchemyLoginRepository,
+    SqlAlchemyMobileTokenRepository,
     SqlAlchemyOIDCRepository,
     SqlAlchemyPasswordRecoveryRepository,
     SqlAlchemyRegistrationRepository,
@@ -159,6 +161,7 @@ def create_app(
     login: Login | None = None,
     login_rate_limiter: LoginRateLimit | None = None,
     session_authentication: SessionAuthentication | None = None,
+    mobile_tokens: MobileTokenService | None = None,
     verification_resend: VerificationResend | None = None,
     verification_resend_rate_limiter: VerificationResendRateLimit | None = None,
     password_recovery: PasswordRecovery | None = None,
@@ -230,6 +233,7 @@ def create_app(
             ),
             from_address=str(resolved_settings.email_from_address),
             public_app_url=resolved_settings.public_app_url,
+            mobile_app_scheme=resolved_settings.mobile_app_scheme,
         )
     if resolved_registration is None:
         resolved_registration = RegistrationService(
@@ -258,10 +262,14 @@ def create_app(
             SqlAlchemyPasswordChangeRepository(transactions), password_service
         )
     if resolved_oidc_login is None:
+        oidc_redirect_uri = (
+            resolved_settings.google_oidc_redirect_uri
+            or resolved_settings.google_mobile_oidc_redirect_uri
+        )
         if (
             resolved_settings.google_oidc_client_id is not None
             and resolved_settings.google_oidc_client_secret is not None
-            and resolved_settings.google_oidc_redirect_uri is not None
+            and oidc_redirect_uri is not None
             and authentication_http_client is not None
         ):
             resolved_oidc_login = OIDCLoginService(
@@ -270,11 +278,11 @@ def create_app(
                     authentication_http_client,
                     resolved_settings.google_oidc_client_id,
                     resolved_settings.google_oidc_client_secret.get_secret_value(),
-                    resolved_settings.google_oidc_redirect_uri,
+                    oidc_redirect_uri,
                 ),
                 SessionService(SqlAlchemySessionRepository(transactions)),
                 resolved_settings.google_oidc_client_id,
-                resolved_settings.google_oidc_redirect_uri,
+                oidc_redirect_uri,
             )
         else:
             resolved_oidc_login = UnconfiguredOIDCLogin()
@@ -424,6 +432,9 @@ def create_app(
     )
     application.state.session_authentication = session_authentication or (
         SessionAuthenticationService(SqlAlchemySessionAuthenticationRepository(transactions))
+    )
+    application.state.mobile_tokens = mobile_tokens or MobileTokenService(
+        SqlAlchemyMobileTokenRepository(transactions)
     )
     application.state.verification_resend = resolved_verification_resend
     application.state.verification_resend_rate_limiter = (

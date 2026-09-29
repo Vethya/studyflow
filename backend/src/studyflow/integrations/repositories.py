@@ -61,6 +61,7 @@ class SqlAlchemyGoogleImportRepository:
         horizon_days: int,
         now: datetime,
         expires_at: datetime,
+        redirect_uri: str | None = None,
     ) -> None:
         async with self._database.transaction() as session:
             await session.execute(
@@ -79,6 +80,7 @@ class SqlAlchemyGoogleImportRepository:
                     source=source.value,
                     code_verifier=code_verifier,
                     horizon_days=horizon_days,
+                    redirect_uri=redirect_uri,
                     created_at=now,
                     expires_at=expires_at,
                 )
@@ -103,6 +105,7 @@ class SqlAlchemyGoogleImportRepository:
                 source=GoogleImportSource(row.source),
                 code_verifier=row.code_verifier,
                 horizon_days=row.horizon_days,
+                redirect_uri=row.redirect_uri,
             )
 
     async def store_snapshot(

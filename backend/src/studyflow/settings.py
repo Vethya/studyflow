@@ -1,3 +1,4 @@
+import re
 from enum import StrEnum
 from typing import Annotated, Literal, Self
 from urllib.parse import parse_qs, urlsplit
@@ -38,11 +39,14 @@ class Settings(BaseSettings):
     smtp_start_tls: bool = False
     email_from_address: EmailStr = "no-reply@example.com"
     public_app_url: str = "http://localhost:3000"
+    mobile_app_scheme: str = "studyflow"
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
     google_oidc_client_id: str | None = None
     google_oidc_client_secret: SecretStr | None = None
     google_oidc_redirect_uri: str | None = None
+    google_mobile_oidc_redirect_uri: str | None = None
     google_import_redirect_uri: str | None = None
+    google_mobile_import_redirect_uri: str | None = None
 
     @field_validator("database_url")
     @classmethod
@@ -63,6 +67,13 @@ class Settings(BaseSettings):
         if parsed_url.query or parsed_url.fragment:
             raise ValueError("Public app URL must not include a query or fragment")
         return value.rstrip("/")
+
+    @field_validator("mobile_app_scheme")
+    @classmethod
+    def require_mobile_app_scheme(cls, value: str) -> str:
+        if re.fullmatch(r"[a-z][a-z0-9+.-]*", value) is None:
+            raise ValueError("Mobile app scheme must be a valid URI scheme")
+        return value
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -104,7 +115,9 @@ class Settings(BaseSettings):
         "google_oidc_client_id",
         "google_oidc_client_secret",
         "google_oidc_redirect_uri",
+        "google_mobile_oidc_redirect_uri",
         "google_import_redirect_uri",
+        "google_mobile_import_redirect_uri",
         mode="before",
     )
     @classmethod
@@ -137,18 +150,55 @@ class Settings(BaseSettings):
             raise ValueError("Google import redirect URI must not include a query or fragment")
         return value
 
+    @field_validator("google_mobile_oidc_redirect_uri")
+    @classmethod
+    def require_http_mobile_oidc_redirect_uri(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed_url = urlsplit(value)
+        if parsed_url.scheme not in {"http", "https"} or parsed_url.hostname is None:
+            raise ValueError(
+                "Google mobile OIDC redirect URI must use HTTP or HTTPS and include a host"
+            )
+        if parsed_url.query or parsed_url.fragment:
+            raise ValueError("Google mobile OIDC redirect URI must not include a query or fragment")
+        return value
+
+    @field_validator("google_mobile_import_redirect_uri")
+    @classmethod
+    def require_http_mobile_import_redirect_uri(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed_url = urlsplit(value)
+        if parsed_url.scheme not in {"http", "https"} or parsed_url.hostname is None:
+            raise ValueError(
+                "Google mobile import redirect URI must use HTTP or HTTPS and include a host"
+            )
+        if parsed_url.query or parsed_url.fragment:
+            raise ValueError(
+                "Google mobile import redirect URI must not include a query or fragment"
+            )
+        return value
+
     @model_validator(mode="after")
     def reject_debug_in_production(self) -> Self:
-        configured_oidc_values = (
+        configured_oidc_credentials = (
             self.google_oidc_client_id,
             self.google_oidc_client_secret,
-            self.google_oidc_redirect_uri,
         )
-        if any(configured_oidc_values) and not all(configured_oidc_values):
-            raise ValueError(
-                "Google OIDC client ID, secret, and redirect URI must be configured together"
-            )
-        if self.google_import_redirect_uri is not None and not all(configured_oidc_values):
+        if any(configured_oidc_credentials) and not all(configured_oidc_credentials):
+            raise ValueError("Google OIDC client ID and secret must be configured together")
+        if self.google_oidc_redirect_uri is not None and not all(
+            (*configured_oidc_credentials, self.google_oidc_redirect_uri)
+        ):
+            raise ValueError("Google web OIDC requires the Google client ID and secret")
+        if self.google_mobile_oidc_redirect_uri is not None and not all(
+            (*configured_oidc_credentials, self.google_mobile_oidc_redirect_uri)
+        ):
+            raise ValueError("Google mobile OIDC requires the Google client ID and secret")
+        if self.google_import_redirect_uri is not None and not all(
+            (*configured_oidc_credentials, self.google_oidc_redirect_uri)
+        ):
             raise ValueError(
                 "Google import requires the Google OIDC client ID, secret, and redirect URI"
             )
@@ -175,6 +225,16 @@ class Settings(BaseSettings):
                 and urlsplit(self.google_oidc_redirect_uri).scheme != "https"
             ):
                 raise ValueError("Production Google OIDC redirect URI must use HTTPS")
+            if (
+                self.google_mobile_oidc_redirect_uri is not None
+                and urlsplit(self.google_mobile_oidc_redirect_uri).scheme != "https"
+            ):
+                raise ValueError("Production Google mobile OIDC redirect URI must use HTTPS")
+            if (
+                self.google_mobile_import_redirect_uri is not None
+                and urlsplit(self.google_mobile_import_redirect_uri).scheme != "https"
+            ):
+                raise ValueError("Production Google mobile import redirect URI must use HTTPS")
             if (
                 self.google_import_redirect_uri is not None
                 and urlsplit(self.google_import_redirect_uri).scheme != "https"
