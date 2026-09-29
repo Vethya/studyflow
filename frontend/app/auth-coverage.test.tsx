@@ -287,7 +287,7 @@ describe("email verification", () => {
     fireEvent.change(confirm, { target: { value: "Abcdefgh1234!" } });
     screen.getByRole("combobox").click();
     screen.getByRole("button", { name: "Invoke empty timezone" }).click();
-    const timezoneOption = screen.queryByRole("option", { name: /Phnom Penh|UTC/ });
+    const timezoneOption = screen.getAllByRole("option", { name: /Phnom Penh|UTC/ })[0];
     if (timezoneOption) timezoneOption.click();
     state.auth.completeRegistration.mockRejectedValueOnce(new ApiError(422, "invalid", null, null, { name: "Name rejected" }));
     fireEvent.submit(form());
