@@ -177,7 +177,7 @@ it("asks for acknowledgment before saving a large adaptive adjustment", async ()
   });
   const task = toAcademicTask({ ...wire, estimate_frozen: false, planned_source: "adaptive" });
   render(<TaskFormDialog open task={task} onOpenChange={closed} onSaved={vi.fn()} />);
-  await waitFor(() => expect(screen.getByRole("button", { name: /Suggested/ })).toBeTruthy());
+  await waitFor(() => expect(screen.getByRole("button", { name: "Suggested · 3h", pressed: true })).toBeTruthy());
   fireEvent.submit(screen.getByLabelText("Title").closest("form")!);
   expect(await screen.findByText(/usually takes much longer/)).toBeTruthy();
   fireEvent.click(screen.getAllByRole("button", { name: "Close" }).at(-1)!);
