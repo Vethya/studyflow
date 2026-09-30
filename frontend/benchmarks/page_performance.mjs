@@ -263,7 +263,7 @@ async function login(page, args) {
     waitUntil: "domcontentloaded",
   });
   await page.getByLabel("Email").fill(args.email);
-  await page.getByLabel("Password").fill(args.password);
+  await page.getByLabel("Password", { exact: true }).fill(args.password);
   await page.getByRole("button", { name: "Sign In", exact: true }).click();
   await page.waitForURL((url) => !url.pathname.endsWith("/login"), {
     timeout: args.timeoutMs,
