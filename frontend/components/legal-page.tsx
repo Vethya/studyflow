@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, BookOpen } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 
 export const LEGAL_LAST_UPDATED = "18 September 2026";
 
@@ -15,10 +15,7 @@ export function LegalPage({ title, intro, children }: LegalPageProps) {
     <div className="min-h-svh bg-background text-foreground">
       <header className="border-b">
         <div className="mx-auto flex max-w-[760px] items-center justify-between px-4 py-4 sm:px-6">
-          <Link href="/" className="flex items-center gap-2 font-semibold">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
-            </span>
+          <Link href="/" className="flex items-center font-semibold">
             Studyflow
           </Link>
           <Link

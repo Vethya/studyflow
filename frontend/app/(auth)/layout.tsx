@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { GraduationCap } from "lucide-react";
 
 /**
  * The shell every sign-in, sign-up and recovery screen sits in.
@@ -36,11 +35,8 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         <div className="relative z-10 flex w-full max-w-sm flex-col items-center">
           <Link
             href="/"
-            className="mb-6 flex items-center gap-2.5 rounded-lg outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+            className="mb-6 flex items-center rounded-lg outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
           >
-            <span className="flex size-8 items-center justify-center rounded-lg bg-white/20 backdrop-blur-sm">
-              <GraduationCap className="size-5 text-white" />
-            </span>
             <span className="font-display text-lg font-bold tracking-tight text-white">
               StudyFlow
             </span>

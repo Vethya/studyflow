@@ -48,8 +48,12 @@ function initials(name: string): string {
  */
 export function NavUser() {
   const { account, signOut } = useSession();
-  const { isMobile } = useSidebar();
+  const { isMobile, setOpenMobile } = useSidebar();
   const { theme, setTheme } = useTheme();
+
+  function closeMobileSidebar() {
+    if (isMobile) setOpenMobile(false);
+  }
 
   return (
     <SidebarMenu>
@@ -152,12 +156,18 @@ export function NavUser() {
 
             <DropdownMenuSeparator />
 
-            <DropdownMenuItem render={<Link href="/dashboard" />} onClick={restartOnboarding}>
+            <DropdownMenuItem
+              render={<Link href="/dashboard" />}
+              onClick={() => {
+                closeMobileSidebar();
+                restartOnboarding();
+              }}
+            >
               <Compass />
               Show me around
             </DropdownMenuItem>
 
-            <DropdownMenuItem render={<Link href="/settings" />}>
+            <DropdownMenuItem render={<Link href="/settings" />} onClick={closeMobileSidebar}>
               <Settings />
               Settings
             </DropdownMenuItem>

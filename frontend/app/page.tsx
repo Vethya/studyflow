@@ -150,10 +150,7 @@ function Navigation() {
     <nav ref={navRef} className="absolute top-0 left-0 right-0 z-50 w-full">
       <div className="max-w-[1200px] mx-auto px-6 flex items-center justify-between h-16">
         {/* Logo */}
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-md bg-white/20 backdrop-blur-sm flex items-center justify-center">
-            <BookOpen className="w-3.5 h-3.5 text-white" />
-          </div>
+        <div className="flex items-center">
           <span className="font-[family-name:var(--font-display)] font-bold text-[16px] tracking-[-0.01em] text-white">
             Studyflow
           </span>
@@ -691,10 +688,7 @@ It takes about five minutes to enter a term of coursework and the hours you have
       {/* ═══════ Footer ═══════ */}
       <footer className="landing-surface border-t landing-border py-16">
         <div className="footer-content max-w-[1200px] mx-auto px-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg landing-accent-bg flex items-center justify-center">
-              <BookOpen className="w-3.5 h-3.5 text-white" />
-            </div>
+          <div className="flex items-center">
             <span className="font-[family-name:var(--font-display)] font-bold text-[16px] tracking-[-0.01em] landing-ink">
               Studyflow
             </span>

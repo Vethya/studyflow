@@ -48,7 +48,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             this the document scrolls and takes the sidebar and header with it. */}
         <SidebarInset className="h-svh overflow-hidden">
           <header className="flex h-16 shrink-0 items-center gap-3 border-b bg-background px-4 md:px-6">
-            <SidebarTrigger className="-ml-1 shrink-0" />
+            <SidebarTrigger className="-ml-1 shrink-0 md:hidden" />
             <TopBar />
           </header>
           <main

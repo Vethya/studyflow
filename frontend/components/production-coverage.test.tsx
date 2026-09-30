@@ -20,7 +20,7 @@ import { TopBar } from "./top-bar";
 import { StudyFlowSWRProvider } from "./swr-provider";
 import { AppSidebar } from "./app-sidebar";
 import { NavUser } from "./nav-user";
-import { SidebarProvider } from "./ui/sidebar";
+import { SidebarProvider, SidebarTrigger } from "./ui/sidebar";
 import { Button } from "./ui/button";
 import type { AcademicTask } from "@/types/task";
 import type { OverloadWarning } from "@/types/schedule";
@@ -175,6 +175,7 @@ describe("drawers, onboarding, themes, and navigation", () => {
   it("renders sidebar account menu and exercises theme/sign-out actions", () => {
     render(<SidebarProvider><AppSidebar /><NavUser /></SidebarProvider>);
     expect(screen.getByText("StudyFlow")).toBeTruthy();
+    fireEvent.click(screen.getByRole("link", { name: "StudyFlow" }));
     fireEvent.click(screen.getAllByRole("button", { name: "Account menu" })[1]);
     fireEvent.click(screen.getByText("Appearance"));
     fireEvent.click(screen.getByText("Dark"));
@@ -204,9 +205,16 @@ describe("drawers, onboarding, themes, and navigation", () => {
     cleanup();
     vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
     useSessionMock.mockReturnValue({ status: "authenticated", account: { id: "a", name: "Ada Lovelace", email: "ada@example.com" }, signOut: signOutMock });
+    render(<SidebarProvider><SidebarTrigger /><AppSidebar /></SidebarProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Toggle Sidebar" }));
+    fireEvent.click(screen.getByRole("link", { name: "StudyFlow" }));
+
+    cleanup();
     render(<SidebarProvider><NavUser /></SidebarProvider>);
     fireEvent.click(screen.getByRole("button", { name: "Account menu" }));
     expect(screen.getByText("Appearance")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Settings"));
 
     cleanup();
     useThemeMock.mockReturnValue({ theme: null, setTheme: vi.fn() });

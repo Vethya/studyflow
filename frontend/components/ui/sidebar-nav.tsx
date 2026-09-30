@@ -48,6 +48,9 @@ export function SidebarNav({
   const sidebar = React.useContext(SidebarContext);
 
   const isCollapsed = sidebar?.state === "collapsed" && !sidebar?.isMobile;
+  const closeMobileSidebar = React.useCallback(() => {
+    if (sidebar?.isMobile) sidebar.setOpenMobile(false);
+  }, [sidebar]);
 
   const isItemActive = React.useCallback(
     (item: SidebarNavItem) => {
@@ -75,7 +78,7 @@ export function SidebarNav({
       className={cn(
         "relative",
         orientation === "responsive"
-          ? "flex md:flex-col gap-1.5 overflow-x-auto md:overflow-visible pb-1 md:pb-0 scrollbar-none"
+          ? "flex w-full min-w-0 max-w-full md:flex-col gap-1.5 overflow-x-auto md:overflow-visible pb-1 md:pb-0 scrollbar-none"
           : "flex flex-col gap-1 w-full",
         className,
       )}
@@ -126,6 +129,7 @@ export function SidebarNav({
             href={item.url}
             data-active={active ? "true" : undefined}
             aria-current={active ? "page" : undefined}
+            onClick={closeMobileSidebar}
             className={itemClassName}
           >
             {content}

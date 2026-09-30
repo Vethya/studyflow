@@ -46,9 +46,9 @@ export function PageShell({
 }
 
 /**
- * `min-w-0` on the text column and `flex-wrap` on the container are what stop
- * the actions being pushed off the right edge — the bug that clipped "Add
- * window" on Availability and the "Service" tab in Settings.
+ * The title and actions both need an explicit mobile width contract. Without
+ * it, a multi-button action group keeps its intrinsic width and can push page
+ * controls past the viewport.
  */
 export function PageHeader({
   title,
@@ -60,7 +60,7 @@ export function PageHeader({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+    <div data-slot="page-header" className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
       <div className="min-w-0 flex-1 basis-64">
         <h1 className="wrap-break-word font-display text-2xl font-bold tracking-tight sm:text-[1.75rem]">
           {title}
@@ -69,7 +69,14 @@ export function PageHeader({
           <p className="mt-1 max-w-prose wrap-break-word text-sm text-muted-foreground">{description}</p>
         )}
       </div>
-      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+      {actions && (
+        <div
+          data-slot="page-header-actions"
+          className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0"
+        >
+          {actions}
+        </div>
+      )}
     </div>
   );
 }

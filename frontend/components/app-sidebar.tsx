@@ -7,7 +7,6 @@ import {
   ListChecks,
   Clock3,
   ChartLine,
-  GraduationCap,
 } from "lucide-react";
 import {
   Sidebar,
@@ -17,9 +16,8 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
+  SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { NavUser } from "@/components/nav-user";
 import { SidebarNav } from "@/components/ui/sidebar-nav";
@@ -34,26 +32,23 @@ const MENU = [
 ];
 
 export function AppSidebar() {
+  const { isMobile, setOpenMobile } = useSidebar();
+
   return (
     <Sidebar variant="sidebar" collapsible="icon">
-      <SidebarHeader className="px-3 py-4 group-data-[collapsible=icon]:px-2">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              className="h-11 gap-2.5 hover:bg-transparent active:bg-transparent group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0!"
-              render={
-                <Link href="/dashboard">
-                  <span className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                    <GraduationCap className="size-4" />
-                  </span>
-                  <span className="truncate font-display text-lg font-bold tracking-tight group-data-[collapsible=icon]:hidden">
-                    StudyFlow
-                  </span>
-                </Link>
-              }
-            />
-          </SidebarMenuItem>
-        </SidebarMenu>
+      <SidebarHeader className="py-4 pl-6 pr-3 group-data-[collapsible=icon]:px-2">
+        <div className="flex h-11 items-center justify-between gap-2 group-data-[collapsible=icon]:h-8 group-data-[collapsible=icon]:justify-center">
+          <Link
+            href="/dashboard"
+            onClick={() => {
+              if (isMobile) setOpenMobile(false);
+            }}
+            className="min-w-0 flex-1 truncate font-display text-lg font-bold tracking-tight group-data-[collapsible=icon]:hidden"
+          >
+            StudyFlow
+          </Link>
+          <SidebarTrigger className="ml-auto shrink-0 group-data-[collapsible=icon]:ml-0 group-data-[collapsible=icon]:size-8" />
+        </div>
       </SidebarHeader>
 
       {/* Folded, SidebarGroup already supplies the 8px gutter; keeping this
