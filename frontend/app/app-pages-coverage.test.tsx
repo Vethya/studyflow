@@ -131,6 +131,8 @@ function setNormalResources(overrides: Record<string, any> = {}) {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-29T10:00:00Z"));
   setNormalResources();
   state.mobile = false;
   state.account = { name: "Student Name", email: "student@example.com" };
@@ -138,7 +140,10 @@ beforeEach(() => {
   state.api.generateProposal.mockResolvedValue(proposal);
   vi.clearAllMocks();
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe("dashboard and progress pages", () => {
   it("renders dashboard data, changes horizons, records outcomes, and reviews plans", async () => {
