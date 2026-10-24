@@ -18,6 +18,7 @@ from studyflow.scheduling import (
     TaskPriority,
     classify_overload_status,
     solve_with_overload,
+    split_task_sessions,
 )
 from studyflow.scheduling.overload import _DayStartOption
 
@@ -726,15 +727,20 @@ def test_overload_placement_exceptions_and_budget_exhaustion(
     assert result2.diagnostics.solver_status == "EXCEPTION"
     assert result2.detail == "placement solver crash"
 
-    # 3. Placement non-optimal status (line 2033)
+    # 3. Placement non-optimal status falls back to the feasible incumbent
     monkeypatch.undo()
+    original_solve = cp_model.CpSolver.solve
+
+    def downgrade_placement(
+        solver: cp_model.CpSolver,
+        model: cp_model.CpModel,
+    ) -> cp_model.CpSolverStatus:
+        status = original_solve(solver, model)
+        return cp_model.FEASIBLE if status == cp_model.OPTIMAL else status
+
     monkeypatch.setattr(
         "studyflow.scheduling.overload.cp_model.CpSolver.solve",
-        lambda _solver, _model: cp_model.FEASIBLE,
-    )
-    monkeypatch.setattr(
-        "studyflow.scheduling.overload.solver_diagnostics",
-        lambda _solver, _status: SolverDiagnostics("FEASIBLE", 0.0, 0, 0),
+        downgrade_placement,
     )
     result3 = solve_with_overload(
         overload_problem(
@@ -745,8 +751,8 @@ def test_overload_placement_exceptions_and_budget_exhaustion(
             planning_start_minute=0,
         )
     )
-    assert result3.status is KernelStatus.TECHNICAL_FAILURE
-    assert "placement objective was not proven optimal" in str(result3.detail)
+    assert result3.status is KernelStatus.FEASIBLE
+    assert len(result3.sessions) == 2
 
     # 4. Placement solve budget exhaustion (line 2008)
     monkeypatch.undo()
@@ -1542,3 +1548,73 @@ def test_overload_main_policy_preserves_a_valid_session_when_another_has_no_doma
 
     assert result.status is KernelStatus.FEASIBLE
     assert [item.session_id for item in result.sessions] == ["valid"]
+
+
+def _demands_for_estimates(
+    estimates: tuple[int, ...],
+    windows: tuple[tuple[int, int], ...],
+    deadline: int,
+) -> tuple[SessionDemand, ...]:
+    sessions: list[SessionDemand] = []
+    for index, estimate in enumerate(estimates):
+        task_id = f"task-{index}"
+        sessions.extend(
+            demand(
+                draft.session_id,
+                task_id,
+                draft.duration_minutes,
+                *windows,
+                deadline=deadline,
+            )
+            for draft in split_task_sessions(task_id, estimate, 60)
+        )
+    return tuple(sessions)
+
+
+@pytest.mark.parametrize(
+    "estimates",
+    [
+        (200, 344, 148, 233),
+        (30,) * 25,
+    ],
+)
+def test_real_solver_places_every_demand_within_a_short_budget(
+    estimates: tuple[int, ...],
+) -> None:
+    # Eight study days leave overnight gaps for the breaks. One second is enough
+    # to place every session and too short to prove the last refinement optimal.
+    day_span = 24 * 60
+    study_minutes = 8 * 60
+    day_count = 8
+    planning_days = tuple(
+        PlanningDay(index, index * day_span, index * day_span + study_minutes)
+        for index in range(day_count)
+    )
+    windows = tuple((day.start_minute, day.end_minute) for day in planning_days)
+    deadline = planning_days[-1].end_minute
+    sessions = _demands_for_estimates(estimates, windows, deadline)
+    problem = FeasibilityProblem(
+        sessions,
+        planning_start_minute=0,
+        minimum_break_minutes=10,
+        max_solve_seconds=1.0,
+        planning_days=planning_days,
+    )
+
+    result = solve_with_overload(problem)
+
+    assert result.status is KernelStatus.FEASIBLE
+    assert {session.session_id for session in result.sessions} == {
+        session.session_id for session in sessions
+    }
+    by_id = {session.session_id: session for session in sessions}
+    for scheduled in result.sessions:
+        requested = by_id[scheduled.session_id]
+        assert scheduled.end_minute - scheduled.start_minute == requested.duration_minutes
+        assert scheduled.end_minute <= requested.deadline_minute
+        assert any(
+            window.start <= scheduled.start_minute and scheduled.end_minute <= window.end
+            for window in requested.allowed_windows
+        )
+    for previous, following in pairwise(result.sessions):
+        assert following.start_minute >= previous.end_minute + problem.minimum_break_minutes

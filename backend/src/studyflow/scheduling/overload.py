@@ -1153,6 +1153,7 @@ def _solve_witness_day_placement(
     total_wall_time = 0.0
     total_conflicts = 0
     total_branches = 0
+    proven_optimal = True
     for component in components:
         if len(component) == 1:
             placement = component[0]
@@ -1217,14 +1218,16 @@ def _solve_witness_day_placement(
                 empty_diagnostics("EXCEPTION"),
                 str(error),
             )
-        if solver_status != cp_model.OPTIMAL:
+        # A feasible incumbent is a valid placement; only the refinement quality is unproven.
+        if solver_status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             return OverloadResult(
                 KernelStatus.TECHNICAL_FAILURE,
                 (),
                 (),
                 solver_diagnostics(solver, solver_status),
-                "The earliness placement objective was not proven optimal",
+                "The earliness placement objective could not be computed",
             )
+        proven_optimal = proven_optimal and solver_status == cp_model.OPTIMAL
 
         total_wall_time += solver.wall_time
         total_conflicts += solver.num_conflicts
@@ -1247,7 +1250,12 @@ def _solve_witness_day_placement(
         status,
         scheduled,
         _allocations(tasks, scheduled_ids, problem),
-        SolverDiagnostics("OPTIMAL", total_wall_time, total_conflicts, total_branches),
+        SolverDiagnostics(
+            "OPTIMAL" if proven_optimal else "FEASIBLE",
+            total_wall_time,
+            total_conflicts,
+            total_branches,
+        ),
         "Some work could not fit before its deadline" if status is KernelStatus.OVERLOAD else None,
     )
 
@@ -1328,6 +1336,7 @@ def _solve_uniform_spread_placement(
     policy_wall_time = 0.0
     policy_conflicts = 0
     policy_branches = 0
+    policy_proven_optimal = True
     if spread_variables_by_day_count:
         extra_day_weights = {
             day_count: maximum_candidate_days - day_count + 1
@@ -1398,14 +1407,16 @@ def _solve_uniform_spread_placement(
                 empty_diagnostics("EXCEPTION"),
                 str(error),
             )
-        if spread_status != cp_model.OPTIMAL:
+        # A feasible incumbent is a valid placement; only the refinement quality is unproven.
+        if spread_status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             return OverloadResult(
                 KernelStatus.TECHNICAL_FAILURE,
                 (),
                 (),
                 solver_diagnostics(spread_solver, spread_status),
-                "The spread placement objective was not proven optimal",
+                "The spread placement objective could not be computed",
             )
+        policy_proven_optimal = spread_status == cp_model.OPTIMAL
 
         policy_wall_time += spread_solver.wall_time
         policy_conflicts += spread_solver.num_conflicts
@@ -1445,14 +1456,16 @@ def _solve_uniform_spread_placement(
                     empty_diagnostics("EXCEPTION"),
                     str(error),
                 )
-            if earliness_status != cp_model.OPTIMAL:
+            # A feasible incumbent keeps the pinned spread; only earliness is unproven.
+            if earliness_status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
                 return OverloadResult(
                     KernelStatus.TECHNICAL_FAILURE,
                     (),
                     (),
                     solver_diagnostics(assignment_solver, earliness_status),
-                    "The earliness placement objective was not proven optimal",
+                    "The earliness placement objective could not be computed",
                 )
+            policy_proven_optimal = policy_proven_optimal and earliness_status == cp_model.OPTIMAL
             policy_wall_time += assignment_solver.wall_time
             policy_conflicts += assignment_solver.num_conflicts
             policy_branches += assignment_solver.num_branches
@@ -1500,7 +1513,9 @@ def _solve_uniform_spread_placement(
         placement.sessions,
         placement.allocations,
         SolverDiagnostics(
-            "OPTIMAL",
+            "OPTIMAL"
+            if policy_proven_optimal and placement.diagnostics.solver_status == "OPTIMAL"
+            else "FEASIBLE",
             policy_wall_time + placement.diagnostics.wall_time_seconds,
             policy_conflicts + placement.diagnostics.conflicts,
             policy_branches + placement.diagnostics.branches,
@@ -2029,13 +2044,14 @@ def solve_with_overload(problem: FeasibilityProblem) -> OverloadResult:
                 str(error),
             )
 
-        if placement_status != cp_model.OPTIMAL:
+        # A feasible incumbent is a valid placement; only the refinement quality is unproven.
+        if placement_status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             return OverloadResult(
                 KernelStatus.TECHNICAL_FAILURE,
                 (),
                 (),
                 solver_diagnostics(placement_solver, placement_status),
-                f"The {objective_name} placement objective was not proven optimal",
+                f"The {objective_name} placement objective could not be computed",
             )
 
         solver = placement_solver
