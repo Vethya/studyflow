@@ -52,7 +52,7 @@ const preview: Preview = {
     <ThemeProvider>
       <ThemeSync theme={context.globals.theme} />
       <TooltipProvider>
-        <div className="min-h-screen bg-background p-6 font-sans text-foreground antialiased">
+        <div className={`min-h-screen bg-background font-sans text-foreground antialiased ${context.parameters.layout === "fullscreen" ? "" : "p-6"}`}>
           {context.parameters.app ? <StoryProviders key={context.id}><Story /></StoryProviders> : <Story />}
           <Toaster position="bottom-right" richColors />
         </div>
