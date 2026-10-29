@@ -17,6 +17,10 @@ to select light, dark, or AMOLED, and the viewport tools to check narrow layouts
 Control changes are temporary. Edit the component, app CSS, or story source to
 save changes; Storybook updates automatically.
 
+Docs examples render in separate iframes to isolate their API scenarios.
+Each Docs page runs one primary example to prevent concurrent interaction playback.
+Use the Canvas tab for every variant and interactive Controls.
+
 Add typed `.stories.tsx` files under `stories`, grouped by UI, feature, or page.
 Each interactive control should have an accessible label. Use `fn()` for callback
 args and `play` assertions for behavior. Keep app components and their stories
