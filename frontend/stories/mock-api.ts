@@ -7,6 +7,8 @@ export interface ApiScenario {
   authenticated?: boolean;
   pending?: boolean;
   adaptive?: boolean;
+  overloaded?: boolean;
+  googleConfigured?: boolean;
 }
 let scenario: ApiScenario = {};
 let tasks: WireAcademicTask[] = [];
@@ -21,7 +23,7 @@ export const requests: { method: string; path: string; body: Record<string, unkn
 
 export function resetApi(next: ApiScenario = {}) {
   scenario = { ...next };
-  tasks = next.state === "empty" ? [] : [{ ...wireTask }];
+  tasks = next.state === "empty" ? [] : [{ ...wireTask, ...(next.overloaded ? { planned_duration_minutes: 4000, original_estimate_minutes: 4000 } : {}) }];
   sessions = next.state === "empty" ? [] : structuredClone(wireSessions);
   windows = next.state === "empty" ? [] : structuredClone(wireWindows);
   periods = next.state === "empty" ? [] : [structuredClone(wirePeriod)];
@@ -105,6 +107,18 @@ export const apiHandler = http.all("/api/v1/*", async ({ request }) => {
     return json({ period, invalidated_future_session_ids: [] });
   }
   if (path === "/availability/confirm-timezone") return empty();
+  if (path === "/availability/study-time") {
+    const input = (body.recurring_availability as { windows: typeof windows } | undefined)?.windows;
+    if (input) windows = input.map((w, i) => ({ ...w, id: `window-${i}` }));
+    if (body.planning_preferences) prefs = { ...prefs, ...body.planning_preferences };
+    const changes = body.blocked_periods as { add?: typeof periods; update?: ((typeof periods)[number] & { period_id: string })[]; remove?: { period_id: string }[] } | undefined;
+    const added = (changes?.add ?? []).map((p) => ({ ...p, id: `period-${++sequence}` }));
+    periods = periods.filter((p) => !changes?.remove?.some((r) => r.period_id === p.id));
+    const updated = (changes?.update ?? []).map((p) => ({ ...p, id: p.period_id }));
+    updated.forEach((p) => Object.assign(periods.find((row) => row.id === p.id) ?? {}, p));
+    periods.push(...added);
+    return json({ timezone_confirmed: true, planning_preferences: prefs, recurring_windows: windows, added_blocked_periods: added, updated_blocked_periods: updated, removed_blocked_period_ids: changes?.remove?.map((p) => p.period_id) ?? [], invalidated_future_session_ids: [] });
+  }
   if (path === "/study-sessions") return json(sessions);
   if (path.endsWith("/outcomes")) {
     const session = sessions.find((s) => s.id === path.split("/")[2]);
@@ -118,6 +132,20 @@ export const apiHandler = http.all("/api/v1/*", async ({ request }) => {
   if (path === "/schedule-proposals") { pending = true; return json(wireProposal); }
   if (path.endsWith("/accept")) { sessions = [structuredClone(wireSessions[1])]; pending = false; return empty(); }
   if (path.endsWith("/reject")) { pending = false; return empty(); }
-  if (path === "/integrations/google/status") return json({ configured: true, calendar_checked_at: "2026-10-01T05:00:00Z", classroom_checked_at: "2026-10-01T05:00:00Z" });
+  if (path === "/integrations/google/status") return json({ configured: scenario.googleConfigured ?? true, calendar_checked_at: "2026-10-01T05:00:00Z", classroom_checked_at: "2026-10-01T05:00:00Z" });
+  if (/^\/integrations\/google\/(calendar|classroom)\/start$/.test(path)) return json({ detail: "OAuth navigation is unavailable in this isolated demo." }, 400);
+  if (path.startsWith("/integrations/google/imports/")) {
+    const id = path.split("/")[4];
+    if (method === "DELETE") return empty();
+    if (method === "POST" && path.endsWith("/calendar")) return json({ created: (body.item_ids as string[]).length, updated: 0, unchanged: 0, skipped_past: 0, invalidated_future_session_ids: [] });
+    if (method === "POST" && path.endsWith("/classroom")) return json({ created_task_ids: ["imported-task"], already_imported: [], failed: [] });
+    return json({ id, source: id === "import-classroom" ? "google_classroom" : "google_calendar", expires_at: "2026-10-16T06:00:00Z", items: scenario.state === "empty" ? [] : id === "import-classroom" ? [
+      { id: "assignment", title: "Lab report", course: "Physics", due_at: wireTask.deadline_at, link: null, suggested_category: "assignment", status: "new" },
+      { id: "imported", title: "Reading quiz", course: "PSY101", due_at: wireTask.deadline_at, link: null, suggested_category: "reading", status: "already_imported" },
+    ] : [
+      { id: "shift", title: "Part-time shift", starts_at: wirePeriod.starts_at, ends_at: wirePeriod.ends_at, all_day: false, status: "new" },
+      { id: "trip", title: "Family trip", starts_at: "2026-10-19T00:00:00Z", ends_at: "2026-10-20T00:00:00Z", all_day: true, status: "changed" },
+    ] });
+  }
   return json({ detail: `Unhandled Storybook request: ${method} ${path}` }, 501);
 });
