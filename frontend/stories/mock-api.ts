@@ -109,7 +109,7 @@ export const apiHandler = http.all("/api/v1/*", async ({ request }) => {
   if (path.endsWith("/outcomes")) {
     const session = sessions.find((s) => s.id === path.split("/")[2]);
     if (!session) return json({ detail: "Session not found" }, 404);
-    const outcome = { session_id: session.id, ...body, recorded_at: NOW, rescheduled_at: null } as NonNullable<WireStudySession["outcome"]>;
+    const outcome = { session_id: session.id, kind: body.outcome, actual_minutes: body.actual_minutes ?? 0, remaining_minutes: body.outcome === "missed" ? session.planned_duration_minutes : body.remaining_minutes ?? 0, recorded_at: NOW, rescheduled_at: null } as NonNullable<WireStudySession["outcome"]>;
     session.outcome = outcome;
     pending = outcome.kind !== "completed";
     return json({ session, outcome, revision: pending ? { ...wireProposal, kind: "revision", revision_reason: "Session outcome changed remaining work." } : null });
