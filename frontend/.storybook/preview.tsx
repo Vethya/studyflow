@@ -8,6 +8,7 @@ import MockDate from "mockdate";
 import { NOW } from "../stories/fixtures";
 import { apiHandler, resetApi } from "../stories/mock-api";
 import { StoryProviders } from "../stories/providers";
+import { restartOnboarding } from "../lib/onboarding";
 import { ThemeProvider } from "../components/theme-provider";
 import { TooltipProvider } from "../components/ui/tooltip";
 import { Toaster } from "../components/ui/sonner";
@@ -29,8 +30,8 @@ const preview: Preview = {
     resetApi(context.parameters.api);
     const keys = ["studyflow:welcome-seen", "studyflow:getting-started-hidden"];
     const saved = keys.map((key) => localStorage.getItem(key));
-    keys.forEach((key) => localStorage.removeItem(key));
-    return () => { MockDate.reset(); keys.forEach((key, i) => saved[i] === null ? localStorage.removeItem(key) : localStorage.setItem(key, saved[i]!)); };
+    restartOnboarding();
+    return () => { MockDate.reset(); restartOnboarding(); keys.forEach((key, i) => saved[i] === null ? localStorage.removeItem(key) : localStorage.setItem(key, saved[i]!)); };
   },
   globalTypes: {
     theme: { description: "App theme", toolbar: { icon: "paintbrush", items: ["light", "dark", "amoled"], dynamicTitle: true } },
