@@ -7,7 +7,7 @@ const config: StorybookConfig = {
   addons: ["@storybook/addon-docs", "@storybook/addon-a11y", "@storybook/addon-vitest", "msw-storybook-addon"],
   staticDirs: ["../public", "./public"],
   viteFinal: (config) => mergeConfig(config, {
-    optimizeDeps: { include: ["msw-storybook-addon/csf3", "msw/browser", "mockdate", "swr"] },
+    optimizeDeps: { include: ["msw-storybook-addon/csf3", "msw/browser", "mockdate", "swr", "@base-ui/react/**", "recharts", "react-day-picker", "cmdk", "gsap", "gsap/dist/ScrollTrigger", "@gsap/react"] },
   }),
 };
 
