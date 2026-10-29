@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import { PasswordInput } from "@/components/ui/password-input";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 
 
 const meta = { title: "UI/Password-input", component: PasswordInput, args: { "aria-label": "Password", defaultValue: "studyflow-demo" } } satisfies Meta<typeof PasswordInput>;
