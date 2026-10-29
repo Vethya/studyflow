@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import React, { createContext, useContext } from "react";
+import MockDate from "mockdate";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -68,6 +69,7 @@ import { ApiError } from "@/lib/api";
 import TasksPage from "./(app)/tasks/page";
 
 beforeEach(() => {
+  MockDate.set("2026-09-30T12:00:00Z");
   state.mode = "normal";
   state.params = new URLSearchParams();
   state.tasks = [task({ id: "task-new", title: "New assignment", status: "Not Started", priority: "Low", course: undefined }), task(), task({ id: "task-done", title: "Finished task", status: "Completed", remainingDuration: 0, priority: "Medium" }), task({ id: "task-overdue", title: "Overdue task", status: "Overdue", priority: "High", deadline: "2026-09-20T12:00:00Z" })];
@@ -78,7 +80,7 @@ beforeEach(() => {
   state.setDataNull = false;
   vi.clearAllMocks();
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); MockDate.reset(); });
 
 describe("tasks page", () => {
   it("filters, sorts, edits, starts, finishes, and deletes tasks", async () => {

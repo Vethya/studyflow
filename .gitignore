@@ -9,6 +9,7 @@ htmlcov/
 
 # Virtual environments
 .venv/
+.pnpm-store/
 
 # Local configuration
 .env

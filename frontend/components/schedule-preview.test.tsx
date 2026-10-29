@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
+import MockDate from "mockdate";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
@@ -37,6 +38,7 @@ vi.mock("sonner", () => ({
 import { PendingPlanBanner, ProposalCalendar, SchedulePreview } from "./schedule-preview";
 
 afterEach(() => {
+  MockDate.reset();
   cleanup();
   vi.unstubAllGlobals();
   acceptProposalMock.mockReset();
@@ -46,6 +48,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  MockDate.set("2026-09-30T12:00:00Z");
   vi.stubGlobal("matchMedia", () => ({
     matches: false,
     addEventListener: vi.fn(),
