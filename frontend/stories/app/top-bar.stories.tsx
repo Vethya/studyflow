@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import { TopBar } from "@/components/top-bar";
 import { SidebarProvider } from "@/components/ui/sidebar";
-import { expect, fn, userEvent, waitFor, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 
 const meta = { title: "App/top-bar", component: TopBar, parameters: { app: true }, args: {  } } satisfies Meta<typeof TopBar>;
 export default meta;

@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import { NavUser } from "@/components/nav-user";
 import { SidebarProvider, Sidebar } from "@/components/ui/sidebar";
-import { expect, fn, userEvent, waitFor, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 
 const meta = { title: "App/nav-user", component: NavUser, parameters: { app: true }, args: {  } } satisfies Meta<typeof NavUser>;
 export default meta;

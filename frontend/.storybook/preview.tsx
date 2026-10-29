@@ -6,7 +6,8 @@ import { INITIAL_VIEWPORTS } from "storybook/viewport";
 import { mswLoader } from "msw-storybook-addon/csf3";
 import MockDate from "mockdate";
 import { NOW } from "../stories/fixtures";
-import { apiHandler, resetApi } from "../stories/mock-api";
+import { apiHandler, resetApi, unhandledRequests } from "../stories/mock-api";
+import { expect } from "storybook/test";
 import { StoryProviders } from "../stories/providers";
 import { restartOnboarding } from "../lib/onboarding";
 import { ThemeProvider } from "../components/theme-provider";
@@ -25,6 +26,7 @@ function ThemeSync({ theme }: { theme: string }) {
 const preview: Preview = {
   tags: ["autodocs"],
   loaders: [mswLoader()],
+  afterEach: async () => { await expect(unhandledRequests).toEqual([]); },
   beforeEach: (context) => {
     MockDate.set(NOW);
     resetApi(context.parameters.api);

@@ -20,6 +20,7 @@ let prefs = { ...preferences };
 let pending = false;
 let sequence = 0;
 export const requests: { method: string; path: string; body: Record<string, unknown> }[] = [];
+export const unhandledRequests: string[] = [];
 
 export function resetApi(next: ApiScenario = {}) {
   scenario = { ...next };
@@ -32,6 +33,7 @@ export function resetApi(next: ApiScenario = {}) {
   pending = next.pending ?? false;
   sequence = 0;
   requests.length = 0;
+  unhandledRequests.length = 0;
 }
 
 const json = (value: unknown, status = 200) => HttpResponse.json(value as never, { status });
@@ -82,7 +84,7 @@ export const apiHandler = http.all("/api/v1/*", async ({ request }) => {
     if (path.endsWith("/finish-early")) task.status = "completed";
     return json(task);
   }
-  if (path === "/progress") return json(tasks.map((t) => ({ task_id: t.id, task_title: t.title, actual_duration_minutes: 30, estimated_remaining_minutes: 120, effort_percent: 20, sessions_completed: 0, sessions_upcoming: 1, status: t.status })));
+  if (path === "/progress") return json(tasks.map((t) => ({ task_id: t.id, task_title: t.title, actual_duration_minutes: 30, estimated_remaining_minutes: scenario.overloaded ? 4000 : 120, effort_percent: scenario.overloaded ? 1 : 20, sessions_completed: 0, sessions_upcoming: 1, status: t.status })));
   if (path === "/adaptive-estimates/preview") {
     const original = Number(url.searchParams.get("original_minutes") ?? 60);
     const adaptive = scenario.adaptive ?? true;
@@ -147,5 +149,6 @@ export const apiHandler = http.all("/api/v1/*", async ({ request }) => {
       { id: "trip", title: "Family trip", starts_at: "2026-10-19T00:00:00Z", ends_at: "2026-10-20T00:00:00Z", all_day: true, status: "changed" },
     ] });
   }
+  unhandledRequests.push(`${method} ${path}`);
   return json({ detail: `Unhandled Storybook request: ${method} ${path}` }, 501);
 });

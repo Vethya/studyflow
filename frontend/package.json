@@ -14,7 +14,8 @@
     "test:nfr05:install": "playwright install chromium chrome webkit msedge",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
-    "test:storybook": "vitest run --config vitest.storybook.config.mts"
+    "test:storybook": "vitest run --config vitest.storybook.config.mts",
+    "check:stories": "node scripts/check-stories.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
