@@ -568,3 +568,127 @@ async def test_rate_limiter_handles_aware_expiry_and_exhausted_retry_loops(
     await login_limiter._finish_failure_slot(
         "student@example.com", "reservation", failed=True, reset_failures=False
     )
+
+
+async def _create_rate_limit_schema(database: Database) -> None:
+    async with database.transaction() as session:
+        await session.run_sync(
+            lambda sync_session: Base.metadata.create_all(sync_session.connection())
+        )
+
+
+async def _rate_limit_rows(database: Database) -> list[AuthenticationRateLimit]:
+    async with database.transaction() as session:
+        return list(await session.scalars(select(AuthenticationRateLimit)))
+
+
+@pytest.mark.anyio
+async def test_expired_rows_are_pruned_in_bounded_throttled_batches() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    current_time = datetime(2026, 7, 28, 12, tzinfo=UTC)
+    try:
+        await _create_rate_limit_schema(database)
+        async with database.transaction() as session:
+            for index in range(7):
+                session.add(
+                    AuthenticationRateLimit(
+                        action="registration",
+                        key_hash=f"{index:064x}",
+                        window_started_at=current_time - timedelta(hours=1, minutes=index),
+                        attempts=1,
+                    )
+                )
+        limiter = DatabaseRegistrationRateLimiter(
+            database, clock=lambda: current_time, cleanup_batch_size=3
+        )
+
+        await limiter.check("203.0.113.10", "first@example.com")
+        assert len(await _rate_limit_rows(database)) == 4 + 2
+
+        current_time += timedelta(seconds=30)
+        await limiter.check("203.0.113.11", "second@example.com")
+        assert len(await _rate_limit_rows(database)) == 4 + 4
+
+        current_time += timedelta(seconds=30)
+        await limiter.check("203.0.113.12", "third@example.com")
+        rows = await _rate_limit_rows(database)
+        assert len(rows) == 1 + 6
+        remaining_expired = [
+            row
+            for row in rows
+            if row.window_started_at.replace(tzinfo=UTC) <= current_time - timedelta(hours=1)
+        ]
+        assert len(remaining_expired) == 1
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_cleanup_failure_does_not_block_the_rate_limit_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import asynccontextmanager
+
+    from sqlalchemy.exc import OperationalError
+
+    import studyflow.auth.rate_limits as rate_limits_module
+
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        await _create_rate_limit_schema(database)
+        original_transaction = database.transaction
+        calls = 0
+
+        @asynccontextmanager
+        async def first_transaction_fails() -> AsyncIterator[AsyncSession]:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OperationalError("DELETE", {}, Exception("lock timeout"))
+            async with original_transaction() as session:
+                yield session
+
+        database.transaction = first_transaction_fails  # type: ignore[method-assign]
+        limiter = DatabaseRegistrationRateLimiter(database)
+
+        logger = MagicMock()
+        monkeypatch.setattr(rate_limits_module, "logger", logger)
+
+        await limiter.check("203.0.113.10", "student@example.com")
+
+        logger.warning.assert_called_once()
+        assert "Rate-limit cleanup failed" in logger.warning.call_args.args[0]
+        database.transaction = original_transaction  # type: ignore[method-assign]
+        assert len(await _rate_limit_rows(database)) == 2
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_postgresql_cleanup_skips_locked_rows_and_is_bounded() -> None:
+    from contextlib import asynccontextmanager
+
+    from sqlalchemy.dialects.postgresql.base import PGDialect
+
+    session = MagicMock()
+    session.execute = AsyncMock()
+
+    @asynccontextmanager
+    async def transaction() -> AsyncIterator[Any]:
+        yield session
+
+    database = MagicMock()
+    database.transaction = transaction
+    limiter = DatabaseRegistrationRateLimiter(database, cleanup_batch_size=7)
+
+    await limiter._prune_expired(datetime(2026, 7, 28, tzinfo=UTC))
+
+    session.execute.assert_awaited_once()
+    compiled = session.execute.call_args.args[0].compile(dialect=cast(Any, PGDialect)())
+    statement = str(compiled)
+    assert statement.startswith("DELETE FROM authentication_rate_limits")
+    assert "LIMIT" in statement
+    assert "FOR UPDATE SKIP LOCKED" in statement
+    assert 7 in compiled.params.values()

@@ -1,17 +1,26 @@
 """Durable abuse control for authentication endpoints."""
 
 import hashlib
+import logging
 import secrets
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from sqlalchemy import delete, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from studyflow.auth.email import canonicalize_email
 from studyflow.auth.repositories import SessionTransactions
 from studyflow.database.models import AuthenticationRateLimit
+
+logger = logging.getLogger(__name__)
+
+# Expired rows are pruned in small batches, at most once per interval per limiter, in their own
+# short transaction (indexed by ix_authentication_rate_limits_window_started_at). Pruning is only
+# housekeeping: every check already treats a row older than its window as a fresh window.
+CLEANUP_INTERVAL = timedelta(seconds=60)
+CLEANUP_BATCH_SIZE = 500
 
 
 class RegistrationRateLimitExceeded(RuntimeError):
@@ -124,11 +133,38 @@ class _DatabaseRateLimiter:
         maximum_attempts: int = 5,
         window_seconds: int = 900,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        cleanup_interval: timedelta = CLEANUP_INTERVAL,
+        cleanup_batch_size: int = CLEANUP_BATCH_SIZE,
     ) -> None:
         self._database = database
         self._maximum_attempts = maximum_attempts
         self._window = timedelta(seconds=window_seconds)
         self._clock = clock
+        self._cleanup_interval = cleanup_interval
+        self._cleanup_batch_size = cleanup_batch_size
+        self._next_cleanup_at: datetime | None = None
+
+    async def _prune_expired(self, now: datetime) -> None:
+        """Delete one bounded batch of expired rows, skipping rows other requests hold."""
+        if self._next_cleanup_at is not None and now < self._next_cleanup_at:
+            return
+        self._next_cleanup_at = now + self._cleanup_interval
+        expired_ids = (
+            select(AuthenticationRateLimit.id)
+            .where(AuthenticationRateLimit.window_started_at <= now - self._window)
+            .order_by(AuthenticationRateLimit.window_started_at)
+            .limit(self._cleanup_batch_size)
+            .with_for_update(skip_locked=True)
+        )
+        try:
+            async with self._database.transaction() as session:
+                await session.execute(
+                    delete(AuthenticationRateLimit).where(
+                        AuthenticationRateLimit.id.in_(expired_ids.scalar_subquery())
+                    )
+                )
+        except SQLAlchemyError:
+            logger.warning("Rate-limit cleanup failed; it will be retried", exc_info=True)
 
     async def _check(
         self,
@@ -138,14 +174,10 @@ class _DatabaseRateLimiter:
     ) -> None:
         now = self._clock()
         keys = tuple(self._hash_key(value) for value in key_values)
+        await self._prune_expired(now)
         for attempt in range(3):
             try:
                 async with self._database.transaction() as session:
-                    await session.execute(
-                        delete(AuthenticationRateLimit).where(
-                            AuthenticationRateLimit.window_started_at <= now - self._window
-                        )
-                    )
                     rows = {
                         row.key_hash: row
                         for row in await session.scalars(
