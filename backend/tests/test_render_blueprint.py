@@ -130,6 +130,14 @@ def test_blueprint_trusts_only_the_render_proxy_chain_for_client_addresses() -> 
         assert variables["STUDYFLOW_TRUSTED_PROXY_HOPS"] == "3"
 
 
+def test_blueprint_reads_the_frontend_proxy_secret_from_the_dashboard() -> None:
+    for service_config in services():
+        by_key = {entry["key"]: entry for entry in service_config["envVars"]}
+
+        assert by_key["STUDYFLOW_FRONTEND_PROXY_SECRET"].get("sync") is False
+        assert "value" not in by_key["STUDYFLOW_FRONTEND_PROXY_SECRET"]
+
+
 def test_dockerfile_disables_uvicorn_proxy_header_rewriting() -> None:
     dockerfile = DOCKERFILE_PATH.read_text()
 
@@ -140,6 +148,7 @@ def test_blueprint_keeps_secrets_out_of_the_repository() -> None:
     raw_variables: list[dict[str, Any]] = service()["envVars"]
     secrets = [
         "STUDYFLOW_DATABASE_URL",
+        "STUDYFLOW_FRONTEND_PROXY_SECRET",
         "STUDYFLOW_SMTP_PASSWORD",
         "STUDYFLOW_GOOGLE_OIDC_CLIENT_ID",
         "STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET",

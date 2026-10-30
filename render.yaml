@@ -17,6 +17,8 @@ projects:
                 value: production
               - key: STUDYFLOW_TRUSTED_PROXY_HOPS
                 value: "3"
+              - key: STUDYFLOW_FRONTEND_PROXY_SECRET
+                sync: false
               - key: STUDYFLOW_DATABASE_URL
                 sync: false
               - key: STUDYFLOW_PUBLIC_APP_URL
@@ -59,6 +61,8 @@ projects:
                 value: production
               - key: STUDYFLOW_TRUSTED_PROXY_HOPS
                 value: "3"
+              - key: STUDYFLOW_FRONTEND_PROXY_SECRET
+                sync: false
               - key: STUDYFLOW_DATABASE_URL
                 sync: false
               - key: STUDYFLOW_PUBLIC_APP_URL

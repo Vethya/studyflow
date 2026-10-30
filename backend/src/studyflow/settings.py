@@ -14,6 +14,7 @@ class Environment(StrEnum):
 
 
 DEFAULT_DATABASE_URL = "postgresql+psycopg://studyflow:studyflow@localhost:5432/studyflow"
+MIN_FRONTEND_PROXY_SECRET_LENGTH = 32
 
 
 class Settings(BaseSettings):
@@ -40,6 +41,7 @@ class Settings(BaseSettings):
     public_app_url: str = "http://localhost:3000"
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
     trusted_proxy_hops: Annotated[int, Field(ge=0, le=5)] = 0
+    frontend_proxy_secret: SecretStr | None = None
     google_oidc_client_id: str | None = None
     google_oidc_client_secret: SecretStr | None = None
     google_oidc_redirect_uri: str | None = None
@@ -99,6 +101,23 @@ class Settings(BaseSettings):
     def normalize_blank_smtp_password(cls, value: object) -> object:
         if value == "" or (isinstance(value, SecretStr) and value.get_secret_value() == ""):
             return None
+        return value
+
+    @field_validator("frontend_proxy_secret", mode="before")
+    @classmethod
+    def normalize_blank_frontend_proxy_secret(cls, value: object) -> object:
+        if value == "" or (isinstance(value, SecretStr) and value.get_secret_value() == ""):
+            return None
+        return value
+
+    @field_validator("frontend_proxy_secret")
+    @classmethod
+    def require_a_strong_frontend_proxy_secret(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and len(value.get_secret_value()) < MIN_FRONTEND_PROXY_SECRET_LENGTH:
+            raise ValueError(
+                "Frontend proxy secret must be at least "
+                f"{MIN_FRONTEND_PROXY_SECRET_LENGTH} characters"
+            )
         return value
 
     @field_validator(

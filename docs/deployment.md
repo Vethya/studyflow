@@ -23,6 +23,7 @@ URL, and TLS for email delivery.
 | --- | --- | --- | --- |
 | `STUDYFLOW_ENVIRONMENT` | yes | `render.yaml` (`production` for every hosted service) | Enables production validators and secure cookies |
 | `STUDYFLOW_TRUSTED_PROXY_HOPS` | yes | `render.yaml` (`3`) | Number of proxies in front of the API that append to `X-Forwarded-For`; see [Client IP addresses](#client-ip-addresses-and-rate-limits) |
+| `STUDYFLOW_FRONTEND_PROXY_SECRET` | yes (Render and Vercel) | You (secret, same value on both) | At least 32 random characters shared with the frontend proxy so the API can trust the end-user address it forwards; leave unset locally; see [Client IP addresses](#client-ip-addresses-and-rate-limits) |
 | `STUDYFLOW_DATABASE_URL` | yes | You (secret) | Neon **pooled** URL, converted; see below |
 | `STUDYFLOW_PUBLIC_APP_URL` | yes | `render.yaml` (`https://studyflow.vercel.app`) | Shared frontend origin; verification links point here |
 | `STUDYFLOW_SMTP_HOST` | yes | `render.yaml` (`smtp.resend.com`) | |

@@ -86,6 +86,17 @@ def test_backend_example_environment_matches_the_proxy_hop_setting() -> None:
     assert "STUDYFLOW_TRUSTED_PROXY_HOPS=0" in example_environment.splitlines()
 
 
+def test_frontend_proxy_secret_is_unset_for_local_development() -> None:
+    compose = load_compose()
+
+    assert (
+        compose["x-backend-environment"]["STUDYFLOW_FRONTEND_PROXY_SECRET"]
+        == "${STUDYFLOW_FRONTEND_PROXY_SECRET:-}"
+    )
+    for example in (REPOSITORY_ROOT / ".env.example", BACKEND_ROOT / ".env.example"):
+        assert "STUDYFLOW_FRONTEND_PROXY_SECRET=" in example.read_text().splitlines()
+
+
 def test_compose_images_are_pinned_by_digest() -> None:
     services = load_compose()["services"]
 

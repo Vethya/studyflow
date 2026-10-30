@@ -62,6 +62,29 @@ def test_settings_reject_out_of_range_trusted_proxy_hops(hops: int) -> None:
         Settings(trusted_proxy_hops=hops)
 
 
+def test_frontend_proxy_secret_is_optional_secret_and_blank_means_unset(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert Settings().frontend_proxy_secret is None
+
+    monkeypatch.setenv("STUDYFLOW_FRONTEND_PROXY_SECRET", "")
+    assert Settings().frontend_proxy_secret is None
+
+    secret = "p" * 32
+    monkeypatch.setenv("STUDYFLOW_FRONTEND_PROXY_SECRET", secret)
+    settings = Settings()
+    assert settings.frontend_proxy_secret is not None
+    assert settings.frontend_proxy_secret.get_secret_value() == secret
+    assert secret not in repr(settings)
+
+
+def test_settings_reject_a_short_frontend_proxy_secret() -> None:
+    with raises(ValidationError, match="Frontend proxy secret must be at least 32 characters"):
+        Settings(frontend_proxy_secret=SecretStr("p" * 31))
+
+
 def test_production_rejects_debug_mode() -> None:
     with raises(ValidationError, match="Debug mode must be disabled in production"):
         Settings(environment=Environment.PRODUCTION, debug=True)

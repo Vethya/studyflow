@@ -1,13 +1,19 @@
 """Client address resolution for abuse-control keys behind reverse proxies."""
 
+from hmac import compare_digest
 from ipaddress import IPv6Address, ip_address
 from typing import cast
 
 from fastapi import Request
+from pydantic import SecretStr
 
 from studyflow.settings import Settings
 
 UNKNOWN_CLIENT_IP = "unknown"
+FRONTEND_CLIENT_IP_HEADER = "x-studyflow-client-ip"
+"""End-user address forwarded by the StudyFlow frontend proxy."""
+FRONTEND_PROXY_SECRET_HEADER = "x-studyflow-proxy-secret"  # noqa: S105
+"""Shared secret proving that ``FRONTEND_CLIENT_IP_HEADER`` was set by the frontend proxy."""
 
 
 def resolve_client_ip(
@@ -36,9 +42,45 @@ def resolve_client_ip(
     return _normalize_ip(peer_host) or peer_host
 
 
+def resolve_frontend_proxy_client_ip(
+    forwarded_client_ip: list[str],
+    presented_secret: list[str],
+    expected_secret: SecretStr | None,
+) -> str | None:
+    """Return the end-user address forwarded by the frontend proxy, if it is authenticated.
+
+    Browser traffic reaches the API through the frontend's server-side proxy, so the proxy hops
+    only identify the frontend's egress address, which unrelated users share. The frontend sends
+    the end-user address it verified, together with a shared secret. The address is used only
+    when exactly one secret header matches the configured secret (compared in constant time) and
+    exactly one well-formed address is supplied. Anything else returns ``None`` and the caller
+    falls back to the proxy hops, so a client that does not know the secret cannot choose its own
+    rate-limit key.
+    """
+    if expected_secret is None or len(presented_secret) != 1 or len(forwarded_client_ip) != 1:
+        return None
+    if not compare_digest(
+        presented_secret[0].encode(),
+        expected_secret.get_secret_value().encode(),
+    ):
+        return None
+    return _normalize_ip(forwarded_client_ip[0].strip())
+
+
 def request_client_ip(request: Request) -> str:
-    """Resolve the abuse-control client address for a request using the configured proxy hops."""
+    """Resolve the abuse-control client address for a request.
+
+    An authenticated end-user address from the frontend proxy wins; otherwise the address is
+    derived from the configured proxy hops.
+    """
     settings = cast(Settings, request.app.state.settings)
+    frontend_client_ip = resolve_frontend_proxy_client_ip(
+        request.headers.getlist(FRONTEND_CLIENT_IP_HEADER),
+        request.headers.getlist(FRONTEND_PROXY_SECRET_HEADER),
+        settings.frontend_proxy_secret,
+    )
+    if frontend_client_ip is not None:
+        return frontend_client_ip
     peer_host = request.client.host if request.client is not None else None
     return resolve_client_ip(
         peer_host,
