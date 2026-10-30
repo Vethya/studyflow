@@ -338,4 +338,5 @@ it("covers empty scenario assumptions and plural recovery summaries", () => {
   const delayed = makeSession("delayed", { outcome: "Delayed", actualDuration: undefined });
   render(<ProposalCalendar isRecoveryProposal={false} proposedSessions={[]} recordedSessions={[{ ...delayed, startTime: "2026-09-29T23:00:00Z", endTime: "2026-09-30T00:00:00Z" } as any]} availabilityWindows={[]} unavailablePeriods={[]} />);
   expect(screen.getByRole("region", { name: "Proposed sessions" })).toBeTruthy();
+  expect(screen.getAllByTitle(/Task delayed · Partly done \(.+ recorded\) · 23:00–00:00/).length).toBeGreaterThan(0);
 });

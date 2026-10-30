@@ -1,8 +1,9 @@
 name: Frontend CI
 
 # SPEC §21: lint, type-check, and unit tests on every push; a production build
-# and one minimal Playwright task-to-schedule smoke test on pull requests and
-# master. The full NFR-05 browser matrix stays a nightly/pre-review run.
+# and one minimal Playwright task-to-schedule smoke test on pull requests, on
+# the integrated dev and master tips, and on manual runs. The full NFR-05
+# browser matrix stays a nightly/pre-review run.
 
 on:
   pull_request:
@@ -13,6 +14,8 @@ on:
     paths:
       - ".github/workflows/frontend-ci.yml"
       - "frontend/**"
+  # Re-run every job on any branch tip on demand, e.g. the exact dev commit before a release.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -62,7 +65,7 @@ jobs:
 
   smoke:
     name: Build and task-to-schedule smoke test
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/master'
+    if: github.event_name != 'push' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev'
     needs: quality
     runs-on: ubuntu-latest
     timeout-minutes: 20
