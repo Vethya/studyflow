@@ -87,6 +87,9 @@ class RecordingLoginRateLimit:
     async def reset_failures(self, client_ip: str, email: str, reservation_id: str) -> None:
         return None
 
+    async def clear_failures(self, client_ip: str, email: str) -> None:
+        return None
+
     async def release(self, client_ip: str, email: str, reservation_id: str) -> None:
         return None
 

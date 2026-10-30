@@ -57,11 +57,17 @@ async def test_password_reset_is_single_use_and_revokes_all_sessions() -> None:
             "student@example.com", hash_verification_token(token), now + timedelta(hours=1)
         )
 
-        assert await repository.reset_password(
-            hash_verification_token(token), "$argon2id$new-hash", now
+        assert (
+            await repository.reset_password(
+                hash_verification_token(token), "$argon2id$new-hash", now
+            )
+            == "student@example.com"
         )
-        assert not await repository.reset_password(
-            hash_verification_token(token), "$argon2id$reused-hash", now
+        assert (
+            await repository.reset_password(
+                hash_verification_token(token), "$argon2id$reused-hash", now
+            )
+            is None
         )
 
         async with database.transaction() as session:
@@ -126,8 +132,11 @@ async def test_password_reset_can_set_password_for_google_only_account() -> None
         assert await repository.create_reset_token(
             "student@example.com", hash_verification_token(token), now + timedelta(hours=1)
         )
-        assert await repository.reset_password(
-            hash_verification_token(token), "$argon2id$new-hash", now
+        assert (
+            await repository.reset_password(
+                hash_verification_token(token), "$argon2id$new-hash", now
+            )
+            == "student@example.com"
         )
 
         login_account = await SqlAlchemyLoginRepository(database).find_by_email(
@@ -168,16 +177,21 @@ async def test_password_reset_tokens_expire_and_replacement_invalidates_prior_to
             "student@example.com", replacement_token_hash, now + timedelta(hours=1)
         )
 
-        assert not await repository.reset_password(first_token_hash, "$argon2id$first-hash", now)
-        assert not await repository.reset_password(
-            replacement_token_hash, "$argon2id$expired-hash", now + timedelta(hours=1)
+        assert (
+            await repository.reset_password(first_token_hash, "$argon2id$first-hash", now) is None
+        )
+        assert (
+            await repository.reset_password(
+                replacement_token_hash, "$argon2id$expired-hash", now + timedelta(hours=1)
+            )
+            is None
         )
     finally:
         await database.stop()
 
 
 @pytest.mark.anyio
-async def test_password_reset_orphaned_token_returns_false() -> None:
+async def test_password_reset_orphaned_token_returns_none() -> None:
     database = Database("sqlite+aiosqlite:///:memory:")
     await database.start()
     now = datetime.now(UTC)
@@ -197,13 +211,13 @@ async def test_password_reset_orphaned_token_returns_false() -> None:
                 )
             )
         repository = SqlAlchemyPasswordRecoveryRepository(database)
-        assert not await repository.reset_password(token_hash, "$argon2id$new-hash", now)
+        assert await repository.reset_password(token_hash, "$argon2id$new-hash", now) is None
     finally:
         await database.stop()
 
 
 @pytest.mark.anyio
-async def test_password_reset_returns_false_when_token_disappears_after_account_lock() -> None:
+async def test_password_reset_returns_none_when_token_disappears_after_account_lock() -> None:
     account_id = uuid4()
     session = MagicMock()
     session.scalar = AsyncMock(side_effect=[account_id, None])
@@ -216,8 +230,11 @@ async def test_password_reset_returns_false_when_token_disappears_after_account_
 
     repository = SqlAlchemyPasswordRecoveryRepository(cast(Any, database))
 
-    assert not await repository.reset_password(
-        "a" * 64,
-        "$argon2id$new-hash",
-        datetime(2026, 7, 28, 12, tzinfo=UTC),
+    assert (
+        await repository.reset_password(
+            "a" * 64,
+            "$argon2id$new-hash",
+            datetime(2026, 7, 28, 12, tzinfo=UTC),
+        )
+        is None
     )

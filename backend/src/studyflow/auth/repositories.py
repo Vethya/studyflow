@@ -424,7 +424,9 @@ class SqlAlchemyPasswordRecoveryRepository:
             )
         return True
 
-    async def reset_password(self, token_hash: str, password_hash: str, now: datetime) -> bool:
+    async def reset_password(
+        self, token_hash: str, password_hash: str, now: datetime
+    ) -> str | None:
         async with self._database.transaction() as session:
             account_id = await session.scalar(
                 select(AuthenticationEmailToken.account_id).where(
@@ -435,10 +437,10 @@ class SqlAlchemyPasswordRecoveryRepository:
                 )
             )
             if account_id is None:
-                return False
+                return None
             account = await session.get(StudentAccount, account_id, with_for_update=True)
             if account is None:
-                return False
+                return None
             token = await session.scalar(
                 select(AuthenticationEmailToken)
                 .where(
@@ -451,7 +453,8 @@ class SqlAlchemyPasswordRecoveryRepository:
                 .with_for_update()
             )
             if token is None:
-                return False
+                return None
+            email = account.email
             account.password_hash = password_hash
             token.consumed_at = now
             await session.execute(
@@ -462,7 +465,7 @@ class SqlAlchemyPasswordRecoveryRepository:
                 )
                 .values(revoked_at=now)
             )
-        return True
+        return email
 
 
 class SqlAlchemyOIDCRepository:

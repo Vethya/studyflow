@@ -16,8 +16,10 @@ class RecoveryRepositoryStub:
         self.requests.append((email, token_hash, expires_at))
         return self.eligible
 
-    async def reset_password(self, token_hash: str, password_hash: str, now: datetime) -> bool:
-        return False
+    async def reset_password(
+        self, token_hash: str, password_hash: str, now: datetime
+    ) -> str | None:
+        return None
 
 
 @dataclass
@@ -91,8 +93,10 @@ async def test_password_reset_succeeds_when_token_is_valid() -> None:
     now = datetime(2026, 7, 29, 12, tzinfo=UTC)
 
     class ValidRecoveryRepositoryStub(RecoveryRepositoryStub):
-        async def reset_password(self, token_hash: str, password_hash: str, now: datetime) -> bool:
-            return True
+        async def reset_password(
+            self, token_hash: str, password_hash: str, now: datetime
+        ) -> str | None:
+            return "student@example.com"
 
     repository = ValidRecoveryRepositoryStub()
     passwords = PasswordHasherStub()
@@ -100,5 +104,8 @@ async def test_password_reset_succeeds_when_token_is_valid() -> None:
         repository, RecoveryEmailSenderStub(), passwords=passwords, clock=lambda: now
     )
 
-    await service.reset_password("valid-reset-token", "a-new-secure-password")
+    assert (
+        await service.reset_password("valid-reset-token", "a-new-secure-password")
+        == "student@example.com"
+    )
     assert passwords.hashes == ["a-new-secure-password"]

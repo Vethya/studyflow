@@ -5,6 +5,7 @@ import logging
 import secrets
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from ipaddress import IPv6Address, ip_address, ip_network
 from typing import Protocol
 
 from sqlalchemy import delete, select
@@ -90,6 +91,8 @@ class LoginRateLimit(Protocol):
     async def record_failure(self, client_ip: str, email: str, reservation_id: str) -> None: ...
 
     async def reset_failures(self, client_ip: str, email: str, reservation_id: str) -> None: ...
+
+    async def clear_failures(self, client_ip: str, email: str) -> None: ...
 
     async def release(self, client_ip: str, email: str, reservation_id: str) -> None: ...
 
@@ -251,21 +254,39 @@ class DatabaseEmailVerificationRateLimiter(_DatabaseRateLimiter):
 
 
 class DatabaseLoginRateLimiter(_DatabaseRateLimiter):
+    """Login abuse control with per-client and shared email failure budgets.
+
+    Failed password attempts count against two budgets:
+
+    - ``failure_attempts`` per email *and* client address, grouping IPv6 addresses by /64.
+      One source can only lock itself out.
+    - ``email_failure_attempts`` per email across all addresses, a much higher backstop that
+      enough distinct sources can reach. A completed password reset clears it.
+
+    The client address must come from ``request_client_ip`` so that clients cannot choose it.
+    """
+
     def __init__(
         self,
         database: SessionTransactions,
         *,
         traffic_attempts: int = 30,
         failure_attempts: int = 5,
+        email_failure_attempts: int = 50,
         window_seconds: int = 900,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
+        if email_failure_attempts < 1 or email_failure_attempts < failure_attempts:
+            raise ValueError(
+                "email_failure_attempts must be at least 1 and at least failure_attempts"
+            )
         super().__init__(
             database,
             maximum_attempts=failure_attempts,
             window_seconds=window_seconds,
             clock=clock,
         )
+        self._email_failure_attempts = email_failure_attempts
         self._traffic = _DatabaseRateLimiter(
             database,
             maximum_attempts=traffic_attempts,
@@ -279,24 +300,44 @@ class DatabaseLoginRateLimiter(_DatabaseRateLimiter):
             (f"ip:{client_ip}",),
             LoginRateLimitExceeded,
         )
-        return await self._reserve_failure_slot(email)
+        return await self._reserve_failure_slot(client_ip, email)
 
     async def record_failure(self, client_ip: str, email: str, reservation_id: str) -> None:
-        del client_ip
-        await self._finish_failure_slot(email, reservation_id, failed=True, reset_failures=False)
+        await self._finish_failure_slot(
+            client_ip, email, reservation_id, failed=True, reset_failures=False
+        )
 
     async def reset_failures(self, client_ip: str, email: str, reservation_id: str) -> None:
-        del client_ip
-        await self._finish_failure_slot(email, reservation_id, failed=False, reset_failures=True)
+        await self._finish_failure_slot(
+            client_ip, email, reservation_id, failed=False, reset_failures=True
+        )
 
     async def release(self, client_ip: str, email: str, reservation_id: str) -> None:
-        del client_ip
-        await self._finish_failure_slot(email, reservation_id, failed=False, reset_failures=False)
+        await self._finish_failure_slot(
+            client_ip, email, reservation_id, failed=False, reset_failures=False
+        )
 
-    def _failure_budgets(self, email: str) -> list[tuple[str, int]]:
+    async def clear_failures(self, client_ip: str, email: str) -> None:
+        await self._finish_failure_slot(client_ip, email, None, failed=False, reset_failures=True)
+
+    def _failure_budgets(self, client_ip: str, email: str) -> list[tuple[str, int]]:
         """Return (key hash, limit) pairs in a stable order so row locks never deadlock."""
+        canonical_email = canonicalize_email(email)
+        try:
+            address = ip_address(client_ip)
+        except ValueError:
+            pass
+        else:
+            if isinstance(address, IPv6Address) and address.ipv4_mapped is None:
+                client_ip = str(ip_network(f"{address}/64", strict=False))
         return sorted(
-            ((self._hash_key(f"email:{canonicalize_email(email)}"), self._maximum_attempts),)
+            (
+                (
+                    self._hash_key(f"email_ip:{canonical_email}|{client_ip}"),
+                    self._maximum_attempts,
+                ),
+                (self._hash_key(f"email:{canonical_email}"), self._email_failure_attempts),
+            )
         )
 
     async def _lock_guard(self, session: AsyncSession, key_hash: str, now: datetime) -> None:
@@ -334,9 +375,9 @@ class DatabaseLoginRateLimiter(_DatabaseRateLimiter):
         )
         return failures
 
-    async def _reserve_failure_slot(self, email: str) -> str:
+    async def _reserve_failure_slot(self, client_ip: str, email: str) -> str:
         now = self._clock()
-        budgets = self._failure_budgets(email)
+        budgets = self._failure_budgets(client_ip, email)
         for attempt in range(3):
             try:
                 async with self._database.transaction() as session:
@@ -385,25 +426,27 @@ class DatabaseLoginRateLimiter(_DatabaseRateLimiter):
 
     async def _finish_failure_slot(
         self,
+        client_ip: str,
         email: str,
-        reservation_id: str,
+        reservation_id: str | None,
         *,
         failed: bool,
         reset_failures: bool,
     ) -> None:
         now = self._clock()
-        budgets = self._failure_budgets(email)
+        budgets = self._failure_budgets(client_ip, email)
         for attempt in range(3):
             try:
                 async with self._database.transaction() as session:
                     for key_hash, _limit in budgets:
                         await self._lock_guard(session, key_hash, now)
-                        await session.execute(
-                            delete(AuthenticationRateLimit).where(
-                                AuthenticationRateLimit.action == reservation_id,
-                                AuthenticationRateLimit.key_hash == key_hash,
+                        if reservation_id is not None:
+                            await session.execute(
+                                delete(AuthenticationRateLimit).where(
+                                    AuthenticationRateLimit.action == reservation_id,
+                                    AuthenticationRateLimit.key_hash == key_hash,
+                                )
                             )
-                        )
                         failures = await self._locked_failures(session, key_hash)
                         if reset_failures and failures is not None:
                             await session.delete(failures)

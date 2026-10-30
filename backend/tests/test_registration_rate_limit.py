@@ -33,6 +33,8 @@ from studyflow.auth.rate_limits import (
 from studyflow.database import Base, Database
 from studyflow.database.models import AuthenticationRateLimit
 
+CLIENT_IP = "203.0.113.10"
+
 
 @pytest.mark.anyio
 async def test_registration_rate_limit_bounds_ip_and_email_attempts_per_window() -> None:
@@ -182,23 +184,21 @@ async def test_successful_logins_do_not_consume_failure_budget() -> None:
                 lambda sync_session: Base.metadata.create_all(sync_session.connection())
             )
         limiter = DatabaseLoginRateLimiter(database)
-        for attempt in range(4):
-            client_ip = f"198.51.100.{attempt}"
-            reservation_id = await limiter.check(client_ip, "student@example.com")
-            await limiter.record_failure(client_ip, "student@example.com", reservation_id)
-        reservation_id = await limiter.check("198.51.100.99", "student@example.com")
-        await limiter.reset_failures("198.51.100.99", "student@example.com", reservation_id)
-        for attempt in range(10):
-            email = "student@example.com"
-            client_ip = f"203.0.113.{attempt}"
-            reservation_id = await limiter.check(client_ip, email)
-            await limiter.reset_failures(client_ip, email, reservation_id)
+        email = "student@example.com"
+        for _ in range(4):
+            reservation_id = await limiter.check(CLIENT_IP, email)
+            await limiter.record_failure(CLIENT_IP, email, reservation_id)
+        reservation_id = await limiter.check(CLIENT_IP, email)
+        await limiter.reset_failures(CLIENT_IP, email, reservation_id)
+        for _ in range(10):
+            reservation_id = await limiter.check(CLIENT_IP, email)
+            await limiter.reset_failures(CLIENT_IP, email, reservation_id)
     finally:
         await database.stop()
 
 
 @pytest.mark.anyio
-async def test_login_failure_budget_follows_email_across_ips() -> None:
+async def test_login_failures_lock_out_only_the_failing_address() -> None:
     database = Database("sqlite+aiosqlite:///:memory:")
     await database.start()
     try:
@@ -207,13 +207,73 @@ async def test_login_failure_budget_follows_email_across_ips() -> None:
                 lambda sync_session: Base.metadata.create_all(sync_session.connection())
             )
         limiter = DatabaseLoginRateLimiter(database)
-        for attempt in range(5):
-            email = "Student@Example.com"
-            client_ip = f"203.0.113.{attempt}"
-            reservation_id = await limiter.check(client_ip, email)
-            await limiter.record_failure(client_ip, email, reservation_id)
+        attacker_ip = "203.0.113.66"
+        for _ in range(5):
+            reservation_id = await limiter.check(attacker_ip, "Student@Example.com")
+            await limiter.record_failure(attacker_ip, "Student@Example.com", reservation_id)
+
         with pytest.raises(LoginRateLimitExceeded):
-            await limiter.check("203.0.113.99", "student@example.com")
+            await limiter.check(attacker_ip, "student@example.com")
+
+        student_ip = "198.51.100.7"
+        reservation_id = await limiter.check(student_ip, "student@example.com")
+        await limiter.reset_failures(student_ip, "student@example.com", reservation_id)
+        failures = [
+            row for row in await _rate_limit_rows(database) if row.action == "login_failure"
+        ]
+        assert len(failures) == 1
+        assert failures[0].attempts == 5
+        assert failures[0].key_hash == limiter._hash_key(
+            f"email_ip:student@example.com|{attacker_ip}"
+        )
+        with pytest.raises(LoginRateLimitExceeded):
+            await limiter.check(attacker_ip, "student@example.com")
+        reservation_id = await limiter.check(attacker_ip, "other@example.com")
+        await limiter.release(attacker_ip, "other@example.com", reservation_id)
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_login_failure_backstop_follows_email_across_addresses() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        limiter = DatabaseLoginRateLimiter(database, email_failure_attempts=10)
+        for attempt in range(10):
+            client_ip = f"203.0.113.{attempt // 2}"
+            reservation_id = await limiter.check(client_ip, "Student@Example.com")
+            await limiter.record_failure(client_ip, "Student@Example.com", reservation_id)
+
+        with pytest.raises(LoginRateLimitExceeded):
+            await limiter.check("198.51.100.99", "student@example.com")
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_login_backstop_defaults_well_above_the_per_address_budget() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        limiter = DatabaseLoginRateLimiter(database)
+        for attempt in range(49):
+            client_ip = f"203.0.113.{attempt // 5}"
+            reservation_id = await limiter.check(client_ip, "student@example.com")
+            await limiter.record_failure(client_ip, "student@example.com", reservation_id)
+        reservation_id = await limiter.check("198.51.100.1", "student@example.com")
+        await limiter.record_failure("198.51.100.1", "student@example.com", reservation_id)
+
+        with pytest.raises(LoginRateLimitExceeded):
+            await limiter.check("198.51.100.2", "student@example.com")
     finally:
         await database.stop()
 
@@ -246,10 +306,10 @@ async def test_parallel_login_attempts_reserve_the_failure_budget() -> None:
                 lambda sync_session: Base.metadata.create_all(sync_session.connection())
             )
         limiter = DatabaseLoginRateLimiter(database)
-        for attempt in range(5):
-            await limiter.check(f"203.0.113.{attempt}", "student@example.com")
+        for _ in range(5):
+            await limiter.check(CLIENT_IP, "student@example.com")
         with pytest.raises(LoginRateLimitExceeded):
-            await limiter.check("203.0.113.99", "student@example.com")
+            await limiter.check(CLIENT_IP, "student@example.com")
     finally:
         await database.stop()
 
@@ -265,14 +325,14 @@ async def test_newer_login_reservations_keep_their_own_expiry() -> None:
                 lambda sync_session: Base.metadata.create_all(sync_session.connection())
             )
         limiter = DatabaseLoginRateLimiter(database, clock=lambda: current_time[0])
-        await limiter.check("203.0.113.1", "student@example.com")
+        await limiter.check(CLIENT_IP, "student@example.com")
         current_time[0] += timedelta(minutes=14)
-        await limiter.check("203.0.113.2", "student@example.com")
+        await limiter.check(CLIENT_IP, "student@example.com")
         current_time[0] += timedelta(minutes=2)
-        for attempt in range(4):
-            await limiter.check(f"203.0.113.{attempt + 3}", "student@example.com")
+        for _ in range(4):
+            await limiter.check(CLIENT_IP, "student@example.com")
         with pytest.raises(LoginRateLimitExceeded):
-            await limiter.check("203.0.113.99", "student@example.com")
+            await limiter.check(CLIENT_IP, "student@example.com")
     finally:
         await database.stop()
 
@@ -434,7 +494,7 @@ async def test_login_rate_limiter_edge_cases(
                 )
             )
         # Hits lines 285-286 (delete expired failures in _reserve_failure_slot)
-        res_expired = await limiter._reserve_failure_slot("student@example.com")
+        res_expired = await limiter._reserve_failure_slot("203.0.113.10", "student@example.com")
         await limiter.release("203.0.113.10", "student@example.com", res_expired)
 
         # Re-add expired failure and hit lines 367-368
@@ -449,7 +509,7 @@ async def test_login_rate_limiter_edge_cases(
                 )
             )
         await limiter._finish_failure_slot(
-            "student@example.com", "fake_res", failed=True, reset_failures=False
+            "203.0.113.10", "student@example.com", "fake_res", failed=True, reset_failures=False
         )
 
         # 4. Finish failure slot when guard is missing
@@ -460,7 +520,7 @@ async def test_login_rate_limiter_edge_cases(
                 )
             )
         await limiter._finish_failure_slot(
-            "student@example.com", "fake_res", failed=False, reset_failures=False
+            "203.0.113.10", "student@example.com", "fake_res", failed=False, reset_failures=False
         )
 
         # 5. Reserve failure slot IntegrityError exhaustion (lines 311-312)
@@ -477,7 +537,7 @@ async def test_login_rate_limiter_edge_cases(
 
         monkeypatch.setattr(database, "transaction", failing_tx)
         with pytest.raises(IntegrityError):
-            await limiter._reserve_failure_slot("student@example.com")
+            await limiter._reserve_failure_slot("203.0.113.10", "student@example.com")
 
         # 6. Finish failure slot IntegrityError exhaustion
         @asynccontextmanager
@@ -489,7 +549,7 @@ async def test_login_rate_limiter_edge_cases(
         monkeypatch.setattr(database, "transaction", failing_tx_exec)
         with pytest.raises(IntegrityError):
             await limiter._finish_failure_slot(
-                "student@example.com", "fake_res", failed=True, reset_failures=False
+                "203.0.113.10", "student@example.com", "fake_res", failed=True, reset_failures=False
             )
 
         monkeypatch.undo()
@@ -564,9 +624,9 @@ async def test_rate_limiter_handles_aware_expiry_and_exhausted_retry_loops(
         "203.0.113.10", "student@example.com"
     )
     with pytest.raises(RuntimeError, match="retry exhausted"):
-        await login_limiter._reserve_failure_slot("student@example.com")
+        await login_limiter._reserve_failure_slot("203.0.113.10", "student@example.com")
     await login_limiter._finish_failure_slot(
-        "student@example.com", "reservation", failed=True, reset_failures=False
+        "203.0.113.10", "student@example.com", "reservation", failed=True, reset_failures=False
     )
 
 
@@ -692,3 +752,107 @@ async def test_postgresql_cleanup_skips_locked_rows_and_is_bounded() -> None:
     assert "LIMIT" in statement
     assert "FOR UPDATE SKIP LOCKED" in statement
     assert 7 in compiled.params.values()
+
+
+@pytest.mark.parametrize(
+    ("failure_attempts", "email_failure_attempts"),
+    ((5, -1), (5, 0), (5, 4), (0, 0), (7, 5)),
+)
+def test_login_limiter_rejects_invalid_email_failure_budget(
+    failure_attempts: int, email_failure_attempts: int
+) -> None:
+    with pytest.raises(ValueError, match="email_failure_attempts"):
+        DatabaseLoginRateLimiter(
+            Database("sqlite+aiosqlite:///:memory:"),
+            failure_attempts=failure_attempts,
+            email_failure_attempts=email_failure_attempts,
+        )
+
+
+@pytest.mark.anyio
+async def test_password_reset_clears_only_completing_clients_failure_budgets() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        await _create_rate_limit_schema(database)
+        limiter = DatabaseLoginRateLimiter(database, email_failure_attempts=10)
+        email = "student@example.com"
+        other_ip = "198.51.100.7"
+        for client_ip in (CLIENT_IP, other_ip):
+            for _ in range(5):
+                reservation_id = await limiter.check(client_ip, email)
+                await limiter.record_failure(client_ip, email, reservation_id)
+        with pytest.raises(LoginRateLimitExceeded):
+            await limiter.check("198.51.100.8", email)
+        traffic_before = {
+            row.key_hash: row.attempts
+            for row in await _rate_limit_rows(database)
+            if row.action == "login_traffic"
+        }
+
+        await limiter.clear_failures(CLIENT_IP, "Student@Example.com")
+
+        rows = await _rate_limit_rows(database)
+        failures = [row for row in rows if row.action == "login_failure"]
+        assert len(failures) == 1
+        assert failures[0].key_hash == limiter._hash_key(f"email_ip:{email}|{other_ip}")
+        assert failures[0].attempts == 5
+        assert {
+            row.key_hash: row.attempts for row in rows if row.action == "login_traffic"
+        } == traffic_before
+        reservation_id = await limiter.check(CLIENT_IP, email)
+        await limiter.release(CLIENT_IP, email, reservation_id)
+        with pytest.raises(LoginRateLimitExceeded):
+            await limiter.check(other_ip, email)
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_ipv6_rotation_within_a_subnet_shares_the_login_failure_budget() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        await _create_rate_limit_schema(database)
+        limiter = DatabaseLoginRateLimiter(database)
+        email = "student@example.com"
+        for suffix in range(1, 6):
+            client_ip = f"2001:db8:abcd:1234::{suffix}"
+            reservation_id = await limiter.check(client_ip, email)
+            await limiter.record_failure(client_ip, email, reservation_id)
+        with pytest.raises(LoginRateLimitExceeded):
+            await limiter.check("2001:0db8:abcd:1234:ffff:ffff:ffff:ffff", email)
+        reservation_id = await limiter.check("2001:db8:abcd:1235::1", email)
+        await limiter.release("2001:db8:abcd:1235::1", email, reservation_id)
+        await limiter.clear_failures("2001:db8:abcd:1234::99", email)
+        reservation_id = await limiter.check("2001:db8:abcd:1234::100", email)
+        await limiter.release("2001:db8:abcd:1234::100", email, reservation_id)
+    finally:
+        await database.stop()
+
+
+@pytest.mark.parametrize("client_ip", (CLIENT_IP, "::ffff:203.0.113.10", "testclient"))
+def test_login_budget_preserves_ipv4_mapped_and_non_ip_keys(client_ip: str) -> None:
+    limiter = DatabaseLoginRateLimiter(Database("sqlite+aiosqlite:///:memory:"))
+    assert (
+        limiter._hash_key(f"email_ip:student@example.com|{client_ip}"),
+        5,
+    ) in limiter._failure_budgets(client_ip, "Student@Example.com")
+
+
+@pytest.mark.anyio
+async def test_ipv6_login_traffic_caps_keep_the_full_client_address() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    try:
+        await _create_rate_limit_schema(database)
+        limiter = DatabaseLoginRateLimiter(database, traffic_attempts=1)
+        email = "student@example.com"
+        for client_ip in ("2001:db8::1", "2001:db8::2"):
+            reservation_id = await limiter.check(client_ip, email)
+            await limiter.release(client_ip, email, reservation_id)
+        await limiter.clear_failures("2001:db8::1", email)
+        with pytest.raises(LoginRateLimitExceeded):
+            await limiter.check("2001:db8::1", email)
+    finally:
+        await database.stop()

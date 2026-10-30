@@ -21,7 +21,9 @@ class PasswordRecoveryRepository(Protocol):
         self, email: str, token_hash: str, expires_at: datetime
     ) -> bool: ...
 
-    async def reset_password(self, token_hash: str, password_hash: str, now: datetime) -> bool: ...
+    async def reset_password(
+        self, token_hash: str, password_hash: str, now: datetime
+    ) -> str | None: ...
 
 
 class PasswordRecoveryEmailSender(Protocol):
@@ -35,7 +37,7 @@ class PasswordHashing(Protocol):
 class PasswordRecovery(Protocol):
     async def request_reset(self, email: str, deferred_tasks: DeferredTasks) -> None: ...
 
-    async def reset_password(self, token: str, password: str) -> None: ...
+    async def reset_password(self, token: str, password: str) -> str: ...
 
 
 class PasswordRecoveryService:
@@ -63,9 +65,11 @@ class PasswordRecoveryService:
         ):
             deferred_tasks.add_task(self._email_sender.send_password_reset, canonical_email, token)
 
-    async def reset_password(self, token: str, password: str) -> None:
+    async def reset_password(self, token: str, password: str) -> str:
         password_hash = await self._passwords.hash_password(password)
-        if not await self._repository.reset_password(
+        email = await self._repository.reset_password(
             hash_verification_token(token), password_hash, self._clock()
-        ):
+        )
+        if email is None:
             raise InvalidPasswordResetTokenError
+        return email

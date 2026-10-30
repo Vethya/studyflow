@@ -55,6 +55,9 @@ class LoginRateLimitStub:
     async def reset_failures(self, client_ip: str, email: str, reservation_id: str) -> None:
         self.resets.append(email)
 
+    async def clear_failures(self, client_ip: str, email: str) -> None:
+        return None
+
     async def release(self, client_ip: str, email: str, reservation_id: str) -> None:
         self.releases.append(email)
 

@@ -797,11 +797,12 @@ async def reset_password(
     rate_limit: Annotated[
         PasswordResetAttemptRateLimit, Depends(get_password_reset_attempt_rate_limit)
     ],
+    login_rate_limit: Annotated[LoginRateLimit, Depends(get_login_rate_limit)],
 ) -> None:
     client_ip = request_client_ip(http_request)
     try:
         await rate_limit.check(client_ip, payload.token)
-        await recovery.reset_password(payload.token, payload.password)
+        email = await recovery.reset_password(payload.token, payload.password)
     except PasswordResetAttemptRateLimitExceeded as error:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -828,6 +829,10 @@ async def reset_password(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Password safety service is unavailable",
         ) from error
+    try:
+        await login_rate_limit.clear_failures(client_ip, email)
+    except Exception:
+        logger.exception("Could not clear login failures after password reset")
     get_cookie_policy(http_request).clear_authentication(response)
 
 
