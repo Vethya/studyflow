@@ -22,8 +22,15 @@ import {
   updateStudyTimeSchema,
   updateTaskSchema,
 } from "./schemas";
-import type { WebMcpTool } from "./types";
+import type { ConfirmAction } from "./confirm";
+import { browserConfirm, confirmationLabel, requireUserConfirmation } from "./confirm";
+import type { WebMcpTool, WebMcpToolExecutionOptions } from "./types";
 import { signalFor } from "./types";
+
+/** The client's hook, bound so a hook implemented as a method keeps its `this`. */
+function userInteraction(options?: Partial<WebMcpToolExecutionOptions>) {
+  return options?.requestUserInteraction?.bind(options);
+}
 
 type InputObject = Record<string, unknown>;
 
@@ -161,13 +168,9 @@ function blockedPeriodChanges(input: InputObject): BlockedPeriodChanges | null {
       draft: blockedPeriodDraft(period),
     };
   });
-  const remove = arrayInput(changesInput, "remove").map((item) => {
-    const period = inputObject(item);
-    if (period.confirmed !== true) {
-      throw new Error("Removing a blocked period requires confirmed: true.");
-    }
-    return requiredString(period, "period_id");
-  });
+  const remove = arrayInput(changesInput, "remove").map((item) =>
+    requiredString(inputObject(item), "period_id"),
+  );
   if (add.length + update.length + remove.length === 0) {
     throw new Error("blocked_periods must include at least one add, update, or remove.");
   }
@@ -215,15 +218,35 @@ function taskOperationInput(input: InputObject): TaskOperation {
   return operation;
 }
 
-function requireConfirmation(input: InputObject, operation: "delete" | "finish_early"): void {
-  if (input.confirmed !== true) {
-    throw new Error(`${operation} requires confirmed: true.`);
-  }
+type ExecutionOptions = Partial<WebMcpToolExecutionOptions> | undefined;
+
+async function confirmTaskOperation(
+  taskId: string,
+  operation: "delete" | "finish_early",
+  confirm: ConfirmAction,
+  options: ExecutionOptions,
+): Promise<void> {
+  // Name the task from StudyFlow's own data, not from the agent's input.
+  const task = await tasks.getTask(taskId, signalFor(options));
+  const title = confirmationLabel(task.title, "untitled task");
+  const request =
+    operation === "delete"
+      ? {
+          action: `delete the task "${title}"`,
+          consequence: "The task and its planned study sessions are removed permanently.",
+        }
+      : {
+          action: `finish the task "${title}" early`,
+          consequence: "The task is marked complete and its remaining sessions are cancelled.",
+        };
+  await requireUserConfirmation(request, confirm, userInteraction(options));
 }
 
 async function applyStudyTimeChanges(
   input: unknown,
   signal: AbortSignal,
+  confirm: ConfirmAction,
+  options: ExecutionOptions,
 ): Promise<StudyTimeUpdateResult> {
   const record = inputObject(input);
   const shouldConfirmTimezone = record.confirm_timezone !== undefined;
@@ -240,6 +263,24 @@ async function applyStudyTimeChanges(
     blockedChanges === null
   ) {
     throw new Error("Provide at least one study-time change.");
+  }
+  if (blockedChanges !== null && blockedChanges.remove.length > 0) {
+    const periods = await availability.listUnavailablePeriods(signal);
+    const byId = new Map(periods.map((period) => [period.id, period]));
+    const details = blockedChanges.remove.map((id) => {
+      const period = byId.get(id);
+      if (!period) return "a blocked period that is not on this account";
+      const label = confirmationLabel(period.reason?.trim() || period.title, "Blocked time");
+      return `${label} (${period.startDate}–${period.endDate})`;
+    });
+    await requireUserConfirmation(
+      {
+        action: `remove blocked time: ${details.join("; ")}`,
+        consequence: "StudyFlow may schedule study sessions during that time again.",
+      },
+      confirm,
+      userInteraction(options),
+    );
   }
 
   return availability.updateStudyTime(
@@ -314,7 +355,11 @@ function result<T>(
   return { data, ...metadata };
 }
 
-export function createStudyFlowTools(): WebMcpTool[] {
+/**
+ * @param confirm asks the student in the page before destructive actions.
+ *   Tests inject a stub; production uses the browser's modal dialog.
+ */
+export function createStudyFlowTools(confirm: ConfirmAction = browserConfirm): WebMcpTool[] {
   return [
     {
       name: WEBMCP_TOOL_NAMES.getPlanState,
@@ -390,12 +435,12 @@ export function createStudyFlowTools(): WebMcpTool[] {
       name: WEBMCP_TOOL_NAMES.updateStudyTime,
       title: "Update Study Time",
       description:
-        "Update the authenticated student's planning preferences, timezone confirmation, recurring weekly study windows, and one-off blocked periods. This changes scheduling inputs only; it never generates or activates a study schedule. Planning preferences are a full replacement, recurring availability is a complete weekly replacement, and removing a blocked period requires explicit confirmation.",
+        "Update the authenticated student's planning preferences, timezone confirmation, recurring weekly study windows, and one-off blocked periods. This changes scheduling inputs only; it never generates or activates a study schedule. Planning preferences are a full replacement, recurring availability is a complete weekly replacement, and removing a blocked period asks the student to confirm in the page.",
       inputSchema: updateStudyTimeSchema,
       annotations: writeUntrusted,
       execute: async (input, options) => {
         const record = inputObject(input);
-        const changes = await applyStudyTimeChanges(record, signalFor(options));
+        const changes = await applyStudyTimeChanges(record, signalFor(options), confirm, options);
         const activeScheduleChanged = changes.invalidated_future_session_ids.length > 0;
         return result(
           changes,
@@ -411,7 +456,7 @@ export function createStudyFlowTools(): WebMcpTool[] {
       name: WEBMCP_TOOL_NAMES.updateTask,
       title: "Manage Academic Task",
       description:
-        "Manage one existing academic task. Use edit to replace all editable fields, or use start, finish_early, or delete for lifecycle actions. Delete and finish_early require explicit confirmation. These actions never silently generate or activate a new schedule.",
+        "Manage one existing academic task. Use edit to replace all editable fields, or use start, finish_early, or delete for lifecycle actions. Delete and finish_early ask the student to confirm in the page and fail if they decline. These actions never silently generate or activate a new schedule.",
       inputSchema: updateTaskSchema,
       annotations: writeUntrusted,
       execute: async (input, options) => {
@@ -453,7 +498,7 @@ export function createStudyFlowTools(): WebMcpTool[] {
           );
         }
         if (operation === "finish_early") {
-          requireConfirmation(record, operation);
+          await confirmTaskOperation(taskId, operation, confirm, options);
           await tasks.finishTaskEarly(taskId, signal);
           const task = await tasks.getTask(taskId, signal);
           return result<UpdateTaskResult>(
@@ -461,7 +506,7 @@ export function createStudyFlowTools(): WebMcpTool[] {
             { active_schedule_changed: true, requires_user_review: true, persisted: true },
           );
         }
-        requireConfirmation(record, operation);
+        await confirmTaskOperation(taskId, operation, confirm, options);
         await tasks.deleteTask(taskId, signal);
         return result<UpdateTaskResult>(
           { operation, task_id: taskId, task: null, deleted: true, invalidated_future_session_ids: [] },
@@ -507,14 +552,20 @@ export function createStudyFlowTools(): WebMcpTool[] {
       name: WEBMCP_TOOL_NAMES.acceptPlan,
       title: "Accept Study Plan",
       description:
-        "Activate exactly one pending feasible study-plan proposal after the student explicitly approves it. This changes the active schedule.",
+        "Activate exactly one pending feasible study-plan proposal. The student is asked to approve it in the page first, and nothing changes if they decline. This changes the active schedule.",
       inputSchema: proposalIdSchema,
       annotations: writeUntrusted,
       execute: async (input, options) => {
-        const schedule = await scheduling.acceptProposal(
-          idInput(input, "proposal_id"),
-          signalFor(options),
+        const proposalId = idInput(input, "proposal_id");
+        await requireUserConfirmation(
+          {
+            action: "activate the pending study plan",
+            consequence: "It replaces your current schedule. Review it on the Schedule page first.",
+          },
+          confirm,
+          userInteraction(options),
         );
+        const schedule = await scheduling.acceptProposal(proposalId, signalFor(options));
         return result(
           { schedule },
           { active_schedule_changed: true, requires_user_review: false, persisted: true },

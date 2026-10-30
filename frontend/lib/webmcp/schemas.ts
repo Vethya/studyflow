@@ -136,14 +136,20 @@ const blockedPeriodUpdateSchema: JsonSchema = {
   required: ["period_id", "starts_at", "ends_at"],
 };
 
+const ignoredConfirmed: JsonSchema = {
+  type: "boolean",
+  description:
+    "Ignored. The student confirms in the page. Older agents may still send this field.",
+};
+
 const blockedPeriodRemovalSchema: JsonSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
     period_id: { type: "string", format: "uuid" },
-    confirmed: { const: true },
+    confirmed: ignoredConfirmed,
   },
-  required: ["period_id", "confirmed"],
+  required: ["period_id"],
 };
 
 const taskFields: Record<string, JsonSchema> = {
@@ -184,9 +190,9 @@ const taskDeleteSchema: JsonSchema = {
   properties: {
     operation: { const: "delete" },
     task_id: { type: "string", format: "uuid" },
-    confirmed: { const: true },
+    confirmed: ignoredConfirmed,
   },
-  required: ["operation", "task_id", "confirmed"],
+  required: ["operation", "task_id"],
 };
 
 const taskStartSchema: JsonSchema = {
@@ -205,9 +211,9 @@ const taskFinishEarlySchema: JsonSchema = {
   properties: {
     operation: { const: "finish_early" },
     task_id: { type: "string", format: "uuid" },
-    confirmed: { const: true },
+    confirmed: ignoredConfirmed,
   },
-  required: ["operation", "task_id", "confirmed"],
+  required: ["operation", "task_id"],
 };
 
 export const updateStudyTimeSchema: JsonSchema = {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RequestUserInteraction } from "./confirm";
 import { browserConfirm, confirmationLabel, requireUserConfirmation } from "./confirm";
+import { createStudyFlowTools } from "./tools";
 
 const request = { action: "delete the task \"Essay\"", consequence: "It is removed." };
 
@@ -85,5 +86,35 @@ describe("in-page confirmation for destructive WebMCP actions", () => {
     await requireUserConfirmation(request, confirm, requestUserInteraction);
 
     expect(order).toEqual(["paused", "asked"]);
+  });
+
+  it("uses the browser dialog by default and ignores an agent-supplied confirmed flag", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    const accept = createStudyFlowTools().find((tool) => tool.name.includes("accept"))!;
+
+    await expect(
+      accept.execute(
+        { proposal_id: "proposal-1", confirmed: true },
+        { signal: new AbortController().signal },
+      ),
+    ).rejects.toThrow("did not approve");
+  });
+
+  it("calls the client's requestUserInteraction as a method", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    class Client {
+      signal = new AbortController().signal;
+      pauses = 0;
+      async requestUserInteraction<T>(callback: () => Promise<T>): Promise<T> {
+        if (!(this instanceof Client)) throw new TypeError("Illegal invocation");
+        this.pauses += 1;
+        return callback();
+      }
+    }
+    const client = new Client();
+    const accept = createStudyFlowTools().find((tool) => tool.name.includes("accept"))!;
+
+    await expect(accept.execute({ proposal_id: "proposal-1" }, client)).rejects.toThrow("did not approve");
+    expect(client.pauses).toBe(1);
   });
 });

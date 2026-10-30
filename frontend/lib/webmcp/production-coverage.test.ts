@@ -90,14 +90,17 @@ const periods = [] as any;
 const schedule = { sessions: [{ id: "session-1", taskId: task.id }] } as any;
 const signal = new AbortController().signal;
 
+const confirm = vi.fn();
+
 function tool(name: string) {
-  const found = createStudyFlowTools().find((item) => item.name === name);
+  const found = createStudyFlowTools(confirm).find((item) => item.name === name);
   if (!found) throw new Error(`Missing tool ${name}`);
   return found;
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  confirm.mockReturnValue(true);
   mocks.listTasks.mockResolvedValue([task]);
   mocks.listWindows.mockResolvedValue(windows);
   mocks.listUnavailablePeriods.mockResolvedValue(periods);
@@ -196,7 +199,7 @@ describe("WebMCP tools", () => {
       blocked_periods: {
         add: [{ starts_at: "2026-10-01T09:00:00Z", ends_at: "2026-10-01T10:00:00Z", reason: "   " }],
         update: [{ period_id: "period-1", starts_at: "2026-10-02T09:00:00Z", ends_at: "2026-10-02T10:00:00Z", reason: null }],
-        remove: [{ period_id: "period-2", confirmed: true }],
+        remove: [{ period_id: "period-2" }],
       },
     }, { signal });
     expect(mocks.updateStudyTime).toHaveBeenCalledTimes(4);
@@ -215,7 +218,15 @@ describe("WebMCP tools", () => {
     await expect(update.execute({ recurring_availability: { replace_all: true, windows: [{ day: "Funday", start_time: "09:00", end_time: "10:00" }] } }, { signal })).rejects.toThrow("weekday");
     await expect(update.execute({ recurring_availability: { replace_all: true, windows: [{ day: "Monday", start_time: "bad", end_time: "10:00" }] } }, { signal })).rejects.toThrow("HH:mm");
     await expect(update.execute({ blocked_periods: { add: [] } }, { signal })).rejects.toThrow("at least one");
-    await expect(update.execute({ blocked_periods: { remove: [{ period_id: "p", confirmed: false }] } }, { signal })).rejects.toThrow("confirmed");
+    confirm.mockReturnValueOnce(false);
+    await expect(update.execute({ blocked_periods: { remove: [{ period_id: "p" }] } }, { signal })).rejects.toThrow("a blocked period that is not on this account");
+    mocks.listUnavailablePeriods.mockResolvedValueOnce([
+      { id: "period-2", title: "Exam\nslot", startDate: "2026-10-02T09:00:00Z", endDate: "2026-10-02T10:00:00Z", reason: "Midterm" },
+      { id: "period-3", title: "Dentist", startDate: "2026-10-03T09:00:00Z", endDate: "2026-10-03T10:00:00Z" },
+    ]);
+    confirm.mockReturnValueOnce(false);
+    await expect(update.execute({ blocked_periods: { remove: [{ period_id: "period-2" }, { period_id: "period-3" }] } }, { signal })).rejects.toThrow("remove blocked time: Midterm (2026-10-02T09:00:00Z–2026-10-02T10:00:00Z); Dentist (2026-10-03T09:00:00Z–2026-10-03T10:00:00Z)");
+    expect(mocks.updateStudyTime).not.toHaveBeenCalled();
     await expect(update.execute({ blocked_periods: "bad" }, { signal })).rejects.toThrow("object");
     await expect(update.execute({ blocked_periods: { add: [{ starts_at: "x", ends_at: "y", reason: 1 }] } }, { signal })).rejects.toThrow("reason");
     await expect(update.execute({ blocked_periods: { add: "bad" } }, { signal })).rejects.toThrow("add must be an array");
@@ -240,10 +251,16 @@ describe("WebMCP tools", () => {
     const editWithoutSchedules = await update.execute({ operation: "edit", task_id: "task-1", title: "Read", category: "Reading", priority: "Medium", deadline_at: task.deadline, original_estimate_minutes: 90 }, { signal }) as any;
     expect(editWithoutSchedules.data.invalidated_future_session_ids).toEqual([]);
     await update.execute({ operation: "start", task_id: "task-1" }, { signal });
-    await expect(update.execute({ operation: "finish_early", task_id: "task-1" }, { signal })).rejects.toThrow("confirmed");
-    await update.execute({ operation: "finish_early", task_id: "task-1", confirmed: true }, { signal });
-    await expect(update.execute({ operation: "delete", task_id: "task-1" }, { signal })).rejects.toThrow("confirmed");
-    await update.execute({ operation: "delete", task_id: "task-1", confirmed: true }, { signal });
+    confirm.mockReturnValueOnce(false);
+    await expect(update.execute({ operation: "finish_early", task_id: "task-1", confirmed: true }, { signal })).rejects.toThrow('finish the task "Read" early');
+    expect(mocks.finishTaskEarly).not.toHaveBeenCalled();
+    await update.execute({ operation: "finish_early", task_id: "task-1" }, { signal });
+    expect(mocks.finishTaskEarly).toHaveBeenCalledWith("task-1", signal);
+    confirm.mockReturnValueOnce(false);
+    await expect(update.execute({ operation: "delete", task_id: "task-1", confirmed: true }, { signal })).rejects.toThrow('delete the task "Read"');
+    expect(mocks.deleteTask).not.toHaveBeenCalled();
+    await update.execute({ operation: "delete", task_id: "task-1" }, { signal });
+    expect(mocks.deleteTask).toHaveBeenCalledWith("task-1", signal);
     await expect(update.execute({ operation: "unknown", task_id: "task-1" }, { signal })).rejects.toThrow("operation");
     await expect(update.execute({ operation: "start" }, { signal })).rejects.toThrow("task_id");
   });
@@ -255,7 +272,11 @@ describe("WebMCP tools", () => {
     await expect(tool(WEBMCP_TOOL_NAMES.simulatePlan).execute({ scenario: [] }, { signal })).rejects.toThrow("scenario must be an object");
     await tool(WEBMCP_TOOL_NAMES.draftPlan).execute({}, { signal });
     await tool(WEBMCP_TOOL_NAMES.draftPlan).execute({ scenario }, { signal });
+    confirm.mockResolvedValueOnce(false);
+    await expect(tool(WEBMCP_TOOL_NAMES.acceptPlan).execute({ proposal_id: "proposal-1" }, { signal })).rejects.toThrow("activate the pending study plan");
+    expect(mocks.acceptProposal).not.toHaveBeenCalled();
     await tool(WEBMCP_TOOL_NAMES.acceptPlan).execute({ proposal_id: "proposal-1" }, { signal });
+    expect(mocks.acceptProposal).toHaveBeenCalledWith("proposal-1", signal);
     await tool(WEBMCP_TOOL_NAMES.rejectPlan).execute({ proposal_id: "proposal-1" }, { signal });
     await tool(WEBMCP_TOOL_NAMES.recordMissed).execute({ session_id: "session-1" }, { signal });
     mocks.recordOutcome.mockResolvedValue({ session: { id: "session-2" }, revision: { id: "revision-1" } });
