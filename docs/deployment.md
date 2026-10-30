@@ -66,9 +66,32 @@ TCP peer address is used.
   Render, and never set it higher than the number of proxies actually present: a value that is
   too high reads a client-controlled entry again.
 
-Requests proxied by the Vercel frontend arrive with Vercel's egress address in the counted
-position, so browser traffic through the rewrite shares per-IP limits per Vercel egress address.
-Per-email, per-token and per-account limits still apply individually.
+### Browser traffic through the frontend proxy
+
+Browser requests reach the API through the frontend's same-origin proxy, so the hop logic above
+only sees a Vercel egress address, which many unrelated users share. Counting that address
+would let five sign-ups from anyone behind it lock everyone else out for 15 minutes.
+
+The frontend therefore forwards the end-user address itself (`frontend/proxy.ts`,
+`frontend/lib/api-proxy.ts`):
+
+- The Next.js Proxy handles `/api/v1/*`, drops any client-supplied `x-studyflow-client-ip` and
+  `x-studyflow-proxy-secret` headers, and rewrites the request to `BACKEND_ORIGIN`.
+- Only when it runs on Vercel (`VERCEL=1`) and `STUDYFLOW_FRONTEND_PROXY_SECRET` is set, it adds
+  `x-studyflow-client-ip` from Vercel's `x-real-ip` (falling back to `x-vercel-forwarded-for`),
+  which Vercel overwrites with the connecting address, plus `x-studyflow-proxy-secret`.
+- The API uses `x-studyflow-client-ip` only when exactly one `x-studyflow-proxy-secret` header
+  matches its own `STUDYFLOW_FRONTEND_PROXY_SECRET` (constant-time comparison) and the address is
+  well formed. Otherwise it falls back to the proxy hops, so callers that do not know the secret,
+  including direct calls to the Render URL, cannot choose their own rate-limit key.
+
+To enable it, generate one value (for example `openssl rand -base64 48`) and set it as
+`STUDYFLOW_FRONTEND_PROXY_SECRET` on both Render services (dashboard, `sync: false`) and on the
+Vercel project (Production and Preview environments, not prefixed with `NEXT_PUBLIC_`), then
+redeploy both. `BACKEND_ORIGIN` must be available to the Vercel runtime as well as the build,
+because the Proxy reads it per request. Rotate by changing both sides together; while they
+differ, browser traffic falls back to per-egress-address limits. Leave the variable unset for
+local development, tests and `docker compose`.
 
 ## One-time setup
 

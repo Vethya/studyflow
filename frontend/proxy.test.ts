@@ -51,6 +51,27 @@ describe("CSP proxy", () => {
     expect(pattern.test("/_next/static/chunks/main.js")).toBe(false);
     expect(pattern.test("/favicon.ico")).toBe(false);
     expect(pattern.test("/hero.png")).toBe(false);
-    expect(matcher.missing.map((header) => header.key)).toEqual(["next-router-prefetch", "purpose"]);
+    expect(matcher.missing?.map((header) => header.key)).toEqual(["next-router-prefetch", "purpose"]);
+  });
+
+  it("also runs on API calls, without prefetch exclusions", () => {
+    expect(config.matcher[1]).toEqual({ source: "/api/v1/:path*" });
+  });
+});
+
+describe("API proxy", () => {
+  it("rewrites API calls to the backend with the verified client address and no CSP", () => {
+    vi.stubEnv("BACKEND_ORIGIN", "https://api.example");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("STUDYFLOW_FRONTEND_PROXY_SECRET", "s".repeat(40));
+    const response = proxy(
+      new NextRequest("https://studyflow.example/api/v1/tasks?page=2", {
+        headers: { "x-real-ip": "198.51.100.7", "x-studyflow-client-ip": "203.0.113.9" },
+      }),
+    );
+
+    expect(response.headers.get("x-middleware-rewrite")).toBe("https://api.example/api/v1/tasks?page=2");
+    expect(response.headers.get("x-middleware-request-x-studyflow-client-ip")).toBe("198.51.100.7");
+    expect(response.headers.get("Content-Security-Policy")).toBeNull();
   });
 });
