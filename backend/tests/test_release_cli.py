@@ -1,9 +1,15 @@
 import io
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
+from alembic import command
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 
-from studyflow.cli.release import check_settings, main
+from studyflow.cli import release
+from studyflow.cli.release import SchemaState, check_settings, classify_schema, main
 
 BACKEND_ROOT = Path(__file__).parents[1]
 ALEMBIC_CONFIG = BACKEND_ROOT / "alembic.ini"
@@ -24,6 +30,11 @@ PRODUCTION_ENVIRONMENT = {
 
 
 @pytest.fixture
+def script() -> ScriptDirectory:
+    return ScriptDirectory.from_config(Config(ALEMBIC_CONFIG))
+
+
+@pytest.fixture
 def production_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     for key, value in PRODUCTION_ENVIRONMENT.items():
         monkeypatch.setenv(key, value)
@@ -33,6 +44,82 @@ def run(*arguments: str) -> tuple[int, str]:
     output = io.StringIO()
     exit_code = main(["--alembic-config", str(ALEMBIC_CONFIG), *arguments], output)
     return exit_code, output.getvalue()
+
+
+def stub_database_revisions(
+    monkeypatch: pytest.MonkeyPatch, revisions: tuple[str, ...]
+) -> list[str]:
+    requested_urls: list[str] = []
+
+    async def read_database_revisions(database_url: str) -> tuple[str, ...]:
+        requested_urls.append(database_url)
+        return revisions
+
+    monkeypatch.setattr(release, "read_database_revisions", read_database_revisions)
+    return requested_urls
+
+
+def stub_migrate(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+    calls: list[Path] = []
+    monkeypatch.setattr(release, "migrate", calls.append)
+    return calls
+
+
+def test_schema_at_every_head_is_current(script: ScriptDirectory) -> None:
+    status = classify_schema(script.get_heads(), script)
+
+    assert status.state is SchemaState.CURRENT
+    assert status.database_revisions == status.code_heads
+
+
+@pytest.mark.parametrize("revisions", [(), ("20260903_15",), ("20260918_22",)])
+def test_missing_or_older_schema_is_behind(
+    script: ScriptDirectory, revisions: tuple[str, ...]
+) -> None:
+    assert classify_schema(revisions, script).state is SchemaState.BEHIND
+
+
+@pytest.mark.parametrize(
+    "revisions", [("20991231_99",), ("20260918_23", "20991231_99"), ("not-a-revision",)]
+)
+def test_unknown_revision_is_rejected_rather_than_treated_as_ahead(
+    script: ScriptDirectory, revisions: tuple[str, ...]
+) -> None:
+    assert classify_schema(revisions, script).state is SchemaState.UNKNOWN
+
+
+@pytest.mark.anyio
+async def test_database_revisions_are_read_from_the_alembic_version_table(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "revisions.sqlite"
+    with closing(sqlite3.connect(database_path)) as connection:
+        connection.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)")
+        connection.execute("INSERT INTO alembic_version VALUES ('20260918_23')")
+        connection.commit()
+
+    revisions = await release.read_database_revisions(f"sqlite+aiosqlite:///{database_path}")
+
+    assert revisions == ("20260918_23",)
+
+
+@pytest.mark.anyio
+async def test_empty_database_has_no_revisions(tmp_path: Path) -> None:
+    database_path = tmp_path / "empty.sqlite"
+
+    assert await release.read_database_revisions(f"sqlite+aiosqlite:///{database_path}") == ()
+
+
+def test_listed_newer_revision_is_accepted(script: ScriptDirectory) -> None:
+    status = classify_schema(("20991231_99",), script, ["20991231_99"])
+
+    assert status.state is SchemaState.ACCEPTED_NEWER
+
+
+def test_accepting_one_revision_does_not_accept_another(script: ScriptDirectory) -> None:
+    status = classify_schema(("20991231_99", "20991231_98"), script, ["20991231_99"])
+
+    assert status.state is SchemaState.UNKNOWN
 
 
 def test_development_settings_are_valid_without_production_values() -> None:
@@ -107,3 +194,56 @@ def test_check_settings_does_not_touch_the_database() -> None:
 
     assert exit_code == 0
     assert "Settings are valid for the production environment." in output
+
+
+def test_unknown_database_revision_fails_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    stub_database_revisions(monkeypatch, ("20991231_99",))
+
+    exit_code, output = run("check-schema")
+
+    assert exit_code == 1
+    assert "database schema is at 20991231_99, which this build (20260918_23) does not know" in (
+        output
+    )
+    assert "Database schema is current" not in output
+
+
+def test_migrate_applies_migrations_without_checking_the_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested_urls = stub_database_revisions(monkeypatch, ())
+    migrations = stub_migrate(monkeypatch)
+
+    exit_code, output = run("migrate")
+
+    assert exit_code == 0
+    assert migrations == [ALEMBIC_CONFIG]
+    assert requested_urls == []
+    assert "Migrations applied." in output
+
+
+def test_migrate_upgrades_the_configured_alembic_environment_to_head(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    upgrades: list[tuple[str | None, str]] = []
+
+    def upgrade(config: Config, revision: str) -> None:
+        upgrades.append((config.config_file_name, revision))
+
+    monkeypatch.setattr(command, "upgrade", upgrade)
+
+    release.migrate(ALEMBIC_CONFIG)
+
+    assert upgrades == [(str(ALEMBIC_CONFIG), "head")]
+
+
+def test_check_schema_reads_the_configured_database(
+    monkeypatch: pytest.MonkeyPatch, script: ScriptDirectory
+) -> None:
+    requested_urls = stub_database_revisions(monkeypatch, tuple(script.get_heads()))
+    monkeypatch.setenv("STUDYFLOW_DATABASE_URL", SECRET_DATABASE_URL)
+
+    exit_code, _ = run("check-schema")
+
+    assert exit_code == 0
+    assert requested_urls == [SECRET_DATABASE_URL]

@@ -93,6 +93,7 @@ jobs:
         run: |
           uv run alembic upgrade head
           uv run alembic check
+          uv run python -m studyflow.cli.release check-schema
 
       - name: Validate Compose configuration
         run: docker compose config --quiet

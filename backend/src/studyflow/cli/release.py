@@ -1,27 +1,52 @@
-"""Release checks for StudyFlow settings.
+"""Release checks for StudyFlow settings and schema.
 
 Run from the backend directory (``/app`` in the container)::
 
     python -m studyflow.cli.release check-settings [--require-production]
+    python -m studyflow.cli.release check-schema
+    python -m studyflow.cli.release migrate
 
-Later commands will check the schema and apply migrations. This command only
-reports whether the environment can build ``Settings``.
+``check-schema`` compares the database with this build's migration heads.
+``migrate`` applies pending migrations. The container start command is unchanged.
 """
 
 import argparse
+import asyncio
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import TextIO
 
+from alembic import command
+from alembic.config import Config
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from pydantic import ValidationError
+from sqlalchemy import Connection
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
 
 from studyflow.settings import Environment, Settings
 
 DEFAULT_ALEMBIC_CONFIG = Path("alembic.ini")
 
 EXAMPLE_FROM_ADDRESS = "no-reply@example.com"
+
+
+class SchemaState(StrEnum):
+    CURRENT = "current"
+    BEHIND = "behind"
+    ACCEPTED_NEWER = "accepted_newer"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class SchemaStatus:
+    state: SchemaState
+    database_revisions: tuple[str, ...]
+    code_heads: tuple[str, ...]
 
 
 @dataclass
@@ -73,6 +98,54 @@ def check_settings(
     return report
 
 
+def classify_schema(
+    database_revisions: Sequence[str],
+    script: ScriptDirectory,
+    accepted_newer_revisions: Sequence[str] = (),
+) -> SchemaStatus:
+    """Compare the database's Alembic revisions with the migration heads in this build.
+
+    A revision missing from this build is rejected unless the operator listed it in
+    ``STUDYFLOW_ACCEPTED_NEWER_SCHEMA_REVISIONS``, for example while rolling back to the
+    previous build after an additive release migration.
+    """
+    current = tuple(sorted(database_revisions))
+    heads = tuple(sorted(script.get_heads()))
+    known_revisions = {revision.revision for revision in script.walk_revisions()}
+    unknown = [revision for revision in current if revision not in known_revisions]
+    if unknown and all(revision in accepted_newer_revisions for revision in unknown):
+        state = SchemaState.ACCEPTED_NEWER
+    elif unknown:
+        # A revision this build has never heard of could be a newer release, a branch that was
+        # never merged, or a hand-edited alembic_version. None of them is safe by default.
+        state = SchemaState.UNKNOWN
+    elif current == heads:
+        state = SchemaState.CURRENT
+    else:
+        state = SchemaState.BEHIND
+    return SchemaStatus(state=state, database_revisions=current, code_heads=heads)
+
+
+async def read_database_revisions(database_url: str) -> tuple[str, ...]:
+    engine = create_async_engine(database_url, poolclass=NullPool)
+    try:
+        async with engine.connect() as connection:
+            return await connection.run_sync(_current_heads)
+    finally:
+        await engine.dispose()
+
+
+def check_schema(settings: Settings, alembic_config: Path) -> SchemaStatus:
+    script = ScriptDirectory.from_config(Config(alembic_config))
+    revisions = asyncio.run(read_database_revisions(settings.database_url.get_secret_value()))
+    return classify_schema(revisions, script, settings.accepted_newer_schema_revisions)
+
+
+def migrate(alembic_config: Path) -> None:
+    """Apply all pending migrations; the migration environment serializes concurrent runs."""
+    command.upgrade(Config(alembic_config), "head")
+
+
 def main(argv: Sequence[str] | None = None, output: TextIO | None = None) -> int:
     stream = output if output is not None else sys.stderr
     parser = argparse.ArgumentParser(description="StudyFlow release gates")
@@ -91,11 +164,14 @@ def main(argv: Sequence[str] | None = None, output: TextIO | None = None) -> int
         action="store_true",
         help="Fail unless STUDYFLOW_ENVIRONMENT is production",
     )
+    subcommands.add_parser("check-schema", help="Fail unless the database is at this build's head")
+    subcommands.add_parser("migrate", help="Validate settings, then apply pending migrations")
     args = parser.parse_args(argv)
+    alembic_config: Path = args.alembic_config
 
     report = check_settings(
-        require_production=bool(args.require_production),
-        release_checks=True,
+        require_production=getattr(args, "require_production", False),
+        release_checks=args.command == "check-settings",
     )
     for warning in report.warnings:
         print(f"warning: {warning}", file=stream)
@@ -105,8 +181,47 @@ def main(argv: Sequence[str] | None = None, output: TextIO | None = None) -> int
         print("Settings check failed.", file=stream)
         return 1
     settings = report.settings
-    print(f"Settings are valid for the {settings.environment} environment.", file=stream)
+    if args.command == "check-settings":
+        print(f"Settings are valid for the {settings.environment} environment.", file=stream)
+        return 0
+
+    if args.command == "migrate":
+        migrate(alembic_config)
+        print("Migrations applied.", file=stream)
+        return 0
+
+    status = check_schema(settings, alembic_config)
+    database = ", ".join(status.database_revisions) or "none"
+    heads = ", ".join(status.code_heads)
+    if status.state is SchemaState.BEHIND:
+        print(
+            f"error: database schema is at {database} but this build requires {heads}. "
+            "Apply migrations with the release runbook (docs/release.md) before deploying.",
+            file=stream,
+        )
+        return 1
+    if status.state is SchemaState.UNKNOWN:
+        print(
+            f"error: database schema is at {database}, which this build ({heads}) does not "
+            "know. Deploy the build that created that revision, or, after confirming it is an "
+            "additive release migration, list it in STUDYFLOW_ACCEPTED_NEWER_SCHEMA_REVISIONS "
+            "(docs/release.md).",
+            file=stream,
+        )
+        return 1
+    if status.state is SchemaState.ACCEPTED_NEWER:
+        print(
+            f"warning: database schema {database} is newer than this build ({heads}); "
+            "continuing because STUDYFLOW_ACCEPTED_NEWER_SCHEMA_REVISIONS lists it.",
+            file=stream,
+        )
+        return 0
+    print(f"Database schema is current ({heads}).", file=stream)
     return 0
+
+
+def _current_heads(connection: Connection) -> tuple[str, ...]:
+    return tuple(MigrationContext.configure(connection).get_current_heads())
 
 
 def _describe_validation_error(location: tuple[int | str, ...], message: str) -> str:

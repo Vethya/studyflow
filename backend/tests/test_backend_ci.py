@@ -36,6 +36,7 @@ def test_backend_ci_runs_every_quality_and_infrastructure_gate() -> None:
     assert "uv run pytest --cov=studyflow --cov-branch" in commands
     assert "uv run alembic upgrade head" in commands
     assert "uv run alembic check" in commands
+    assert "uv run python -m studyflow.cli.release check-schema" in commands
     assert "docker compose config --quiet" in commands
     assert "docker build" in commands
 
