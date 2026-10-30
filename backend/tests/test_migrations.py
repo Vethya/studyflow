@@ -7,7 +7,7 @@ import sys
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from pathlib import Path
-from types import TracebackType
+from types import SimpleNamespace, TracebackType
 from unittest.mock import Mock
 
 import pytest
@@ -22,14 +22,29 @@ BACKEND_ROOT = Path(__file__).parents[1]
 ALEMBIC_CONFIG = BACKEND_ROOT / "alembic.ini"
 
 
+class FakeSyncConnection:
+    def __init__(self, dialect_name: str) -> None:
+        self.dialect = SimpleNamespace(name=dialect_name)
+        self.statements: list[tuple[str, dict[str, object]]] = []
+
+    def execute(self, statement: object, parameters: dict[str, object]) -> None:
+        self.statements.append((str(statement), parameters))
+
+
 class FakeAsyncConnection:
-    async def run_sync(self, callback: Callable[[object], None]) -> None:
-        callback(object())
+    def __init__(self, connection: FakeSyncConnection) -> None:
+        self.connection = connection
+
+    async def run_sync(self, callback: Callable[[FakeSyncConnection], None]) -> None:
+        callback(self.connection)
 
 
 class FakeConnectionContext(AbstractAsyncContextManager[FakeAsyncConnection]):
+    def __init__(self, connection: FakeSyncConnection) -> None:
+        self.connection = connection
+
     async def __aenter__(self) -> FakeAsyncConnection:
-        return FakeAsyncConnection()
+        return FakeAsyncConnection(self.connection)
 
     async def __aexit__(
         self,
@@ -41,11 +56,12 @@ class FakeConnectionContext(AbstractAsyncContextManager[FakeAsyncConnection]):
 
 
 class FakeAsyncEngine:
-    def __init__(self) -> None:
+    def __init__(self, dialect_name: str = "sqlite") -> None:
         self.disposed = False
+        self.connection = FakeSyncConnection(dialect_name)
 
     def connect(self) -> FakeConnectionContext:
-        return FakeConnectionContext()
+        return FakeConnectionContext(self.connection)
 
     async def dispose(self) -> None:
         self.disposed = True
@@ -205,14 +221,19 @@ def test_registration_migration_preserves_legacy_pending_accounts() -> None:
     assert "token.expires_at > CURRENT_TIMESTAMP" not in result.stdout
 
 
+@pytest.mark.parametrize(
+    ("dialect_name", "expects_lock"), [("sqlite", False), ("postgresql", True)]
+)
 def test_online_environment_runs_migrations_and_disposes_engine(
     monkeypatch: pytest.MonkeyPatch,
+    dialect_name: str,
+    expects_lock: bool,
 ) -> None:
     from alembic import context
     from sqlalchemy.ext import asyncio as sqlalchemy_asyncio
 
     database_url = "postgresql+psycopg://user:secret@database:5432/studyflow"
-    engine = FakeAsyncEngine()
+    engine = FakeAsyncEngine(dialect_name)
     configure = Mock()
     run_migrations = Mock()
     engine_factory = Mock(return_value=engine)
@@ -234,3 +255,9 @@ def test_online_environment_runs_migrations_and_disposes_engine(
     configure.assert_called_once()
     run_migrations.assert_called_once_with()
     assert engine.disposed is True
+    lock_statements = [
+        statement
+        for statement in engine.connection.statements
+        if "pg_advisory_xact_lock" in statement[0]
+    ]
+    assert len(lock_statements) == (1 if expects_lock else 0)
