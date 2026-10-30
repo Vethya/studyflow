@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { staticSecurityHeaders } from "./lib/security/headers";
 
 /**
  * The browser always talks to the Next.js origin at `/api/v1/*`, and Next
@@ -23,7 +24,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/:path*",
-        headers: [{ key: "Permissions-Policy", value: "tools=(self)" }],
+        headers: staticSecurityHeaders(),
       },
     ];
   },
