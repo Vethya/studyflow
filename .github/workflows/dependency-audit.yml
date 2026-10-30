@@ -1,0 +1,72 @@
+name: Dependency Audit
+
+# Known-vulnerability audit of the backend's locked runtime dependencies (#65).
+# The frontend audit (`pnpm audit`) stays in frontend-nightly.yml.
+# It runs on pull requests that change a lock file, every night, and on demand.
+# GitHub only runs `schedule` triggers from the default branch, so the nightly
+# run starts once this file reaches master.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/dependency-audit.yml"
+      - "backend/Dockerfile"
+      - "backend/pyproject.toml"
+      - "backend/uv.lock"
+  schedule:
+    - cron: "30 19 * * *" # 02:30 Asia/Phnom_Penh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend pip-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # pip-audit evaluates environment markers for this interpreter, so it
+      # has to be the same Python the image installs. The tag in the Dockerfile
+      # is that source; a pull request that changes it runs this workflow.
+      - name: Read the production Python version
+        id: runtime
+        run: |
+          version="$(sed -n 's/^FROM python:\([0-9][0-9.]*\).*/\1/p' Dockerfile | head -n 1)"
+          if [ -z "$version" ]; then
+            echo "backend/Dockerfile has no FROM python: tag" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.32"
+          python-version: ${{ steps.runtime.outputs.version }}
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+          working-directory: backend
+
+      # The exported file pins every runtime package with hashes, so pip-audit
+      # checks exactly what the Docker image installs without resolving again.
+      - name: Export locked runtime dependencies
+        run: uv export --frozen --no-dev --no-emit-project --format requirements-txt -o "$RUNNER_TEMP/requirements.txt"
+
+      - name: Audit with pip-audit
+        run: >-
+          uvx --from "pip-audit>=2.9,<3" pip-audit
+          --requirement "$RUNNER_TEMP/requirements.txt"
+          --require-hashes --disable-pip --strict --progress-spinner off

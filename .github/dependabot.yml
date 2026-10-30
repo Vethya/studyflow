@@ -1,0 +1,42 @@
+# Dependency update PRs (#65). Dependabot reads this file from the default
+# branch only, so it takes effect once it reaches master.
+#
+# Version updates use target-branch: dev, where feature work lands first.
+# Security updates ignore target-branch and always open against the default
+# branch (master). Merge those on master, then bring the same bump to dev,
+# or the next dev → master merge has to reconcile the lockfile.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /backend
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Phnom_Penh
+    open-pull-requests-limit: 5
+    groups:
+      backend-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Phnom_Penh
+    open-pull-requests-limit: 5
+    groups:
+      frontend-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: monthly
+      timezone: Asia/Phnom_Penh
+    groups:
+      github-actions:
+        patterns: ["*"]
