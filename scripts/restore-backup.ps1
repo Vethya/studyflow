@@ -45,7 +45,8 @@ if ([string]::IsNullOrWhiteSpace($IdentityFile)) {
 if ([string]::IsNullOrWhiteSpace($TargetLabel)) {
     $TargetLabel = if ($env:STUDYFLOW_RESTORE_TARGET_LABEL) { $env:STUDYFLOW_RESTORE_TARGET_LABEL } else { "target database (credentials omitted)" }
 }
-$operator = if ($env:STUDYFLOW_RESTORE_OPERATOR) { $env:STUDYFLOW_RESTORE_OPERATOR } else { $env:USERNAME }
+# Defaults to a role, not the login name, so committed evidence does not name a machine (#73).
+$operator = if ($env:STUDYFLOW_RESTORE_OPERATOR) { $env:STUDYFLOW_RESTORE_OPERATOR } else { "project maintainer" }
 $sourceEnvironment = if ($env:STUDYFLOW_RESTORE_SOURCE_ENVIRONMENT) { $env:STUDYFLOW_RESTORE_SOURCE_ENVIRONMENT } else { "production" }
 $sourceProject = if ($env:STUDYFLOW_RESTORE_SOURCE_NEON_PROJECT) { $env:STUDYFLOW_RESTORE_SOURCE_NEON_PROJECT } else { "not recorded" }
 $sourceBranch = if ($env:STUDYFLOW_RESTORE_SOURCE_NEON_BRANCH) { $env:STUDYFLOW_RESTORE_SOURCE_NEON_BRANCH } else { "not recorded" }

@@ -14,8 +14,8 @@ The approved revised requirements are authoritative when they differ from the or
 
 Source artifacts:
 
-- `/Users/macbookpro/Documents/School/Kirirum Institute of Technology (KIT)/Year 4/Final Thesis/0th Review/B11-P10_StudyFlow_Proposal.pdf`
-- `/Users/macbookpro/Documents/School/Kirirum Institute of Technology (KIT)/Year 4/Final Thesis/0th Review/B11-P10_StudyFlow_Presentation.pdf`
+- `B11-P10_StudyFlow_Proposal.pdf`
+- `B11-P10_StudyFlow_Presentation.pdf`
 
 The product is a responsive web application for university students. Its core contribution is a behavior-adaptive scheduler that converts academic tasks into feasible study sessions, learns from estimated-versus-actual duration records, detects overload, and proposes controlled schedule revisions.
 

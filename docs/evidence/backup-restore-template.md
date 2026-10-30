@@ -2,7 +2,9 @@
 
 Copy this file to a dated record after completing the restore test, or let the restore script
 generate the record. Do not include passwords, database URLs containing passwords, OAuth tokens,
-private age identities, or raw database dumps.
+private age identities, or raw database dumps. Record the operator as a role (for example
+"project maintainer"), not a login or machine name, and describe the backup location without its
+private folder path. Run the backup and the restore test from a clean worktree.
 
 ## Backup record
 
