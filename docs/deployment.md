@@ -25,6 +25,8 @@ URL, and TLS for email delivery.
 | `STUDYFLOW_ENVIRONMENT` | yes | `render.yaml` (`production` for every hosted service) | Enables production validators and secure cookies |
 | `STUDYFLOW_TRUSTED_PROXY_HOPS` | yes | `render.yaml` (`3`) | Number of proxies in front of the API that append to `X-Forwarded-For`; see [Client IP addresses](#client-ip-addresses-and-rate-limits) |
 | `STUDYFLOW_FRONTEND_PROXY_SECRET` | yes (Render and Vercel) | You (secret, same value on both) | At least 32 random characters shared with the frontend proxy so the API can trust the end-user address it forwards; leave unset locally; see [Client IP addresses](#client-ip-addresses-and-rate-limits) |
+| `STUDYFLOW_MIGRATE_ON_START` | no | `render.yaml` (`true` on `studyflow-api-dev`, `false` on `studyflow-api`) | Applies migrations before Uvicorn starts. Set to `false` for `studyflow-api`; see [`release.md`](release.md) |
+| `STUDYFLOW_ACCEPTED_NEWER_SCHEMA_REVISIONS` | no | Render Dashboard, temporarily | Comma-separated revisions newer than the build that the boot gate may start on (release window and rollback only); see [`release.md`](release.md) |
 | `STUDYFLOW_DATABASE_URL` | yes | You (secret) | Neon **pooled** URL, converted; see below |
 | `STUDYFLOW_PUBLIC_APP_URL` | yes | You for dev; `render.yaml` for production (`https://studyflow.vercel.app`) | Frontend origin; verification links point here |
 | `STUDYFLOW_SMTP_HOST` | yes | `render.yaml` (`smtp.resend.com`) | |
@@ -127,10 +129,16 @@ local development, tests and `docker compose`.
    Each service uses Docker, the free plan, a health check, and its own environment variables.
    Render checks `/api/v1/health`, which does not access PostgreSQL. Use `/api/v1/ready` separately
    when you need to verify database connectivity.
-   The Dockerfile `CMD` applies migrations (`alembic upgrade head`) before launching Uvicorn because
-   pre-deploy commands require a paid plan. The Blueprint leaves `dockerCommand` unset so Render
-   uses that `CMD` without reparsing its shell quoting. `alembic upgrade head` is idempotent, so the
-   extra run on every cold start costs only seconds.
+   Render's pre-deploy command only exists on paid instance types, so the release gate lives in
+   the Dockerfile `CMD`: `python -m studyflow.cli.release boot` runs before Uvicorn. It validates
+   the settings and refuses to start while the database is behind this build's migrations. A
+   failed start fails the deploy, and Render keeps serving the previous deploy. The gate applies
+   migrations itself only when `STUDYFLOW_MIGRATE_ON_START=true`, which the Blueprint sets for
+   `studyflow-api-dev` only. Production has `autoDeployTrigger: "off"`, so merging to `master`
+   does not deploy, provided the Blueprint's Auto Sync is off: a Blueprint sync redeploys
+   services whose `render.yaml` entry changed regardless of `autoDeployTrigger`. Production schema changes and deploys follow [`release.md`](release.md).
+   The Blueprint leaves `dockerCommand` unset so Render uses that `CMD` without reparsing its
+   shell quoting. The schema check runs on every cold start and costs one short query.
 3. Keep the existing production secret values. Configure separate values for production and dev,
    especially separate Neon databases. `sync: false` values for newly added services may need to
    be entered manually after syncing an existing Blueprint:

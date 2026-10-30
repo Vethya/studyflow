@@ -100,6 +100,6 @@ projects:
                 sync: false
               - key: STUDYFLOW_GOOGLE_IMPORT_REDIRECT_URI
                 sync: false
-              # Pinned so a dashboard edit cannot make production migrate on container start.
+              # A Blueprint sync resets any dashboard override of this value.
               - key: STUDYFLOW_MIGRATE_ON_START
                 value: "false"
