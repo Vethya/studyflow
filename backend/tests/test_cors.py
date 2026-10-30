@@ -1,10 +1,10 @@
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 from pytest import MonkeyPatch, mark, raises
 
 from studyflow.app import create_app
-from studyflow.settings import Settings
+from studyflow.settings import Environment, Settings
 
 CORS_ORIGINS = ["https://studyflow.vercel.app", "http://localhost:5173"]
 
@@ -128,3 +128,120 @@ def test_settings_accept_a_bare_trailing_slash_in_cors_origins() -> None:
 def test_settings_reject_duplicate_cors_origins() -> None:
     with raises(ValidationError, match="must not contain duplicates"):
         Settings(cors_origins=["https://studyflow.example.com/", "https://studyflow.example.com"])
+
+
+def production_settings(
+    cors_origins: list[str], public_app_url: str = "https://studyflow.vercel.app"
+) -> Settings:
+    return Settings(
+        environment=Environment.PRODUCTION,
+        database_url=SecretStr(
+            "postgresql+psycopg://studyflow:secret@db.example.com/studyflow?sslmode=require"
+        ),
+        public_app_url=public_app_url,
+        smtp_start_tls=True,
+        cors_origins=cors_origins,
+    )
+
+
+@mark.parametrize(
+    "cors_origins",
+    [
+        [],
+        ["https://studyflow.vercel.app"],
+        ["https://studyflow.vercel.app/"],
+        ["HTTPS://StudyFlow.Vercel.App"],
+    ],
+)
+def test_production_accepts_no_cors_or_only_the_public_app_origin(
+    cors_origins: list[str],
+) -> None:
+    settings = production_settings(cors_origins)
+
+    assert len(settings.cors_origins) == len(cors_origins)
+
+
+@mark.parametrize(
+    ("cors_origins", "message"),
+    [
+        (["http://studyflow.vercel.app"], "Production CORS origins must use HTTPS"),
+        (["http://localhost:3000"], "Production CORS origins must use HTTPS"),
+        (["https://evil.example"], "Production CORS origins must match the public app URL"),
+        (
+            ["https://studyflow.vercel.app", "https://preview.vercel.app"],
+            "Production CORS origins must match the public app URL",
+        ),
+        (
+            ["https://studyflow.vercel.app:8443"],
+            "Production CORS origins must match the public app URL",
+        ),
+        (
+            ["https://studyflow.vercel.app.evil.example"],
+            "Production CORS origins must match the public app URL",
+        ),
+    ],
+)
+def test_production_rejects_cors_origins_other_than_the_public_app(
+    cors_origins: list[str], message: str
+) -> None:
+    with raises(ValidationError, match=message):
+        production_settings(cors_origins)
+
+
+def test_development_still_allows_local_cross_origin_frontends() -> None:
+    settings = Settings(public_app_url="http://localhost:3000", cors_origins=CORS_ORIGINS)
+
+    assert settings.cors_origins == CORS_ORIGINS
+
+
+@mark.parametrize(
+    ("public_app_url", "cors_origin"),
+    [
+        ("https://studyflow.vercel.app:443", "https://studyflow.vercel.app"),
+        ("https://studyflow.vercel.app", "https://studyflow.vercel.app:443"),
+        ("https://studyflow.vercel.app:443/", "https://StudyFlow.vercel.app:443/"),
+        ("https://studyflow.vercel.app:8443", "https://studyflow.vercel.app:8443"),
+    ],
+)
+def test_production_treats_default_ports_as_the_same_origin(
+    public_app_url: str, cors_origin: str
+) -> None:
+    settings = production_settings([cors_origin], public_app_url=public_app_url)
+
+    assert len(settings.cors_origins) == 1
+
+
+@mark.parametrize(
+    ("configured", "serialized"),
+    [
+        ("https://studyflow.vercel.app:443", "https://studyflow.vercel.app"),
+        ("http://localhost:80/", "http://localhost"),
+        ("HTTPS://StudyFlow.Vercel.App", "https://studyflow.vercel.app"),
+        ("http://localhost:3000", "http://localhost:3000"),
+        ("https://[2001:DB8::1]:443", "https://[2001:db8::1]"),
+        ("http://localhost:443", "http://localhost:443"),
+    ],
+)
+def test_cors_origins_are_stored_as_browsers_serialize_origin(
+    configured: str, serialized: str
+) -> None:
+    assert Settings(cors_origins=[configured]).cors_origins == [serialized]
+
+
+def test_settings_reject_cors_origins_that_only_differ_by_a_default_port() -> None:
+    with raises(ValidationError, match="must not contain duplicates"):
+        Settings(
+            cors_origins=["https://studyflow.example.com", "https://studyflow.example.com:443"]
+        )
+
+
+@mark.anyio
+async def test_origin_configured_with_its_default_port_still_receives_cors_headers() -> None:
+    app = build_app(["https://studyflow.vercel.app:443"])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(
+            "/api/v1/health", headers={"Origin": "https://studyflow.vercel.app"}
+        )
+
+    assert response.headers["access-control-allow-origin"] == "https://studyflow.vercel.app"

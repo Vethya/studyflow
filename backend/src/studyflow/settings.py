@@ -86,7 +86,7 @@ class Settings(BaseSettings):
                 raise ValueError("CORS origins must not include a query or fragment")
             if parsed_url.path not in {"", "/"}:
                 raise ValueError("CORS origins must not include a path")
-            normalized.append(origin.rstrip("/"))
+            normalized.append(_origin(origin))
         if len(set(normalized)) != len(normalized):
             raise ValueError("CORS origins must not contain duplicates")
         return normalized
@@ -200,4 +200,29 @@ class Settings(BaseSettings):
                 and urlsplit(self.google_import_redirect_uri).scheme != "https"
             ):
                 raise ValueError("Production Google import redirect URI must use HTTPS")
+            app_origin = _origin(self.public_app_url)
+            for origin in self.cors_origins:
+                if urlsplit(origin).scheme != "https":
+                    raise ValueError("Production CORS origins must use HTTPS")
+                if _origin(origin) != app_origin:
+                    raise ValueError("Production CORS origins must match the public app URL")
         return self
+
+
+DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _origin(url: str) -> str:
+    """Return a URL's origin serialized the way browsers send the ``Origin`` header.
+
+    The scheme and host are lowercased and the scheme's default port is omitted, so
+    ``https://Example.com:443/`` and ``https://example.com`` are the same origin.
+    """
+    parsed_url = urlsplit(url)
+    scheme = parsed_url.scheme.lower()
+    host = parsed_url.hostname or ""
+    if ":" in host:
+        host = f"[{host}]"
+    port = parsed_url.port
+    explicit_port = f":{port}" if port is not None and port != DEFAULT_PORTS.get(scheme) else ""
+    return f"{scheme}://{host}{explicit_port}"

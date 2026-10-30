@@ -32,7 +32,7 @@ URL, and TLS for email delivery.
 | `STUDYFLOW_SMTP_PASSWORD` | yes | You (secret) | Resend API key |
 | `STUDYFLOW_SMTP_START_TLS` | yes | `render.yaml` (`true`) | Production requires TLS delivery |
 | `STUDYFLOW_EMAIL_FROM_ADDRESS` | yes | You (secret) | Must be an address on a Resend-verified domain |
-| `STUDYFLOW_CORS_ORIGINS` | no | `render.yaml` (per service) | Comma-separated origins for direct frontend calls; the production proxy normally avoids this |
+| `STUDYFLOW_CORS_ORIGINS` | no | `render.yaml` (per service) | Comma-separated origins for direct frontend calls; the production proxy normally avoids this. Origins are compared and stored the way browsers send `Origin` (lowercase, default `:443`/`:80` omitted). In production every origin must be HTTPS and equal to the `STUDYFLOW_PUBLIC_APP_URL` origin, or startup fails |
 | `STUDYFLOW_GOOGLE_OIDC_CLIENT_ID` | no | You (secret) | All three OIDC values configure together |
 | `STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET` | no | You (secret) | |
 | `STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI` | no | You (secret) | Paste `https://<frontend-origin>/api/v1/auth/google/callback`; must be HTTPS and must go through the frontend proxy |
@@ -134,7 +134,8 @@ local development, tests and `docker compose`.
    especially separate Neon databases. `sync: false` values for newly added services may need to
    be entered manually after syncing an existing Blueprint:
    - `STUDYFLOW_DATABASE_URL` (converted Neon URL from step 1)
-   - `STUDYFLOW_CORS_ORIGINS`, if the service accepts direct browser calls from another origin
+   - `STUDYFLOW_CORS_ORIGINS`: normally leave empty, because the frontend proxy keeps the browser
+     on one origin. Production accepts only the HTTPS origin of `STUDYFLOW_PUBLIC_APP_URL`
    - `STUDYFLOW_SMTP_PASSWORD` and `STUDYFLOW_EMAIL_FROM_ADDRESS`
    - all three Google OIDC variables together, if Google Sign-In is enabled
    All hosted services use production mode so cookies retain their `Secure` attribute and
