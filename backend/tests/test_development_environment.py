@@ -66,14 +66,24 @@ def test_backend_image_is_locked_and_runs_as_non_root() -> None:
     assert "chown -R" not in dockerfile
 
 
-def test_trusted_proxy_addresses_are_explicit_and_safe_by_default() -> None:
+def test_trusted_proxy_hops_are_explicit_and_safe_by_default() -> None:
     compose = load_compose()
+    example_environment = (REPOSITORY_ROOT / ".env.example").read_text()
 
+    assert "FORWARDED_ALLOW_IPS" not in compose["x-backend-environment"]
     assert (
-        compose["x-backend-environment"]["FORWARDED_ALLOW_IPS"]
-        == "${FORWARDED_ALLOW_IPS:-127.0.0.1}"
+        compose["x-backend-environment"]["STUDYFLOW_TRUSTED_PROXY_HOPS"]
+        == "${STUDYFLOW_TRUSTED_PROXY_HOPS:-0}"
     )
-    assert "FORWARDED_ALLOW_IPS=127.0.0.1" in (REPOSITORY_ROOT / ".env.example").read_text()
+    assert "FORWARDED_ALLOW_IPS" not in example_environment
+    assert "STUDYFLOW_TRUSTED_PROXY_HOPS=0" in example_environment
+
+
+def test_backend_example_environment_matches_the_proxy_hop_setting() -> None:
+    example_environment = (BACKEND_ROOT / ".env.example").read_text()
+
+    assert "FORWARDED_ALLOW_IPS" not in example_environment
+    assert "STUDYFLOW_TRUSTED_PROXY_HOPS=0" in example_environment.splitlines()
 
 
 def test_compose_images_are_pinned_by_digest() -> None:

@@ -113,14 +113,27 @@ def test_blueprint_uses_the_database_free_liveness_endpoint_as_its_health_check(
     }
 
 
-def test_blueprint_runs_in_production_with_proxy_headers_trusted() -> None:
+def test_blueprint_runs_in_production_over_https() -> None:
     variables = environment(service())
 
     assert variables["STUDYFLOW_ENVIRONMENT"] == "production"
-    assert variables["FORWARDED_ALLOW_IPS"] == "0.0.0.0/0"
     public_app_url = variables["STUDYFLOW_PUBLIC_APP_URL"]
     assert public_app_url is not None
     assert public_app_url.startswith("https://")
+
+
+def test_blueprint_trusts_only_the_render_proxy_chain_for_client_addresses() -> None:
+    for service_config in services():
+        variables = environment(service_config)
+
+        assert "FORWARDED_ALLOW_IPS" not in variables
+        assert variables["STUDYFLOW_TRUSTED_PROXY_HOPS"] == "3"
+
+
+def test_dockerfile_disables_uvicorn_proxy_header_rewriting() -> None:
+    dockerfile = DOCKERFILE_PATH.read_text()
+
+    assert "--no-proxy-headers" in dockerfile
 
 
 def test_blueprint_keeps_secrets_out_of_the_repository() -> None:

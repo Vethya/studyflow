@@ -22,7 +22,7 @@ URL, and TLS for email delivery.
 | Variable | Required in production | Set by | Notes |
 | --- | --- | --- | --- |
 | `STUDYFLOW_ENVIRONMENT` | yes | `render.yaml` (`production` for every hosted service) | Enables production validators and secure cookies |
-| `FORWARDED_ALLOW_IPS` | yes | `render.yaml` (`0.0.0.0/0`) | Lets Uvicorn trust Render's proxy headers |
+| `STUDYFLOW_TRUSTED_PROXY_HOPS` | yes | `render.yaml` (`3`) | Number of proxies in front of the API that append to `X-Forwarded-For`; see [Client IP addresses](#client-ip-addresses-and-rate-limits) |
 | `STUDYFLOW_DATABASE_URL` | yes | You (secret) | Neon **pooled** URL, converted; see below |
 | `STUDYFLOW_PUBLIC_APP_URL` | yes | `render.yaml` (`https://studyflow.vercel.app`) | Shared frontend origin; verification links point here |
 | `STUDYFLOW_SMTP_HOST` | yes | `render.yaml` (`smtp.resend.com`) | |
@@ -36,6 +36,38 @@ URL, and TLS for email delivery.
 | `STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET` | no | You (secret) | |
 | `STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI` | no | You (secret) | Paste `https://<frontend-origin>/api/v1/auth/google/callback`; must be HTTPS and must go through the frontend proxy |
 | `STUDYFLOW_GOOGLE_IMPORT_REDIRECT_URI` | no | You (secret) | Enables Google Calendar and Classroom import. Paste `https://<frontend-origin>/api/v1/integrations/google/callback`; requires the three OIDC values. See [google-import-setup.md](google-import-setup.md) |
+
+## Client IP addresses and rate limits
+
+Registration, login, password reset, verification resend, Google sign-in and Google import are
+rate limited per client IP address (`backend/src/studyflow/auth/rate_limits.py`). The API never
+lets Uvicorn rewrite the client address from proxy headers: the Dockerfile starts Uvicorn with
+`--no-proxy-headers`, and `FORWARDED_ALLOW_IPS` is not used. Trusting every source address
+(`FORWARDED_ALLOW_IPS=0.0.0.0/0` or `*`) makes Uvicorn take the **left-most**
+`X-Forwarded-For` entry, which the client writes itself, so any request could pick a new IP and
+bypass every per-IP limit.
+
+Instead, `studyflow.api.client_ip.request_client_ip` reads `X-Forwarded-For` from the right.
+Each proxy appends the address that connected to it, so only the right-most
+`STUDYFLOW_TRUSTED_PROXY_HOPS` entries come from infrastructure in front of the API, and the
+entry that many positions from the right is the address that connected to the outermost trusted
+proxy. Anything further left is ignored. If the header is missing, too short or malformed, the
+TCP peer address is used.
+
+- **Render: `3`.** Requests pass through Cloudflare, which appends the connecting address, then
+  Render's proxy, which appends the Cloudflare edge address, then a Render-internal proxy, which
+  appends a `10.x` address. None of them strips a value the client sent. A header-echo service on
+  Render showed `client, Cloudflare edge, 10.x` on every request (30 October 2026). With `2`, the
+  API would key every caller on a Cloudflare edge address, which changes between requests.
+- **Local development, tests and `docker compose`: `0` (default).** `X-Forwarded-For` is
+  ignored and the socket peer address is used.
+- Raise the value only if another proxy that appends to `X-Forwarded-For` is added in front of
+  Render, and never set it higher than the number of proxies actually present: a value that is
+  too high reads a client-controlled entry again.
+
+Requests proxied by the Vercel frontend arrive with Vercel's egress address in the counted
+position, so browser traffic through the rewrite shares per-IP limits per Vercel egress address.
+Per-email, per-token and per-account limits still apply individually.
 
 ## One-time setup
 

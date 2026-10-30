@@ -15,8 +15,8 @@ projects:
             envVars:
               - key: STUDYFLOW_ENVIRONMENT
                 value: production
-              - key: FORWARDED_ALLOW_IPS
-                value: 0.0.0.0/0
+              - key: STUDYFLOW_TRUSTED_PROXY_HOPS
+                value: "3"
               - key: STUDYFLOW_DATABASE_URL
                 sync: false
               - key: STUDYFLOW_PUBLIC_APP_URL
@@ -57,8 +57,8 @@ projects:
             envVars:
               - key: STUDYFLOW_ENVIRONMENT
                 value: production
-              - key: FORWARDED_ALLOW_IPS
-                value: 0.0.0.0/0
+              - key: STUDYFLOW_TRUSTED_PROXY_HOPS
+                value: "3"
               - key: STUDYFLOW_DATABASE_URL
                 sync: false
               - key: STUDYFLOW_PUBLIC_APP_URL

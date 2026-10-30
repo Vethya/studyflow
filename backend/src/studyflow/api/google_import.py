@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import RedirectResponse
 
 from studyflow.api.account import AccountError, require_csrf_session, require_session
+from studyflow.api.client_ip import request_client_ip
 from studyflow.auth.cookies import CookiePolicy
 from studyflow.auth.rate_limits import (
     GoogleImportStartRateLimit,
@@ -197,7 +198,7 @@ async def _start(
     rate_limit: GoogleImportStartRateLimit,
 ) -> GoogleImportStartResponse:
     try:
-        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        client_ip = request_client_ip(http_request)
         await rate_limit.check(client_ip, str(principal.account_id))
         started: GoogleImportStart = await imports.start(principal.account_id, source, horizon_days)
     except GoogleImportStartRateLimitExceeded as error:

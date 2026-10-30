@@ -21,6 +21,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from starlette.responses import JSONResponse, RedirectResponse
 
+from studyflow.api.client_ip import request_client_ip
 from studyflow.auth.cookies import CookiePolicy
 from studyflow.auth.login import (
     EmailVerificationRequiredError,
@@ -406,7 +407,7 @@ async def start_google_oidc(
     rate_limit: Annotated[OIDCStartRateLimit, Depends(get_oidc_start_rate_limit)],
 ) -> OIDCStartResponse:
     try:
-        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        client_ip = request_client_ip(http_request)
         await rate_limit.check(client_ip)
         started = await oidc.start(payload.timezone)
     except OIDCStartRateLimitExceeded as error:
@@ -441,7 +442,7 @@ async def start_google_link_oidc(
     rate_limit: Annotated[OIDCStartRateLimit, Depends(get_oidc_start_rate_limit)],
 ) -> OIDCStartResponse:
     try:
-        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        client_ip = request_client_ip(http_request)
         await rate_limit.check(client_ip)
         started = await oidc.start_link(principal.account_id, payload.timezone)
     except OIDCStartRateLimitExceeded as error:
@@ -477,7 +478,7 @@ async def start_google_account_deletion(
     rate_limit: Annotated[OIDCStartRateLimit, Depends(get_oidc_start_rate_limit)],
 ) -> OIDCStartResponse:
     try:
-        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        client_ip = request_client_ip(http_request)
         await rate_limit.check(client_ip)
         started = await oidc.start_account_deletion(principal.account_id, payload.timezone)
     except OIDCStartRateLimitExceeded as error:
@@ -708,7 +709,7 @@ async def _complete_google_account_link(
     linking: OIDCAccountLinking,
     rate_limit: OIDCLinkRateLimit,
 ) -> LoginResponse:
-    client_ip = http_request.client.host if http_request.client is not None else "unknown"
+    client_ip = request_client_ip(http_request)
     cookie_policy = get_cookie_policy(http_request)
     try:
         account_id = await linking.resolve_attempt_account_id(challenge)
@@ -751,7 +752,7 @@ async def forgot_password(
         PasswordResetRequestRateLimit, Depends(get_password_reset_request_rate_limit)
     ],
 ) -> AuthenticationMessage:
-    client_ip = http_request.client.host if http_request.client is not None else "unknown"
+    client_ip = request_client_ip(http_request)
     try:
         await rate_limit.check(client_ip, str(payload.email))
         await recovery.request_reset(str(payload.email), background_tasks)
@@ -797,7 +798,7 @@ async def reset_password(
         PasswordResetAttemptRateLimit, Depends(get_password_reset_attempt_rate_limit)
     ],
 ) -> None:
-    client_ip = http_request.client.host if http_request.client is not None else "unknown"
+    client_ip = request_client_ip(http_request)
     try:
         await rate_limit.check(client_ip, payload.token)
         await recovery.reset_password(payload.token, payload.password)
@@ -843,7 +844,7 @@ async def resend_verification(
     resend: Annotated[VerificationResend, Depends(get_verification_resend)],
     rate_limit: Annotated[VerificationResendRateLimit, Depends(get_verification_resend_rate_limit)],
 ) -> AuthenticationMessage:
-    client_ip = http_request.client.host if http_request.client is not None else "unknown"
+    client_ip = request_client_ip(http_request)
     try:
         await rate_limit.check(client_ip, str(payload.email))
         await resend.resend(str(payload.email), background_tasks)
@@ -955,7 +956,7 @@ async def login_with_email(
 ) -> LoginResponse:
     reservation_id: str | None = None
     try:
-        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        client_ip = request_client_ip(http_request)
         reservation_id = await rate_limit.check(client_ip, str(payload.email))
         result = await login.login(LoginCommand(email=payload.email, password=payload.password))
     except LoginRateLimitExceeded as error:
@@ -1026,7 +1027,7 @@ async def register(
     registration: Annotated[Registration, Depends(get_registration)],
     rate_limit: Annotated[RegistrationRateLimit, Depends(get_registration_rate_limit)],
 ) -> AuthenticationMessage:
-    client_ip = http_request.client.host if http_request.client is not None else "unknown"
+    client_ip = request_client_ip(http_request)
     try:
         await rate_limit.check(client_ip, str(payload.email))
         await registration.register(
@@ -1071,7 +1072,7 @@ async def complete_registration(
     ],
 ) -> AuthenticationMessage:
     try:
-        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        client_ip = request_client_ip(http_request)
         await rate_limit.check(client_ip, payload.signup_token)
         completed = await registration.complete(
             payload.signup_token,
@@ -1129,7 +1130,7 @@ async def verify_email(
     verification: Annotated[EmailVerification, Depends(get_email_verification)],
     rate_limit: Annotated[EmailVerificationRateLimit, Depends(get_email_verification_rate_limit)],
 ) -> EmailVerificationResponse:
-    client_ip = http_request.client.host if http_request.client is not None else "unknown"
+    client_ip = request_client_ip(http_request)
     try:
         await rate_limit.check(client_ip, payload.token)
     except EmailVerificationRateLimitExceeded as error:

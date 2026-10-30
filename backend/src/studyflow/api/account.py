@@ -12,6 +12,7 @@ from studyflow.accounts.deletion import AccountDeletion
 from studyflow.accounts.password import AccountPasswords, InvalidCurrentPasswordError
 from studyflow.accounts.preferences import AccountPreferences, StudyPreferences
 from studyflow.accounts.profile import AccountProfile, AccountProfiles
+from studyflow.api.client_ip import request_client_ip
 from studyflow.auth.cookies import CookiePolicy
 from studyflow.auth.oidc import OIDCAccountLinking
 from studyflow.auth.passwords import (
@@ -321,7 +322,7 @@ async def change_password(
     ],
 ) -> None:
     try:
-        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        client_ip = request_client_ip(http_request)
         await rate_limit.check(client_ip, str(principal.account_id))
         await passwords.change(principal.account_id, payload.current_password, payload.new_password)
     except AccountPasswordChangeRateLimitExceeded as error:
@@ -371,7 +372,7 @@ async def prepare_account_deletion(
     rate_limit: Annotated[AccountDeletionRateLimit, Depends(get_account_deletion_rate_limit)],
 ) -> None:
     try:
-        client_ip = http_request.client.host if http_request.client is not None else "unknown"
+        client_ip = request_client_ip(http_request)
         await rate_limit.check(client_ip, str(principal.account_id))
         challenge = await deletion.prepare_with_password(
             principal.account_id, payload.current_password
