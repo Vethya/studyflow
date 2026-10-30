@@ -49,13 +49,13 @@ class LoginRateLimitStub:
             raise self.error
         return "login_inflight:test"
 
-    async def record_failure(self, email: str, reservation_id: str) -> None:
+    async def record_failure(self, client_ip: str, email: str, reservation_id: str) -> None:
         self.failures.append(email)
 
-    async def reset_failures(self, email: str, reservation_id: str) -> None:
+    async def reset_failures(self, client_ip: str, email: str, reservation_id: str) -> None:
         self.resets.append(email)
 
-    async def release(self, email: str, reservation_id: str) -> None:
+    async def release(self, client_ip: str, email: str, reservation_id: str) -> None:
         self.releases.append(email)
 
 
@@ -271,7 +271,7 @@ async def test_limiter_error_before_reservation_does_not_release_another_slot() 
 @pytest.mark.anyio
 async def test_login_record_failure_rate_limit_exceeded_returns_429() -> None:
     class FailingRecordRateLimitStub(LoginRateLimitStub):
-        async def record_failure(self, email: str, reservation_id: str) -> None:
+        async def record_failure(self, client_ip: str, email: str, reservation_id: str) -> None:
             raise LoginRateLimitExceeded()
 
     transport = ASGITransport(

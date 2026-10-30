@@ -77,11 +77,11 @@ class EmailVerificationRateLimit(Protocol):
 class LoginRateLimit(Protocol):
     async def check(self, client_ip: str, email: str) -> str: ...
 
-    async def record_failure(self, email: str, reservation_id: str) -> None: ...
+    async def record_failure(self, client_ip: str, email: str, reservation_id: str) -> None: ...
 
-    async def reset_failures(self, email: str, reservation_id: str) -> None: ...
+    async def reset_failures(self, client_ip: str, email: str, reservation_id: str) -> None: ...
 
-    async def release(self, email: str, reservation_id: str) -> None: ...
+    async def release(self, client_ip: str, email: str, reservation_id: str) -> None: ...
 
 
 class VerificationResendRateLimit(Protocol):
@@ -248,13 +248,16 @@ class DatabaseLoginRateLimiter(_DatabaseRateLimiter):
         )
         return await self._reserve_failure_slot(email)
 
-    async def record_failure(self, email: str, reservation_id: str) -> None:
+    async def record_failure(self, client_ip: str, email: str, reservation_id: str) -> None:
+        del client_ip
         await self._finish_failure_slot(email, reservation_id, failed=True, reset_failures=False)
 
-    async def reset_failures(self, email: str, reservation_id: str) -> None:
+    async def reset_failures(self, client_ip: str, email: str, reservation_id: str) -> None:
+        del client_ip
         await self._finish_failure_slot(email, reservation_id, failed=False, reset_failures=True)
 
-    async def release(self, email: str, reservation_id: str) -> None:
+    async def release(self, client_ip: str, email: str, reservation_id: str) -> None:
+        del client_ip
         await self._finish_failure_slot(email, reservation_id, failed=False, reset_failures=False)
 
     async def _reserve_failure_slot(self, email: str) -> str:

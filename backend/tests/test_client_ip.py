@@ -81,13 +81,13 @@ class RecordingLoginRateLimit:
         self.client_ips.append(client_ip)
         return "login_inflight:test"
 
-    async def record_failure(self, email: str, reservation_id: str) -> None:
+    async def record_failure(self, client_ip: str, email: str, reservation_id: str) -> None:
         return None
 
-    async def reset_failures(self, email: str, reservation_id: str) -> None:
+    async def reset_failures(self, client_ip: str, email: str, reservation_id: str) -> None:
         return None
 
-    async def release(self, email: str, reservation_id: str) -> None:
+    async def release(self, client_ip: str, email: str, reservation_id: str) -> None:
         return None
 
 

@@ -955,8 +955,8 @@ async def login_with_email(
     rate_limit: Annotated[LoginRateLimit, Depends(get_login_rate_limit)],
 ) -> LoginResponse:
     reservation_id: str | None = None
+    client_ip = request_client_ip(http_request)
     try:
-        client_ip = request_client_ip(http_request)
         reservation_id = await rate_limit.check(client_ip, str(payload.email))
         result = await login.login(LoginCommand(email=payload.email, password=payload.password))
     except LoginRateLimitExceeded as error:
@@ -969,7 +969,7 @@ async def login_with_email(
         try:
             if reservation_id is None:
                 raise RuntimeError("Login reservation was not created")
-            await rate_limit.record_failure(str(payload.email), reservation_id)
+            await rate_limit.record_failure(client_ip, str(payload.email), reservation_id)
         except LoginRateLimitExceeded as rate_limit_error:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -983,18 +983,18 @@ async def login_with_email(
     except EmailVerificationRequiredError as error:
         if reservation_id is None:
             raise RuntimeError("Login reservation was not created") from error
-        await rate_limit.reset_failures(str(payload.email), reservation_id)
+        await rate_limit.reset_failures(client_ip, str(payload.email), reservation_id)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Email verification required",
         ) from error
     except Exception:
         if reservation_id is not None:
-            await rate_limit.release(str(payload.email), reservation_id)
+            await rate_limit.release(client_ip, str(payload.email), reservation_id)
         raise
     if reservation_id is None:
         raise RuntimeError("Login reservation was not created")
-    await rate_limit.reset_failures(str(payload.email), reservation_id)
+    await rate_limit.reset_failures(client_ip, str(payload.email), reservation_id)
     get_cookie_policy(http_request).set_authentication(
         response, result.session_token, result.csrf_token
     )

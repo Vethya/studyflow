@@ -183,14 +183,16 @@ async def test_successful_logins_do_not_consume_failure_budget() -> None:
             )
         limiter = DatabaseLoginRateLimiter(database)
         for attempt in range(4):
-            reservation_id = await limiter.check(f"198.51.100.{attempt}", "student@example.com")
-            await limiter.record_failure("student@example.com", reservation_id)
+            client_ip = f"198.51.100.{attempt}"
+            reservation_id = await limiter.check(client_ip, "student@example.com")
+            await limiter.record_failure(client_ip, "student@example.com", reservation_id)
         reservation_id = await limiter.check("198.51.100.99", "student@example.com")
-        await limiter.reset_failures("student@example.com", reservation_id)
+        await limiter.reset_failures("198.51.100.99", "student@example.com", reservation_id)
         for attempt in range(10):
             email = "student@example.com"
-            reservation_id = await limiter.check(f"203.0.113.{attempt}", email)
-            await limiter.reset_failures(email, reservation_id)
+            client_ip = f"203.0.113.{attempt}"
+            reservation_id = await limiter.check(client_ip, email)
+            await limiter.reset_failures(client_ip, email, reservation_id)
     finally:
         await database.stop()
 
@@ -207,8 +209,9 @@ async def test_login_failure_budget_follows_email_across_ips() -> None:
         limiter = DatabaseLoginRateLimiter(database)
         for attempt in range(5):
             email = "Student@Example.com"
-            reservation_id = await limiter.check(f"203.0.113.{attempt}", email)
-            await limiter.record_failure(email, reservation_id)
+            client_ip = f"203.0.113.{attempt}"
+            reservation_id = await limiter.check(client_ip, email)
+            await limiter.record_failure(client_ip, email, reservation_id)
         with pytest.raises(LoginRateLimitExceeded):
             await limiter.check("203.0.113.99", "student@example.com")
     finally:
@@ -409,15 +412,15 @@ async def test_login_rate_limiter_edge_cases(
 
         # 1. Release
         reservation = await limiter.check("203.0.113.10", "student@example.com")
-        await limiter.release("student@example.com", reservation)
+        await limiter.release("203.0.113.10", "student@example.com", reservation)
 
         # 2. Record failure and reset failures
         res2 = await limiter.check("203.0.113.10", "student@example.com")
-        await limiter.record_failure("student@example.com", res2)
+        await limiter.record_failure("203.0.113.10", "student@example.com", res2)
         current_time += timedelta(seconds=1000)
         res3 = await limiter.check("203.0.113.10", "student@example.com")
-        await limiter.record_failure("student@example.com", res3)
-        await limiter.reset_failures("student@example.com", res3)
+        await limiter.record_failure("203.0.113.10", "student@example.com", res3)
+        await limiter.reset_failures("203.0.113.10", "student@example.com", res3)
 
         # 3. Expired failures during reservation and finish failure slot
         key_hash = limiter._hash_key("email:student@example.com")
@@ -432,7 +435,7 @@ async def test_login_rate_limiter_edge_cases(
             )
         # Hits lines 285-286 (delete expired failures in _reserve_failure_slot)
         res_expired = await limiter._reserve_failure_slot("student@example.com")
-        await limiter.release("student@example.com", res_expired)
+        await limiter.release("203.0.113.10", "student@example.com", res_expired)
 
         # Re-add expired failure and hit lines 367-368
         # (delete and flush expired failure in _finish_failure_slot)
