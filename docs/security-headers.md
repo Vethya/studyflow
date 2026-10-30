@@ -5,6 +5,7 @@ same-origin `/api/v1` rewrite, so these headers are what protect the pages.
 
 | Header | Value | Set in |
 | --- | --- | --- |
+| `Content-Security-Policy` | Per-request nonce policy (below) | `frontend/proxy.ts` |
 | `Strict-Transport-Security` | `max-age=3600` (no `includeSubDomains`, no `preload`) | `frontend/next.config.ts` |
 | `X-Content-Type-Options` | `nosniff` | `frontend/next.config.ts` |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | `frontend/next.config.ts` |
@@ -12,6 +13,49 @@ same-origin `/api/v1` rewrite, so these headers are what protect the pages.
 | `Permissions-Policy` | `tools=(self)` (WebMCP; unchanged) | `frontend/next.config.ts` |
 
 All values come from `frontend/lib/security/headers.ts`.
+
+## Content-Security-Policy
+
+`frontend/proxy.ts` (Next.js 16's `proxy`, formerly `middleware`) creates a random nonce for
+every page request. It sets the policy on both the response and the request, because Next.js
+reads the nonce from the request's policy and attaches it to its framework and page scripts.
+The root layout passes the same nonce to next-themes for its inline theme script.
+
+```
+default-src 'self';
+script-src 'self' 'nonce-<random>' 'strict-dynamic';
+style-src 'self' 'unsafe-inline';
+img-src 'self' blob: data: https://*.googleusercontent.com;
+font-src 'self';
+connect-src 'self';
+object-src 'none'; base-uri 'self'; form-action 'self';
+frame-ancestors 'none';
+upgrade-insecure-requests
+```
+
+- **Scripts:** only nonced scripts, plus scripts they load (`'strict-dynamic'`), can run. Inline
+  event handlers, injected `<script>` tags and `javascript:` URLs are blocked. `next dev` adds
+  `'unsafe-eval'`, which React needs to rebuild server error stacks. Production never gets it.
+- **Styles:** `'unsafe-inline'` stays, because React `style` attributes (calendar positions,
+  charts) and runtime `<style>` tags (toasts) cannot carry a nonce. Putting a nonce in
+  `style-src` would also make browsers ignore `'unsafe-inline'`.
+- **Images:** Google account avatars are the only remote images.
+- **`upgrade-insecure-requests`** is sent only for HTTPS requests, so a local `next start` on
+  `http://127.0.0.1` (the CI smoke test) still loads its assets.
+- **Dynamic rendering:** the root layout reads the request headers, so every page renders per
+  request. A nonce cannot be baked into a prerendered page. The build output marks routes as
+  `ƒ (Dynamic)`.
+- **WebMCP** registers tools through `document.modelContext`/`navigator.modelContext` from
+  the app's own bundle, so the CSP doesn't affect it. Browser-extension content scripts are not
+  bound by the page CSP.
+- **Analytics:** the app ships no Vercel Analytics or Speed Insights. Adding them later needs
+  `https://va.vercel-scripts.com` in `script-src` (loaded by a nonced script) and the
+  `/_vercel/insights` endpoint, which is same-origin. On preview deployments, the Vercel
+  Toolbar (`vercel.live`) is blocked by this policy. Turn the toolbar off for the project, or
+  accept that preview comments don't load.
+
+To find a violation, open the browser console on the deployed site. Blocked resources are
+logged with the directive that blocked them.
 
 ## Raising HSTS later
 

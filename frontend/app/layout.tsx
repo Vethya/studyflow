@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Bricolage_Grotesque, IBM_Plex_Mono, Inter } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { SessionProvider } from "@/hooks/use-session";
 import { ThemeProvider } from "@/components/theme-provider";
 import { StudyFlowSWRProvider } from "@/components/swr-provider";
+import { NONCE_HEADER } from "@/lib/security/headers";
 import "./globals.css";
 
 const inter = Inter({
@@ -36,11 +38,14 @@ export const metadata: Metadata = {
   keywords: ["study planner", "academic workload", "student productivity", "deadline tracking"],
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Reading request headers also makes every page render per request, which a
+  // nonce-based CSP requires: a prerendered page would carry no nonce.
+  const nonce = (await headers()).get(NONCE_HEADER) ?? undefined;
   return (
     <html
       lang="en"
@@ -48,7 +53,7 @@ export default function RootLayout({
       className={`${inter.variable} ${bricolage.variable} ${plexMono.variable} h-full`}
     >
       <body className="min-h-full font-sans antialiased">
-        <ThemeProvider>
+        <ThemeProvider nonce={nonce}>
           <StudyFlowSWRProvider>
             <SessionProvider>
               <TooltipProvider>

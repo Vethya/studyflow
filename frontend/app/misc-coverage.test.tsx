@@ -3,7 +3,8 @@ import React from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const state = vi.hoisted(() => ({ params: new URLSearchParams(), redirect: vi.fn() }));
+const state = vi.hoisted(() => ({ params: new URLSearchParams(), redirect: vi.fn(), requestHeaders: new Headers() }));
+vi.mock("next/headers", () => ({ headers: async () => state.requestHeaders }));
 vi.mock("next/navigation", () => ({
   useSearchParams: () => state.params,
   redirect: (path: string) => { state.redirect(path); throw new Error(`REDIRECT:${path}`); },
@@ -16,7 +17,7 @@ vi.mock("next/font/google", () => ({
 vi.mock("@/components/ui/tooltip", () => ({ TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
 vi.mock("@/components/ui/sonner", () => ({ Toaster: () => <div data-testid="toaster" /> }));
 vi.mock("@/hooks/use-session", () => ({ SessionProvider: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
-vi.mock("@/components/theme-provider", () => ({ ThemeProvider: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
+vi.mock("@/components/theme-provider", () => ({ ThemeProvider: ({ children, nonce }: { children: React.ReactNode; nonce?: string }) => <div data-testid="theme" data-nonce={nonce ?? "none"}>{children}</div> }));
 vi.mock("@/components/swr-provider", () => ({ StudyFlowSWRProvider: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
 
 import AuthLayout from "./(auth)/layout";
@@ -32,7 +33,7 @@ afterEach(() => {
 });
 
 describe("static and redirect pages", () => {
-  it("renders auth, privacy, terms, and root layouts", () => {
+  it("renders auth, privacy, terms, and root layouts", async () => {
     render(<AuthLayout><p>form</p></AuthLayout>);
     expect(screen.getByText("StudyFlow")).toBeTruthy();
     cleanup();
@@ -42,9 +43,17 @@ describe("static and redirect pages", () => {
     render(<TermsPage />);
     expect(screen.getByRole("heading", { name: "Terms of Service" })).toBeTruthy();
     cleanup();
-    render(<RootLayout><p>child</p></RootLayout>);
+    render(await RootLayout({ children: <p>child</p> }));
     expect(screen.getByText("child")).toBeTruthy();
     expect(screen.getByTestId("toaster")).toBeTruthy();
+    expect(screen.getByTestId("theme").dataset.nonce).toBe("none");
+  });
+
+  it("passes the per-request CSP nonce to the inline theme script", async () => {
+    state.requestHeaders = new Headers({ "x-nonce": "test-nonce" });
+    render(await RootLayout({ children: <p>child</p> }));
+    expect(screen.getByTestId("theme").dataset.nonce).toBe("test-nonce");
+    state.requestHeaders = new Headers();
   });
 
   it("redirects the Google landing page", () => {

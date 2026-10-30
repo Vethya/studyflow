@@ -24,6 +24,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/:path*",
+        // The nonce-based Content-Security-Policy is per request; see proxy.ts.
         headers: staticSecurityHeaders(),
       },
     ];
