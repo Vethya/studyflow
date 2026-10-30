@@ -9,7 +9,8 @@ StudyFlow deploys at zero cost per `docs/adr/0005-use-zero-cost-render-and-neon-
 | PostgreSQL | Neon | Free |
 | Authentication email | Resend SMTP relay | Free |
 
-The frontend proxies every API request through its own origin (`vercel.json` rewrite), so the
+The frontend proxies every API request through its own origin (the Next.js `/api/v1/*` rewrite in
+`frontend/next.config.ts`, which reads `BACKEND_ORIGIN`), so the
 browser sees a single HTTPS origin as required by SPEC §6.6. Session cookies keep their
 `__Host-` prefix, `SameSite=Strict` attributes, and CSRF double-submit design unchanged.
 
@@ -25,14 +26,14 @@ URL, and TLS for email delivery.
 | `STUDYFLOW_TRUSTED_PROXY_HOPS` | yes | `render.yaml` (`3`) | Number of proxies in front of the API that append to `X-Forwarded-For`; see [Client IP addresses](#client-ip-addresses-and-rate-limits) |
 | `STUDYFLOW_FRONTEND_PROXY_SECRET` | yes (Render and Vercel) | You (secret, same value on both) | At least 32 random characters shared with the frontend proxy so the API can trust the end-user address it forwards; leave unset locally; see [Client IP addresses](#client-ip-addresses-and-rate-limits) |
 | `STUDYFLOW_DATABASE_URL` | yes | You (secret) | Neon **pooled** URL, converted; see below |
-| `STUDYFLOW_PUBLIC_APP_URL` | yes | `render.yaml` (`https://studyflow.vercel.app`) | Shared frontend origin; verification links point here |
+| `STUDYFLOW_PUBLIC_APP_URL` | yes | You for dev; `render.yaml` for production (`https://studyflow.vercel.app`) | Frontend origin; verification links point here |
 | `STUDYFLOW_SMTP_HOST` | yes | `render.yaml` (`smtp.resend.com`) | |
 | `STUDYFLOW_SMTP_PORT` | yes | `render.yaml` (`2587`) | |
 | `STUDYFLOW_SMTP_USERNAME` | yes | `render.yaml` (`resend`) | Literal username for Resend's relay |
 | `STUDYFLOW_SMTP_PASSWORD` | yes | You (secret) | Resend API key |
 | `STUDYFLOW_SMTP_START_TLS` | yes | `render.yaml` (`true`) | Production requires TLS delivery |
 | `STUDYFLOW_EMAIL_FROM_ADDRESS` | yes | You (secret) | Must be an address on a Resend-verified domain |
-| `STUDYFLOW_CORS_ORIGINS` | no | `render.yaml` (per service) | Comma-separated origins for direct frontend calls; the production proxy normally avoids this. Origins are compared and stored the way browsers send `Origin` (lowercase, default `:443`/`:80` omitted). In production every origin must be HTTPS and equal to the `STUDYFLOW_PUBLIC_APP_URL` origin, or startup fails |
+| `STUDYFLOW_CORS_ORIGINS` | no | You for dev and production | Comma-separated origins for direct frontend calls; the production proxy normally avoids this. Origins are compared and stored the way browsers send `Origin` (lowercase, default `:443`/`:80` omitted). In production every origin must be HTTPS and equal to the `STUDYFLOW_PUBLIC_APP_URL` origin, or startup fails |
 | `STUDYFLOW_GOOGLE_OIDC_CLIENT_ID` | no | You (secret) | All three OIDC values configure together |
 | `STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET` | no | You (secret) | |
 | `STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI` | no | You (secret) | Paste `https://<frontend-origin>/api/v1/auth/google/callback`; must be HTTPS and must go through the frontend proxy |
@@ -134,6 +135,8 @@ local development, tests and `docker compose`.
    especially separate Neon databases. `sync: false` values for newly added services may need to
    be entered manually after syncing an existing Blueprint:
    - `STUDYFLOW_DATABASE_URL` (converted Neon URL from step 1)
+   - `STUDYFLOW_PUBLIC_APP_URL` for dev: set the HTTPS frontend origin. Left unset, it falls back
+     to `http://localhost:3000`, which production validation rejects
    - `STUDYFLOW_CORS_ORIGINS`: normally leave empty, because the frontend proxy keeps the browser
      on one origin. Production accepts only the HTTPS origin of `STUDYFLOW_PUBLIC_APP_URL`
    - `STUDYFLOW_SMTP_PASSWORD` and `STUDYFLOW_EMAIL_FROM_ADDRESS`
@@ -152,29 +155,85 @@ local development, tests and `docker compose`.
 
 ### 4. Vercel (frontend)
 
-The frontend repository needs a production rewrite checked into its project root so cookies
-work unchanged. Create `vercel.json` in the frontend repository:
+The frontend is a Next.js app in `frontend/`. Its `/api/v1/*` rewrite lives in
+`frontend/next.config.ts` and forwards to the `BACKEND_ORIGIN` environment variable, so cookies
+stay on the frontend origin. Do not add a `vercel.json` (or a rewrite in the Vercel dashboard)
+for `/api/*`: a Vercel-level rewrite to a fixed Render URL runs before the Next.js rewrite and
+silently overrides `BACKEND_ORIGIN`.
 
-```json
-{
-  "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "https://studyflow-api.onrender.com/api/:path*"
-    }
-  ]
-}
-```
-
-This Vercel rewrite is required for production Vite deployments; a Vite development-server
-proxy only handles local development or preview processes and does not configure Vercel's
-production routing.
-
-1. Import the frontend repository into Vercel with the project name `studyflow`.
-2. Commit `vercel.json` to the frontend repository and replace the example Render service URL
-   with the deployed API URL.
+1. Import the repository into Vercel with the project name `studyflow` and the root directory
+   `frontend`.
+2. Set `BACKEND_ORIGIN` in the Vercel project's environment variables to the API service that
+   environment should use, for example `https://studyflow-api.onrender.com`. Environment
+   variable changes only apply to new deployments.
 3. Application code calls `/api/...` relative to its own origin everywhere — never an
    absolute backend URL.
+
+## Separate dev and production frontends
+
+Until this split is done, the shared frontend (`https://studyflow.vercel.app`) proxies to
+`studyflow-api-dev`. Every push to `dev` therefore reaches real users, and dev's verification
+and password-reset emails link to the production frontend. The Blueprint no longer hardcodes
+dev's `STUDYFLOW_PUBLIC_APP_URL` and `STUDYFLOW_CORS_ORIGINS`. Both are `sync: false`, so each
+team chooses dev's frontend origin itself.
+
+Render keeps the current value of an existing `sync: false` variable after a Blueprint sync.
+Until you change them, `studyflow-api-dev` keeps `https://studyflow.vercel.app`.
+
+### 0. Remove any fixed `/api` rewrite
+
+Earlier versions of this guide told operators to commit a `vercel.json` that rewrote
+`/api/:path*` to a fixed Render URL. If the deployed Vercel project still has one (in the
+deployed root directory or as a dashboard rewrite), it routes `/api/v1/*` before the Next.js
+rewrite, so changing `BACKEND_ORIGIN` below would have no effect and a dev preview could keep
+reaching production, or production could stay on dev. Delete that rule, redeploy, and confirm
+that `/api/v1/health` still answers through the frontend origin before continuing.
+
+### 1. Give dev its own frontend origin
+
+1. Pick a dev frontend origin, for example the Vercel branch domain of the `dev` branch or a
+   second Vercel project. The frontend's `/api/v1/*` rewrite (`frontend/next.config.ts`) reads
+   `BACKEND_ORIGIN`. In Vercel, set `BACKEND_ORIGIN=https://studyflow-api-dev.onrender.com` for
+   the Preview environment, scoped to the `dev` branch, so only the dev frontend talks to the dev
+   service.
+2. In the Render Dashboard, set these on `studyflow-api-dev`:
+   - `STUDYFLOW_PUBLIC_APP_URL` to the dev frontend origin, with no path.
+   - `STUDYFLOW_CORS_ORIGINS` to empty. The rewrite keeps the browser on one origin. The
+     dev service runs in production mode and rejects a mismatch with `STUDYFLOW_PUBLIC_APP_URL`
+     at startup. Clear `STUDYFLOW_CORS_ORIGINS` before changing `STUDYFLOW_PUBLIC_APP_URL`, or
+     save both values together, so the dev service can start.
+   - If dev uses Google sign-in or import, set the full callback URIs on the dev frontend
+     origin and register both in the Google Cloud console:
+     - `STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI=https://<dev-frontend-origin>/api/v1/auth/google/callback`
+     - `STUDYFLOW_GOOGLE_IMPORT_REDIRECT_URI=https://<dev-frontend-origin>/api/v1/integrations/google/callback`
+3. Redeploy `studyflow-api-dev`. Then confirm that a verification email from dev links to the dev
+   frontend.
+
+### 2. Repoint the production frontend at `studyflow-api`
+
+Do this only after the production database is migrated and verified (see the release runbook,
+if present), and after deciding what happens to the accounts that currently live in the dev
+database.
+
+1. In the Vercel project's **Production** environment variables, change `BACKEND_ORIGIN` from
+   `https://studyflow-api-dev.onrender.com` to `https://studyflow-api.onrender.com`, then
+   redeploy production. Environment variable changes only apply to new deployments.
+2. Check `studyflow-api`'s variables: `STUDYFLOW_PUBLIC_APP_URL=https://studyflow.vercel.app`,
+   `STUDYFLOW_CORS_ORIGINS` empty, and Google redirect URIs on `https://studyflow.vercel.app`.
+3. Run the post-deployment checklist below against `https://studyflow.vercel.app`. Existing
+   sessions from the dev service will not be valid on production, so users sign in again.
+4. Rollback: changing `BACKEND_ORIGIN` alone is not enough, because after step 1 the dev
+   service's origin-dependent settings point at the dev frontend. Google state cookies set on
+   `https://studyflow.vercel.app` would be redirected to the dev frontend, and emails would link
+   there. To roll back:
+   1. On `studyflow-api-dev`, set `STUDYFLOW_PUBLIC_APP_URL=https://studyflow.vercel.app` and
+      both Google redirect URIs back to
+      `https://studyflow.vercel.app/api/v1/auth/google/callback` and
+      `https://studyflow.vercel.app/api/v1/integrations/google/callback`, then redeploy it.
+   2. Set the Vercel **Production** `BACKEND_ORIGIN` back to
+      `https://studyflow-api-dev.onrender.com` and redeploy the frontend.
+   3. The dev frontend shares the dev service again until you redo step 1, so treat dev pushes
+      as reaching real users in the meantime.
 
 ## Local development
 

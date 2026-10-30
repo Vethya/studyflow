@@ -21,10 +21,12 @@ projects:
                 sync: false
               - key: STUDYFLOW_DATABASE_URL
                 sync: false
+              # Dev gets its own frontend origin (see docs/deployment.md, "Separate dev and
+              # production frontends"); enter it in the Render Dashboard.
               - key: STUDYFLOW_PUBLIC_APP_URL
-                value: https://studyflow.vercel.app
+                sync: false
               - key: STUDYFLOW_CORS_ORIGINS
-                value: https://studyflow.vercel.app
+                sync: false
               - key: STUDYFLOW_SMTP_HOST
                 value: smtp.resend.com
               - key: STUDYFLOW_SMTP_PORT

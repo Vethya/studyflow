@@ -71,12 +71,19 @@ def test_blueprint_deploys_each_environment_from_its_own_branch() -> None:
     }
 
 
-def test_blueprint_uses_the_shared_frontend_for_authentication_links() -> None:
-    public_app_urls = {
-        environment(service_config)["STUDYFLOW_PUBLIC_APP_URL"] for service_config in services()
-    }
+def raw_variable(service_name: str, key: str) -> dict[str, Any]:
+    return next(entry for entry in service(service_name)["envVars"] if entry["key"] == key)
 
-    assert public_app_urls == {"https://studyflow.vercel.app"}
+
+def test_production_links_point_at_the_production_frontend() -> None:
+    assert environment(service())["STUDYFLOW_PUBLIC_APP_URL"] == "https://studyflow.vercel.app"
+
+
+def test_dev_frontend_origin_is_entered_per_deployment_not_shared() -> None:
+    for key in ("STUDYFLOW_PUBLIC_APP_URL", "STUDYFLOW_CORS_ORIGINS"):
+        entry = raw_variable("studyflow-api-dev", key)
+        assert entry.get("sync") is False
+        assert "value" not in entry
 
 
 def test_blueprint_deploys_the_backend_docker_image_on_the_free_plan() -> None:
@@ -168,11 +175,9 @@ def test_blueprint_requires_production_tls_for_email_delivery() -> None:
     assert variables["STUDYFLOW_SMTP_START_TLS"] == "true"
 
 
-def test_blueprint_allows_the_shared_frontend_to_call_the_dev_service() -> None:
-    variables = environment(service("studyflow-api-dev"))
-    origins = (variables["STUDYFLOW_CORS_ORIGINS"] or "").split(",")
-
-    assert origins == ["https://studyflow.vercel.app"]
+def test_no_service_hardcodes_the_production_frontend_as_a_cors_origin() -> None:
+    for service_config in services():
+        assert environment(service_config).get("STUDYFLOW_CORS_ORIGINS") is None
 
 
 def test_blueprint_does_not_expose_a_render_postgres_instance() -> None:
