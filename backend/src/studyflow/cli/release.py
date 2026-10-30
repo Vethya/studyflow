@@ -1,13 +1,16 @@
-"""Release checks for StudyFlow settings and schema.
+"""Release gates that keep schema changes out of the API start path.
 
 Run from the backend directory (``/app`` in the container)::
 
     python -m studyflow.cli.release check-settings [--require-production]
     python -m studyflow.cli.release check-schema
     python -m studyflow.cli.release migrate
+    python -m studyflow.cli.release boot
 
-``check-schema`` compares the database with this build's migration heads.
-``migrate`` applies pending migrations. The container start command is unchanged.
+``boot`` is the container start gate. It validates settings and refuses to start the API while
+the database is behind this build's migrations. It only applies migrations itself when
+``STUDYFLOW_MIGRATE_ON_START`` is enabled, so production schema changes happen in an explicit,
+rehearsed release step instead of on every container start.
 """
 
 import argparse
@@ -166,6 +169,7 @@ def main(argv: Sequence[str] | None = None, output: TextIO | None = None) -> int
     )
     subcommands.add_parser("check-schema", help="Fail unless the database is at this build's head")
     subcommands.add_parser("migrate", help="Validate settings, then apply pending migrations")
+    subcommands.add_parser("boot", help="Container start gate run before Uvicorn")
     args = parser.parse_args(argv)
     alembic_config: Path = args.alembic_config
 
@@ -185,10 +189,11 @@ def main(argv: Sequence[str] | None = None, output: TextIO | None = None) -> int
         print(f"Settings are valid for the {settings.environment} environment.", file=stream)
         return 0
 
-    if args.command == "migrate":
+    if args.command == "migrate" or (args.command == "boot" and settings.migrate_on_start):
         migrate(alembic_config)
         print("Migrations applied.", file=stream)
-        return 0
+        if args.command == "migrate":
+            return 0
 
     status = check_schema(settings, alembic_config)
     database = ", ".join(status.database_revisions) or "none"

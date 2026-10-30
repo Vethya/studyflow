@@ -58,7 +58,7 @@ def test_backend_image_is_locked_and_runs_as_non_root() -> None:
     assert "uv sync --locked --no-dev" in dockerfile
     assert "USER studyflow" in dockerfile
     assert (
-        'CMD ["/bin/bash", "-c", ".venv/bin/alembic upgrade head '
+        'CMD ["/bin/bash", "-c", ".venv/bin/python -m studyflow.cli.release boot '
         "&& exec .venv/bin/uvicorn" in dockerfile
     )
     assert 'FORWARDED_ALLOW_IPS="*"' not in dockerfile

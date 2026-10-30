@@ -97,13 +97,24 @@ def test_blueprint_deploys_the_backend_docker_image_on_the_free_plan() -> None:
     assert api["dockerContext"] == "./backend"
 
 
-def test_blueprint_applies_migrations_before_the_server_starts() -> None:
+def test_container_start_runs_the_release_gate_instead_of_migrations() -> None:
     dockerfile = DOCKERFILE_PATH.read_text()
 
-    assert "alembic upgrade head" in dockerfile
-    assert dockerfile.index("alembic upgrade head") < dockerfile.index("uvicorn")
+    assert "alembic upgrade head" not in dockerfile
+    assert "studyflow.cli.release boot &&" in dockerfile
+    assert dockerfile.index("studyflow.cli.release boot") < dockerfile.index("uvicorn")
     assert "--host 0.0.0.0" in dockerfile
     assert "exec .venv/bin/uvicorn" in dockerfile
+
+
+def test_production_deploys_only_when_started_by_hand() -> None:
+    assert service()["autoDeployTrigger"] == "off"
+    assert "autoDeployTrigger" not in service("studyflow-api-dev")
+
+
+def test_only_the_dev_service_applies_migrations_on_start() -> None:
+    assert environment(service("studyflow-api-dev"))["STUDYFLOW_MIGRATE_ON_START"] == "true"
+    assert environment(service())["STUDYFLOW_MIGRATE_ON_START"] == "false"
 
 
 def test_blueprint_uses_the_dockerfile_start_command() -> None:
@@ -111,7 +122,9 @@ def test_blueprint_uses_the_dockerfile_start_command() -> None:
 
 
 def test_blueprint_does_not_rely_on_paid_plan_features() -> None:
-    assert "preDeployCommand" not in service()
+    for service_config in services():
+        assert service_config["plan"] == "free"
+        assert "preDeployCommand" not in service_config
 
 
 def test_blueprint_uses_the_database_free_liveness_endpoint_as_its_health_check() -> None:

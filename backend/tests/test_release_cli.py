@@ -2,6 +2,7 @@ import io
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from alembic import command
@@ -196,10 +197,52 @@ def test_check_settings_does_not_touch_the_database() -> None:
     assert "Settings are valid for the production environment." in output
 
 
-def test_unknown_database_revision_fails_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_boot_refuses_to_start_when_the_database_is_behind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub_database_revisions(monkeypatch, ("20260903_15",))
+    migrations = stub_migrate(monkeypatch)
+
+    exit_code, output = run("boot")
+
+    assert exit_code == 1
+    assert "database schema is at 20260903_15 but this build requires 20260918_23" in output
+    assert "docs/release.md" in output
+    assert migrations == []
+
+
+def test_boot_starts_when_the_database_is_current(
+    monkeypatch: pytest.MonkeyPatch, script: ScriptDirectory
+) -> None:
+    stub_database_revisions(monkeypatch, tuple(script.get_heads()))
+    migrations = stub_migrate(monkeypatch)
+
+    exit_code, output = run("boot")
+
+    assert exit_code == 0
+    assert "Database schema is current (20260918_23)." in output
+    assert migrations == []
+
+
+def test_boot_starts_on_a_newer_revision_the_operator_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("STUDYFLOW_ACCEPTED_NEWER_SCHEMA_REVISIONS", " 20991231_99 , ")
     stub_database_revisions(monkeypatch, ("20991231_99",))
 
-    exit_code, output = run("check-schema")
+    exit_code, output = run("boot")
+
+    assert exit_code == 0
+    assert "newer than this build" in output
+
+
+@pytest.mark.parametrize("command_name", ["boot", "check-schema"])
+def test_unknown_database_revision_fails_the_gate(
+    monkeypatch: pytest.MonkeyPatch, command_name: str
+) -> None:
+    stub_database_revisions(monkeypatch, ("20991231_99",))
+
+    exit_code, output = run(command_name)
 
     assert exit_code == 1
     assert "database schema is at 20991231_99, which this build (20260918_23) does not know" in (
@@ -247,3 +290,57 @@ def test_check_schema_reads_the_configured_database(
 
     assert exit_code == 0
     assert requested_urls == [SECRET_DATABASE_URL]
+
+
+def test_boot_migrates_first_only_when_enabled(
+    monkeypatch: pytest.MonkeyPatch, script: ScriptDirectory
+) -> None:
+    monkeypatch.setenv("STUDYFLOW_MIGRATE_ON_START", "true")
+    stub_database_revisions(monkeypatch, tuple(script.get_heads()))
+    migrations = stub_migrate(monkeypatch)
+
+    exit_code, output = run("boot")
+
+    assert exit_code == 0
+    assert migrations == [ALEMBIC_CONFIG]
+    assert "Migrations applied." in output
+
+
+def test_boot_stops_before_checking_the_schema_when_migration_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("STUDYFLOW_MIGRATE_ON_START", "true")
+    migrate = Mock(side_effect=RuntimeError("migration failed"))
+    check_schema = Mock()
+    monkeypatch.setattr(release, "migrate", migrate)
+    monkeypatch.setattr(release, "check_schema", check_schema)
+
+    with pytest.raises(RuntimeError, match="migration failed"):
+        run("boot")
+
+    migrate.assert_called_once_with(ALEMBIC_CONFIG)
+    check_schema.assert_not_called()
+
+
+def test_boot_does_not_migrate_with_invalid_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STUDYFLOW_MIGRATE_ON_START", "true")
+    monkeypatch.setenv("STUDYFLOW_ENVIRONMENT", "production")
+    migrations = stub_migrate(monkeypatch)
+
+    exit_code, _ = run("boot")
+
+    assert exit_code == 1
+    assert migrations == []
+
+
+@pytest.mark.usefixtures("production_environment")
+def test_boot_is_not_stricter_than_the_application(
+    monkeypatch: pytest.MonkeyPatch, script: ScriptDirectory
+) -> None:
+    monkeypatch.delenv("STUDYFLOW_SMTP_PASSWORD")
+    stub_database_revisions(monkeypatch, tuple(script.get_heads()))
+
+    exit_code, output = run("boot")
+
+    assert exit_code == 0
+    assert "error:" not in output

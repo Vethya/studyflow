@@ -46,6 +46,10 @@ def test_settings_trust_no_proxy_hops_by_default() -> None:
     assert Settings().trusted_proxy_hops == 0
 
 
+def test_settings_do_not_migrate_on_start_by_default() -> None:
+    assert Settings().migrate_on_start is False
+
+
 def test_settings_split_accepted_newer_schema_revisions(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setenv("STUDYFLOW_ACCEPTED_NEWER_SCHEMA_REVISIONS", " 20991231_99 , ")
 

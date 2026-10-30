@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
     trusted_proxy_hops: Annotated[int, Field(ge=0, le=5)] = 0
     frontend_proxy_secret: SecretStr | None = None
+    migrate_on_start: bool = False
     accepted_newer_schema_revisions: Annotated[list[str], NoDecode] = Field(default_factory=list)
     google_oidc_client_id: str | None = None
     google_oidc_client_secret: SecretStr | None = None

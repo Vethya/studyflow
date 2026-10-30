@@ -112,9 +112,10 @@ In each Render service that should offer imports (development and production), a
 | `STUDYFLOW_GOOGLE_IMPORT_REDIRECT_URI` | `https://studyflow.vercel.app/api/v1/integrations/google/callback`, exactly as registered in step 3 |
 
 The three `STUDYFLOW_GOOGLE_OIDC_*` values must already be set, because the import reuses that client
-ID and secret. Production refuses a non-HTTPS URI. Save, then redeploy. The container runs
-`alembic upgrade head` on start, which applies migration `20260918_22` (two short-lived tables and
-two nullable columns).
+ID and secret. Production refuses a non-HTTPS URI. Production applies migrations through the
+release process in [`release.md`](release.md). Dev migrates on start with
+`STUDYFLOW_MIGRATE_ON_START=true`. Migration `20260918_22` adds two short-lived tables and two
+nullable columns.
 
 For local Docker Compose, put the variable in `.env` with the `http://localhost:3000/...` value.
 
