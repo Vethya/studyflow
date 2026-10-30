@@ -133,7 +133,7 @@
                 "openapi.json"
               ]
             },
-            "description": "Fetches the generated API contract used by Swagger UI and client tooling."
+            "description": "Fetches the generated API contract on local instances. Deployed services return 404."
           },
           "response": [],
           "event": [
@@ -142,14 +142,19 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('returns HTTP 200', () => pm.response.to.have.status(200));",
-                  "pm.test('returns the StudyFlow OpenAPI contract', () => {",
-                  "  const body = pm.response.json();",
-                  "  pm.expect(body.openapi).to.match(/^3\\./);",
-                  "  pm.expect(body.info.title).to.eql('StudyFlow API');",
-                  "  pm.expect(body.paths).to.have.property('/api/v1/health');",
-                  "  pm.expect(body.paths).to.have.property('/api/v1/ready');",
-                  "});"
+                  "const isLocal = /^https?:\\/\\/(localhost|127\\.0\\.0\\.1|\\[::1\\])(:|\\/|$)/.test(pm.variables.get('base_url'));",
+                  "if (isLocal) {",
+                  "  pm.test('returns HTTP 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('returns the StudyFlow OpenAPI contract', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.openapi).to.match(/^3\\./);",
+                  "    pm.expect(body.info.title).to.eql('StudyFlow API');",
+                  "    pm.expect(body.paths).to.have.property('/api/v1/health');",
+                  "    pm.expect(body.paths).to.have.property('/api/v1/ready');",
+                  "  });",
+                  "} else {",
+                  "  pm.test('hides the OpenAPI schema', () => pm.response.to.have.status(404));",
+                  "}"
                 ]
               }
             }

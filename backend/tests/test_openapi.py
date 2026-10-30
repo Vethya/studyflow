@@ -1,7 +1,9 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 
 from studyflow.app import create_app
+from studyflow.settings import Environment, Settings
 
 
 @pytest.mark.anyio
@@ -34,6 +36,53 @@ async def test_documentation_routes_stay_under_the_versioned_api_prefix() -> Non
     assert versioned_oauth_redirect.status_code == 200
     assert unversioned_redoc.status_code == 404
     assert unversioned_oauth_redirect.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_production_hides_the_documentation_and_schema() -> None:
+    settings = Settings(
+        environment=Environment.PRODUCTION,
+        database_url=SecretStr(
+            "postgresql+psycopg://studyflow:secret@db.example.com/studyflow?sslmode=require"
+        ),
+        public_app_url="https://studyflow.example.com",
+        smtp_start_tls=True,
+    )
+    transport = ASGITransport(app=create_app(settings))
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        responses = [
+            await client.get(path)
+            for path in (
+                "/api/v1/docs",
+                "/api/v1/docs/oauth2-redirect",
+                "/api/v1/openapi.json",
+                "/docs",
+                "/openapi.json",
+                "/redoc",
+            )
+        ]
+        health = await client.get("/api/v1/health")
+
+    assert [response.status_code for response in responses] == [404] * 6
+    assert health.status_code == 200
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "environment", [Environment.DEVELOPMENT, Environment.EVALUATION, Environment.TEST]
+)
+async def test_non_production_environments_keep_the_documentation(
+    environment: Environment,
+) -> None:
+    transport = ASGITransport(app=create_app(Settings(environment=environment)))
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        docs = await client.get("/api/v1/docs")
+        schema = await client.get("/api/v1/openapi.json")
+
+    assert docs.status_code == 200
+    assert schema.status_code == 200
 
 
 @pytest.mark.anyio

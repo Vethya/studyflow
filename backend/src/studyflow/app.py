@@ -118,7 +118,7 @@ from studyflow.scheduling.recovery_repositories import (
 )
 from studyflow.scheduling.repositories import SqlAlchemyScheduleProposalRepository
 from studyflow.scheduling.service import ScheduleGeneration, ScheduleGenerationService
-from studyflow.settings import Settings
+from studyflow.settings import Environment, Settings
 from studyflow.tasks.repositories import (
     SqlAlchemyAcademicTaskRepository,
     SqlAlchemyTaskDeadlineSessionInvalidator,
@@ -188,6 +188,7 @@ def create_app(
     google_import_start_rate_limiter: GoogleImportStartRateLimit | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
+    hide_api_docs = resolved_settings.environment is Environment.PRODUCTION
     resolved_database = database or Database(resolved_settings.database_url.get_secret_value())
     transactions = cast(SessionTransactions, resolved_database)
     authentication_http_client: httpx.AsyncClient | None = None
@@ -288,10 +289,14 @@ def create_app(
         version=__version__,
         debug=resolved_settings.debug,
         lifespan=lifespan,
-        docs_url=f"{API_V1_PREFIX}/docs",
-        openapi_url=f"{API_V1_PREFIX}/openapi.json",
+        # Production serves no interactive docs or schema; the contract stays available in
+        # development and test and through `create_app().openapi()`.
+        docs_url=None if hide_api_docs else f"{API_V1_PREFIX}/docs",
+        openapi_url=None if hide_api_docs else f"{API_V1_PREFIX}/openapi.json",
         redoc_url=None,
-        swagger_ui_oauth2_redirect_url=f"{API_V1_PREFIX}/docs/oauth2-redirect",
+        swagger_ui_oauth2_redirect_url=(
+            None if hide_api_docs else f"{API_V1_PREFIX}/docs/oauth2-redirect"
+        ),
     )
     application.add_exception_handler(
         RequestValidationError, handle_google_callback_validation_error

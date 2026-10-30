@@ -43,6 +43,9 @@ The initial public endpoints are:
 - API documentation: <http://127.0.0.1:8000/api/v1/docs>
 - OpenAPI schema: <http://127.0.0.1:8000/api/v1/openapi.json>
 
+The documentation and schema are disabled when `STUDYFLOW_ENVIRONMENT=production`, so deployed
+services return 404 for them. Use a local or evaluation instance to browse the contract.
+
 Application settings use the `STUDYFLOW_` prefix. For example,
 `STUDYFLOW_ENVIRONMENT=test` selects the test environment and `STUDYFLOW_DEBUG=true` enables
 FastAPI debug behavior.
@@ -63,6 +66,9 @@ that the student confirms. See `docs/google-import-setup.md`.
 Import `postman/StudyFlow.postman_collection.json` from the repository root. The collection uses
 `http://127.0.0.1:8000` by default and includes assertions for every request. Import and select one
 of the files in `postman/environments/` to target local, development, or production instead.
+
+The OpenAPI schema request expects HTTP 200 and checks the contract when `base_url` uses
+`localhost`, `127.0.0.1`, or `[::1]`. It expects HTTP 404 for deployed URLs.
 
 The development and production URLs are safe placeholders: update `base_url` in your local
 Postman environment after importing. Keep credentials and other secrets in Postman's **current
