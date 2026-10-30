@@ -42,6 +42,26 @@ def test_app_factory_uses_explicit_settings() -> None:
     assert app.state.settings is settings
 
 
+def test_settings_trust_no_proxy_hops_by_default() -> None:
+    assert Settings().trusted_proxy_hops == 0
+
+
+def test_settings_read_trusted_proxy_hops(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("STUDYFLOW_TRUSTED_PROXY_HOPS", "2")
+
+    assert Settings().trusted_proxy_hops == 2
+
+
+@mark.parametrize("hops", [-1, 6])
+def test_settings_reject_out_of_range_trusted_proxy_hops(hops: int) -> None:
+    with raises(ValidationError, match="trusted_proxy_hops"):
+        Settings(trusted_proxy_hops=hops)
+
+
 def test_production_rejects_debug_mode() -> None:
     with raises(ValidationError, match="Debug mode must be disabled in production"):
         Settings(environment=Environment.PRODUCTION, debug=True)
