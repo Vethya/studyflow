@@ -9,6 +9,7 @@ from typing import Protocol
 
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.email import canonicalize_email
 from studyflow.auth.repositories import SessionTransactions
@@ -292,70 +293,89 @@ class DatabaseLoginRateLimiter(_DatabaseRateLimiter):
         del client_ip
         await self._finish_failure_slot(email, reservation_id, failed=False, reset_failures=False)
 
+    def _failure_budgets(self, email: str) -> list[tuple[str, int]]:
+        """Return (key hash, limit) pairs in a stable order so row locks never deadlock."""
+        return sorted(
+            ((self._hash_key(f"email:{canonicalize_email(email)}"), self._maximum_attempts),)
+        )
+
+    async def _lock_guard(self, session: AsyncSession, key_hash: str, now: datetime) -> None:
+        guard = await session.scalar(
+            select(AuthenticationRateLimit)
+            .where(
+                AuthenticationRateLimit.action == "login_guard",
+                AuthenticationRateLimit.key_hash == key_hash,
+            )
+            .with_for_update()
+        )
+        if guard is None:
+            session.add(
+                AuthenticationRateLimit(
+                    action="login_guard",
+                    key_hash=key_hash,
+                    window_started_at=now,
+                    attempts=1,
+                )
+            )
+            await session.flush()
+        else:
+            guard.window_started_at = now
+
+    async def _locked_failures(
+        self, session: AsyncSession, key_hash: str
+    ) -> AuthenticationRateLimit | None:
+        failures: AuthenticationRateLimit | None = await session.scalar(
+            select(AuthenticationRateLimit)
+            .where(
+                AuthenticationRateLimit.action == "login_failure",
+                AuthenticationRateLimit.key_hash == key_hash,
+            )
+            .with_for_update()
+        )
+        return failures
+
     async def _reserve_failure_slot(self, email: str) -> str:
         now = self._clock()
-        key_hash = self._hash_key(f"email:{canonicalize_email(email)}")
+        budgets = self._failure_budgets(email)
         for attempt in range(3):
             try:
                 async with self._database.transaction() as session:
-                    guard = await session.scalar(
-                        select(AuthenticationRateLimit)
-                        .where(
-                            AuthenticationRateLimit.action == "login_guard",
-                            AuthenticationRateLimit.key_hash == key_hash,
-                        )
-                        .with_for_update()
-                    )
-                    if guard is None:
-                        guard = AuthenticationRateLimit(
-                            action="login_guard",
-                            key_hash=key_hash,
-                            window_started_at=now,
-                            attempts=1,
-                        )
-                        session.add(guard)
-                        await session.flush()
-                    else:
-                        guard.window_started_at = now
-                    await session.execute(
-                        delete(AuthenticationRateLimit).where(
-                            AuthenticationRateLimit.action.like("login_inflight:%"),
-                            AuthenticationRateLimit.key_hash == key_hash,
-                            AuthenticationRateLimit.window_started_at <= now - self._window,
-                        )
-                    )
-                    failures = await session.scalar(
-                        select(AuthenticationRateLimit)
-                        .where(
-                            AuthenticationRateLimit.action == "login_failure",
-                            AuthenticationRateLimit.key_hash == key_hash,
-                        )
-                        .with_for_update()
-                    )
-                    if failures is not None and self._is_expired(failures, now):
-                        await session.delete(failures)
-                        failures = None
-                    reservations = list(
-                        await session.scalars(
-                            select(AuthenticationRateLimit).where(
+                    for key_hash, limit in budgets:
+                        await self._lock_guard(session, key_hash, now)
+                        await session.execute(
+                            delete(AuthenticationRateLimit).where(
                                 AuthenticationRateLimit.action.like("login_inflight:%"),
                                 AuthenticationRateLimit.key_hash == key_hash,
+                                AuthenticationRateLimit.window_started_at <= now - self._window,
                             )
                         )
-                    )
-                    if (failures.attempts if failures is not None else 0) + len(
-                        reservations
-                    ) >= self._maximum_attempts:
-                        raise LoginRateLimitExceeded
-                    reservation_id = f"login_inflight:{secrets.token_hex(8)}"
-                    session.add(
-                        AuthenticationRateLimit(
-                            action=reservation_id,
-                            key_hash=key_hash,
-                            window_started_at=now,
-                            attempts=1,
+                        failures = await self._locked_failures(session, key_hash)
+                        if failures is not None and self._is_expired(failures, now):
+                            await session.delete(failures)
+                            failures = None
+                        reservations = list(
+                            await session.scalars(
+                                select(AuthenticationRateLimit).where(
+                                    AuthenticationRateLimit.action.like("login_inflight:%"),
+                                    AuthenticationRateLimit.key_hash == key_hash,
+                                )
+                            )
                         )
-                    )
+                        used = (failures.attempts if failures is not None else 0) + len(
+                            reservations
+                        )
+                        if used >= limit:
+                            raise LoginRateLimitExceeded
+                    reservation_id = f"login_inflight:{secrets.token_hex(8)}"
+                    for key_hash, _limit in budgets:
+                        session.add(
+                            AuthenticationRateLimit(
+                                action=reservation_id,
+                                key_hash=key_hash,
+                                window_started_at=now,
+                                attempts=1,
+                            )
+                        )
                     await session.flush()
                 return reservation_id
             except IntegrityError:
@@ -372,61 +392,36 @@ class DatabaseLoginRateLimiter(_DatabaseRateLimiter):
         reset_failures: bool,
     ) -> None:
         now = self._clock()
-        key_hash = self._hash_key(f"email:{canonicalize_email(email)}")
+        budgets = self._failure_budgets(email)
         for attempt in range(3):
             try:
                 async with self._database.transaction() as session:
-                    guard = await session.scalar(
-                        select(AuthenticationRateLimit)
-                        .where(
-                            AuthenticationRateLimit.action == "login_guard",
-                            AuthenticationRateLimit.key_hash == key_hash,
-                        )
-                        .with_for_update()
-                    )
-                    if guard is None:
-                        session.add(
-                            AuthenticationRateLimit(
-                                action="login_guard",
-                                key_hash=key_hash,
-                                window_started_at=now,
-                                attempts=1,
+                    for key_hash, _limit in budgets:
+                        await self._lock_guard(session, key_hash, now)
+                        await session.execute(
+                            delete(AuthenticationRateLimit).where(
+                                AuthenticationRateLimit.action == reservation_id,
+                                AuthenticationRateLimit.key_hash == key_hash,
                             )
                         )
-                        await session.flush()
-                    else:
-                        guard.window_started_at = now
-                    await session.execute(
-                        delete(AuthenticationRateLimit).where(
-                            AuthenticationRateLimit.action == reservation_id,
-                            AuthenticationRateLimit.key_hash == key_hash,
-                        )
-                    )
-                    failures = await session.scalar(
-                        select(AuthenticationRateLimit)
-                        .where(
-                            AuthenticationRateLimit.action == "login_failure",
-                            AuthenticationRateLimit.key_hash == key_hash,
-                        )
-                        .with_for_update()
-                    )
-                    if reset_failures and failures is not None:
-                        await session.delete(failures)
-                    elif failed:
-                        if failures is None or self._is_expired(failures, now):
-                            if failures is not None:
-                                await session.delete(failures)
-                                await session.flush()
-                            session.add(
-                                AuthenticationRateLimit(
-                                    action="login_failure",
-                                    key_hash=key_hash,
-                                    window_started_at=now,
-                                    attempts=1,
+                        failures = await self._locked_failures(session, key_hash)
+                        if reset_failures and failures is not None:
+                            await session.delete(failures)
+                        elif failed:
+                            if failures is None or self._is_expired(failures, now):
+                                if failures is not None:
+                                    await session.delete(failures)
+                                    await session.flush()
+                                session.add(
+                                    AuthenticationRateLimit(
+                                        action="login_failure",
+                                        key_hash=key_hash,
+                                        window_started_at=now,
+                                        attempts=1,
+                                    )
                                 )
-                            )
-                        else:
-                            failures.attempts += 1
+                            else:
+                                failures.attempts += 1
                 return
             except IntegrityError:
                 if attempt == 2:
