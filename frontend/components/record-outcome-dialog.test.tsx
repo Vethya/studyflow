@@ -63,7 +63,7 @@ it("records a missed session with the full planned work", async () => {
     "session-1",
     { outcome: "Missed", actualMinutes: 0, revisedRemainingMinutes: undefined, largeActualConfirmed: false },
     undefined,
-    "Read chapter",
+    { title: "Read chapter", category: "Reading" },
   ));
   expect(onRecorded).toHaveBeenCalledWith(result);
   expect(onOpenChange).toHaveBeenCalledWith(false);
@@ -82,8 +82,28 @@ it("requires positive worked and remaining minutes for a delayed outcome", async
     "session-1",
     { outcome: "Delayed", actualMinutes: 40, revisedRemainingMinutes: 20, largeActualConfirmed: false },
     undefined,
-    "Read chapter",
+    { title: "Read chapter", category: "Reading" },
   ));
+});
+
+it("pre-fills a usable split for partly done until the student types their own figure", async () => {
+  recordOutcomeMock.mockResolvedValue({ ...result, session: { ...session, outcome: "Delayed" } });
+  renderDialog();
+
+  fireEvent.click(screen.getByRole("button", { name: /Partly done/ }));
+  expect((screen.getByLabelText("Minutes you worked") as HTMLInputElement).value).toBe("30");
+  expect((screen.getByLabelText("Minutes still left") as HTMLInputElement).value).toBe("30");
+  expect(screen.queryByText(/whole number of minutes greater than 0/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /Finished it/ }));
+  expect((screen.getByLabelText("Minutes you worked") as HTMLInputElement).value).toBe("60");
+
+  fireEvent.change(screen.getByLabelText("Minutes you worked"), { target: { value: "75" } });
+  fireEvent.click(screen.getByRole("button", { name: /Partly done/ }));
+  expect((screen.getByLabelText("Minutes you worked") as HTMLInputElement).value).toBe("75");
+  expect((screen.getByLabelText("Minutes still left") as HTMLInputElement).value).toBe("");
+  expect(screen.getByText("How many minutes of work are still left?")).toBeTruthy();
+  expect(screen.queryByText(/whole number of minutes greater than 0/)).toBeNull();
+  expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
 });
 
 it("asks for confirmation before recording an unusually large actual duration", async () => {
@@ -101,7 +121,7 @@ it("asks for confirmation before recording an unusually large actual duration", 
     "session-1",
     { outcome: "Completed", actualMinutes: 200, revisedRemainingMinutes: undefined, largeActualConfirmed: true },
     undefined,
-    "Read chapter",
+    { title: "Read chapter", category: "Reading" },
   ));
 });
 

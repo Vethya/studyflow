@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { SessionProvider } from "@/hooks/use-session";
 import { ThemeProvider } from "@/components/theme-provider";
 import { StudyFlowSWRProvider } from "@/components/swr-provider";
+import { DENSITY_BOOT_SCRIPT } from "@/lib/density-script";
 import { NONCE_HEADER } from "@/lib/security/headers";
 import "./globals.css";
 
@@ -53,6 +54,7 @@ export default async function RootLayout({
       className={`${inter.variable} ${bricolage.variable} ${plexMono.variable} h-full`}
     >
       <body className="min-h-full font-sans antialiased">
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: DENSITY_BOOT_SCRIPT }} />
         <ThemeProvider nonce={nonce}>
           <StudyFlowSWRProvider>
             <SessionProvider>

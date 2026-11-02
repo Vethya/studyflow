@@ -4,18 +4,21 @@ import MockDate from "mockdate";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-const { acceptProposalMock, rejectProposalMock, errorToastMock, successToastMock } = vi.hoisted(() => ({
+const { acceptProposalMock, rejectProposalMock, generateProposalMock, errorToastMock, successToastMock, infoToastMock } = vi.hoisted(() => ({
   acceptProposalMock: vi.fn(),
   rejectProposalMock: vi.fn(),
+  generateProposalMock: vi.fn(),
   errorToastMock: vi.fn(),
   successToastMock: vi.fn(),
+  infoToastMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
   scheduling: {
     acceptProposal: acceptProposalMock,
     rejectProposal: rejectProposalMock,
-    listSessions: vi.fn(),
+    generateProposal: generateProposalMock,
+    getActiveSchedule: vi.fn(),
   },
 }));
 
@@ -32,7 +35,7 @@ vi.mock("@/hooks/use-account-timezone", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { success: successToastMock, error: errorToastMock },
+  toast: { success: successToastMock, error: errorToastMock, info: infoToastMock },
 }));
 
 import { PendingPlanBanner, ProposalCalendar, SchedulePreview } from "./schedule-preview";
@@ -43,8 +46,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
   acceptProposalMock.mockReset();
   rejectProposalMock.mockReset();
+  generateProposalMock.mockReset();
   errorToastMock.mockReset();
   successToastMock.mockReset();
+  infoToastMock.mockReset();
 });
 
 beforeEach(() => {
@@ -98,6 +103,63 @@ it("shows the proposed work and accepts the whole plan", async () => {
 
   await waitFor(() => expect(acceptProposalMock).toHaveBeenCalledWith("proposal-1", undefined, false));
   expect(onAccepted).toHaveBeenCalledOnce();
+  expect(onOpenChange).toHaveBeenCalledWith(false);
+});
+
+it("swaps an expired plan for a fresh one that can then be used", async () => {
+  acceptProposalMock
+    .mockRejectedValueOnce(Object.assign(new Error("The schedule proposal has expired"), { status: 409 }))
+    .mockResolvedValueOnce(undefined);
+  generateProposalMock.mockResolvedValue({ ...proposal, id: "proposal-2" });
+  const onAccepted = vi.fn();
+
+  render(
+    <SchedulePreview proposal={proposal} open onOpenChange={vi.fn()} onAccepted={onAccepted} onRejected={vi.fn()} />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Use this plan" }));
+  await waitFor(() => expect(infoToastMock).toHaveBeenCalledWith(expect.stringContaining("out of date")));
+  expect(errorToastMock).not.toHaveBeenCalled();
+  expect(onAccepted).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Use this plan" }));
+  await waitFor(() => expect(acceptProposalMock).toHaveBeenLastCalledWith("proposal-2", undefined, false));
+  expect(onAccepted).toHaveBeenCalledOnce();
+});
+
+it("reports a plan that can never be accepted instead of regenerating it", async () => {
+  for (const cause of [
+    Object.assign(new Error("Only feasible proposals can be accepted"), { status: 409 }),
+    { status: 409 },
+    null,
+  ]) {
+    acceptProposalMock.mockRejectedValueOnce(cause);
+    render(
+      <SchedulePreview proposal={proposal} open onOpenChange={vi.fn()} onAccepted={vi.fn()} onRejected={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Use this plan" }));
+    await waitFor(() => expect(errorToastMock).toHaveBeenCalled());
+    cleanup();
+    errorToastMock.mockClear();
+  }
+  expect(generateProposalMock).not.toHaveBeenCalled();
+});
+
+it("closes an expired plan when a fresh one cannot be made", async () => {
+  acceptProposalMock.mockRejectedValueOnce(
+    Object.assign(new Error("Recovery inputs changed; generate a new proposal"), { status: 409 }),
+  );
+  generateProposalMock.mockRejectedValueOnce(new Error("offline"));
+  const onRejected = vi.fn();
+  const onOpenChange = vi.fn();
+
+  render(
+    <SchedulePreview proposal={proposal} open onOpenChange={onOpenChange} onAccepted={vi.fn()} onRejected={onRejected} />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Use this plan" }));
+  await waitFor(() => expect(errorToastMock).toHaveBeenCalledWith("That plan was out of date. Error: offline"));
+  expect(onRejected).toHaveBeenCalledOnce();
   expect(onOpenChange).toHaveBeenCalledWith(false);
 });
 
@@ -335,8 +397,12 @@ it("covers empty scenario assumptions and plural recovery summaries", () => {
   expect(screen.getByText(/2 tasks still don’t fit/)).toBeTruthy();
 
   cleanup();
+  // The calendar opens on the current week, so the session has to fall in it.
+  const lateTonight = new Date();
+  lateTonight.setUTCHours(23, 0, 0, 0);
+  const midnight = new Date(lateTonight.getTime() + 3_600_000);
   const delayed = makeSession("delayed", { outcome: "Delayed", actualDuration: undefined });
-  render(<ProposalCalendar isRecoveryProposal={false} proposedSessions={[]} recordedSessions={[{ ...delayed, startTime: "2026-09-29T23:00:00Z", endTime: "2026-09-30T00:00:00Z" } as any]} availabilityWindows={[]} unavailablePeriods={[]} />);
+  render(<ProposalCalendar isRecoveryProposal={false} proposedSessions={[]} recordedSessions={[{ ...delayed, startTime: lateTonight.toISOString(), endTime: midnight.toISOString() } as any]} availabilityWindows={[]} unavailablePeriods={[]} />);
   expect(screen.getByRole("region", { name: "Proposed sessions" })).toBeTruthy();
-  expect(screen.getAllByTitle(/Task delayed · Partly done \(.+ recorded\) · 23:00–00:00/).length).toBeGreaterThan(0);
+  expect(screen.getAllByTitle(/Partly done \(0m recorded\)/).length).toBeGreaterThan(0);
 });

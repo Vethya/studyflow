@@ -270,14 +270,14 @@ describe("email verification", () => {
     render(<VerifyEmailPage />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Finish your account" })).toBeTruthy());
     const password = screen.getByLabelText("Password");
-    const confirm = screen.getByLabelText("Confirm Password");
+    const confirm = screen.getByLabelText("Confirm password");
     for (const [value, label] of [["a", "Weak"], ["Abcdefgh", "Fair"], ["Abcdefgh1", "Good"], ["Abcdefgh1234", "Strong"], ["Abcdefgh1234!", "Great"]] as const) {
       fireEvent.change(password, { target: { value } });
       expect(screen.getByText(`${label} password`)).toBeTruthy();
     }
     fireEvent.submit(form());
     expect(screen.getByText("Enter your name.")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Full Name"), { target: { value: "Student" } });
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Student" } });
     fireEvent.change(password, { target: { value: "short" } });
     fireEvent.change(confirm, { target: { value: "different" } });
     fireEvent.submit(form());

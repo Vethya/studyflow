@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CalendarClock, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import { CalendarClock, ChevronLeft, ChevronRight, Loader2 } from "@/components/icons";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
@@ -29,6 +29,19 @@ import type { SessionOutcome, StudySession } from "@/types/session";
 import { useAccountTimezone } from "@/hooks/use-account-timezone";
 
 const DEFAULT_RANGE = { start: 8, end: 22 };
+
+/**
+ * Whether accepting failed only because the plan is out of date, so a fresh
+ * one should replace it. The API answers 409 for that ("has expired",
+ * "…changed; generate a new proposal") and also for plans that can never be
+ * accepted (not feasible, overlapping work in progress). It sends no error
+ * code, so the message decides; regenerating on the second kind would loop.
+ */
+function isOutdatedPlan(cause: unknown): boolean {
+  if (typeof cause !== "object" || cause === null) return false;
+  const { status, message } = cause as { status?: unknown; message?: unknown };
+  return status === 409 && typeof message === "string" && /expired|generate a new proposal/i.test(message);
+}
 
 function startOfWeek(date: Date, timeZone: string): Date {
   const start = startOfZonedDay(date, timeZone);
@@ -71,7 +84,7 @@ function describeScenario(scenario: ScheduleScenario): string | null {
  * controls that would have to be taken away again.
  */
 export function SchedulePreview({
-  proposal,
+  proposal: proposalProp,
   open,
   onOpenChange,
   onAccepted,
@@ -91,16 +104,26 @@ export function SchedulePreview({
 }) {
   const timeZone = useAccountTimezone();
   const [busy, setBusy] = React.useState<"accept" | "reject" | null>(null);
+  // A plan whose first session has already started can no longer be used; the
+  // API answers 409 and the preview swaps in a freshly generated one.
+  const [replacement, setReplacement] = React.useState<{
+    forId: string;
+    proposal: ScheduleProposal;
+  } | null>(null);
+  const proposal =
+    proposalProp && replacement?.forId === proposalProp.id ? replacement.proposal : proposalProp;
 
-  const loadActiveSessions = React.useCallback(
-    (s: AbortSignal) => scheduling.listSessions(s),
+  // Same key and loader as every other schedule reader: the cached value is a
+  // Schedule, so a sessions-only loader here would corrupt it for the others.
+  const loadActiveSchedule = React.useCallback(
+    (s: AbortSignal) => scheduling.getActiveSchedule(s),
     [],
   );
-  const activeSessionsQuery = useApi(
+  const activeScheduleQuery = useApi(
     open && !existingSessionsProp ? SWR_KEYS.activeSchedule : null,
-    loadActiveSessions,
+    loadActiveSchedule,
   );
-  const existingSessions = existingSessionsProp ?? activeSessionsQuery.data ?? [];
+  const existingSessions = existingSessionsProp ?? activeScheduleQuery.data?.sessions ?? [];
 
   // Keep the dialog root mounted before the first proposal is available. This
   // gives Base UI a closed-to-open transition instead of mounting open.
@@ -155,9 +178,25 @@ export function SchedulePreview({
       }
       onOpenChange(false);
     } catch (cause) {
-      toast.error(describeError(cause));
+      if (action === "accept" && isOutdatedPlan(cause)) {
+        await replaceExpired();
+      } else {
+        toast.error(describeError(cause));
+      }
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function replaceExpired() {
+    try {
+      const fresh = await scheduling.generateProposal();
+      setReplacement({ forId: proposalProp!.id, proposal: fresh });
+      toast.info("That plan was out of date, so StudyFlow made a fresh one. Check it, then use it.");
+    } catch (cause) {
+      toast.error(`That plan was out of date. ${describeError(cause)}`);
+      onRejected();
+      onOpenChange(false);
     }
   }
 
@@ -244,7 +283,7 @@ export function SchedulePreview({
                       );
                     })}
                     {activeUpcoming.length > 5 && (
-                      <li className="list-none pt-0.5 text-muted-foreground/80 italic">
+                      <li className="list-none pt-0.5 text-muted-foreground italic">
                         ...and {activeUpcoming.length - 5} more upcoming {activeUpcoming.length - 5 === 1 ? "session" : "sessions"}
                       </li>
                     )}

@@ -25,16 +25,18 @@ function renderNav({
   isMobile,
   setOpenMobile,
   onClick,
+  collapsed = false,
 }: {
   isMobile: boolean;
   setOpenMobile: OpenMobileMock;
   onClick?: VoidMock;
+  collapsed?: boolean;
 }) {
   return render(
     <SidebarContext.Provider
       value={{
-        state: "expanded",
-        open: true,
+        state: collapsed ? "collapsed" : "expanded",
+        open: !collapsed,
         setOpen: vi.fn<OpenMobileMock>(),
         openMobile: true,
         setOpenMobile,
@@ -91,5 +93,11 @@ describe("SidebarNav mobile navigation", () => {
 
     expect(onClick).toHaveBeenCalled();
     expect(setOpenMobile).not.toHaveBeenCalled();
+  });
+
+  it("names icon-only route links when the desktop sidebar is collapsed", () => {
+    renderNav({ isMobile: false, setOpenMobile: vi.fn<OpenMobileMock>(), collapsed: true });
+
+    expect(screen.getByRole("link", { name: "Tasks" }).getAttribute("aria-label")).toBe("Tasks");
   });
 });

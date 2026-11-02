@@ -13,6 +13,7 @@ export const SWR_KEYS = {
   profile: "studyflow/account/profile",
   identities: "studyflow/account/identities",
   deletionStatus: "studyflow/account/deletion-status",
+  reminderPreferences: "studyflow/reminders/preferences",
   googleImportStatus: "studyflow/integrations/google/status",
   activeSchedule: "studyflow/schedule/active",
   pendingRevision: "studyflow/schedule/pending-revision",
@@ -28,7 +29,8 @@ export function taskListKey(filters: TaskFilters = {}) {
     filters.deadlineFrom === undefined &&
     filters.deadlineTo === undefined &&
     filters.query === undefined &&
-    filters.limit === undefined
+    filters.limit === undefined &&
+    filters.offset === undefined
   ) {
     return SWR_KEYS.tasks;
   }
@@ -73,12 +75,6 @@ function scheduleDataRevision(schedule: Schedule | null): string {
       ].join(":"),
     )
     .join("|");
-}
-
-export function activeScheduleKey(tasks: AcademicTask[] | null) {
-  return tasks === null
-    ? null
-    : [SWR_KEYS.activeSchedule, taskDataRevision(tasks)] as const;
 }
 
 export function effortProgressKey(

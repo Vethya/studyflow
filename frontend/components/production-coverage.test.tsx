@@ -13,10 +13,8 @@ import { UnscheduledWorkList } from "./unscheduled-work-list";
 import { WeekGrid, GridLegend } from "./week-grid";
 import { DetailDrawer } from "./detail-drawer";
 import { SessionDrawer } from "./session-drawer";
-import { WelcomeTour, GettingStarted } from "./onboarding";
 import { ThemeOptionIcon, ThemeSelector } from "./theme-selector";
 import { ThemeProvider } from "./theme-provider";
-import { TopBar } from "./top-bar";
 import { StudyFlowSWRProvider } from "./swr-provider";
 import { AppSidebar } from "./app-sidebar";
 import { NavUser } from "./nav-user";
@@ -82,6 +80,7 @@ describe("shared content components", () => {
       <CapacityBar available={100} committed={40} />
       <CapacityBar available={100} committed={110} />
       <CapacityBar available={100} committed={300} />
+      <CapacityBar size="sm" available={100} committed={40} className="slim-capacity" />
       <PageShell><PageHeader title="Header" description="Description" actions={<Button>Action</Button>} /><SectionHeader title="Section" meta="Meta" tone="deficit" action={{ href: "/tasks", label: "See all" }} /><SectionCard title="Card" description="Card description" action={<Button>Card action</Button>} footer="Footer" flush>Body</SectionCard><SectionCard title="Nonflush">Body</SectionCard><SectionCard>Body only</SectionCard><FigureRow><Figure label="A" value={null} /><Figure label="B" value="42" tone="surplus" hint="Hint" /><Figure label="C" value="0" tone="deficit" /></FigureRow><EmptyState title="Empty" icon={() => <span>Icon</span>} action={<Button>Fix</Button>}>Nothing here</EmptyState></PageShell>
       <LegalPage title="Privacy" intro="Intro"><LegalSection title="Section">Text</LegalSection></LegalPage>
       <UnscheduledWorkList items={[]} />
@@ -89,6 +88,10 @@ describe("shared content components", () => {
     </div>);
     expect(screen.getByText("Everything has a slot")).toBeTruthy();
     expect(screen.getByText("No room")).toBeTruthy();
+    const slim = document.querySelector(".slim-capacity")!;
+    expect(slim.className).toContain("space-y-2");
+    expect(slim.firstElementChild!.className).toContain("h-4");
+    expect(slim.lastElementChild!.className).toContain("sr-only");
     expect(screen.getByText("Privacy")).toBeTruthy();
   });
 
@@ -147,6 +150,11 @@ describe("drawers, onboarding, themes, and navigation", () => {
     cleanup();
     render(<SessionDrawer session={{ id: "past", taskId: "task-1", taskTitle: "Past session", category: "Reading", startTime: "2026-09-14T10:00:00Z", endTime: "2026-09-14T11:00:00Z", plannedDuration: 60, isAwaitingOutcome: false }} task={null} open onOpenChange={callbacks.onOpenChange} onEditTask={callbacks.onEditTask} onDeleteTask={callbacks.onDeleteTask} onRecordOutcome={callbacks.onRecordOutcome} />);
     expect(screen.getByRole("button", { name: "Record what happened" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Delete task" })).toBeNull();
+
+    cleanup();
+    render(<SessionDrawer session={{ id: "waiting", taskId: "task-1", taskTitle: "Waiting session", category: "Reading", startTime: "2026-09-14T10:00:00Z", endTime: "2026-09-14T11:00:00Z", plannedDuration: 60, isAwaitingOutcome: true }} task={task()} open onOpenChange={callbacks.onOpenChange} onEditTask={callbacks.onEditTask} onDeleteTask={callbacks.onDeleteTask} onRecordOutcome={callbacks.onRecordOutcome} />);
+    expect(screen.getAllByRole("button", { name: "Record what happened" })).toHaveLength(1);
 
     cleanup();
     render(<SessionDrawer session={{ id: "done", taskId: "task-1", taskTitle: "Done session", category: "Reading", startTime: "2026-09-14T10:00:00Z", endTime: "2026-09-14T11:00:00Z", plannedDuration: 60, outcome: "Completed", actualDuration: 30, isAwaitingOutcome: false }} task={task({ deadline: "2026-09-01T00:00:00Z", priority: "High" })} open onOpenChange={callbacks.onOpenChange} onEditTask={callbacks.onEditTask} onDeleteTask={callbacks.onDeleteTask} onRecordOutcome={callbacks.onRecordOutcome} />);
@@ -158,13 +166,8 @@ describe("drawers, onboarding, themes, and navigation", () => {
     expect(screen.getByText("Done zero")).toBeTruthy();
   });
 
-  it("renders onboarding tour/checklist states and theme selector", () => {
-    render(<WelcomeTour state={{ weeklyWindows: 0, openTasks: 0, plannedSessions: 0, recordedOutcomes: 0 }} ready />);
-    expect(screen.getByText("Set the hours you can study")).toBeTruthy();
-    cleanup();
-    render(<SidebarProvider><div><GettingStarted state={{ weeklyWindows: 1, openTasks: 0, plannedSessions: 0, recordedOutcomes: 0 }} ready /><ThemeOptionIcon theme="unknown" /><ThemeSelector /><ThemeProvider><span>Theme child</span></ThemeProvider></div></SidebarProvider>);
-    expect(screen.getByText("Getting started")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+  it("renders the theme selector", () => {
+    render(<SidebarProvider><div><ThemeOptionIcon theme="unknown" /><ThemeSelector /><ThemeProvider><span>Theme child</span></ThemeProvider></div></SidebarProvider>);
     expect(screen.getByText("Theme child")).toBeTruthy();
     const theme = screen.getByRole("combobox", { name: "Theme" });
     fireEvent.mouseDown(theme);
@@ -179,7 +182,7 @@ describe("drawers, onboarding, themes, and navigation", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Account menu" })[1]);
     fireEvent.click(screen.getByText("Appearance"));
     fireEvent.click(screen.getByText("Dark"));
-    fireEvent.click(screen.getByText("Show me around"));
+    fireEvent.click(screen.getByText("Show getting started"));
     fireEvent.click(screen.getAllByRole("button", { name: "Account menu" })[1]);
     fireEvent.click(screen.getByText("Settings"));
     fireEvent.click(screen.getAllByRole("button", { name: "Account menu" })[1]);
@@ -225,61 +228,7 @@ describe("drawers, onboarding, themes, and navigation", () => {
   });
 });
 
-describe("search and SWR coordination", () => {
-  it("searches, clears, navigates, and displays empty results", async () => {
-    searchTasksMock.mockResolvedValue([task({ id: "found", title: "Found task", course: "Math" })]);
-    useApiMock.mockImplementationOnce((_key: unknown, load: (signal: AbortSignal) => Promise<unknown>) => {
-      void load(new AbortController().signal);
-      return { data: [task({ id: "found", title: "Found task", course: "Math" })], error: null, isLoading: false };
-    });
-    useApiMock.mockReturnValue({ data: [task({ id: "found", title: "Found task", course: "Math" })], error: null, isLoading: false });
-    render(<TopBar />);
-    const input = screen.getByLabelText("Find a task by title or course");
-    fireEvent.change(input, { target: { value: "Found" } });
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    expect(screen.getByText("Found task")).toBeTruthy();
-    fireEvent.click(screen.getByText("Found task"));
-    fireEvent.change(input, { target: { value: "Found" } });
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    fireEvent.click(screen.getByText("View all results in Tasks"));
-    fireEvent.change(input, { target: { value: "clear me" } });
-    fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
-    fireEvent.change(input, { target: { value: "none" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.keyDown(input, { key: "Escape" });
-    expect((input as HTMLInputElement).value).toBe("");
-  });
-
-  it("shows pending and empty search states", async () => {
-    useApiMock.mockReturnValue({ data: [], error: null, isLoading: true });
-    render(<TopBar />);
-    const input = screen.getByLabelText("Find a task by title or course");
-    fireEvent.change(input, { target: { value: "missing" } });
-    expect(screen.getByRole("button", { name: "Clear search" })).toBeTruthy();
-    useApiMock.mockReturnValue({ data: [], error: null, isLoading: false });
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    expect(screen.getByText(/No task matches/)).toBeTruthy();
-  });
-
-  it("covers empty search key handling and tasks without a course", async () => {
-    useApiMock.mockReturnValue({ data: [task({ id: "no-course", title: "No course task", course: undefined })], error: null, isLoading: false });
-    render(<TopBar />);
-    const input = screen.getByLabelText("Find a task by title or course");
-    fireEvent.change(input, { target: { value: "No course" } });
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    expect(screen.getByText("No course task")).toBeTruthy();
-    expect(screen.queryByText(/Reading ·/)).toBeNull();
-    fireEvent.change(input, { target: { value: "" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.keyDown(input, { key: "Tab" });
-
-    cleanup();
-    useApiMock.mockReturnValue({ data: null, error: null, isLoading: false });
-    render(<TopBar />);
-    fireEvent.change(screen.getByLabelText("Find a task by title or course"), { target: { value: "missing" } });
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  });
-
+describe("SWR coordination", () => {
   it("mounts the shared SWR provider and responds to mutation events", async () => {
     let cache: Map<unknown, unknown> | undefined;
     render(<StudyFlowSWRProvider><SWRCacheProbe onReady={(value) => { cache = value.cache; }} /><span>App</span></StudyFlowSWRProvider>);

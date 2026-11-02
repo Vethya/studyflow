@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Sparkles } from "lucide-react";
+import { Sparkles } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import {
@@ -20,10 +20,9 @@ import type { AdaptiveEstimate } from "@/types/progress";
 /**
  * How the student's own history changes an estimate (SPEC §15.6).
  *
- * Shows the original, the adaptive value, and which of the two will actually
- * be scheduled. It deliberately shows no accuracy figures — SPEC §15.6 forbids
- * exposing MAE, signed bias, prediction errors or sample counts to the
- * student, so the explanation is in tasks and minutes, never in model terms.
+ * Shows the original, the adaptive value, its likely range, and which of the
+ * two will actually be scheduled. The explanation stays in tasks and minutes,
+ * never in model terms such as error or bias.
  */
 export function AdaptiveEstimateNote({
   estimate,
@@ -36,6 +35,8 @@ export function AdaptiveEstimateNote({
   const usingAdaptive = estimate.plannedDuration === estimate.adaptiveEstimate;
   const longer = estimate.adaptiveEstimate > estimate.originalEstimate;
   const category = CATEGORY_CONFIG[estimate.category].label.toLowerCase();
+  const range = describeEstimateRange(estimate);
+  const basis = describeEstimateBasis(estimate);
 
   return (
     <Callout
@@ -56,6 +57,14 @@ export function AdaptiveEstimateNote({
         </strong>{" "}
         instead of {formatDuration(estimate.originalEstimate)}.
       </p>
+
+      {(range || basis) && (
+        <p className="mt-2 text-xs">
+          {range && <span className="tabular-nums text-foreground">{range}</span>}
+          {range && basis && <br />}
+          {basis}
+        </p>
+      )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Choice
@@ -79,6 +88,31 @@ export function AdaptiveEstimateNote({
       </p>
     </Callout>
   );
+}
+
+/** "About 1h 26m · likely 1h 15m–1h 50m", or null without a usable range. */
+export function describeEstimateRange(estimate: AdaptiveEstimate): string | null {
+  const range = estimate.range;
+  if (!range || range.high <= range.low) return null;
+  return `About ${formatDuration(estimate.adaptiveEstimate)} · likely ${formatDuration(range.low)}–${formatDuration(range.high)}`;
+}
+
+/**
+ * Which of the student's own tasks the suggestion leans on, in plain words.
+ * SPEC §15.6 rules out sample counts in the interface, so it names the kind
+ * of history and never how many tasks are in it.
+ */
+export function describeEstimateBasis(estimate: AdaptiveEstimate): string | null {
+  const basis = estimate.basis;
+  if (!basis) return null;
+  const source =
+    basis.scope === "category"
+      ? `Mostly based on your earlier ${CATEGORY_CONFIG[estimate.category].label} tasks`
+      : basis.scope === "size"
+        ? "Mostly based on your earlier tasks of a similar size"
+        : "Based on all your earlier tasks";
+  const inProgress = basis.provisionalRecords > 0 ? ", including some still in progress" : "";
+  return `${source}${inProgress}.`;
 }
 
 /**
@@ -126,7 +160,7 @@ function Choice({
       <span
         className={cn(
           "rounded-md border px-2.5 py-1 text-xs",
-          active ? "border-foreground bg-muted font-medium text-foreground" : "text-muted-foreground",
+          active ? "border-primary bg-primary/10 font-medium text-foreground" : "text-muted-foreground",
         )}
       >
         {label}
@@ -134,19 +168,21 @@ function Choice({
     );
   }
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
+      size="xs"
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "rounded-md border px-2.5 py-1 text-xs transition-colors",
+        "rounded-md px-2.5 font-normal",
         active
-          ? "border-foreground bg-muted font-medium text-foreground"
-          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+          ? "border-primary bg-primary/10 font-medium text-foreground hover:bg-primary/10"
+          : "text-muted-foreground",
       )}
     >
       {label}
-    </button>
+    </Button>
   );
 }
 
@@ -251,7 +287,7 @@ function Option({ title, value, hint }: { title: string; value: string; hint: st
   return (
     <div className="rounded-lg border bg-card p-3">
       <p className="text-xs font-medium text-muted-foreground">{title}</p>
-      <p className="mt-1 font-display text-xl font-bold tabular-nums">{value}</p>
+      <p className="mt-1 text-2xl leading-none tabular-nums font-semibold tracking-tight">{value}</p>
       <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
     </div>
   );

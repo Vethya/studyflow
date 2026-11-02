@@ -15,8 +15,7 @@
 import { apiJson, apiVoid, ApiError, buildQuery } from "./client";
 import { toWireOutcome } from "./outcome-contract";
 import { toAdaptiveEstimate } from "./adaptive-contract";
-import { listTasks } from "./tasks";
-import { toScheduleProposal, toStudySession, toWireCategory } from "./mappers";
+import { toScheduleProposal, toStudySession, toWireCategory, type SessionTask } from "./mappers";
 import type {
   WireScheduleProposal,
   WireScheduleScenario,
@@ -29,7 +28,12 @@ import type { ScenarioOverrides, SimulatePlanResult } from "@/lib/webmcp/contrac
 import type { OutcomeFormData, StudySession } from "@/types/session";
 import type { Schedule, ScheduleProposal, ScheduleRevision } from "@/types/schedule";
 import type { AdaptiveEstimate } from "@/types/progress";
-import type { AcademicTask, Category } from "@/types/task";
+import type { Category } from "@/types/task";
+
+/** Keep the following sentence from running into a detail that has no stop. */
+export function ensureSentence(detail: string): string {
+  return /[.!?]$/.test(detail) ? detail : `${detail}.`;
+}
 
 /**
  * CP-SAT timed out or could not prove its objective (SPEC §10.7), surfaced by
@@ -52,36 +56,34 @@ export interface OutcomeResult {
   revision: ScheduleRevision | null;
 }
 
-/** Titles for the session list, which the API returns without them. */
-async function taskTitles(
-  signal?: AbortSignal,
-  tasks?: AcademicTask[],
-): Promise<Map<string, string>> {
-  const rows = tasks ?? (await listTasks({}, signal));
-  return new Map(rows.map((task) => [task.id, task.title]));
+export interface SessionFilters {
+  /** Offset-aware ISO timestamps; a session matches when it overlaps [from, to). */
+  from?: string;
+  to?: string;
+  /** Omit for every session; true for finished sessions without an outcome. */
+  awaitingOutcome?: boolean;
 }
 
 // ─── Sessions ───────────────────────────────────────────────────
 export async function listSessions(
   signal?: AbortSignal,
-  tasks?: AcademicTask[],
+  filters: SessionFilters = {},
 ): Promise<StudySession[]> {
-  const [wire, titles] = await Promise.all([
-    apiJson<WireStudySession[]>(`/study-sessions${buildQuery({})}`, { signal }),
-    taskTitles(signal, tasks),
-  ]);
-  return wire.map((session) => toStudySession(session, titles));
+  const query = buildQuery({
+    from: filters.from,
+    to: filters.to,
+    awaiting_outcome: filters.awaitingOutcome,
+  });
+  const wire = await apiJson<WireStudySession[]>(`/study-sessions${query}`, { signal });
+  return wire.map((session) => toStudySession(session));
 }
 
 export async function getSession(
   sessionId: string,
   signal?: AbortSignal,
 ): Promise<StudySession> {
-  const [wire, titles] = await Promise.all([
-    apiJson<WireStudySession>(`/study-sessions/${sessionId}`, { signal }),
-    taskTitles(signal),
-  ]);
-  return toStudySession(wire, titles);
+  const wire = await apiJson<WireStudySession>(`/study-sessions/${sessionId}`, { signal });
+  return toStudySession(wire);
 }
 
 // ─── Active schedule ────────────────────────────────────────────
@@ -90,11 +92,8 @@ export async function getSession(
  * sessions into the accepted set, and `GET /study-sessions` returns exactly
  * that. This wraps them so callers keep a single shape.
  */
-export async function getActiveSchedule(
-  signal?: AbortSignal,
-  tasks?: AcademicTask[],
-): Promise<Schedule | null> {
-  const sessions = await listSessions(signal, tasks);
+export async function getActiveSchedule(signal?: AbortSignal): Promise<Schedule | null> {
+  const sessions = await listSessions(signal);
   if (sessions.length === 0) return null;
   return {
     id: "active",
@@ -171,9 +170,12 @@ export async function getPendingRevision(
   signal?: AbortSignal,
 ): Promise<ScheduleRevision | null> {
   try {
-    const wire = await apiJson<WireScheduleProposal>("/schedule-proposals/current", {
+    // 404 is "no proposal". A same-origin proxy may also answer 200 `null` so
+    // the browser does not log that expected 404.
+    const wire = await apiJson<WireScheduleProposal | null>("/schedule-proposals/current", {
       signal,
     });
+    if (wire === null) return null;
     const proposal = toScheduleProposal(wire);
     return { ...proposal, reason: proposal.reason ?? "" };
   } catch (cause) {
@@ -207,7 +209,8 @@ export function rejectProposal(proposalId: string, signal?: AbortSignal): Promis
 
 // ─── Outcomes ───────────────────────────────────────────────────
 /**
- * Records what happened in a past session.
+ * Records what happened in a past session. `task` labels the returned
+ * session only if the response arrives without its task title and category.
  *
  * The backend returns the recorded outcome, its updated accepted session, and
  * an optional revision for student review.
@@ -216,7 +219,7 @@ export async function recordOutcome(
   sessionId: string,
   data: OutcomeFormData,
   signal?: AbortSignal,
-  taskTitle?: string,
+  task?: SessionTask,
 ): Promise<OutcomeResult> {
   try {
     const response = await apiJson<WireSessionOutcomeRecordingResponse>(
@@ -228,12 +231,9 @@ export async function recordOutcome(
       },
     );
 
-    const titles = taskTitle
-      ? new Map([[response.session.task_id, taskTitle]])
-      : await taskTitles(signal);
     const revision = response.revision ? toScheduleProposal(response.revision) : null;
     return {
-      session: toStudySession(response.session, titles),
+      session: toStudySession(response.session, task),
       revision: revision ? { ...revision, reason: revision.reason ?? "" } : null,
     };
   } catch (cause) {

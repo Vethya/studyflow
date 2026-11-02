@@ -6,23 +6,25 @@ import type { Category, Priority, TaskStatus } from "@/types";
  * Teal (`surplus`) and orange (`deficit`) are the only saturated colours in the
  * product: they mean "you have room" and "you are over", and nothing else.
  *
- * Category and priority are attributes of a task, not capacity signals, so they
- * are rendered in ink. They used to be five decorative hues — indigo, rose,
- * amber, sky, teal — which made a task list look more urgent than the capacity
- * warnings it sat next to, and stole the meaning from the two colours that
- * matter. Distinction now comes from the label itself.
+ * Categories are marked like highlighter tabs in a notebook: a small coloured
+ * dot on a faint wash of the same ink, with the label in regular text. The
+ * hues are muted (`--cat-*` in globals.css) so a task list never looks more
+ * urgent than the capacity warnings next to it.
  */
 
 // ─── Category config ────────────────────────────────────────────
 const NEUTRAL_CHIP = { color: "text-muted-foreground", bg: "bg-muted" } as const;
 
-export const CATEGORY_CONFIG: Record<Category, { label: string; color: string; bg: string }> = {
-  Assignment:         { label: "Assignment",       ...NEUTRAL_CHIP },
-  Reading:            { label: "Reading",          ...NEUTRAL_CHIP },
-  "Exam Preparation": { label: "Exam prep",        ...NEUTRAL_CHIP },
-  Project:            { label: "Project",          ...NEUTRAL_CHIP },
-  "Research/Writing": { label: "Research",         ...NEUTRAL_CHIP },
-  Other:              { label: "Other",            ...NEUTRAL_CHIP },
+export const CATEGORY_CONFIG: Record<
+  Category,
+  { label: string; color: string; bg: string; dot: string }
+> = {
+  Assignment:         { label: "Assignment", color: "text-foreground", bg: "bg-cat-assignment/12", dot: "bg-cat-assignment" },
+  Reading:            { label: "Reading",    color: "text-foreground", bg: "bg-cat-reading/12",    dot: "bg-cat-reading" },
+  "Exam Preparation": { label: "Exam prep",  color: "text-foreground", bg: "bg-cat-exam/12",       dot: "bg-cat-exam" },
+  Project:            { label: "Project",    color: "text-foreground", bg: "bg-cat-project/12",    dot: "bg-cat-project" },
+  "Research/Writing": { label: "Research",   color: "text-foreground", bg: "bg-cat-research/14",   dot: "bg-cat-research" },
+  Other:              { label: "Other",      color: "text-foreground", bg: "bg-cat-other/14",      dot: "bg-cat-other" },
 };
 
 // ─── Priority config ────────────────────────────────────────────

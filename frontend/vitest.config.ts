@@ -6,6 +6,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     exclude: [...configDefaults.exclude, "e2e/**"],
+    // Whole-page tests take ~5s on their own and time out under coverage load.
+    testTimeout: 20_000,
     coverage: {
       provider: "v8",
       include: [

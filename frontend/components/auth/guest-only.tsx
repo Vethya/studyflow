@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Loader2 } from "@/components/icons";
 import { useSession } from "@/hooks/use-session";
 
 interface GuestOnlyProps {

@@ -12,7 +12,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { CATEGORY_CONFIG } from "@/lib/constants";
 import { cn } from "@/lib/utils";
+import type { Category } from "@/types";
 
 /**
  * The structural vocabulary every screen is built from.
@@ -35,8 +37,8 @@ export function PageShell({
   return (
     <div
       className={cn(
-        "mx-auto flex w-full min-w-0 flex-col gap-8 px-4 py-6 sm:px-6 sm:py-8",
-        width === "wide" ? "max-w-6xl" : "max-w-4xl",
+        "app-page mx-auto flex w-full min-w-0 flex-col gap-6 px-4 py-6 @2xl/dashboard:px-6 @2xl/dashboard:py-7",
+        width === "wide" ? "max-w-7xl" : "max-w-4xl",
         className,
       )}
     >
@@ -51,28 +53,39 @@ export function PageShell({
  * controls past the viewport.
  */
 export function PageHeader({
+  icon: Icon,
+  eyebrow,
   title,
   description,
   actions,
 }: {
+  icon?: React.ElementType;
+  /** A short line of context above the title, such as today's date. */
+  eyebrow?: React.ReactNode;
   title: React.ReactNode;
   description?: React.ReactNode;
   actions?: React.ReactNode;
 }) {
   return (
-    <div data-slot="page-header" className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+    <div data-slot="page-header" className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
       <div className="min-w-0 flex-1 basis-64">
-        <h1 className="wrap-break-word font-display text-2xl font-bold tracking-tight sm:text-[1.75rem]">
+        {(Icon || eyebrow) && (
+          <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            {Icon && <Icon className="size-3.5 text-primary" aria-hidden />}
+            {eyebrow}
+          </p>
+        )}
+        <h1 className="wrap-break-word text-2xl leading-tight font-semibold tracking-tight @2xl/dashboard:text-[1.625rem]">
           {title}
         </h1>
         {description && (
-          <p className="mt-1 max-w-prose wrap-break-word text-sm text-muted-foreground">{description}</p>
+          <p className="mt-1.5 max-w-prose wrap-break-word text-sm text-muted-foreground">{description}</p>
         )}
       </div>
       {actions && (
         <div
           data-slot="page-header-actions"
-          className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0"
+          className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-2 @2xl/dashboard:w-auto @2xl/dashboard:shrink-0"
         >
           {actions}
         </div>
@@ -102,7 +115,7 @@ export function SectionHeader({
         className,
       )}
     >
-      <h2 className="font-display text-base font-semibold tracking-tight">{title}</h2>
+      <h2 className="text-base font-semibold tracking-tight">{title}</h2>
       <div className="flex items-baseline gap-3">
         {meta != null && (
           <span
@@ -154,18 +167,14 @@ export function SectionCard({
   return (
     <Card className={cn("min-w-0", className)}>
       {(title || description || action) && (
-        <CardHeader className={flush ? "border-b" : undefined}>
+        <CardHeader>
           {title && <CardTitle>{title}</CardTitle>}
           {description && <CardDescription>{description}</CardDescription>}
           {action && <CardAction>{action}</CardAction>}
         </CardHeader>
       )}
-      <CardContent className={cn(flush && "p-0", contentClassName)}>{children}</CardContent>
-      {footer && (
-        <CardFooter className="border-t pt-(--card-spacing) text-xs text-muted-foreground">
-          {footer}
-        </CardFooter>
-      )}
+      <CardContent className={cn(flush && "overflow-hidden p-0", contentClassName)}>{children}</CardContent>
+      {footer && <CardFooter>{footer}</CardFooter>}
     </Card>
   );
 }
@@ -177,8 +186,8 @@ export function SectionCard({
  */
 export function FigureRow({ children }: { children: React.ReactNode }) {
   return (
-    <Card className="min-w-0 py-0">
-      <CardContent className="grid divide-y p-0 sm:auto-cols-fr sm:grid-flow-col sm:divide-x sm:divide-y-0">
+    <Card className="min-w-0">
+      <CardContent className="app-figure-grid grid grid-cols-2 divide-x divide-y overflow-hidden p-0 @3xl/dashboard:auto-cols-fr @3xl/dashboard:grid-flow-col @3xl/dashboard:grid-cols-none @3xl/dashboard:divide-y-0">
         {children}
       </CardContent>
     </Card>
@@ -200,13 +209,13 @@ export function Figure({
 }) {
   return (
     <div className="min-w-0 px-4 py-3">
-      <p className="truncate text-xs text-muted-foreground">{label}</p>
+      <p className="text-xs leading-5 text-muted-foreground">{label}</p>
       {value === null ? (
         <Skeleton className="mt-1.5 h-6 w-16" />
       ) : (
         <p
           className={cn(
-            "mt-1 font-display text-xl font-bold leading-none tabular-nums",
+            "mt-1 text-2xl font-semibold leading-none tabular-nums",
             tone === "deficit" && "text-deficit",
             tone === "surplus" && "text-surplus",
           )}
@@ -216,6 +225,78 @@ export function Figure({
       )}
       {hint && <p className="mt-1 truncate text-xs text-muted-foreground">{hint}</p>}
     </div>
+  );
+}
+
+/** One headline figure in a framed card: the label rides on the frame. */
+export function StatCard({
+  icon: Icon,
+  label,
+  /** `null` renders the loading state. */
+  value,
+  hint,
+  tone,
+  children,
+  className,
+}: {
+  icon?: React.ElementType;
+  label: string;
+  value: React.ReactNode | null;
+  hint?: React.ReactNode;
+  tone?: "deficit" | "surplus";
+  children?: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <Card data-slot="stat-card" className={cn("min-w-0", className)}>
+      <CardHeader className="flex items-center gap-2">
+        {Icon && <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
+        {/* Wraps rather than truncates: two stat cards share a 360px row. */}
+        <p className="min-w-0 text-xs leading-tight font-medium text-pretty text-muted-foreground">{label}</p>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-1 px-4 py-3">
+        {value === null ? (
+          <Skeleton className="h-7 w-20" />
+        ) : (
+          <p
+            className={cn(
+              "text-[1.375rem] leading-tight font-semibold tracking-tight tabular-nums",
+              tone === "deficit" && "text-deficit",
+              tone === "surplus" && "text-surplus",
+            )}
+          >
+            {value}
+          </p>
+        )}
+        {hint && <p className="text-xs leading-snug text-pretty text-muted-foreground tabular-nums">{hint}</p>}
+        {children}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** A task's category, drawn as a highlighter tab. */
+export function CategoryTag({
+  category,
+  className,
+}: {
+  category: Category;
+  className?: string;
+}) {
+  const config = CATEGORY_CONFIG[category];
+  return (
+    <span
+      data-slot="category-tag"
+      className={cn(
+        "inline-flex h-5 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-xs font-medium",
+        config.bg,
+        config.color,
+        className,
+      )}
+    >
+      <span className={cn("size-1.5 rounded-full", config.dot)} aria-hidden />
+      {config.label}
+    </span>
   );
 }
 
@@ -236,19 +317,19 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-10 text-center",
+        "flex flex-col items-center gap-4 rounded-xl px-5 py-10 text-center",
         className,
       )}
     >
       {Icon && (
-        <span className="flex size-10 items-center justify-center rounded-full border bg-muted/50">
-          <Icon className="size-5 text-muted-foreground" aria-hidden />
+        <span className="flex size-12 items-center justify-center rounded-xl border bg-frame text-foreground shadow-xs">
+          <Icon className="size-6" aria-hidden />
         </span>
       )}
       <div>
         <p className="text-sm font-medium">{title}</p>
         {children && (
-          <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">{children}</p>
+          <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted-foreground">{children}</p>
         )}
       </div>
       {action}

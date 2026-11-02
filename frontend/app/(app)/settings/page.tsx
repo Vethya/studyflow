@@ -1,32 +1,32 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  AlertTriangle,
   CheckCircle2,
-  Clock4,
-  Globe,
   Loader2,
+  Lock,
   LogOut,
   Palette,
-  Search,
   ShieldCheck,
   SlidersHorizontal,
   Trash2,
   User,
-  X,
-} from "lucide-react";
+} from "@/components/icons";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Callout } from "@/components/ui/callout";
-import { SidebarNav } from "@/components/ui/sidebar-nav";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { PageHeader, PageShell } from "@/components/page-kit";
+import { SettingRow } from "@/components/study-kit";
+import { useCommandMenu, useModifierKey } from "@/components/command-menu";
 import {
   AddPasswordDialog,
   AccountDeletionDialog,
@@ -34,10 +34,20 @@ import {
   ChangePasswordDialog,
   ChangeTimezoneDialog,
 } from "@/components/settings-dialogs";
-import { account as accountApi, auth, availability as availabilityApi } from "@/lib/api";
+import {
+  account as accountApi,
+  auth,
+  availability as availabilityApi,
+  reminders as remindersApi,
+  type ReminderPreferences,
+} from "@/lib/api";
 import { describeError, useApi } from "@/hooks/use-api";
+import { useNow } from "@/hooks/use-now";
 import { useSession } from "@/hooks/use-session";
 import { formatDuration } from "@/lib/constants";
+import { extendedStudyPlanningEnabled } from "@/lib/feature-flags";
+import { clearPerUserStorage, markAccountDeleted } from "@/lib/user-storage";
+import { setDensity, useDensity, type Density } from "@/lib/density";
 import { detectTimezone, formatOffset } from "@/lib/timezones";
 import { cn } from "@/lib/utils";
 import { notifyStudyFlowSessionInvalidated } from "@/lib/data-events";
@@ -56,21 +66,6 @@ const GoogleIcon = () => (
     <path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303c-.792 2.237-2.231 4.166-4.087 5.571l6.19 5.238C39.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z" />
   </svg>
 );
-
-type TabId = "profile" | "security" | "preferences" | "appearance";
-
-interface TabItem {
-  id: TabId;
-  label: string;
-  icon: React.ElementType;
-}
-
-const TABS: TabItem[] = [
-  { id: "profile", label: "Profile", icon: User },
-  { id: "security", label: "Account & Security", icon: ShieldCheck },
-  { id: "preferences", label: "Preferences", icon: SlidersHorizontal },
-  { id: "appearance", label: "Appearance", icon: Palette },
-];
 
 export default function SettingsPage() {
   return (
@@ -91,8 +86,6 @@ function SettingsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [activeTab, setActiveTab] = useState<TabId>("profile");
-  const [searchQuery, setSearchQuery] = useState("");
 
   const loadProfile = useCallback((s: AbortSignal) => accountApi.getProfile(s), []);
   const loadPreferences = useCallback((s: AbortSignal) => accountApi.getPreferences(s), []);
@@ -107,6 +100,16 @@ function SettingsContent() {
   const preferences = useApi(SWR_KEYS.studyPreferences, loadPreferences);
   const identities = useApi(SWR_KEYS.identities, loadIdentities);
   const deletionStatus = useApi(SWR_KEYS.deletionStatus, loadDeletionStatus);
+  // The reminder settings are the only read that reports verification. This
+  // shares the Reminders section's request (same key), so the badge and that
+  // section always agree. Without them a signed-in address counts as verified:
+  // registration cannot finish without the emailed link.
+  const loadReminders = useCallback((s: AbortSignal) => remindersApi.getPreferences(s), []);
+  const reminderStatus = useApi<ReminderPreferences>(
+    extendedStudyPlanningEnabled() ? SWR_KEYS.reminderPreferences : null,
+    loadReminders,
+  );
+  const emailVerified = reminderStatus.data?.emailVerified;
 
   const [nameOpen, setNameOpen] = useState(false);
   const [addPasswordOpen, setAddPasswordOpen] = useState(false);
@@ -159,544 +162,226 @@ function SettingsContent() {
     deletionStatus.reload();
   }
 
-  const query = searchQuery.trim().toLowerCase();
+  const nameRow = (
+    <SettingRow label="Name" description={profile.data?.name ?? "—"}>
+      <Button variant="outline" size="sm" aria-label="Change name" onClick={() => setNameOpen(true)}>
+        Change
+      </Button>
+    </SettingRow>
+  );
 
-  const searchMatches = useMemo(() => {
-    if (!query) return null;
-    const words = query.split(/\s+/).filter(Boolean);
-    const matchTerms = (...terms: (string | undefined | null)[]) => {
-      const combined = terms.filter(Boolean).join(" ").toLowerCase();
-      return words.every((w) => combined.includes(w));
-    };
+  const emailRow = (
+    <SettingRow
+      label="Email address"
+      description={
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className="min-w-0 break-all">{profile.data?.email}</span>
+          {emailVerified === false ? (
+            <span className="flex items-center gap-1 text-xs font-medium text-warning">
+              <AlertTriangle className="size-3" aria-hidden />
+              Not verified
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-xs font-medium text-surplus">
+              <CheckCircle2 className="size-3" aria-hidden />
+              Verified
+            </span>
+          )}
+        </span>
+      }
+    >
+      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Lock className="size-3" aria-hidden />
+        Can&rsquo;t be changed
+      </span>
+    </SettingRow>
+  );
 
-    return {
-      profileName: matchTerms("profile", "name", "display name", "change name", profile.data?.name),
-      profileEmail: matchTerms("profile", "email", "address", "verified", profile.data?.email),
-      password: matchTerms("password", "change password", "add password", "security", "credentials", "sign in"),
-      google: matchTerms("google", "sign in", "connect", "account", "linked", "identity", "authentication", google?.email),
-      signOut: matchTerms("sign out", "log out", "device", "session", "ends your session"),
-      deleteAccount: matchTerms("delete account", "remove account", "wipe data", "danger", "permanent", "planning data"),
-      timezone: matchTerms("timezone", "time zone", "clock", "utc", "gmt", "hours", "availability", "offset", zone),
-      sessions: matchTerms("study sessions", "longest session", "session length", "break length", "minimum break", "break between sessions", "duration", "timer", "sittings", "schedule", "pacing"),
-      appearance: matchTerms("appearance", "theme", "light mode", "dark mode", "amoled", "oled", "black mode", "contrast", "interface", "system"),
-    };
-  }, [google?.email, profile.data?.email, profile.data?.name, query, zone]);
+  const passwordRow = (passwordSet: boolean) => (
+    <SettingRow label="Password" description={passwordSet ? "Added" : "Not added"}>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => (passwordSet ? setPasswordOpen(true) : setAddPasswordOpen(true))}
+      >
+        {passwordSet ? "Change password" : "Add password"}
+      </Button>
+    </SettingRow>
+  );
 
-  const totalMatches = useMemo(() => {
-    if (!searchMatches) return 0;
-    return Object.values(searchMatches).filter(Boolean).length;
-  }, [searchMatches]);
+  const googleRow = (
+    <SettingRow
+      label={
+        <span className="flex items-center gap-2">
+          <GoogleIcon />
+          Google
+        </span>
+      }
+      description={google ? google.email : "Sign in with your Google account"}
+    >
+      {google ? (
+        <span className="flex items-center gap-1.5 text-sm font-medium text-surplus">
+          <CheckCircle2 className="size-4" aria-hidden />
+          Connected
+        </span>
+      ) : (
+        <Button
+          variant="outline"
+          className="min-h-10 px-4"
+          onClick={() => void connectGoogle()}
+          disabled={isConnectingGoogle}
+        >
+          {isConnectingGoogle ? <Loader2 className="animate-spin" /> : <GoogleIcon />}
+          Connect
+        </Button>
+      )}
+    </SettingRow>
+  );
+
+  const signOutRow = (
+    <SettingRow label="Sign out" description="Ends your session on this device only.">
+      <Button variant="outline" size="sm" onClick={() => void signOut()}>
+        <LogOut className="size-3.5 text-muted-foreground" />
+        Sign out
+      </Button>
+    </SettingRow>
+  );
+
+  const deleteRow = (
+    <SettingRow
+      label="Delete your StudyFlow account"
+      description="Permanently removes your profile, sign-in methods, and planning data. This cannot be undone."
+    >
+      <Button
+        variant="destructive"
+        size="sm"
+        onClick={openDeletionDialog}
+        disabled={!deletionProfileReady}
+      >
+        <Trash2 className="size-3.5" />
+        Delete account
+      </Button>
+    </SettingRow>
+  );
+
+  const timezoneRows = (
+    <>
+      <SettingRow
+        label="Timezone"
+        description={
+          zone ? (
+            <ZoneClock zone={zone} />
+          ) : (
+            <>
+              <span className="font-medium text-foreground">Not set</span>
+              <span className="block">Used to read your deadlines and place your sessions.</span>
+            </>
+          )
+        }
+      >
+        <Button variant="outline" size="sm" aria-label="Change timezone" onClick={() => setTimezoneOpen(true)}>
+          Change
+        </Button>
+      </SettingRow>
+      {preferences.data?.availability_confirmation_required && (
+        <div className="pt-4">
+          <ConfirmTimezone preferences={preferences.data} setPreferences={preferences.setData} />
+        </div>
+      )}
+    </>
+  );
+
+  const themeRow = (
+    <SettingRow label="Theme" description="Light, dark, AMOLED black, or follow your device.">
+      <ThemeSelector />
+    </SettingRow>
+  );
+
+  const densityRow = (
+    <SettingRow
+      label="Density"
+      description="Compact tightens rows and spacing so more fits on screen."
+    >
+      <DensityPicker />
+    </SettingRow>
+  );
+
+  const shortcutsRow = <ShortcutsRow />;
+  const extendedPlanning = extendedStudyPlanningEnabled();
 
   return (
-    <PageShell>
-      <PageHeader title="Settings" />
+    <PageShell width="narrow">
+      <PageHeader
+        icon={SlidersHorizontal}
+        eyebrow="Account"
+        title="Settings"
+        description="Your profile, how you sign in, how StudyFlow paces your sessions, and how it looks."
+      />
 
       {googleError && <Callout tone="danger">{googleError}</Callout>}
 
-      <div className="flex flex-col gap-6 md:flex-row md:gap-8 items-start">
-        {/* Navigation Sidebar (Vertical on Desktop, Scrollable Pills on Mobile) */}
-        <div className="w-full md:w-56 shrink-0 min-w-0 space-y-3">
-          {/* Live Search Input */}
-          <div className="relative">
-            <Search
-              className="pointer-events-none absolute left-2.5 top-1/2 z-10 size-4 -translate-y-1/2 text-muted-foreground"
-              aria-hidden
-            />
-            <Input
-              type="text"
-              placeholder="Search settings..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  setSearchQuery("");
-                }
-              }}
-              className="h-9 pl-8 pr-8 text-sm"
-              aria-label="Search settings"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-1 text-muted-foreground hover:text-foreground"
-                aria-label="Clear search"
-              >
-                <X className="size-3.5" />
-              </button>
+      <div className="w-full min-w-0 space-y-6">
+        <SettingsSection icon={User} title="Profile" description="Your name and the email address you sign in with.">
+          <SettingsSubsection>
+            {profile.isLoading ? (
+              <RowSkeleton rows={2} />
+            ) : (
+              <>
+                {nameRow}
+                {emailRow}
+              </>
             )}
-          </div>
+          </SettingsSubsection>
+        </SettingsSection>
 
-          {/* Navigation Tabs */}
-          <SidebarNav
-            items={TABS.map((tab) => ({
-              id: tab.id,
-              title: tab.label,
-              icon: tab.icon,
-              isActive: !searchQuery && activeTab === tab.id,
-              onClick: () => {
-                setActiveTab(tab.id);
-                setSearchQuery("");
-              },
-            }))}
-            size="sm"
-            orientation="responsive"
-            activeKey={searchQuery ? "search" : activeTab}
-            ariaLabel="Settings sections"
-          />
-        </div>
+        <SettingsSection icon={ShieldCheck} title="Account & Security" description="The ways you can sign in to your account.">
+          <SettingsSubsection>
+            {profile.isLoading ? (
+              <RowSkeleton rows={1} />
+            ) : profile.data ? (
+              passwordRow(profile.data.password_set)
+            ) : null}
+            {identities.isLoading ? <RowSkeleton rows={1} /> : googleRow}
+          </SettingsSubsection>
+        </SettingsSection>
 
-        {/* Content Area */}
-        <div className="min-w-0 flex-1 w-full space-y-6">
-          {searchQuery ? (
-            /* Live Search Results View */
-            <div className="space-y-6">
-              <div className="flex items-center justify-between border-b pb-3">
-                <div>
-                  <h2 className="text-lg font-semibold tracking-tight text-foreground">
-                    Search results
-                  </h2>
-                  <p
-                    className="mt-0.5 text-xs text-muted-foreground"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    {totalMatches} {totalMatches === 1 ? "result" : "results"} for &ldquo;{searchQuery}&rdquo;
-                  </p>
-                </div>
-                <Button variant="ghost" size="sm" onClick={() => setSearchQuery("")}>
-                  Clear search
-                </Button>
-              </div>
-
-              {totalMatches === 0 ? (
-                <div className="rounded-xl border border-dashed p-8 text-center">
-                  <Search className="mx-auto size-8 text-muted-foreground/60 mb-3" aria-hidden />
-                  <p className="text-sm font-semibold">No settings found</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    No results match &ldquo;{searchQuery}&rdquo;. Try searching for profile, password, timezone, or theme.
-                  </p>
-                  <Button variant="outline" size="sm" className="mt-4" onClick={() => setSearchQuery("")}>
-                    Clear search
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-6">
-                  {/* Profile Results */}
-                  {(searchMatches?.profileName || searchMatches?.profileEmail) && (
-                    <div className="space-y-2">
-                      <CategoryBadge label="Profile" icon={User} />
-                      <Card className="py-0">
-                        <CardContent className="divide-y p-0 px-4">
-                          {profile.isLoading ? (
-                            <RowSkeleton
-                              rows={
-                                (searchMatches.profileName ? 1 : 0) +
-                                (searchMatches.profileEmail ? 1 : 0)
-                              }
-                            />
-                          ) : (
-                            <>
-                              {searchMatches.profileName && (
-                                <Row label="Name" value={profile.data?.name ?? "—"}>
-                                  <Button variant="outline" size="sm" onClick={() => setNameOpen(true)}>
-                                    Change
-                                  </Button>
-                                </Row>
-                              )}
-                              {searchMatches.profileEmail && (
-                                <Row
-                                  label="Email address"
-                                  value={
-                                    <span className="flex flex-wrap items-center gap-x-1.5">
-                                      <span className="truncate">{profile.data?.email}</span>
-                                      <span className="flex items-center gap-1 font-medium text-surplus">
-                                        <CheckCircle2 className="size-3" />
-                                        Verified
-                                      </span>
-                                    </span>
-                                  }
-                                >
-                                  <span className="text-sm text-muted-foreground">Can&rsquo;t be changed</span>
-                                </Row>
-                              )}
-                            </>
-                          )}
-                        </CardContent>
-                      </Card>
-                    </div>
-                  )}
-
-                  {/* Security Results */}
-                  {(searchMatches?.password ||
-                    searchMatches?.google ||
-                    searchMatches?.signOut ||
-                    searchMatches?.deleteAccount) && (
-                    <div className="space-y-2">
-                      <CategoryBadge label="Account & Security" icon={ShieldCheck} />
-                      <Card className="py-0">
-                        <CardContent className="divide-y p-0 px-4">
-                          {searchMatches.password && (
-                            profile.isLoading ? (
-                              <RowSkeleton rows={1} />
-                            ) : (
-                              <Row
-                                label="Password"
-                                value={profile.data?.password_set ? "Added" : "Not added"}
-                              >
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() =>
-                                    profile.data?.password_set
-                                      ? setPasswordOpen(true)
-                                      : setAddPasswordOpen(true)
-                                  }
-                                >
-                                  {profile.data?.password_set ? "Change password" : "Add password"}
-                                </Button>
-                              </Row>
-                            )
-                          )}
-                          {searchMatches.google && (
-                            identities.isLoading ? (
-                              <RowSkeleton rows={1} />
-                            ) : (
-                              <Row
-                                stretch={!google}
-                                label={
-                                  <span className="flex items-center gap-2">
-                                    <GoogleIcon />
-                                    Google
-                                  </span>
-                                }
-                                value={google ? google.email : "Sign in with your Google account"}
-                              >
-                                {google ? (
-                                  <span className="flex items-center gap-1.5 text-sm font-medium text-surplus">
-                                    <CheckCircle2 className="size-4" />
-                                    Connected
-                                  </span>
-                                ) : (
-                                  <Button
-                                    variant="outline"
-                                    className="h-auto min-h-11 self-stretch px-5 text-sm"
-                                    onClick={() => void connectGoogle()}
-                                    disabled={isConnectingGoogle}
-                                  >
-                                    {isConnectingGoogle ? <Loader2 className="animate-spin" /> : <GoogleIcon />}
-                                    Connect
-                                  </Button>
-                                )}
-                              </Row>
-                            )
-                          )}
-                          {searchMatches.signOut && (
-                            <Row label="Sign out" value="Ends your session on this device only.">
-                              <Button variant="outline" size="sm" onClick={() => void signOut()}>
-                                <LogOut className="size-3.5 mr-1 text-muted-foreground" />
-                                Sign out
-                              </Button>
-                            </Row>
-                          )}
-                          {searchMatches.deleteAccount && (
-                            <Row
-                              label="Delete your StudyFlow account"
-                              value="Permanently removes your profile, sign-in methods, and planning data."
-                            >
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                onClick={openDeletionDialog}
-                                disabled={!deletionProfileReady}
-                              >
-                                <Trash2 className="size-3.5 mr-1" />
-                                Delete account
-                              </Button>
-                            </Row>
-                          )}
-                        </CardContent>
-                      </Card>
-                    </div>
-                  )}
-
-                  {/* Preferences Results */}
-                  {searchMatches?.timezone && (
-                    <div className="space-y-2">
-                      <CategoryBadge label="Preferences · Timezone" icon={Globe} />
-                      <Card className="py-0">
-                        <CardContent className="divide-y p-0 px-4">
-                          <Row
-                            label={zone?.replace(/_/g, " ") ?? "Not set"}
-                            value={
-                              zone ? (
-                                <span className="tabular-nums">
-                                  {formatOffset(zone)} ·{" "}
-                                  {new Date().toLocaleTimeString(undefined, {
-                                    timeZone: zone,
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                    hour12: false,
-                                  })}{" "}
-                                  right now
-                                </span>
-                              ) : (
-                                "Used to read your deadlines and place your sessions"
-                              )
-                            }
-                          >
-                            <Button variant="outline" size="sm" onClick={() => setTimezoneOpen(true)}>
-                              Change
-                            </Button>
-                          </Row>
-
-                          {preferences.data?.availability_confirmation_required && (
-                            <div className="py-4">
-                              <ConfirmTimezone
-                                preferences={preferences.data}
-                                setPreferences={preferences.setData}
-                              />
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    </div>
-                  )}
-
-                  {searchMatches?.sessions && (
-                    <div className="space-y-2">
-                      <CategoryBadge label="Preferences · Study sessions" icon={Clock4} />
-                      <StudySessionsSection preferences={preferences} />
-                    </div>
-                  )}
-
-                  {/* Appearance Results */}
-                  {searchMatches?.appearance && (
-                    <div className="space-y-2">
-                      <CategoryBadge label="Appearance" icon={Palette} />
-                      <Card className="py-0">
-                        <CardContent className="p-0 px-4">
-                          <Row
-                            label="Theme"
-                            value="Choose light mode, dark mode, AMOLED black mode, or follow your device."
-                          >
-                            <ThemeSelector />
-                          </Row>
-                        </CardContent>
-                      </Card>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          ) : (
-            /* Standard Tab View */
-            <>
-              {activeTab === "profile" && (
-                <div className="space-y-5">
-                  <SectionHeader title="Profile" />
-                  <Card className="py-0">
-                    <CardContent className="divide-y p-0 px-4">
-                      {profile.isLoading ? (
-                        <RowSkeleton rows={2} />
-                      ) : (
-                        <>
-                          <Row label="Name" value={profile.data?.name ?? "—"}>
-                            <Button variant="outline" size="sm" onClick={() => setNameOpen(true)}>
-                              Change
-                            </Button>
-                          </Row>
-                          <Row
-                            label="Email address"
-                            value={
-                              <span className="flex flex-wrap items-center gap-x-1.5">
-                                <span className="truncate">{profile.data?.email}</span>
-                                <span className="flex items-center gap-1 font-medium text-surplus">
-                                  <CheckCircle2 className="size-3" />
-                                  Verified
-                                </span>
-                              </span>
-                            }
-                          >
-                            <span className="text-sm text-muted-foreground">Can&rsquo;t be changed</span>
-                          </Row>
-                        </>
-                      )}
-                    </CardContent>
-                  </Card>
-                </div>
-              )}
-
-              {activeTab === "security" && (
-                <div className="space-y-6">
-                  <SectionHeader title="Account & Security" />
-
-                  <div className="space-y-3">
-                    <h3 className="text-sm font-medium text-muted-foreground">Sign-in methods</h3>
-                    <Card className="py-0">
-                      <CardContent className="divide-y p-0 px-4">
-                        {profile.isLoading ? (
-                          <RowSkeleton rows={1} />
-                        ) : profile.data ? (
-                          <Row
-                            label="Password"
-                            value={profile.data.password_set ? "Added" : "Not added"}
-                          >
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() =>
-                                profile.data?.password_set
-                                  ? setPasswordOpen(true)
-                                  : setAddPasswordOpen(true)
-                              }
-                            >
-                              {profile.data.password_set ? "Change password" : "Add password"}
-                            </Button>
-                          </Row>
-                        ) : null}
-
-                        {identities.isLoading ? (
-                          <RowSkeleton rows={1} />
-                        ) : (
-                          <Row
-                            stretch={!google}
-                            label={
-                              <span className="flex items-center gap-2">
-                                <GoogleIcon />
-                                Google
-                              </span>
-                            }
-                            value={google ? google.email : "Sign in with your Google account"}
-                          >
-                            {google ? (
-                              <span className="flex items-center gap-1.5 text-sm font-medium text-surplus">
-                                <CheckCircle2 className="size-4" />
-                                Connected
-                              </span>
-                            ) : (
-                              <Button
-                                variant="outline"
-                                className="h-auto min-h-11 self-stretch px-5 text-sm"
-                                onClick={() => void connectGoogle()}
-                                disabled={isConnectingGoogle}
-                              >
-                                {isConnectingGoogle ? <Loader2 className="animate-spin" /> : <GoogleIcon />}
-                                Connect
-                              </Button>
-                            )}
-                          </Row>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </div>
-
-                  <div className="space-y-3">
-                    <h3 className="text-sm font-medium text-muted-foreground">Account actions</h3>
-                    <Card className="py-0">
-                      <CardContent className="divide-y p-0 px-4">
-                        <Row label="Sign out" value="Ends your session on this device only.">
-                          <Button variant="outline" size="sm" onClick={() => void signOut()}>
-                            <LogOut className="size-3.5 mr-1 text-muted-foreground" />
-                            Sign out
-                          </Button>
-                        </Row>
-                        <Row
-                          label="Delete your StudyFlow account"
-                          value="Permanently removes your profile, sign-in methods, and planning data."
-                        >
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            onClick={openDeletionDialog}
-                            disabled={!deletionProfileReady}
-                          >
-                            <Trash2 className="size-3.5 mr-1" />
-                            Delete account
-                          </Button>
-                        </Row>
-                      </CardContent>
-                    </Card>
-                  </div>
-                </div>
-              )}
-
-              {activeTab === "preferences" && (
-                <div className="space-y-6">
-                  <SectionHeader title="Preferences" />
-
-                  <div className="space-y-3">
-                    <h3 className="text-sm font-medium text-muted-foreground">Timezone</h3>
-                    <Card className="py-0">
-                      <CardContent className="divide-y p-0 px-4">
-                        {preferences.isLoading ? (
-                          <RowSkeleton rows={1} />
-                        ) : (
-                          <>
-                            <Row
-                              label={zone?.replace(/_/g, " ") ?? "Not set"}
-                              value={
-                                zone ? (
-                                  <span className="tabular-nums">
-                                    {formatOffset(zone)} ·{" "}
-                                    {new Date().toLocaleTimeString(undefined, {
-                                      timeZone: zone,
-                                      hour: "2-digit",
-                                      minute: "2-digit",
-                                      hour12: false,
-                                    })}{" "}
-                                    right now
-                                  </span>
-                                ) : (
-                                  "Used to read your deadlines and place your sessions"
-                                )
-                              }
-                            >
-                              <Button variant="outline" size="sm" onClick={() => setTimezoneOpen(true)}>
-                                Change
-                              </Button>
-                            </Row>
-
-                            {/* Recurring windows re-confirmation */}
-                            {preferences.data?.availability_confirmation_required && (
-                              <div className="py-4">
-                                <ConfirmTimezone
-                                  preferences={preferences.data}
-                                  setPreferences={preferences.setData}
-                                />
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </div>
-
-                  <div className="space-y-3">
-                    <h3 className="text-sm font-medium text-muted-foreground">Study sessions</h3>
-                    <StudySessionsSection preferences={preferences} />
-                  </div>
-                </div>
-              )}
-
-              {activeTab === "appearance" && (
-                <div className="space-y-5">
-                  <SectionHeader title="Appearance" />
-                  <Card className="py-0">
-                    <CardContent className="p-0 px-4">
-                      <Row
-                        label="Theme"
-                        value="Choose light mode, dark mode, AMOLED black mode, or follow your device."
-                      >
-                        <ThemeSelector />
-                      </Row>
-                    </CardContent>
-                  </Card>
-                </div>
-              )}
-            </>
+        <SettingsSection
+          icon={SlidersHorizontal}
+          title="Preferences"
+          description={
+            extendedPlanning
+              ? "Where you are, how StudyFlow paces your sessions, and how it reminds you."
+              : "Where you are, and how StudyFlow paces your sessions."
+          }
+        >
+          <SettingsSubsection title="Where you are">
+            {preferences.isLoading ? <RowSkeleton rows={1} /> : timezoneRows}
+          </SettingsSubsection>
+          <SettingsSubsection title="Study sessions">
+            <StudySessionsSection preferences={preferences} />
+          </SettingsSubsection>
+          {extendedPlanning && (
+            <SettingsSubsection title="Reminders">
+              <ReminderSection />
+            </SettingsSubsection>
           )}
-        </div>
+        </SettingsSection>
+
+        <SettingsSection icon={Palette} title="Appearance" description="How StudyFlow looks on this device.">
+          <SettingsSubsection>
+            {themeRow}
+            {densityRow}
+            {shortcutsRow}
+          </SettingsSubsection>
+        </SettingsSection>
+
+        <SettingsSection icon={LogOut} title="Sign out" description="Leave StudyFlow on this device.">
+          <SettingsSubsection>{signOutRow}</SettingsSubsection>
+        </SettingsSection>
+
+        <SettingsSection icon={Trash2} title="Delete account" description="Remove your account and everything in it." tone="danger">
+          <SettingsSubsection>{deleteRow}</SettingsSubsection>
+        </SettingsSection>
       </div>
 
       <ChangeNameDialog
@@ -724,77 +409,65 @@ function SettingsContent() {
         onStartGoogle={startGoogleAccountDeletion}
         onGoogleChallengeExpired={deletionStatus.reload}
         onDeleted={() => {
+          markAccountDeleted();
+          clearPerUserStorage();
           notifyStudyFlowSessionInvalidated();
-          router.replace("/login");
+          router.replace("/login?deleted=1");
         }}
       />
     </PageShell>
   );
 }
 
-function SectionHeader({
+function SettingsSection({
+  icon: Icon,
   title,
   description,
-}: {
-  title: string;
-  description?: string;
-}) {
-  return (
-    <div className="border-b pb-3 mb-5">
-      <h2 className="text-lg font-semibold tracking-tight text-foreground">
-        {title}
-      </h2>
-      {/* c8 ignore start */}
-      {description && (
-        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-      )}
-      {/* c8 ignore stop */}
-    </div>
-  );
-}
-
-function CategoryBadge({
-  label,
-  icon: Icon,
-}: {
-  label: string;
-  icon: React.ElementType;
-}) {
-  return (
-    <h3 className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-      <Icon className="size-3.5 shrink-0" aria-hidden />
-      <span>{label}</span>
-    </h3>
-  );
-}
-
-/** What it is, what it is set to, and the one control that changes it. */
-function Row({
-  label,
-  value,
-  stretch,
+  tone,
   children,
 }: {
-  label: React.ReactNode;
-  value?: React.ReactNode;
-  /** Lets the action fill the row's full height rather than centring in it. */
-  stretch?: boolean;
-  children?: React.ReactNode;
+  icon: React.ElementType;
+  title: string;
+  description: string;
+  tone?: "danger";
+  children: React.ReactNode;
 }) {
+  const danger = tone === "danger";
   return (
-    <div
-      className={cn(
-        "flex flex-wrap justify-between gap-x-4 gap-y-2 py-4",
-        stretch ? "items-stretch" : "items-center",
-      )}
+    <Card
+      role="region"
+      aria-label={title}
+      className={cn(danger && "border-destructive/40 bg-destructive/[0.06]")}
     >
-      <div className="min-w-0">
-        <div className="text-sm font-medium">{label}</div>
-        {value != null && (
-          <div className="mt-0.5 truncate text-sm text-muted-foreground">{value}</div>
-        )}
-      </div>
-      {children}
+      <CardHeader className="grid-cols-[auto_minmax(0,1fr)] pt-2.5 pb-3">
+        <span
+          aria-hidden
+          className={cn(
+            "row-span-2 flex size-8 items-center justify-center rounded-lg border bg-card text-muted-foreground shadow-xs",
+            danger && "border-destructive/30 text-destructive",
+          )}
+        >
+          <Icon className="size-4" />
+        </span>
+        <h2 className={cn("min-w-0 text-sm leading-snug font-semibold tracking-tight", danger && "text-destructive")}>
+          {title}
+        </h2>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent className="divide-y">{children}</CardContent>
+    </Card>
+  );
+}
+
+function SettingsSubsection({ title, children }: { title?: string; children: React.ReactNode }) {
+  return (
+    <div className="py-5 first:pt-0 last:pb-0">
+      {title && (
+        <h3 className="mb-3 text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+          {title}
+        </h3>
+      )}
+      <div className="divide-y">{children}</div>
     </div>
   );
 }
@@ -803,7 +476,7 @@ function RowSkeleton({ rows }: { rows: number }) {
   return (
     <>
       {Array.from({ length: rows }).map((_, index) => (
-        <div key={index} className="flex items-center justify-between gap-4 py-4">
+        <div key={index} className="flex items-center justify-between gap-4 py-4 first:pt-0 last:pb-0">
           <div className="space-y-1.5">
             <Skeleton className="h-4 w-24" />
             <Skeleton className="h-4 w-40" />
@@ -812,6 +485,105 @@ function RowSkeleton({ rows }: { rows: number }) {
         </div>
       ))}
     </>
+  );
+}
+
+/** The zone, its offset, and the time there now, so a wrong zone is obvious. */
+function ZoneClock({ zone }: { zone: string }) {
+  const now = useNow(15_000);
+  const time = now.toLocaleTimeString(undefined, {
+    timeZone: zone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return (
+    <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+      <span className="font-medium text-foreground">{zone.replace(/_/g, " ")}</span>
+      <span className="tabular-nums">{formatOffset(zone)}</span>
+      <span className="tabular-nums">· {time} there now</span>
+    </span>
+  );
+}
+
+const DENSITY_OPTIONS: { value: Density; label: string; lines: number; gap: string }[] = [
+  { value: "comfortable", label: "Comfortable", lines: 3, gap: "gap-1.5" },
+  { value: "compact", label: "Compact", lines: 5, gap: "gap-[3px]" },
+];
+const SKETCH_WIDTHS = ["85%", "60%", "75%", "50%", "68%"];
+
+/** Two small sketches of a list, one loose and one tight: pick by looking. */
+function DensityPicker() {
+  const density = useDensity();
+  return (
+    <div role="radiogroup" aria-label="Density" className="grid grid-cols-2 gap-2">
+      {DENSITY_OPTIONS.map((option) => {
+        const checked = density === option.value;
+        return (
+          <label
+            key={option.value}
+            className={cn(
+              "relative flex cursor-pointer flex-col gap-2 rounded-xl border bg-background p-2 transition-[border-color,box-shadow] duration-150 ease-out active:scale-[0.98] has-focus-visible:ring-3 has-focus-visible:ring-ring/50",
+              checked ? "border-primary/60 ring-1 ring-primary/25" : "hover-fine:border-foreground/25",
+            )}
+          >
+            <input
+              type="radio"
+              name="density"
+              value={option.value}
+              checked={checked}
+              onChange={() => setDensity(option.value)}
+              className="sr-only"
+            />
+            <span
+              aria-hidden
+              className={cn("flex h-12 w-24 flex-col justify-center rounded-md bg-muted/70 px-2", option.gap)}
+            >
+              {Array.from({ length: option.lines }).map((_, index) => (
+                <span key={index} className="flex items-center gap-1">
+                  <span className="size-1 shrink-0 rounded-full bg-primary/60" />
+                  <span
+                    className="h-1 rounded-full bg-foreground/15"
+                    style={{ width: SKETCH_WIDTHS[index] }}
+                  />
+                </span>
+              ))}
+            </span>
+            <span className="flex items-center justify-between gap-1 text-xs font-medium">
+              {option.label}
+              <CheckCircle2
+                aria-hidden
+                className={cn("size-3.5 text-primary transition-opacity duration-150", checked ? "opacity-100" : "opacity-0")}
+              />
+            </span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+function ShortcutsRow() {
+  const { openShortcuts } = useCommandMenu();
+  const mod = useModifierKey();
+  return (
+    <SettingRow
+      label="Keyboard shortcuts"
+      description={
+        <>
+          Press <Kbd>?</Kbd> anywhere for the full list, or{" "}
+          <KbdGroup>
+            <Kbd>{mod}</Kbd>
+            <Kbd>K</Kbd>
+          </KbdGroup>{" "}
+          to search and add tasks.
+        </>
+      }
+    >
+      <Button variant="outline" size="sm" onClick={openShortcuts}>
+        Show shortcuts
+      </Button>
+    </SettingRow>
   );
 }
 
@@ -910,51 +682,248 @@ function StudySessionsSection({
     }
   }
 
-  return (
-    <Card className="py-0">
-      <CardContent className="p-4">
-        {preferences.isLoading ? (
-          <Skeleton className="h-28 w-full" />
-        ) : (
-          <div className="space-y-5">
-            <SliderRow
-              id="session-length"
-              label="Longest session"
-              value={sessionLength}
-              onChange={setSessionLength}
-              bounds={SESSION_LENGTH}
-              hint="Work longer than this is split across several sittings."
-            />
-            <SliderRow
-              id="break-length"
-              label="Break between sessions"
-              value={breakLength}
-              onChange={setBreakLength}
-              bounds={BREAK_LENGTH}
-              hint="Set it to zero if you would rather run straight through."
-            />
+  if (preferences.isLoading) return <Skeleton className="h-28 w-full" />;
 
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-              <p className="text-sm text-muted-foreground">
-                Sittings of up to{" "}
-                <strong className="font-medium text-foreground">
-                  {formatDuration(sessionLength)}
-                </strong>
-                , at least{" "}
-                <strong className="font-medium text-foreground">
-                  {formatDuration(breakLength)}
-                </strong>{" "}
-                apart.
-              </p>
-              <Button size="sm" onClick={() => void save()} disabled={!isDirty || isSaving}>
-                {isSaving && <Loader2 className="animate-spin" />}
-                Save
-              </Button>
-            </div>
-          </div>
+  return (
+    <div className="space-y-6">
+      <SliderRow
+        id="session-length"
+        label="Longest session"
+        value={sessionLength}
+        onChange={setSessionLength}
+        bounds={SESSION_LENGTH}
+        hint="Work longer than this is split across several sittings."
+      />
+      <SliderRow
+        id="break-length"
+        label="Break between sessions"
+        value={breakLength}
+        onChange={setBreakLength}
+        bounds={BREAK_LENGTH}
+        hint="Set it to zero if you would rather run straight through."
+      />
+
+      <SessionRhythm session={sessionLength} rest={breakLength} />
+
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+        <p className="text-sm text-muted-foreground">
+          {preferences.data === null
+            ? "Your current settings could not be loaded."
+            : isDirty
+              ? "You have changes that are not saved yet."
+              : "New plans use these settings."}
+        </p>
+        <Button size="sm" onClick={() => void save()} disabled={!isDirty || isSaving}>
+          {isSaving && <Loader2 className="animate-spin" />}
+          Save
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+interface Choice<T> {
+  value: T;
+  label: string;
+  ariaLabel?: string;
+}
+
+/** A row of mutually exclusive pills; picking the current one does nothing. */
+function ChoiceGroup<T extends string | number | null>({
+  label,
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: Choice<T>[];
+  disabled?: boolean;
+  onChange: (next: T) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1 rounded-lg bg-muted/60 p-0.5">
+      {options.map((option) => {
+        const checked = value === option.value;
+        return (
+          <button
+            key={String(option.value)}
+            type="button"
+            role="radio"
+            aria-checked={checked}
+            aria-label={option.ariaLabel}
+            disabled={disabled}
+            onClick={() => {
+              if (!checked) onChange(option.value);
+            }}
+            className={cn(
+              "h-7 min-w-10 rounded-md px-2 text-xs font-medium tabular-nums transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50",
+              checked ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover-fine:text-foreground",
+            )}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const LEAD_TIME_OPTIONS: Choice<number>[] = [
+  { value: 0, label: "Off", ariaLabel: "No email before a session" },
+  ...[30, 45, 60, 120].map((minutes) => ({
+    value: minutes,
+    label: formatDuration(minutes),
+    ariaLabel: `${formatDuration(minutes)} before`,
+  })),
+];
+
+function ReminderSection() {
+  const load = useCallback((s: AbortSignal) => remindersApi.getPreferences(s), []);
+  const reminders = useApi(SWR_KEYS.reminderPreferences, load);
+  const current = reminders.data;
+  const [saved, setSaved] = useState(false);
+
+  async function save(patch: Partial<ReminderPreferences>) {
+    /* c8 ignore next -- controls only render once preferences have loaded. */
+    if (!current) return;
+    setSaved(false);
+    const next = { ...current, ...patch };
+    reminders.setData(next);
+    try {
+      reminders.setData(
+        await remindersApi.updatePreferences({
+          emailEnabled: next.emailEnabled,
+          beforeSessionMinutes: next.beforeSessionMinutes,
+          afterSession: next.afterSession,
+        }),
+      );
+      setSaved(true);
+      toast.success("Reminders updated");
+    } catch (cause) {
+      reminders.setData(current);
+      toast.error(describeError(cause));
+    }
+  }
+
+  if (reminders.isLoading) return <RowSkeleton rows={3} />;
+  if (!current) {
+    return (
+      <p className="text-sm text-muted-foreground">Your reminder settings could not be loaded.</p>
+    );
+  }
+
+  const off = !current.emailEnabled;
+  return (
+    <>
+      {(!current.deliveryAvailable || !current.emailVerified) && (
+        <div className="pb-4">
+          {!current.deliveryAvailable ? (
+            <Callout tone="info" title="Email delivery is not switched on here yet">
+              Your choices are saved and apply as soon as it is.
+            </Callout>
+          ) : (
+            <Callout tone="warning" title="Verify your email to get reminders">
+              Reminders only go to a verified address.
+            </Callout>
+          )}
+        </div>
+      )}
+      <SettingRow
+        label="Email reminders"
+        description="Get an email around the sessions StudyFlow plans for you."
+        htmlFor="reminders-email"
+      >
+        <Switch
+          id="reminders-email"
+          checked={current.emailEnabled}
+          onCheckedChange={(checked) => void save({ emailEnabled: checked })}
+        />
+      </SettingRow>
+      <SettingRow label="Before a session" description="How early to send the heads-up.">
+        <ChoiceGroup
+          label="Before a session"
+          value={current.beforeSessionMinutes}
+          options={LEAD_TIME_OPTIONS}
+          disabled={off}
+          onChange={(minutes) => void save({ beforeSessionMinutes: minutes })}
+        />
+      </SettingRow>
+      <SettingRow
+        label="After a session"
+        description="A nudge to record how it went, so estimates keep improving."
+        htmlFor="reminders-after"
+      >
+        <Switch
+          id="reminders-after"
+          checked={current.afterSession}
+          disabled={off}
+          onCheckedChange={(checked) => void save({ afterSession: checked })}
+        />
+      </SettingRow>
+      <p role="status" className="border-t pt-4 text-sm text-muted-foreground">
+        {saved ? "Saved." : "Changes save as you make them."}
+      </p>
+    </>
+  );
+}
+
+const RHYTHM_WINDOW_MINUTES = 180;
+
+/**
+ * What three free hours turn into with these settings. Two sliders of minutes
+ * are abstract; a row of sittings and breaks is not.
+ */
+function SessionRhythm({ session, rest }: { session: number; rest: number }) {
+  const segments: { kind: "study" | "rest"; minutes: number }[] = [];
+  let elapsed = 0;
+  while (elapsed < RHYTHM_WINDOW_MINUTES) {
+    const study = Math.min(session, RHYTHM_WINDOW_MINUTES - elapsed);
+    segments.push({ kind: "study", minutes: study });
+    elapsed += study;
+    if (elapsed >= RHYTHM_WINDOW_MINUTES || rest <= 0) continue;
+    const pause = Math.min(rest, RHYTHM_WINDOW_MINUTES - elapsed);
+    segments.push({ kind: "rest", minutes: pause });
+    elapsed += pause;
+  }
+  const sittings = segments.filter((segment) => segment.kind === "study").length;
+
+  return (
+    <div className="rounded-xl bg-muted/45 p-3.5">
+      <p className="text-xs text-muted-foreground">
+        For example, three free hours become{" "}
+        <strong className="font-medium text-foreground">
+          {sittings} {sittings === 1 ? "sitting" : "sittings"}
+        </strong>
+        {rest > 0 ? (
+          <>
+            {" "}with{" "}
+            <strong className="font-medium text-foreground">{formatDuration(rest)}</strong> breaks.
+          </>
+        ) : (
+          " back to back."
         )}
-      </CardContent>
-    </Card>
+      </p>
+      <div aria-hidden className="mt-3 flex h-3 gap-0.5">
+        {segments.map((segment, index) => (
+          <span
+            key={index}
+            className={cn(
+              "h-full min-w-0.5 rounded-full transition-[flex-grow] duration-200 ease-out",
+              segment.kind === "study" ? "bg-primary/70" : "bg-border",
+            )}
+            style={{ flexGrow: segment.minutes, flexBasis: 0 }}
+          />
+        ))}
+      </div>
+      <div aria-hidden className="mt-1.5 flex justify-between text-[0.6875rem] tabular-nums text-muted-foreground">
+        <span>0h</span>
+        <span>1h</span>
+        <span>2h</span>
+        <span>3h</span>
+      </div>
+    </div>
   );
 }
 
@@ -979,13 +948,13 @@ function SliderRow({
         <Label htmlFor={id} className="text-sm font-medium">
           {label}
         </Label>
-        <span className="font-display text-lg font-bold tabular-nums">
+        <span className="text-xl leading-none tabular-nums font-semibold tracking-tight">
           {formatDuration(value)}
         </span>
       </div>
       <Slider
         id={id}
-        className="mt-2.5"
+        className="mt-3"
         value={[value]}
         min={bounds.min}
         max={bounds.max}

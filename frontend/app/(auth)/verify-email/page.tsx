@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { AlertCircle, ArrowLeft, Loader2, Mail, RotateCcw } from "lucide-react";
+import { AlertCircle, ArrowLeft, Loader2, Mail, RotateCcw } from "@/components/icons";
 import { ApiError, auth } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
 import { cn } from "@/lib/utils";
@@ -315,7 +315,7 @@ function CompleteRegistration({ token }: { token: string }) {
       {/* noValidate: our own messages sit under each field (FR-01-AC02). */}
       <form onSubmit={handleSubmit} className="space-y-4" noValidate>
         <div className="space-y-1.5">
-          <Label htmlFor="name" className="text-xs font-medium">Full Name</Label>
+          <Label htmlFor="name" className="text-xs font-medium">Full name</Label>
           <Input
             id="name"
             placeholder="Your full name"
@@ -368,7 +368,7 @@ function CompleteRegistration({ token }: { token: string }) {
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="confirm" className="text-xs font-medium">Confirm Password</Label>
+          <Label htmlFor="confirm" className="text-xs font-medium">Confirm password</Label>
           <PasswordInput
             id="confirm"
             autoComplete="new-password"
@@ -409,7 +409,7 @@ function CompleteRegistration({ token }: { token: string }) {
 
         <Button type="submit" className="w-full font-medium" disabled={isSubmitting}>
           {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Create Account
+          Create account
         </Button>
       </form>
     </div>

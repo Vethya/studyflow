@@ -8,12 +8,14 @@ import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, Loader2 } from "@/components/icons";
 import { ApiError, auth } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
 import { detectTimezone } from "@/lib/timezones";
 import { useSession } from "@/hooks/use-session";
 import { GuestOnly } from "@/components/auth/guest-only";
+import { FieldError } from "@/components/ui/field-error";
+import { forgetSignupEmail, readSignupEmail } from "@/lib/signup-email";
 
 const GoogleIcon = () => (
   <svg className="h-4 w-4" viewBox="0 0 48 48" aria-hidden="true">
@@ -76,8 +78,13 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const { refresh } = useSession();
 
-  const [email, setEmail] = useState("");
+  // Fresh from registration, the address is already known.
+  const [email, setEmail] = useState(() =>
+    searchParams.has("registered") ? (readSignupEmail() ?? "") : "",
+  );
   const [password, setPassword] = useState("");
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
@@ -88,15 +95,28 @@ function LoginForm() {
     ? "Your account is ready. Sign in to continue."
     : searchParams.has("reset")
       ? "Your password has been reset. Sign in with your new password."
-      : null;
+      : searchParams.has("deleted")
+        ? "Your account has been deleted."
+        : null;
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+    const trimmed = email.trim();
+    const nextEmailError = !trimmed
+      ? "Enter your email address."
+      : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)
+        ? "Enter a valid email address, like name@university.edu."
+        : null;
+    const nextPasswordError = password ? null : "Enter your password.";
+    setEmailError(nextEmailError);
+    setPasswordError(nextPasswordError);
+    if (nextEmailError || nextPasswordError) return;
     setIsSubmitting(true);
     try {
       // Sets the session and CSRF cookies as a side effect.
-      await auth.login(email, password);
+      await auth.login(trimmed, password);
+      forgetSignupEmail();
       await refresh();
       router.replace(nextPath);
     } catch (cause) {
@@ -174,7 +194,7 @@ function LoginForm() {
       </div>
 
       {/* Email + password form */}
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div className="space-y-1.5">
           <Label htmlFor="email" className="text-xs font-medium">Email</Label>
           <Input
@@ -186,7 +206,10 @@ function LoginForm() {
             onChange={(e) => setEmail(e.target.value)}
             disabled={isBusy}
             required
+            aria-invalid={emailError ? true : undefined}
+            aria-describedby={emailError ? "email-error" : undefined}
           />
+          <FieldError id="email-error" message={emailError} />
         </div>
 
         <div className="space-y-1.5">
@@ -206,7 +229,10 @@ function LoginForm() {
             onChange={(e) => setPassword(e.target.value)}
             disabled={isBusy}
             required
+            aria-invalid={passwordError ? true : undefined}
+            aria-describedby={passwordError ? "password-error" : undefined}
           />
+          <FieldError id="password-error" message={passwordError} />
         </div>
 
         {/* The backend issues a fixed seven-day session, so there is no
@@ -214,7 +240,7 @@ function LoginForm() {
 
         <Button type="submit" className="w-full font-medium" disabled={isBusy}>
           {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Sign In
+          Sign in
         </Button>
       </form>
 

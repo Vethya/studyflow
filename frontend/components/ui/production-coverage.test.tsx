@@ -14,7 +14,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./collapsib
 import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator, CommandShortcut } from "./command";
 import { ConfirmDialog } from "./confirm-dialog";
 import { PlanGenerationDialog } from "../plan-generation-dialog";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "./dialog";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "./dialog";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuPortal, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "./dropdown-menu";
 import { FieldError } from "./field-error";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, InputGroupText, InputGroupTextarea } from "./input-group";
@@ -116,7 +116,7 @@ describe("presentational UI primitives", () => {
 describe("interactive primitive wrappers", () => {
   it("renders dialog, confirmation, popover, sheet, collapsible, and tooltip", () => {
     render(<div>
-      <Dialog open><DialogTrigger>Open dialog</DialogTrigger><DialogContent><DialogHeader><DialogTitle>Dialog title</DialogTitle><DialogDescription>Dialog description</DialogDescription></DialogHeader><DialogFooter showCloseButton>Footer</DialogFooter></DialogContent></Dialog>
+      <Dialog open><DialogTrigger>Open dialog</DialogTrigger><DialogContent><DialogHeader><DialogTitle>Dialog title</DialogTitle><DialogDescription>Dialog description</DialogDescription></DialogHeader><DialogFooter showCloseButton>Footer</DialogFooter><DialogClose>Dismiss dialog</DialogClose></DialogContent></Dialog>
       <ConfirmDialog open onOpenChange={vi.fn()} title="Confirm" description="Sure?" confirmLabel="Confirm action" onConfirm={vi.fn()}>Extra</ConfirmDialog>
       <PlanGenerationDialog open />
       <Popover open><PopoverTrigger>Open popover</PopoverTrigger><PopoverContent><PopoverHeader><PopoverTitle>Popover title</PopoverTitle><PopoverDescription>Popover description</PopoverDescription></PopoverHeader></PopoverContent></Popover>

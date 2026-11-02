@@ -371,13 +371,13 @@ export function createStudyFlowTools(confirm: ConfirmAction = browserConfirm): W
       execute: async (input, options) => {
         const horizon = horizonDays(input);
         const signal = signalFor(options);
-        const allTasks = await tasks.listTasks({}, signal);
-        const [windows, periods, preferences, activeSchedule, pendingProposal, progress] =
+        const [allTasks, windows, periods, preferences, activeSchedule, pendingProposal, progress] =
           await Promise.all([
+            tasks.listTasks({}, signal),
             availability.listWindows(signal),
             availability.listUnavailablePeriods(signal),
             account.getPreferences(signal),
-            scheduling.getActiveSchedule(signal, allTasks),
+            scheduling.getActiveSchedule(signal),
             scheduling.getPendingRevision(signal),
             scheduling.listEffortProgress(signal),
           ]);

@@ -9,6 +9,22 @@ export interface EffortProgress {
   sessionsCompleted: number;
   sessionsUpcoming: number;
   status: import("./task").TaskStatus;
+  /**
+   * Account-wide summary of how close past estimates were. The backend repeats
+   * the same value on every row; null until enough tasks are finished.
+   */
+  estimationAccuracy?: EstimationAccuracy | null;
+}
+
+/** Aggregate estimate accuracy across finished tasks; never per-task errors. */
+export interface EstimationAccuracy {
+  sampleSize: number;
+  originalMeanAbsoluteError: number;
+  adaptiveMeanAbsoluteError: number;
+  /** Positive when adjusted estimates miss by less; null when not computable. */
+  improvementPercent: number | null;
+  /** Whether adjusted estimates have earned the right to be used. */
+  adaptiveQualified: boolean;
 }
 
 export interface WeeklyProgress {
@@ -20,11 +36,22 @@ export interface WeeklyProgress {
   totalMinutesPlanned: number;
 }
 
+/** The history mix an adaptive estimate was drawn from. */
+export interface AdaptiveEstimateBasis {
+  scope: "category" | "size" | "overall";
+  sizeBucket: "small" | "medium" | "large";
+  completedRecords: number;
+  /** In-progress tasks with partly done sessions, counted at half weight. */
+  provisionalRecords: number;
+  categoryRecords: number;
+  sizeRecords: number;
+}
+
 /**
  * An Adaptive Estimate and the history behind it (SPEC §15.6).
  *
- * Model-accuracy analytics — MAE, signed bias, prediction error, sample counts
- * — are deliberately absent: SPEC §15.6 forbids exposing them to the student.
+ * Per-task model diagnostics — signed bias, individual prediction errors — are
+ * deliberately absent; only a likely range and plain-language basis are shown.
  */
 export interface AdaptiveEstimate {
   category: import("./task").Category;
@@ -45,4 +72,8 @@ export interface AdaptiveEstimate {
    * before it is used for scheduling (SPEC §15.4).
    */
   needsAcknowledgment: boolean;
+  /** Likely low and high minutes, or null when the backend gives no range. */
+  range?: { low: number; high: number } | null;
+  sampleSize?: number | null;
+  basis?: AdaptiveEstimateBasis | null;
 }

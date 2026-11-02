@@ -90,6 +90,16 @@ export function buildQuery(params: Record<string, QueryValue>): string {
   return encoded ? `?${encoded}` : "";
 }
 
+export const UNREADABLE_REPLY_MESSAGE =
+  "StudyFlow got a reply it couldn't read. Please try again in a moment.";
+export const OFFLINE_MESSAGE = "Can't reach StudyFlow. Check your connection and try again.";
+
+/** Plain wording for an error whose body carries no message we can show. */
+function fallbackMessage(status: number): string {
+  if (status >= 500) return "StudyFlow's server had a problem. Please try again in a moment.";
+  return `Something went wrong (error ${status}). Please try again.`;
+}
+
 /**
  * FastAPI returns `{ detail: string }` for handled errors and
  * `{ detail: [{ loc, msg, ... }] }` for Pydantic validation failures.
@@ -101,7 +111,7 @@ async function extractDetail(
   try {
     body = await response.json();
   } catch {
-    return { message: response.statusText || `Request failed with status ${response.status}` };
+    return { message: fallbackMessage(response.status) };
   }
 
   const detail = (body as { detail?: unknown })?.detail;
@@ -125,7 +135,7 @@ async function extractDetail(
     if (messages.length > 0) return { message: messages.join(". "), fieldErrors };
   }
 
-  return { message: response.statusText || `Request failed with status ${response.status}` };
+  return { message: fallbackMessage(response.status) };
 }
 
 interface RequestOptions {
@@ -136,6 +146,13 @@ interface RequestOptions {
   signal?: AbortSignal;
   /** Set false for POST endpoints that only calculate a non-persisted result. */
   notifyDataChanged?: boolean;
+}
+
+let keepalive = false;
+
+/** While on, requests are sent with `keepalive` so they finish after the page unloads. */
+export function setRequestKeepalive(on: boolean): void {
+  keepalive = on;
 }
 
 async function request(path: string, options: RequestOptions = {}): Promise<Response> {
@@ -152,15 +169,23 @@ async function request(path: string, options: RequestOptions = {}): Promise<Resp
     if (token) headers["X-CSRF-Token"] = token;
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers,
-    // Required: the session and CSRF cookies ride along on every call.
-    credentials: "include",
-    cache: "no-store",
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    signal: options.signal,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers,
+      // Required: the session and CSRF cookies ride along on every call.
+      credentials: "include",
+      cache: "no-store",
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      signal: options.signal,
+      ...(keepalive ? { keepalive: true } : {}),
+    });
+  } catch (cause) {
+    // Callers rely on aborts staying aborts; only a failed connection is reworded.
+    if (cause instanceof TypeError) throw new ApiError(0, OFFLINE_MESSAGE);
+    throw cause;
+  }
 
   if (!response.ok) {
     // Authentication endpoints have their own error state. Only protected
@@ -190,10 +215,27 @@ async function request(path: string, options: RequestOptions = {}): Promise<Resp
   return response;
 }
 
+async function readJson<T>(response: Response): Promise<T> {
+  try {
+    return (await response.json()) as T;
+  } catch (cause) {
+    if (cause instanceof SyntaxError) throw new ApiError(response.status, UNREADABLE_REPLY_MESSAGE);
+    throw cause;
+  }
+}
+
 /** Perform a request whose response body is JSON. */
 export async function apiJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  return readJson<T>(await request(path, options));
+}
+
+/** Like `apiJson`, but also hands back the response headers. */
+export async function apiJsonWithHeaders<T>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<{ data: T; headers: Headers }> {
   const response = await request(path, options);
-  return (await response.json()) as T;
+  return { data: await readJson<T>(response), headers: response.headers };
 }
 
 /** Perform a request that returns 204 No Content. */

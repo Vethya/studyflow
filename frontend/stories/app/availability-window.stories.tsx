@@ -10,7 +10,7 @@ type Story = StoryObj<typeof meta>;
 export const Add: Story = { render: (args) => <DialogDemo label="Add weekly window">{(open, onOpenChange) => <AddWindowDialog {...args} open={open} onOpenChange={onOpenChange} />}</DialogDemo>, play: async ({ canvasElement, args }) => {
   await userEvent.click(await within(canvasElement).findByRole("button", { name: "Add weekly window" }));
   const dialog = within(await within(document.body).findByRole("dialog"));
-  await userEvent.click(dialog.getByRole("button", { name: "Add window" }));
+  await userEvent.click(dialog.getByRole("button", { name: "Add study hours" }));
   await waitFor(() => expect(args.onSubmit).toHaveBeenCalledWith({ dayOfWeek: 1, startTime: "18:00", endTime: "21:00" }));
 } };
 export const Overnight: Story = { ...Add, play: async ({ canvasElement }) => {
@@ -21,6 +21,6 @@ export const Overnight: Story = { ...Add, play: async ({ canvasElement }) => {
 } };
 export const SaveError: Story = { ...Add, args: { onSubmit: fn(async () => { throw new Error("Could not save window."); }) }, play: async ({ canvasElement }) => {
   await userEvent.click(await within(canvasElement).findByRole("button", { name: "Add weekly window" }));
-  await userEvent.click(within(await within(document.body).findByRole("dialog")).getByRole("button", { name: "Add window" }));
+  await userEvent.click(within(await within(document.body).findByRole("dialog")).getByRole("button", { name: "Add study hours" }));
   await expect(await within(document.body).findByText("Could not save window.")).toBeInTheDocument();
 } };

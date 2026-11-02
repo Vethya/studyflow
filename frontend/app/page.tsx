@@ -3,11 +3,12 @@
 import { useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { Calendar, BarChart3, Clock, Sparkles, BookOpen, Target, GraduationCap, Pencil, NotebookPen, Check } from "lucide-react";
+import { Calendar, BarChart3, Clock, Sparkles, BookOpen, Target, GraduationCap, Pencil, NotebookPen, Check } from "@/components/icons";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { ScrollTrigger } from "gsap/dist/ScrollTrigger";
 import { useSession } from "@/hooks/use-session";
+import { BrandIcon } from "@/components/brand-icon";
 
 if (typeof window !== "undefined") {
   gsap.registerPlugin(ScrollTrigger, useGSAP);
@@ -150,11 +151,12 @@ function Navigation() {
     <nav ref={navRef} className="absolute top-0 left-0 right-0 z-50 w-full">
       <div className="max-w-[1200px] mx-auto px-6 flex items-center justify-between h-16">
         {/* Logo */}
-        <div className="flex items-center">
+        <Link href="/" aria-label="StudyFlow home" className="flex items-center gap-2 rounded-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">
+          <BrandIcon className="size-8 text-white" />
           <span className="font-[family-name:var(--font-display)] font-bold text-[16px] tracking-[-0.01em] text-white">
-            Studyflow
+            StudyFlow
           </span>
-        </div>
+        </Link>
 
         {/* Center nav */}
         <div className="hidden md:flex items-center gap-8">
@@ -545,7 +547,7 @@ Each task carries an estimate, a priority and a due date. Add them up across the
       <section id="how-it-works" className="landing-canvas py-28">
         <div className="max-w-[1200px] mx-auto px-6">
           <h2 className="section-heading font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-[1.1] text-center mb-16">
-            How Studyflow works
+            How StudyFlow works
           </h2>
 
           <div className="steps-grid grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -657,7 +659,7 @@ Each task carries an estimate, a priority and a due date. Add them up across the
           <div className="product-image landing-card-shadow rounded-[24px] overflow-hidden">
             <Image
               src="/landing/hero-study-app.png"
-              alt="Studyflow app interface"
+              alt="StudyFlow app interface"
               width={1200}
               height={600}
               className="w-full h-auto"
@@ -688,11 +690,12 @@ It takes about five minutes to enter a term of coursework and the hours you have
       {/* ═══════ Footer ═══════ */}
       <footer className="landing-surface border-t landing-border py-16">
         <div className="footer-content max-w-[1200px] mx-auto px-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
-          <div className="flex items-center">
+          <Link href="/" aria-label="StudyFlow home" className="flex items-center gap-2 rounded-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+            <BrandIcon className="size-8" />
             <span className="font-[family-name:var(--font-display)] font-bold text-[16px] tracking-[-0.01em] landing-ink">
-              Studyflow
+              StudyFlow
             </span>
-          </div>
+          </Link>
 
           <div className="flex flex-wrap gap-8">
             <Link href="#features" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">Features</Link>
@@ -702,7 +705,7 @@ It takes about five minutes to enter a term of coursework and the hours you have
             <Link href="/terms" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">Terms</Link>
           </div>
 
-          <p className="text-[12px] landing-subtle">© 2026 Studyflow</p>
+          <p className="text-[12px] landing-subtle">© 2026 StudyFlow</p>
         </div>
       </footer>
     </div>

@@ -31,20 +31,16 @@ import {
 } from "./capacity";
 import {
   gettingStartedHidden,
-  isNewAccount,
   onboardingProgress,
   onboardingSteps,
   rememberGettingStartedHidden,
-  rememberWelcomeSeen,
   restartOnboarding,
   subscribeToOnboardingFlags,
-  welcomeSeen,
 } from "./onboarding";
 import { applyThemeWithTransition } from "./theme";
 import { ALL_TIMEZONES, detectTimezone, formatOffset, withTimezone } from "./timezones";
 import {
   SWR_KEYS,
-  activeScheduleKey,
   adaptiveEstimateKey,
   effortProgressKey,
   taskDetailKey,
@@ -127,11 +123,12 @@ describe("datetime helpers", () => {
     expect(startOfZonedDay(now, zone).getUTCHours()).toBe(0);
     expect(addZonedDays(now, 2, zone).getUTCDate()).toBe(16);
     expect(zonedCalendarDate(2026, 8, 14, zone).getUTCDate()).toBe(14);
-    expect(formatHour(0)).toBe("12am");
-    expect(formatHour(12)).toBe("12pm");
-    expect(formatHour(9)).toBe("9am");
-    expect(formatHour(21)).toBe("9pm");
-    expect(formatHour(-1)).toBe("11pm");
+    expect(formatHour(0)).toBe("00:00");
+    expect(formatHour(12)).toBe("12:00");
+    expect(formatHour(9)).toBe("09:00");
+    expect(formatHour(21)).toBe("21:00");
+    expect(formatHour(-1)).toBe("23:00");
+    expect(formatDateTime("2026-09-14T17:05:00Z", "UTC", { hour: "numeric", minute: "2-digit" })).toMatch(/^17:05$/);
   });
 });
 
@@ -224,18 +221,13 @@ describe("onboarding, events, and browser helpers", () => {
   it("tracks checklist progress and dismissals", () => {
     const state = { weeklyWindows: 0, openTasks: 0, plannedSessions: 0, recordedOutcomes: 0 };
     expect(onboardingProgress(onboardingSteps(state))).toMatchObject({ done: 0, total: 4, complete: false });
-    expect(isNewAccount(state)).toBe(true);
-    expect(isNewAccount({ ...state, openTasks: 1 })).toBe(false);
     const listener = vi.fn();
     const unsubscribe = subscribeToOnboardingFlags(listener);
-    rememberWelcomeSeen();
     rememberGettingStartedHidden();
-    expect(welcomeSeen()).toBe(true);
     expect(gettingStartedHidden()).toBe(true);
-    expect(listener).toHaveBeenCalledTimes(2);
+    expect(listener).toHaveBeenCalledTimes(1);
     unsubscribe();
     restartOnboarding();
-    expect(welcomeSeen()).toBe(false);
     expect(gettingStartedHidden()).toBe(false);
   });
 
@@ -288,14 +280,15 @@ describe("onboarding, events, and browser helpers", () => {
     const storage = window.localStorage;
     vi.spyOn(storage, "getItem").mockImplementation(() => { throw new Error("blocked"); });
     restartOnboarding();
-    expect(welcomeSeen()).toBe(false);
+    expect(gettingStartedHidden()).toBe(false);
     const browserWindow = window;
     vi.stubGlobal("window", { localStorage: { getItem: () => { throw new Error("blocked"); }, removeItem: () => { throw new Error("blocked"); } } });
     restartOnboarding();
-    expect(welcomeSeen()).toBe(false);
+    expect(gettingStartedHidden()).toBe(false);
     vi.stubGlobal("window", browserWindow);
     vi.spyOn(storage, "setItem").mockImplementation(() => { throw new Error("blocked"); });
-    rememberWelcomeSeen();
+    rememberGettingStartedHidden();
+    expect(gettingStartedHidden()).toBe(true);
     vi.spyOn(storage, "removeItem").mockImplementation(() => { throw new Error("blocked"); });
     const listener = vi.fn();
     const unsubscribe = subscribeToOnboardingFlags(listener);
@@ -335,8 +328,7 @@ describe("cache keys, theme, and contracts", () => {
     expect(taskSearchKey("  ")).toBeNull();
     expect(taskSearchKey("  read ")).toEqual([SWR_KEYS.taskSearch, "read"]);
     expect(taskDetailKey("task-1")).toEqual(["studyflow/task", "task-1"]);
-    expect(activeScheduleKey(null)).toBeNull();
-    expect(activeScheduleKey([task()])).toHaveLength(2);
+    expect(taskListKey({ offset: 20 })).toEqual([SWR_KEYS.tasks, { offset: 20 }]);
     expect(effortProgressKey([task()], null, false)).toEqual([
       SWR_KEYS.effortProgress,
       expect.any(String),

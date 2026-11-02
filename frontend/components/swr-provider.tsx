@@ -73,6 +73,7 @@ function rootsForMutation(path: string): string[] {
     ];
   }
   if (path === "/account/identities") return [SWR_KEYS.identities];
+  if (path.startsWith("/reminders/")) return [SWR_KEYS.reminderPreferences];
   if (path.startsWith("/account/deletion/")) return [SWR_KEYS.deletionStatus];
   if (path.startsWith("/adaptive-estimates/")) return ["studyflow/adaptive-estimate"];
   if (path === "/schedule-proposals") return [SWR_KEYS.pendingRevision];
@@ -102,10 +103,13 @@ function StudyFlowDataChangeListener() {
     const onDataChanged = (event: Event) => {
       const detail = (event as CustomEvent<StudyFlowDataChangedDetail | undefined>).detail;
       const roots = detail ? rootsForMutation(detail.path) : ALL_CACHE_ROOTS;
+      // Only the key filter: passing a data argument, even `undefined`, makes
+      // SWR overwrite the cache, which blanks every list and makes a pending
+      // functional `setData` update run against nothing.
       void mutate((key) => {
         const root = rootForKey(key);
         return root !== null && roots.includes(root);
-      }, undefined, { revalidate: true });
+      });
     };
     window.addEventListener(STUDYFLOW_DATA_CHANGED_EVENT, onDataChanged);
     return () => window.removeEventListener(STUDYFLOW_DATA_CHANGED_EVENT, onDataChanged);

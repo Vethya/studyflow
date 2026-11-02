@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2 } from "@/components/icons";
 import { account } from "@/lib/api";
 import { useApi } from "@/hooks/use-api";
 import { SWR_KEYS } from "@/lib/swr-keys";

@@ -130,6 +130,11 @@ describe("Google import review page", () => {
     fireEvent.change(estimate, { target: { value: "0" } });
     expect(screen.getByRole("alert")).toBeTruthy();
     fireEvent.change(estimate, { target: { value: "90" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Estimate 2h for Essay/ }));
+    expect((screen.getByLabelText("Estimate (minutes)") as HTMLInputElement).value).toBe("120");
+    expect(screen.getByRole("button", { name: /^Estimate 2h for Essay/ }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText(/of work across 1 task\./)).toBeTruthy();
+    fireEvent.change(estimate, { target: { value: "90" } });
     screen.getByRole("button", { name: "Category for Essay" }).click();
     screen.getAllByRole("button", { name: "Reading" })[0].click();
     screen.getByRole("button", { name: "Priority for Essay" }).click();
@@ -181,5 +186,17 @@ describe("Google import review page", () => {
     render(page());
     screen.getByRole("button", { name: "Add 2 tasks" }).click();
     await waitFor(() => expect(screen.getByText(/2 tasks added/)).toBeTruthy());
+  });
+
+  it("counts down only in the last half hour before the list expires", () => {
+    const inMinutes = (minutes: number) => new Date(Date.now() + minutes * 60_000 - 1_000).toISOString();
+    state.data = { source: "google_calendar", items: calendarItems, expiresAt: inMinutes(10) };
+    render(page());
+    expect(screen.getByText("(10 min left)")).toBeTruthy();
+
+    cleanup();
+    state.data = { source: "google_calendar", items: calendarItems, expiresAt: inMinutes(90) };
+    render(page());
+    expect(screen.queryByText(/min left/)).toBeNull();
   });
 });

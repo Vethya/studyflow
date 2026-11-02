@@ -9,7 +9,8 @@ vi.mock("gsap/dist/ScrollTrigger", () => ({ ScrollTrigger: { create: vi.fn() } }
 vi.mock("gsap", () => ({ default: { registerPlugin: vi.fn() } }));
 
 describe("landing page server module", () => {
-  it("loads without a browser global", async () => {
+  // A cold import of the whole landing page; under coverage on a busy machine it can pass 20s.
+  it("loads without a browser global", { timeout: 60_000 }, async () => {
     const landingModule = await import("./page");
     expect(landingModule.default).toBeTypeOf("function");
   });

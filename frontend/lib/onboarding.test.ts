@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { isNewAccount, onboardingProgress, onboardingSteps } from "./onboarding";
+import { onboardingProgress, onboardingSteps } from "./onboarding";
 
 const state = {
   weeklyWindows: 0,
@@ -38,10 +38,4 @@ it("is complete only once a session outcome has been recorded", () => {
 
   expect(finished.complete).toBe(true);
   expect(finished.next).toBeNull();
-});
-
-it("treats an account with no hours and no tasks as new", () => {
-  expect(isNewAccount(state)).toBe(true);
-  expect(isNewAccount({ ...state, openTasks: 1 })).toBe(false);
-  expect(isNewAccount({ ...state, weeklyWindows: 1 })).toBe(false);
 });

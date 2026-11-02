@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "@/components/icons";
 
 export const LEGAL_LAST_UPDATED = "18 September 2026";
 
@@ -16,7 +16,7 @@ export function LegalPage({ title, intro, children }: LegalPageProps) {
       <header className="border-b">
         <div className="mx-auto flex max-w-[760px] items-center justify-between px-4 py-4 sm:px-6">
           <Link href="/" className="flex items-center font-semibold">
-            Studyflow
+            StudyFlow
           </Link>
           <Link
             href="/"
@@ -41,7 +41,7 @@ export function LegalPage({ title, intro, children }: LegalPageProps) {
         <div className="mx-auto flex max-w-[760px] flex-wrap gap-6 px-4 py-6 text-sm text-muted-foreground sm:px-6">
           <Link href="/privacy" className="hover:text-foreground">Privacy Policy</Link>
           <Link href="/terms" className="hover:text-foreground">Terms of Service</Link>
-          <span>© 2026 Studyflow</span>
+          <span>© 2026 StudyFlow</span>
         </div>
       </footer>
     </div>

@@ -51,7 +51,7 @@ describe("landing page", () => {
     expect(screen.getAllByText("Get started for free").length).toBeGreaterThan(0);
     expect(screen.getByText("Coming soon")).toBeTruthy();
     expect(screen.getByText("Your real hours, not an ideal week.")).toBeTruthy();
-    expect(screen.getByText("How Studyflow works")).toBeTruthy();
+    expect(screen.getByText("How StudyFlow works")).toBeTruthy();
     state.status = "authenticated";
     rerender(<LandingPage />);
     expect(screen.getByText("Open dashboard")).toBeTruthy();

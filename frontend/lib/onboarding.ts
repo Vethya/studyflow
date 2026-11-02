@@ -12,6 +12,8 @@ export type OnboardingStepId = "hours" | "tasks" | "plan" | "outcomes";
 export interface OnboardingStep {
   id: OnboardingStepId;
   title: string;
+  /** One short line shown under the next step in the sidebar guide. */
+  hint: string;
   description: string;
   /** Where the student goes to do it. */
   href: string;
@@ -30,6 +32,7 @@ export function onboardingSteps(state: OnboardingState): OnboardingStep[] {
   return [
     {
       id: "hours",
+      hint: "When you are free to study each week.",
       title: "Set the hours you can study",
       description:
         "Your weekly windows are the time StudyFlow plans inside. Everything it tells you is measured against them.",
@@ -39,6 +42,7 @@ export function onboardingSteps(state: OnboardingState): OnboardingStep[] {
     },
     {
       id: "tasks",
+      hint: "What is due, and roughly how long it takes.",
       title: "Add your coursework",
       description:
         "Each task needs a deadline and your estimate of how long it takes. That is what gets weighed against your hours.",
@@ -48,6 +52,7 @@ export function onboardingSteps(state: OnboardingState): OnboardingStep[] {
     },
     {
       id: "plan",
+      hint: "StudyFlow books study sessions for you.",
       title: "Generate your study plan",
       description:
         "StudyFlow books sessions in the hours you are free, splits long work, and tells you what does not fit before it is too late.",
@@ -57,6 +62,7 @@ export function onboardingSteps(state: OnboardingState): OnboardingStep[] {
     },
     {
       id: "outcomes",
+      hint: "Tell StudyFlow how a past session went.",
       title: "Say how each session went",
       description:
         "Finished, partly done or missed. That is how remaining work stays honest and how your estimates learn from you.",
@@ -82,12 +88,6 @@ export function onboardingProgress(steps: OnboardingStep[]): {
   };
 }
 
-/** A brand-new account: nothing set up at all, so the welcome tour is worth showing. */
-export function isNewAccount(state: OnboardingState): boolean {
-  return state.weeklyWindows === 0 && state.openTasks === 0;
-}
-
-const SEEN_KEY = "studyflow:welcome-seen";
 const HIDDEN_KEY = "studyflow:getting-started-hidden";
 
 const memoryFlags = new Map<string, boolean>();
@@ -114,7 +114,7 @@ function write(key: string): void {
 }
 
 /**
- * Both flags are read through `useSyncExternalStore`, so a component never has
+ * The flag is read through `useSyncExternalStore`, so a component never has
  * to set state from an effect just to learn what the browser remembers.
  */
 const listeners = new Set<() => void>();
@@ -124,25 +124,65 @@ export function subscribeToOnboardingFlags(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-export const welcomeSeen = () => read(SEEN_KEY);
 export const gettingStartedHidden = () => read(HIDDEN_KEY);
-
-export function rememberWelcomeSeen(): void {
-  write(SEEN_KEY);
-  listeners.forEach((listener) => listener());
-}
 
 export function rememberGettingStartedHidden(): void {
   write(HIDDEN_KEY);
   listeners.forEach((listener) => listener());
 }
 
-/** Lets a student replay the tour and bring the checklist back. */
-export function restartOnboarding(): void {
-  memoryFlags.delete(SEEN_KEY);
+const TOUR_SEEN_KEY = "studyflow:tour-seen";
+
+function tourSeenKey(accountId: string): string {
+  return `${TOUR_SEEN_KEY}:${accountId}`;
+}
+
+/**
+ * The guided tour opens by itself until this account has finished or skipped
+ * it. The flag is per account and is not cleared on logout.
+ */
+export function productTourSeen(accountId: string | null): boolean {
+  if (accountId === null) return true;
+  return read(tourSeenKey(accountId));
+}
+
+export function rememberProductTourSeen(accountId: string | null): void {
+  if (accountId === null) return;
+  write(tourSeenKey(accountId));
+  listeners.forEach((listener) => listener());
+}
+
+const tourRequests = new Set<() => void>();
+
+export function onProductTourRequest(listener: () => void): () => void {
+  tourRequests.add(listener);
+  return () => tourRequests.delete(listener);
+}
+
+/** Replays the tour from the start, e.g. from the account menu. */
+export function startProductTour(): void {
+  tourRequests.forEach((listener) => listener());
+}
+
+/**
+ * Drops the getting-started flag for the student who just left.
+ * The tour flag stays, keyed by account id, so signing back in does not
+ * replay the walkthrough.
+ */
+export function clearSignedInOnboarding(): void {
   memoryFlags.delete(HIDDEN_KEY);
   try {
-    window.localStorage.removeItem(SEEN_KEY);
+    window.localStorage.removeItem(HIDDEN_KEY);
+  } catch {
+    // Memory is already cleared. A later read may still see storage.
+  }
+  listeners.forEach((listener) => listener());
+}
+
+/** Brings a hidden getting-started guide back. */
+export function restartOnboarding(): void {
+  memoryFlags.delete(HIDDEN_KEY);
+  try {
     window.localStorage.removeItem(HIDDEN_KEY);
   } catch {
     // Nothing to clear when storage is unavailable.

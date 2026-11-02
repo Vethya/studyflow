@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none" role="img" aria-labelledby="symbol-title">
+  <title id="symbol-title">StudyFlow open book symbol</title>
+  <g fill="#2563EB">
+    <path d="M25 50C44 50 61 55 61 71V92C51 80 39 79 25 81C23.895 81 23 80.105 23 79V52C23 50.895 23.895 50 25 50Z"/>
+    <path d="M65 90V71C67 60 76 50 87 44C94 40 98 36 101 32C101.8 30.933 102.467 31.933 103 35C104 41 104 49 104 59C104 67 97 71 88 75C78 79 71 83 65 90Z"/>
+    <path d="M62 94C74 84 88 80 103 80C104.105 80 105 80.895 105 82V86C105 87.105 104.105 88 103 88C89 86 75 91 65 97C63 98.2 62 98 60.5 96C52 85 40 82 25 84L25 81C41 79 54 84 62 94Z"/>
+  </g>
+</svg>

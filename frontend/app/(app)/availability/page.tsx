@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -15,11 +16,9 @@ import {
   GoogleImportButton,
   GoogleImportReminder,
 } from "@/components/google-import-button";
-import { Plus, Trash2, CalendarOff, Clock4, Loader2, Pencil, RefreshCw, X } from "lucide-react";
+import { Plus, Trash2, CalendarOff, Clock4, Loader2, Pencil, RefreshCw, X } from "@/components/icons";
 import {
   EmptyState,
-  Figure,
-  FigureRow,
   PageHeader,
   PageShell,
   SectionCard,
@@ -28,7 +27,7 @@ import { GridLegend, WeekGrid, type GridBlock, type GridColumn } from "@/compone
 import { toast } from "sonner";
 import { DAY_NAMES, DAY_NAMES_SHORT } from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import { ScheduleTechnicalFailure, availability as availabilityApi, scheduling } from "@/lib/api";
+import { ScheduleTechnicalFailure, availability as availabilityApi, ensureSentence, scheduling } from "@/lib/api";
 import { SchedulePreview } from "@/components/schedule-preview";
 import { PlanGenerationDialog } from "@/components/plan-generation-dialog";
 import type { WindowDraft } from "@/lib/api";
@@ -36,9 +35,10 @@ import type { UnavailablePeriod, AvailabilityWindow } from "@/types/availability
 import type { ScheduleProposal } from "@/types/schedule";
 import { formatDuration } from "@/lib/constants";
 import { weeklyPatternMinutes } from "@/lib/capacity";
+import { flushPendingActions, scheduleUndoable } from "@/lib/undo";
+import { DateLeaf } from "@/components/study-kit";
 import { describeError, useApi } from "@/hooks/use-api";
 import { AddWindowDialog, ExceptionDialog } from "@/components/availability-dialogs";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Popover,
   PopoverContent,
@@ -47,7 +47,7 @@ import {
   PopoverTitle,
 } from "@/components/ui/popover";
 import { SWR_KEYS } from "@/lib/swr-keys";
-import { dayKey, formatDate } from "@/lib/datetime";
+import { dayKey, formatClock, formatDate, formatHour } from "@/lib/datetime";
 import { useAccountTimezone } from "@/hooks/use-account-timezone";
 
 /** Display Monday-first while the data itself is indexed 0 = Sunday. */
@@ -59,19 +59,27 @@ function toMinutes(time: string): number {
   return h * 60 + m;
 }
 
+/** Windows are matched by their times: every replace-all save issues new ids. */
+function windowKey(w: WindowDraft): string {
+  return `${w.dayOfWeek}|${w.startTime}|${w.endTime}`;
+}
+
+function toDraft(w: WindowDraft): WindowDraft {
+  return { dayOfWeek: w.dayOfWeek, startTime: w.startTime, endTime: w.endTime };
+}
+
 export default function AvailabilityPage() {
   const timeZone = useAccountTimezone();
-  const triggerRef = useRef<HTMLElement | null>(null);
   const [selectedWindow, setSelectedWindow] = useState<{
     window: AvailabilityWindow;
     anchorEl: HTMLElement | null;
   } | null>(null);
-  const [confirmDeleteWindow, setConfirmDeleteWindow] = useState<AvailabilityWindow | null>(null);
   const [hoveredWindow, setHoveredWindow] = useState<string | null>(null);
   const [windowDialogOpen, setWindowDialogOpen] = useState(false);
+  const [windowDialogDay, setWindowDialogDay] = useState(1);
+  const [editingWindow, setEditingWindow] = useState<AvailabilityWindow | null>(null);
   const [exceptionDialogOpen, setExceptionDialogOpen] = useState(false);
   const [editingPeriod, setEditingPeriod] = useState<UnavailablePeriod | null>(null);
-  const [pendingId, setPendingId] = useState<string | null>(null);
   /**
    * SPEC §17.5: a saved availability change can invalidate future sessions.
    * Their count is surfaced, and the student may then ask for a new plan —
@@ -98,6 +106,9 @@ export default function AvailabilityPage() {
     setGenerating(true);
     setTechnicalFailure(null);
     try {
+      // A removal still inside its undo window must land before planning,
+      // or the planner would still see that exception.
+      await flushPendingActions();
       const next = await scheduling.generateProposal();
       setProposal(next);
       setPreviewOpen(true);
@@ -121,8 +132,26 @@ export default function AvailabilityPage() {
   const windows = useApi(SWR_KEYS.availabilityWindows, loadWindows);
   const periods = useApi(SWR_KEYS.unavailablePeriods, loadPeriods);
 
-  const allWindows = useMemo(() => windows.data ?? [], [windows.data]);
+  /** Study hours whose removal is still inside its undo window. */
+  const [removingWindowKeys, setRemovingWindowKeys] = useState<ReadonlySet<string>>(new Set());
+  const allWindows = useMemo(
+    () => (windows.data ?? []).filter((w) => !removingWindowKeys.has(windowKey(w))),
+    [windows.data, removingWindowKeys],
+  );
+  // The undo commit runs seconds later and must save against what is current then.
+  const latestWindows = useRef<AvailabilityWindow[]>([]);
+  useEffect(() => {
+    latestWindows.current = windows.data ?? [];
+  }, [windows.data]);
+  /** The tail of the save queue; see `queueSave`. */
+  const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
   const allPeriods = useMemo(() => periods.data ?? [], [periods.data]);
+  /** Exceptions whose removal is still inside its undo window. */
+  const [removingPeriodIds, setRemovingPeriodIds] = useState<ReadonlySet<string>>(new Set());
+  const visiblePeriods = useMemo(
+    () => allPeriods.filter((period) => !removingPeriodIds.has(period.id)),
+    [allPeriods, removingPeriodIds],
+  );
 
   const columns: GridColumn[] = useMemo(
     () => DISPLAY_DAYS.map((day) => ({ key: String(day), label: DAY_NAMES_SHORT[day] })),
@@ -137,6 +166,8 @@ export default function AvailabilityPage() {
         start: toMinutes(w.startTime),
         end: toMinutes(w.endTime),
         variant: "available" as const,
+        label: "Study time",
+        meta: `${w.startTime}–${w.endTime}`,
         title: `${DAY_NAMES[w.dayOfWeek]} ${w.startTime}–${w.endTime}`,
         onSelect: (e) => setSelectedWindow({ window: w, anchorEl: e?.currentTarget ?? null }),
       })),
@@ -170,62 +201,73 @@ export default function AvailabilityPage() {
     [allWindows],
   );
 
-  const toDraft = (): WindowDraft[] =>
-    allWindows.map((w) => ({
-      dayOfWeek: w.dayOfWeek,
-      startTime: w.startTime,
-      endTime: w.endTime,
-    }));
-
   /**
    * There is no per-window endpoint: the whole weekly set is replaced on every
-   * change, so both adding and removing go through the same PUT.
+   * change, so adding, editing and removing all go through the same PUT.
    */
   async function saveWindows(next: WindowDraft[]) {
     const saved = await availabilityApi.replaceWindows(next);
+    // Set here, not only on re-render: a queued save may start before React
+    // has rendered this one's result.
+    latestWindows.current = saved.windows;
     windows.setData(saved.windows);
+    recordInvalidatedSessions(saved.invalidatedFutureSessionIds);
+    setPlanStale(true);
     return saved;
   }
 
-  async function handleAddWindow(draft: WindowDraft) {
-    const saved = await saveWindows([...toDraft(), draft]);
-    recordInvalidatedSessions(saved.invalidatedFutureSessionIds);
-    setPlanStale(true);
-    toast.success("Window added");
+  /**
+   * Saves run one at a time, each building its week from what the one before
+   * it saved, so overlapping saves never undo each other.
+   */
+  function queueSave(build: () => WindowDraft[]) {
+    const job = saveQueue.current.then(() => saveWindows(build()));
+    saveQueue.current = job.catch(() => undefined);
+    return job;
   }
 
-  async function handleDeleteWindow(id: string) {
-    // The confirmation callback resolves a live window before calling this helper. Keep the
-    // stale-details fallback for defensive safety, but it is unreachable through the UI.
-    /* c8 ignore start */
-    const target =
-      allWindows.find((w) => w.id === id) ??
-      (confirmDeleteWindow &&
-        allWindows.find(
-          (w) =>
-            w.dayOfWeek === confirmDeleteWindow.dayOfWeek &&
-            w.startTime === confirmDeleteWindow.startTime &&
-            w.endTime === confirmDeleteWindow.endTime,
-        ));
+  async function handleSaveWindow(draft: WindowDraft) {
+    const replacing = editingWindow ? windowKey(editingWindow) : null;
+    await queueSave(() => [
+      ...latestWindows.current.filter((w) => windowKey(w) !== replacing).map(toDraft),
+      draft,
+    ]);
+    toast.success(editingWindow ? "Study hours updated" : "Study hours added");
+  }
 
-    const remaining = target
-      ? allWindows.filter((w) => w !== target)
-      : allWindows.filter((w) => w.id !== id);
-    /* c8 ignore stop */
+  function handleDeleteWindow(target: AvailabilityWindow) {
+    const key = windowKey(target);
+    const reveal = () =>
+      setRemovingWindowKeys((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+    setRemovingWindowKeys((current) => new Set(current).add(key));
+    scheduleUndoable({
+      key: `window:${key}`,
+      message: "Study hours removed",
+      description: `${DAY_NAMES[target.dayOfWeek]} ${target.startTime}–${target.endTime}`,
+      // Each removal saves only its own window's absence. Another removal
+      // still inside its undo window stays saved, so its Undo keeps working.
+      commit: async () => {
+        await queueSave(() =>
+          latestWindows.current.filter((w) => windowKey(w) !== key).map(toDraft),
+        );
+      },
+      onCommitted: reveal,
+      onUndo: reveal,
+      onError: (cause) => {
+        reveal();
+        return describeError(cause);
+      },
+    });
+  }
 
-    setPendingId(id);
-    try {
-      const saved = await saveWindows(
-        remaining.map((w) => ({ dayOfWeek: w.dayOfWeek, startTime: w.startTime, endTime: w.endTime })),
-      );
-      recordInvalidatedSessions(saved.invalidatedFutureSessionIds);
-      setPlanStale(true);
-      toast.success("Window removed");
-    } catch (cause) {
-      toast.error(describeError(cause));
-    } finally {
-      setPendingId(null);
-    }
+  function openEditWindow(target: AvailabilityWindow) {
+    setEditingWindow(target);
+    setWindowDialogDay(target.dayOfWeek);
+    setWindowDialogOpen(true);
   }
 
   async function handleSaveException(draft: {
@@ -252,45 +294,62 @@ export default function AvailabilityPage() {
     toast.success("Exception added");
   }
 
-  async function handleDeleteException(id: string) {
-    setPendingId(id);
-    try {
-      await availabilityApi.deleteUnavailablePeriod(id);
-      periods.setData(allPeriods.filter((period) => period.id !== id));
-      toast.success("Exception removed");
-    } catch (cause) {
-      toast.error(describeError(cause));
-    } finally {
-      setPendingId(null);
-    }
+  function handleDeleteException(target: UnavailablePeriod) {
+    const reveal = () =>
+      setRemovingPeriodIds((current) => {
+        const next = new Set(current);
+        next.delete(target.id);
+        return next;
+      });
+    setRemovingPeriodIds((current) => new Set(current).add(target.id));
+    scheduleUndoable({
+      key: `period:${target.id}`,
+      message: "Exception removed",
+      description: target.title,
+      commit: () => availabilityApi.deleteUnavailablePeriod(target.id),
+      onCommitted: () =>
+        periods.setData((current) => (current ?? []).filter((period) => period.id !== target.id)),
+      onUndo: reveal,
+      onError: (cause) => {
+        reveal();
+        return describeError(cause);
+      },
+    });
   }
 
   const loadError = windows.error ?? periods.error;
 
+  const weeklyMinutes = weeklyPatternMinutes(allWindows);
+  const minutesByDay = DISPLAY_DAYS.map((day) =>
+    allWindows
+      .filter((w) => w.dayOfWeek === day)
+      .reduce((sum, w) => sum + (toMinutes(w.endTime) - toMinutes(w.startTime)), 0),
+  );
+  const busiestDay = Math.max(60, ...minutesByDay);
+  const daysWithTime = minutesByDay.filter((minutes) => minutes > 0).length;
+
+  function openAddWindow(day = 1) {
+    setWindowDialogDay(day);
+    setWindowDialogOpen(true);
+  }
+
   return (
     <PageShell>
       <PageHeader
+        icon={Clock4}
+        eyebrow="Study hours"
         title="Availability"
-        description="The hours you are free to study. Everything StudyFlow tells you about your workload is measured against these."
+        description="When you can study each week. StudyFlow only plans sessions inside these hours."
         actions={
           <>
-            <Button
-              variant="outline"
-              onClick={() => void requestRegeneration()}
-              disabled={isGenerating}
-              aria-busy={isGenerating}
-            >
-              {isGenerating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-              Re-plan my time
-            </Button>
+            <GoogleImportButton source="google_calendar" />
             <Button variant="outline" onClick={() => setExceptionDialogOpen(true)}>
               <CalendarOff />
               Add exception
             </Button>
-            <GoogleImportButton source="google_calendar" />
-            <Button onClick={() => setWindowDialogOpen(true)}>
+            <Button onClick={() => openAddWindow()}>
               <Plus />
-              Add window
+              Add study hours
             </Button>
           </>
         }
@@ -327,8 +386,8 @@ export default function AvailabilityPage() {
             </Button>
           }
         >
-          {technicalFailure} This is a problem on our side, not a sign that your work does
-          not fit. Your current plan has not changed.
+          {ensureSentence(technicalFailure)} This is a problem on our side, not a sign that
+          your work does not fit. Your current plan has not changed.
         </Callout>
       )}
 
@@ -375,78 +434,118 @@ export default function AvailabilityPage() {
 
       <GoogleImportReminder source="google_calendar" />
 
-      <FigureRow>
-        <Figure
-          label="Weekly study time"
-          value={windows.isLoading ? null : formatDuration(weeklyPatternMinutes(allWindows))}
-          tone="surplus"
-        />
-        <Figure
-          label={allWindows.length === 1 ? "Weekly window" : "Weekly windows"}
-          value={windows.isLoading ? null : String(allWindows.length)}
-        />
-        <Figure
-          label={allPeriods.length === 1 ? "Exception" : "Exceptions"}
-          value={periods.isLoading ? null : String(allPeriods.length)}
-        />
-      </FigureRow>
+      {/* ── Weekly summary: the total, and how it spreads over the week ── */}
+      <Card className="rise-in relative overflow-hidden">
+        <CardContent className="flex flex-col gap-6 @3xl/dashboard:flex-row @3xl/dashboard:items-end @3xl/dashboard:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground">Your study week</p>
+            {windows.isLoading ? (
+              <Skeleton className="mt-2 h-10 w-44" />
+            ) : (
+              <p className="mt-1 text-[2.5rem] leading-none tabular-nums font-semibold tracking-tight">
+                {formatDuration(weeklyMinutes)}
+                <span className="ms-2 font-sans text-base text-muted-foreground">each week</span>
+              </p>
+            )}
+            <p className="mt-2 text-sm text-muted-foreground">
+              {windows.isLoading || periods.isLoading
+                ? " "
+                : `${allWindows.length} ${allWindows.length === 1 ? "block of study hours" : "blocks of study hours"} on ${daysWithTime} ${daysWithTime === 1 ? "day" : "days"} · ${visiblePeriods.length} ${visiblePeriods.length === 1 ? "exception" : "exceptions"}`}
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-4 @xl/dashboard:flex-row @xl/dashboard:items-end">
+            {/* A glance at the week's shape; the grid below has the detail. */}
+            <ol className="flex items-end gap-1.5" aria-label="Study time per day">
+              {DISPLAY_DAYS.map((day, index) => {
+                const minutes = minutesByDay[index];
+                return (
+                  <li key={day} className="flex w-9 flex-col items-center gap-1.5">
+                    <span className="whitespace-nowrap text-[0.625rem] tabular-nums text-muted-foreground">
+                      {minutes > 0 ? formatDuration(minutes) : "–"}
+                    </span>
+                    <span className="flex h-14 w-full items-end overflow-hidden rounded-md bg-muted/60">
+                      <span
+                        className={cn(
+                          "w-full rounded-md transition-[height] duration-500 ease-fluid",
+                          minutes > 0 ? "bg-surplus/75" : "bg-transparent",
+                        )}
+                        style={{ height: `${Math.max(minutes > 0 ? 12 : 0, (minutes / busiestDay) * 100)}%` }}
+                      />
+                    </span>
+                    <span className={cn("text-xs font-medium", minutes > 0 ? "text-foreground" : "text-muted-foreground")}>
+                      {DAY_NAMES_SHORT[day]}
+                    </span>
+                    <span className="sr-only">{minutes > 0 ? formatDuration(minutes) : "No study time"}</span>
+                  </li>
+                );
+              })}
+            </ol>
+            <Button
+              variant="outline"
+              onClick={() => void requestRegeneration()}
+              disabled={isGenerating}
+              aria-busy={isGenerating}
+              className="shrink-0"
+            >
+              {isGenerating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+              Re-plan my time
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* ── Main content ───────────────────────── */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="flex min-w-0 flex-col gap-4 lg:col-span-2">
+      <div className="grid min-w-0 items-start gap-6 @5xl/dashboard:grid-cols-3">
+        <div className="flex min-w-0 flex-col gap-4 @5xl/dashboard:col-span-2">
           <SectionCard
             title="Your week"
-            description="The same grid the calendar uses. Hover a window to find it in the list."
+            description="Green blocks are when you can study. Select one to change or remove it."
             flush
             footer={<GridLegend />}
           >
-          {windows.isLoading ? (
-            <Skeleton className="m-(--card-spacing) h-[26rem] rounded-lg" />
-          ) : allWindows.length === 0 ? (
-            <EmptyState
-              icon={Clock4}
-              className="border-0"
-              title="No study hours yet"
-              action={
-                <Button size="sm" onClick={() => setWindowDialogOpen(true)}>
-                  Add your first window
-                </Button>
-              }
-            >
-              Tell StudyFlow when you are free and it can tell you what fits.
-            </EmptyState>
-          ) : (
-            <WeekGrid
-              className="rounded-none border-0"
-              ariaLabel="Weekly availability"
-              columns={columns}
-              blocks={blocks}
-              hourStart={hourRange.start}
-              hourEnd={hourRange.end}
-              highlightedId={hoveredWindow}
-              onHighlight={setHoveredWindow}
-            />
-          )}
+            {windows.isLoading ? (
+              <Skeleton className="m-(--card-spacing) h-[26rem] rounded-lg" />
+            ) : allWindows.length === 0 ? (
+              <EmptyState
+                icon={Clock4}
+                className="border-0 py-14"
+                title="No study hours yet"
+                action={
+                  <Button size="sm" onClick={() => openAddWindow()}>
+                    Add your first study hours
+                  </Button>
+                }
+              >
+                Tell StudyFlow when you are free and it can tell you what fits.
+              </EmptyState>
+            ) : (
+              <WeekGrid
+                className="rounded-none border-0"
+                ariaLabel="Weekly availability"
+                columns={columns}
+                blocks={blocks}
+                hourStart={hourRange.start}
+                hourEnd={hourRange.end}
+                highlightedId={hoveredWindow}
+                onHighlight={setHoveredWindow}
+                fit
+              />
+            )}
           </SectionCard>
         </div>
 
         {/* Right column */}
         <div className="flex min-w-0 flex-col gap-4">
-
           {/*
             One row per weekday rather than a heading plus a row for every
-            window. Eight windows used to render sixteen stacked elements and
-            hid the days you are *not* free, which is exactly what you look at
-            this list to check.
+            window, so the days you are *not* free stay visible, which is
+            exactly what you look at this list to check.
           */}
-          <Card className="py-0">
-            <CardHeader className="border-b py-3">
-              <div className="flex items-center justify-between">
-                <CardTitle>Your weekly hours</CardTitle>
-                <span className="text-xs text-muted-foreground">
-                  {formatDuration(weeklyPatternMinutes(allWindows))} a week
-                </span>
-              </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Day by day</CardTitle>
+              <CardDescription>Add or remove hours for each weekday.</CardDescription>
             </CardHeader>
             <CardContent className="p-0">
               {windows.isLoading ? (
@@ -456,33 +555,25 @@ export default function AvailabilityPage() {
                 </div>
               ) : (
                 <ul className="divide-y">
-                  {DISPLAY_DAYS.map((dayIdx) => {
+                  {DISPLAY_DAYS.map((dayIdx, index) => {
                     const dayWindows = sortedAvail.filter((a) => a.dayOfWeek === dayIdx);
-                    const dayMinutes = dayWindows.reduce(
-                      (sum, w) => sum + (toMinutes(w.endTime) - toMinutes(w.startTime)),
-                      0,
-                    );
+                    const dayMinutes = minutesByDay[index];
+                    const free = dayWindows.length > 0;
                     return (
-                      <li
-                        key={dayIdx}
-                        className="flex items-start gap-3 px-4 py-2.5"
-                      >
+                      <li key={dayIdx} className="group/day px-4 py-3 compact:py-2">
+                        <div className="flex items-center gap-3">
                         <span
                           className={cn(
-                            "w-10 shrink-0 pt-1 text-xs font-medium",
-                            dayWindows.length > 0
-                              ? "text-foreground"
-                              : "text-muted-foreground",
+                            "w-8 shrink-0 text-xs font-semibold",
+                            free ? "text-foreground" : "text-muted-foreground",
                           )}
                         >
                           {DAY_NAMES_SHORT[dayIdx]}
                         </span>
 
-                        <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
-                          {dayWindows.length === 0 ? (
-                            <span className="pt-1 text-xs text-muted-foreground">
-                              Not free
-                            </span>
+                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                          {!free ? (
+                            <span className="text-xs text-muted-foreground">No study time</span>
                           ) : (
                             dayWindows.map((w) => (
                               <span
@@ -490,41 +581,56 @@ export default function AvailabilityPage() {
                                 onMouseEnter={() => setHoveredWindow(w.id)}
                                 onMouseLeave={() => setHoveredWindow(null)}
                                 className={cn(
-                                  "group/window flex items-center gap-1 rounded-md border py-1 ps-2 pe-1 text-xs tabular-nums transition-colors",
+                                  "flex items-center gap-1 rounded-full border py-0.5 ps-2.5 pe-0.5 text-xs font-medium tabular-nums transition-colors",
                                   hoveredWindow === w.id
-                                    ? "border-surplus bg-surplus/25"
-                                    : "border-surplus/40 bg-surplus-soft",
+                                    ? "border-surplus/70 bg-surplus/25"
+                                    : "border-surplus/30 bg-surplus/10",
                                 )}
                               >
-                                {w.startTime}–{w.endTime}
                                 <button
-                                  onClick={(e) => {
-                                    triggerRef.current = e.currentTarget;
-                                    setConfirmDeleteWindow(w);
-                                  }}
-                                  disabled={pendingId === w.id}
-                                  aria-label={`Remove ${DAY_NAMES[dayIdx]} ${w.startTime} to ${w.endTime}`}
-                                  className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-card hover:text-deficit"
+                                  type="button"
+                                  onClick={() => openEditWindow(w)}
+                                  aria-label={`Edit ${DAY_NAMES[dayIdx]} ${w.startTime} to ${w.endTime}`}
+                                  className="rounded-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                                 >
-                                  {pendingId === w.id ? (
-                                    <Loader2 className="size-3 animate-spin" />
-                                  ) : (
-                                    <X className="size-3" />
-                                  )}
+                                  {w.startTime}–{w.endTime}
                                 </button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon-xs"
+                                  onClick={() => handleDeleteWindow(w)}
+                                  aria-label={`Remove ${DAY_NAMES[dayIdx]} ${w.startTime} to ${w.endTime}`}
+                                  className="size-5 rounded-full text-muted-foreground hover:bg-card hover:text-deficit"
+                                >
+                                  <X className="size-3" />
+                                </Button>
                               </span>
                             ))
                           )}
                         </div>
 
-                        <span
-                          className={cn(
-                            "w-14 shrink-0 pt-1 text-end text-xs tabular-nums",
-                            dayMinutes > 0 ? "text-muted-foreground" : "text-muted-foreground/50",
-                          )}
-                        >
-                          {dayMinutes > 0 ? formatDuration(dayMinutes) : "—"}
+                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                          {dayMinutes > 0 ? formatDuration(dayMinutes) : ""}
                         </span>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="shrink-0 text-muted-foreground hover:text-foreground"
+                          onClick={() => openAddWindow(dayIdx)}
+                          aria-label={`Add study hours on ${DAY_NAMES[dayIdx]}`}
+                        >
+                          <Plus />
+                        </Button>
+                        </div>
+                        {free && (
+                          <HourStrip
+                            windows={dayWindows}
+                            hourStart={hourRange.start}
+                            hourEnd={hourRange.end}
+                            highlightedId={hoveredWindow}
+                            className="ms-11 me-9 mt-2"
+                          />
+                        )}
                       </li>
                     );
                   })}
@@ -537,7 +643,14 @@ export default function AvailabilityPage() {
           <Card>
             <CardHeader>
               <CardTitle>Exceptions</CardTitle>
-              <CardDescription>Days you know you cannot study</CardDescription>
+              <CardDescription>One-off times you cannot study, like a trip or an appointment.</CardDescription>
+              {visiblePeriods.length > 0 && (
+                <CardAction>
+                  <Button variant="ghost" size="icon-sm" onClick={() => setExceptionDialogOpen(true)} aria-label="Add another exception">
+                    <Plus />
+                  </Button>
+                </CardAction>
+              )}
             </CardHeader>
             <CardContent className="space-y-2">
               {periods.isLoading ? (
@@ -545,61 +658,62 @@ export default function AvailabilityPage() {
                   <Skeleton className="h-16 w-full" />
                   <Skeleton className="h-16 w-full" />
                 </>
-              ) : allPeriods.length === 0 ? (
-                <p className="py-6 text-center text-sm text-muted-foreground">
-                  No exceptions.
-                </p>
+              ) : visiblePeriods.length === 0 ? (
+                <EmptyState
+                  icon={CalendarOff}
+                  title="No exceptions"
+                  className="py-5"
+                  action={
+                    <Button variant="outline" size="sm" onClick={() => setExceptionDialogOpen(true)}>
+                      Add an exception
+                    </Button>
+                  }
+                >
+                  Have an appointment or a day off? Block that time so it stays out of your study plan.
+                </EmptyState>
               ) : (
-                allPeriods.map((period) => {
+                visiblePeriods.map((period) => {
                   const start = new Date(period.startDate);
                   const end = new Date(period.endDate);
                   const sameDay = dayKey(start, timeZone) === dayKey(end, timeZone);
                   return (
                     <div
                       key={period.id}
-                      className="flex items-start justify-between rounded-lg border bg-muted/30 p-3 gap-3"
+                      className="group/period flex items-center justify-between gap-3 rounded-lg px-1 py-1.5 transition-colors duration-150 hover-fine:bg-muted/40"
                     >
-                      <div className="flex items-start gap-3 min-w-0">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-background border">
-                          <CalendarOff className="h-4 w-4 text-muted-foreground" />
-                        </div>
+                      <div className="flex min-w-0 items-center gap-3">
+                        <DateLeaf date={start} />
                         <div className="min-w-0">
-                          <div className="text-sm font-medium truncate">{period.title}</div>
-                          <div className="text-xs text-muted-foreground mt-0.5">
+                          <div className="truncate text-sm font-medium">{period.title}</div>
+                          <div className="mt-0.5 text-xs text-muted-foreground">
                             {sameDay
-                              ? formatDate(start, timeZone, { month: "short", day: "numeric" })
+                              ? `${formatDate(start, timeZone, { weekday: "short" })} · ${formatClock(start, timeZone)}–${formatClock(end, timeZone)}`
                               : `${formatDate(start, timeZone, { month: "short", day: "numeric" })} – ${formatDate(end, timeZone, { month: "short", day: "numeric" })}`}
                           </div>
                         </div>
                       </div>
                       <div className="flex shrink-0 items-center">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                        onClick={() => {
-                          setEditingPeriod(period);
-                          setExceptionDialogOpen(true);
-                        }}
-                        disabled={pendingId === period.id}
-                        aria-label={`Edit ${period.title}`}
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => void handleDeleteException(period.id)}
-                        disabled={pendingId === period.id}
-                        aria-label={`Delete ${period.title}`}
-                      >
-                        {pendingId === period.id ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                          onClick={() => {
+                            setEditingPeriod(period);
+                            setExceptionDialogOpen(true);
+                          }}
+                          aria-label={`Edit ${period.title}`}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                          onClick={() => handleDeleteException(period)}
+                          aria-label={`Delete ${period.title}`}
+                        >
                           <Trash2 className="h-3.5 w-3.5" />
-                        )}
-                      </Button>
+                        </Button>
                       </div>
                     </div>
                   );
@@ -607,14 +721,13 @@ export default function AvailabilityPage() {
               )}
             </CardContent>
           </Card>
-
         </div>
       </div>
 
       <SchedulePreview
         proposal={proposal}
         availabilityWindows={allWindows}
-        unavailablePeriods={allPeriods}
+        unavailablePeriods={visiblePeriods}
         open={previewOpen}
         onOpenChange={setPreviewOpen}
         onAccepted={() => {
@@ -629,8 +742,14 @@ export default function AvailabilityPage() {
 
       <AddWindowDialog
         open={windowDialogOpen}
-        onOpenChange={setWindowDialogOpen}
-        onSubmit={handleAddWindow}
+        onOpenChange={(next) => {
+          setWindowDialogOpen(next);
+          if (!next) setEditingWindow(null);
+        }}
+        onSubmit={handleSaveWindow}
+        defaultDay={windowDialogDay}
+        window={editingWindow}
+        existing={allWindows}
       />
       <ExceptionDialog
         open={exceptionDialogOpen}
@@ -654,73 +773,93 @@ export default function AvailabilityPage() {
           side="top"
           className="w-56 p-3"
         >
-          <PopoverHeader className="gap-0.5">
-            <PopoverTitle className="text-xs font-semibold text-foreground">
-              {selectedWindow
-                ? `${DAY_NAMES[selectedWindow.window.dayOfWeek]} · ${selectedWindow.window.startTime}–${selectedWindow.window.endTime}`
-                : ""}
-            </PopoverTitle>
-            <PopoverDescription className="text-[11px] text-muted-foreground">
-              Weekly availability window
-            </PopoverDescription>
-          </PopoverHeader>
-          <Button
-            variant="destructive"
-            size="sm"
-            className="w-full mt-2"
-            onClick={() => {
-              if (selectedWindow) {
-                const target = selectedWindow.window;
-                triggerRef.current = selectedWindow.anchorEl;
-                setSelectedWindow(null);
-                setConfirmDeleteWindow(target);
-              }
-            }}
-          >
-            <Trash2 className="size-3.5" />
-            Delete window
-          </Button>
+          {selectedWindow && (
+            <>
+              <PopoverHeader className="gap-0.5">
+                <PopoverTitle className="text-xs font-semibold text-foreground">
+                  {`${DAY_NAMES[selectedWindow.window.dayOfWeek]} · ${selectedWindow.window.startTime}–${selectedWindow.window.endTime}`}
+                </PopoverTitle>
+                <PopoverDescription className="text-[11px] text-muted-foreground">
+                  Study hours every week
+                </PopoverDescription>
+              </PopoverHeader>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedWindow(null);
+                    openEditWindow(selectedWindow.window);
+                  }}
+                >
+                  <Pencil className="size-3.5" />
+                  Edit
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedWindow(null);
+                    handleDeleteWindow(selectedWindow.window);
+                  }}
+                >
+                  <Trash2 className="size-3.5" />
+                  Remove
+                </Button>
+              </div>
+            </>
+          )}
         </PopoverContent>
       </Popover>
-
-      <ConfirmDialog
-        open={confirmDeleteWindow !== null}
-        onOpenChange={(next) => {
-          if (!next) {
-            setConfirmDeleteWindow(null);
-            setTimeout(() => {
-              triggerRef.current?.focus();
-            }, 0);
-          }
-        }}
-        title="Delete availability window?"
-        description={
-          confirmDeleteWindow
-            ? `This will remove the recurring ${DAY_NAMES[confirmDeleteWindow.dayOfWeek]} ${confirmDeleteWindow.startTime}–${confirmDeleteWindow.endTime} window from your weekly schedule. Any scheduled sessions in this slot may be rescheduled. It cannot be undone.`
-            : undefined
-        }
-        confirmLabel="Delete window"
-        destructive
-        onConfirm={async () => {
-          const target = confirmDeleteWindow;
-          if (target) {
-            const currentWindow =
-              allWindows.find((w) => w.id === target.id) ??
-              allWindows.find(
-                (w) =>
-                  w.dayOfWeek === target.dayOfWeek &&
-                  w.startTime === target.startTime &&
-                  w.endTime === target.endTime,
-              );
-            if (currentWindow) {
-              await handleDeleteWindow(currentWindow.id);
-            } else {
-              toast.info("This window is no longer active");
-            }
-            setConfirmDeleteWindow(null);
-          }
-        }}
-      />
     </PageShell>
+  );
+}
+
+/**
+ * One day's windows along the same hours the grid shows, so the shape of a
+ * day reads at a glance in the list too — useful on a phone, where the grid
+ * has to scroll sideways.
+ */
+function HourStrip({
+  windows,
+  hourStart,
+  hourEnd,
+  highlightedId,
+  className,
+}: {
+  windows: AvailabilityWindow[];
+  hourStart: number;
+  hourEnd: number;
+  highlightedId: string | null;
+  className?: string;
+}) {
+  const from = hourStart * 60;
+  const span = Math.max(60, hourEnd * 60 - from);
+  const middle = Math.round((hourStart + hourEnd) / 2);
+  return (
+    <div aria-hidden className={cn("relative", className)}>
+      <div className="relative h-1.5 overflow-hidden rounded-full bg-muted">
+        {windows.map((w) => {
+          const start = Math.max(0, toMinutes(w.startTime) - from);
+          const end = Math.min(span, toMinutes(w.endTime) - from);
+          if (end <= start) return null;
+          return (
+            <span
+              key={w.id}
+              className={cn(
+                "absolute inset-y-0 rounded-full transition-colors duration-150",
+                highlightedId === w.id ? "bg-surplus" : "bg-surplus/60",
+              )}
+              style={{ left: `${(start / span) * 100}%`, width: `${((end - start) / span) * 100}%` }}
+            />
+          );
+        })}
+      </div>
+      <div className="mt-1 flex justify-between text-[0.625rem] tabular-nums text-muted-foreground">
+        <span>{formatHour(hourStart)}</span>
+        <span>{formatHour(middle)}</span>
+        <span>{formatHour(hourEnd)}</span>
+      </div>
+    </div>
   );
 }

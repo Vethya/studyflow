@@ -4,6 +4,8 @@ import {
   deleteTask,
   finishTaskEarly,
   listTasks,
+  listTasksPage,
+  readTotalCount,
   searchTasks,
   startTask,
   updateTask,
@@ -94,6 +96,31 @@ it("builds task filters and joins server progress without recalculating it", asy
     },
   ]);
   expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it("pages tasks with an offset and reads the total from X-Total-Count", async () => {
+  const fetchMock = stubFetch((url) => {
+    if (url.endsWith("/progress")) return Response.json([]);
+    return Response.json([wireTask], { headers: { "X-Total-Count": "41" } });
+  });
+
+  await expect(listTasksPage({ limit: 20, offset: 20 })).resolves.toMatchObject({
+    tasks: [{ id: "task-1" }],
+    total: 41,
+  });
+  expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/tasks?limit=20&offset=20");
+});
+
+it("falls back to the rows seen when X-Total-Count is missing or unreadable", async () => {
+  stubFetch((url) => (url.endsWith("/progress") ? Response.json([]) : Response.json([wireTask])));
+  await expect(listTasksPage({ offset: 5 })).resolves.toMatchObject({ total: 6 });
+  await expect(listTasksPage()).resolves.toMatchObject({ total: 1 });
+
+  expect(readTotalCount(new Headers({ "X-Total-Count": "0" }), 3)).toBe(0);
+  expect(readTotalCount(new Headers({ "X-Total-Count": " " }), 3)).toBe(3);
+  expect(readTotalCount(new Headers({ "X-Total-Count": "-1" }), 3)).toBe(3);
+  expect(readTotalCount(new Headers({ "X-Total-Count": "2.5" }), 3)).toBe(3);
+  expect(readTotalCount(new Headers({ "X-Total-Count": "lots" }), 3)).toBe(3);
 });
 
 it("returns no search request for blank input and maps a trimmed search request", async () => {

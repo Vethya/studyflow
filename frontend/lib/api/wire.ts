@@ -102,6 +102,15 @@ export interface WireEffortProgress {
   sessions_completed: number;
   sessions_upcoming: number;
   status: WireTaskStatus;
+  estimation_accuracy?: WireEstimationAccuracy | null;
+}
+
+export interface WireEstimationAccuracy {
+  sample_size: number;
+  original_mean_absolute_error_minutes: number;
+  adaptive_mean_absolute_error_minutes: number;
+  improvement_percent: number | null;
+  adaptive_qualified: boolean;
 }
 
 export interface WireAcademicTaskRequest {
@@ -128,6 +137,19 @@ export interface WireAdaptiveEstimatePreview {
   available: boolean;
   planned_source: WirePlannedSource;
   acknowledgment_required: boolean;
+  low_minutes?: number | null;
+  high_minutes?: number | null;
+  sample_size?: number | null;
+  basis?: WireAdaptiveEstimateBasis | null;
+}
+
+export interface WireAdaptiveEstimateBasis {
+  scope: "category" | "size" | "overall";
+  size_bucket: "small" | "medium" | "large";
+  completed_records: number;
+  provisional_records: number;
+  category_records: number;
+  size_records: number;
 }
 
 // ─── Availability (api/availability.py) ──────────────────────────
@@ -187,13 +209,12 @@ export interface WireSessionOutcome {
   rescheduled_at: string | null;
 }
 
-/**
- * An accepted session. Note there is no `task_title` here — unlike the
- * proposal's session shape — so callers join titles from the task list.
- */
+/** An accepted session, labelled with its task's title and category. */
 export interface WireStudySession {
   id: string;
   task_id: string;
+  task_title: string | null;
+  task_category: WireTaskCategory | null;
   starts_at: string;
   ends_at: string;
   planned_duration_minutes: number;

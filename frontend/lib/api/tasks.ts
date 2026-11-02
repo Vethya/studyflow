@@ -1,6 +1,6 @@
 /** Academic task endpoints — `backend/src/studyflow/api/tasks.py`. */
 
-import { apiJson, apiVoid, buildQuery } from "./client";
+import { apiJson, apiJsonWithHeaders, apiVoid, buildQuery } from "./client";
 import {
   toAcademicTask,
   toWireCategory,
@@ -21,14 +21,20 @@ export interface TaskFilters {
   deadlineFrom?: string;
   deadlineTo?: string;
   query?: string;
+  /** Page size, 1–100. Omit for every matching task. */
   limit?: number;
+  /** Rows to skip; the API orders by deadline, then id. */
+  offset?: number;
 }
 
-export async function listTasks(
-  filters: TaskFilters = {},
-  signal?: AbortSignal,
-): Promise<AcademicTask[]> {
-  const query = buildQuery({
+export interface TaskPage {
+  tasks: AcademicTask[];
+  /** Every task matching the filters, from the `X-Total-Count` header. */
+  total: number;
+}
+
+function taskQuery(filters: TaskFilters): string {
+  return buildQuery({
     course: filters.course,
     category: filters.category && toWireCategory(filters.category),
     priority: filters.priority && toWirePriority(filters.priority),
@@ -37,12 +43,36 @@ export async function listTasks(
     deadline_to: filters.deadlineTo,
     query: filters.query,
     limit: filters.limit,
+    offset: filters.offset,
   });
-  const [wire, progress] = await Promise.all([
-    apiJson<WireAcademicTask[]>(`/tasks${query}`, { signal }),
+}
+
+/** The `X-Total-Count` header, or `fallback` when it is missing or unreadable. */
+export function readTotalCount(headers: Headers, fallback: number): number {
+  const raw = headers.get("X-Total-Count");
+  const total = raw === null || raw.trim() === "" ? Number.NaN : Number(raw);
+  return Number.isInteger(total) && total >= 0 ? total : fallback;
+}
+
+export async function listTasks(
+  filters: TaskFilters = {},
+  signal?: AbortSignal,
+): Promise<AcademicTask[]> {
+  return (await listTasksPage(filters, signal)).tasks;
+}
+
+/** One page of tasks plus the total, for callers that paginate. */
+export async function listTasksPage(
+  filters: TaskFilters = {},
+  signal?: AbortSignal,
+): Promise<TaskPage> {
+  const [response, progress] = await Promise.all([
+    apiJsonWithHeaders<WireAcademicTask[]>(`/tasks${taskQuery(filters)}`, { signal }),
     progressByTask(signal),
   ]);
-  return wire.map((task) => toAcademicTask(task, progress.get(task.id)));
+  const tasks = response.data.map((task) => toAcademicTask(task, progress.get(task.id)));
+  const skipped = filters.offset ?? 0;
+  return { tasks, total: readTotalCount(response.headers, skipped + tasks.length) };
 }
 
 /**

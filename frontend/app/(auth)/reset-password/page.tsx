@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertCircle, ArrowLeft, Loader2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, Loader2 } from "@/components/icons";
 import { auth } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
 import { notifyStudyFlowSessionInvalidated } from "@/lib/data-events";

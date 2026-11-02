@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React, { createContext, useContext } from "react";
 import MockDate from "mockdate";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
@@ -40,6 +40,7 @@ vi.mock("@/lib/api", () => {
   return { ApiError: MockApiError, tasks: { startTask: state.api.start, finishTaskEarly: state.api.finish, deleteTask: state.api.remove, listTasks: vi.fn() } };
 });
 vi.mock("@/components/page-kit", () => ({
+  CategoryTag: ({ category }: any) => <span>{category}</span>,
   PageShell: ({ children }: any) => <main>{children}</main>,
   PageHeader: ({ title, description, actions }: any) => <header><h1>{title}</h1><p>{description}</p>{actions}</header>,
   EmptyState: ({ title, children, action }: any) => <div><h2>{title}</h2><p>{children}</p>{action}</div>,
@@ -67,6 +68,10 @@ vi.mock("@/components/ui/confirm-dialog", () => ({ ConfirmDialog: ({ open, confi
 
 import { ApiError } from "@/lib/api";
 import TasksPage from "./(app)/tasks/page";
+import { flushPendingActions, resetUndoState } from "@/lib/undo";
+
+/** Finish and delete wait out an undo window; tests commit them at once. */
+const commitPending = () => act(() => flushPendingActions());
 
 beforeEach(() => {
   MockDate.set("2026-09-30T12:00:00Z");
@@ -80,13 +85,17 @@ beforeEach(() => {
   state.setDataNull = false;
   vi.clearAllMocks();
 });
-afterEach(() => { cleanup(); MockDate.reset(); });
+afterEach(() => {
+  cleanup();
+  resetUndoState();
+  MockDate.reset();
+});
 
 describe("tasks page", () => {
   it("filters, sorts, edits, starts, finishes, and deletes tasks", async () => {
     render(<TasksPage />);
     expect(screen.getByRole("heading", { name: "Tasks" })).toBeTruthy();
-    const search = screen.getByRole("searchbox", { name: "Search tasks by title" });
+    const search = screen.getByRole("searchbox", { name: "Search tasks by title or course" });
     fireEvent.change(search, { target: { value: "read" } });
     fireEvent.keyDown(search, { key: "Enter" });
     screen.getByRole("button", { name: "Remove “read” filter" }).click();
@@ -95,8 +104,11 @@ describe("tasks page", () => {
     fireEvent.change(search, { target: { value: "read" } });
     screen.getByRole("button", { name: "Clear search" }).click();
     for (const label of ["Latest first", "Most work left", "Priority", "Name (A–Z)", "Soonest first"]) screen.getByRole("button", { name: label }).click();
+    fireEvent.click(screen.getByRole("tab", { name: "To do" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "To do" }).getAttribute("aria-selected")).toBe("true"));
+    expect(screen.queryByText("Read algorithms")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "All" }));
     screen.getByRole("button", { name: /Filters/ }).click();
-    screen.getAllByRole("button", { name: "Not Started" })[0].click();
     screen.getAllByRole("button", { name: "Assignment" })[0].click();
     screen.getAllByRole("button", { name: "High" })[0].click();
     const course = screen.getByPlaceholderText("Any course");
@@ -105,7 +117,7 @@ describe("tasks page", () => {
     fireEvent.keyDown(course, { key: "Enter" });
     fireEvent.keyDown(course, { key: "Escape" });
     fireEvent.change(screen.getByLabelText("Show tasks due before"), { target: { value: "2026-10-03T10:00" } });
-    for (const label of ["Remove Not Started filter", "Remove Assignment filter", "Remove High priority filter", "Remove Algorithms filter", "Remove Due before set filter"]) {
+    for (const label of ["Remove Assignment filter", "Remove High priority filter", "Remove Algorithms filter", "Remove Due before set filter"]) {
       screen.getByRole("button", { name: label }).click();
     }
     screen.getByRole("button", { name: "Clear all filters" }).click();
@@ -124,26 +136,26 @@ describe("tasks page", () => {
     screen.getAllByRole("button", { name: "Start" })[0].click();
     await waitFor(() => expect(state.api.start).toHaveBeenCalled());
     screen.getAllByRole("button", { name: /Actions for Read algorithms/ })[0].click();
-    screen.getAllByRole("button", { name: "Finish early" })[0].click();
+    screen.getAllByRole("button", { name: "Mark done" })[0].click();
     await waitFor(() => expect(screen.getByRole("button", { name: "Mark it finished" })).toBeTruthy());
     screen.getByRole("button", { name: "Cancel task dialog" }).click();
     screen.getAllByRole("button", { name: /Actions for Read algorithms/ })[0].click();
-    screen.getByRole("button", { name: "Finish early" }).click();
+    screen.getByRole("button", { name: "Mark done" }).click();
     await waitFor(() => expect(screen.getByRole("button", { name: "Mark it finished" })).toBeTruthy());
     screen.getByRole("button", { name: "Mark it finished" }).click();
     await waitFor(() => expect(screen.getByRole("button", { name: "Invoke Mark it finished with no target" })).toBeTruthy());
     screen.getByRole("button", { name: "Invoke Mark it finished with no target" }).click();
     screen.getAllByRole("button", { name: /Actions for Finished task/ })[0].click();
+    const beforeDelete = Number(screen.getByText(/^\d+ tasks?$/).textContent?.split(" ")[0]);
     screen.getAllByRole("button", { name: "Delete" }).at(-1)!.click();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Delete task" })).toBeTruthy());
-    screen.getByRole("button", { name: "Cancel task dialog" }).click();
-    screen.getAllByRole("button", { name: /Actions for Finished task/ })[0].click();
-    screen.getAllByRole("button", { name: "Delete" }).at(-1)!.click();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Delete task" })).toBeTruthy());
-    screen.getByRole("button", { name: "Delete task" }).click();
+    // The mocked menus render every row's items, so the last Delete is the last row's.
+    await waitFor(() => expect(screen.queryByText("Overdue task")).toBeNull());
+    const afterDelete = beforeDelete - 1;
+    expect(screen.getByText(`${afterDelete} ${afterDelete === 1 ? "task" : "tasks"}`)).toBeTruthy();
+    expect(state.toast.success).toHaveBeenCalledWith("Task deleted", expect.objectContaining({ description: "Overdue task", action: expect.objectContaining({ label: "Undo" }) }));
+    expect(state.api.remove).not.toHaveBeenCalled();
+    await commitPending();
     await waitFor(() => expect(state.api.remove).toHaveBeenCalled());
-    await waitFor(() => expect(screen.getByRole("button", { name: "Invoke Delete task with no target" })).toBeTruthy());
-    screen.getByRole("button", { name: "Invoke Delete task with no target" }).click();
   });
 
   it("covers loading, error, empty/filter-empty, and action failures", async () => {
@@ -170,10 +182,11 @@ describe("tasks page", () => {
     state.api.finish.mockRejectedValueOnce(new ApiError(409, "conflict"));
     render(<TasksPage />);
     screen.getAllByRole("button", { name: /Actions for/ })[0].click();
-    screen.getByRole("button", { name: "Finish early" }).click();
+    screen.getByRole("button", { name: "Mark done" }).click();
     await waitFor(() => expect(screen.getByRole("button", { name: "Mark it finished" })).toBeTruthy());
     screen.getByRole("button", { name: "Mark it finished" }).click();
-    await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("Start the task before finishing it early."));
+    await commitPending();
+    await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("Start the task before marking it done."));
   });
 
   it("executes every sort comparator and restores optimistic actions on ordinary errors", async () => {
@@ -207,20 +220,21 @@ describe("tasks page", () => {
   it("covers filtered action removal branches and empty select values", async () => {
     state.tasks = [task({ id: "active", title: "Active", status: "In Progress" }), task({ id: "pending", title: "Pending", status: "Not Started" })];
     render(<TasksPage />);
-    screen.getByRole("button", { name: "Filters" }).click();
-    screen.getAllByRole("button", { name: "In Progress" }).at(-1)!.click();
-    await waitFor(() => expect(screen.getByRole("button", { name: /Actions for Active/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole("tab", { name: "In progress" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Actions for Pending/ })).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: /Actions for Active/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Finish early" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark done" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Mark it finished" })).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Mark it finished" }));
+    // A finished task leaves a list filtered to In progress straight away.
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Actions for Active/ })).toBeNull());
+    await commitPending();
     await waitFor(() => expect(state.api.finish).toHaveBeenCalled());
 
     cleanup();
     state.tasks = [task({ id: "pending", title: "Pending", status: "Not Started" })];
     render(<TasksPage />);
-    screen.getByRole("button", { name: "Filters" }).click();
-    screen.getAllByRole("button", { name: "Not Started" }).at(-1)!.click();
+    fireEvent.click(screen.getByRole("tab", { name: "To do" }));
     await waitFor(() => expect(screen.getByRole("button", { name: /Actions for Pending/ })).toBeTruthy());
     screen.getByRole("button", { name: /Actions for Pending/ }).click();
     screen.getByRole("button", { name: "Start" }).click();
@@ -228,7 +242,46 @@ describe("tasks page", () => {
 
     screen.getByRole("button", { name: /Filters/ }).click();
     for (const empty of screen.getAllByRole("button", { name: "Select empty" })) fireEvent.click(empty);
-    fireEvent.click(screen.getAllByRole("button", { name: "Any status" }).at(-1)!);
+    fireEvent.click(screen.getAllByRole("button", { name: "Any category" }).at(-1)!);
+  });
+
+  it("brings a deleted task back when the deletion is undone", async () => {
+    state.tasks = [task({ id: "keep", title: "Keep me", status: "Not Started" })];
+    render(<TasksPage />);
+    screen.getByRole("button", { name: /Actions for Keep me/ }).click();
+    screen.getAllByRole("button", { name: "Delete" }).at(-1)!.click();
+    await waitFor(() => expect(screen.queryByText("Keep me")).toBeNull());
+
+    const options = state.toast.success.mock.calls.at(-1)![1] as { action: { onClick: () => void } };
+    act(() => options.action.onClick());
+    await waitFor(() => expect(screen.getByText("Keep me")).toBeTruthy());
+    await commitPending();
+    expect(state.api.remove).not.toHaveBeenCalled();
+  });
+
+  it("groups upcoming work by week and reports ordinary finish and delete failures", async () => {
+    const inDays = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString();
+    state.tasks = [
+      task({ id: "soon", title: "Soon task", status: "In Progress", deadline: inDays(2) }),
+      task({ id: "far", title: "Far task", status: "Not Started", deadline: inDays(30) }),
+    ];
+    state.api.finish.mockRejectedValueOnce(new Error("finish failed"));
+    state.api.remove.mockRejectedValueOnce(new Error("delete failed"));
+    render(<TasksPage />);
+    expect(screen.getByRole("region", { name: "Due in the next 7 days" }).textContent).toContain("Soon task");
+    expect(screen.getByRole("region", { name: "Later" }).textContent).toContain("Far task");
+
+    screen.getByRole("button", { name: /Actions for Soon task/ }).click();
+    screen.getAllByRole("button", { name: "Mark done" })[0].click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Mark it finished" })).toBeTruthy());
+    screen.getByRole("button", { name: "Mark it finished" }).click();
+    await commitPending();
+    await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("finish failed"));
+
+    screen.getByRole("button", { name: /Actions for Far task/ }).click();
+    screen.getAllByRole("button", { name: "Delete" }).at(-1)!.click();
+    await commitPending();
+    await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("delete failed"));
   });
 
   it("restores optimistic state when the cache callback has no current list", async () => {
@@ -249,5 +302,57 @@ describe("tasks page", () => {
     screen.getByRole("button", { name: /Actions for Stale row/ }).click();
     screen.getByRole("button", { name: "Start" }).click();
     await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("stale row failed"));
+  });
+
+  it("restores the tab, filters and order from the address bar and keeps them there", async () => {
+    window.history.replaceState(null, "", "/tasks?status=in-progress&category=reading&priority=high&course=Algorithms&due=2026-10-03T10:00&sort=title&unknown=1");
+    state.params = new URLSearchParams(window.location.search);
+    state.tasks = [task(), task({ id: "other", title: "Essay", course: "History" })];
+    render(<TasksPage />);
+    expect(screen.getByRole("tab", { name: "In progress" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("button", { name: "Remove Reading filter" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove High priority filter" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove Algorithms filter" })).toBeTruthy();
+    expect(screen.getByText("2 tasks match")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: "All" }));
+    await waitFor(() => expect(window.location.search).not.toContain("status="));
+    expect(window.location.search).toContain("sort=title");
+    expect(window.location.search).toContain("unknown=1");
+
+    // Search covers the course as well as the title.
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search tasks by title or course" }), { target: { value: "history" } });
+    await waitFor(() => expect(screen.getByText("1 task matches")).toBeTruthy());
+    expect(screen.getByText("Essay")).toBeTruthy();
+    expect(screen.queryByText("Read algorithms")).toBeNull();
+
+    screen.getByRole("button", { name: "Clear all filters" }).click();
+    fireEvent.click(screen.getByRole("button", { name: "Soonest first" }));
+    await waitFor(() => expect(window.location.search).toBe("?unknown=1"));
+
+    cleanup();
+    window.history.replaceState(null, "", "/tasks?status=nope&sort=nope");
+    state.params = new URLSearchParams(window.location.search);
+    render(<TasksPage />);
+    expect(screen.getByRole("tab", { name: "All" }).getAttribute("aria-selected")).toBe("true");
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("follows a link to a filtered list opened while already on Tasks", () => {
+    state.params = new URLSearchParams();
+    const view = render(<TasksPage />);
+    expect(screen.getByRole("tab", { name: "All" }).getAttribute("aria-selected")).toBe("true");
+
+    state.params = new URLSearchParams("status=overdue&priority=high");
+    view.rerender(<TasksPage />);
+    expect(screen.getByRole("tab", { name: "Overdue" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("button", { name: "Remove High priority filter" })).toBeTruthy();
+
+    // The page writing its own state back to the address bar changes nothing.
+    fireEvent.click(screen.getByRole("tab", { name: "Done" }));
+    state.params = new URLSearchParams("status=done&priority=high");
+    view.rerender(<TasksPage />);
+    expect(screen.getByRole("tab", { name: "Done" }).getAttribute("aria-selected")).toBe("true");
+    window.history.replaceState(null, "", "/");
   });
 });

@@ -202,6 +202,8 @@ export async function installNfr05ApiMocks(
 
   await page.addInitScript(() => {
     document.cookie = "studyflow_csrf=nfr05-csrf; Path=/";
+    // The first-visit tour covers the page and steals the heading the test waits for.
+    localStorage.setItem("studyflow:tour-seen:account-nfr05", "1");
   });
 
   await page.route("**/api/v1/**", async (route) => {

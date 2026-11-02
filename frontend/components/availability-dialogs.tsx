@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, Loader2 } from "@/components/icons";
 import { DAY_NAMES } from "@/lib/constants";
 import { isoToLocalInput, localInputToIso } from "@/lib/datetime";
 import type { WindowDraft } from "@/lib/api";
@@ -33,38 +33,119 @@ interface AddWindowDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Persists the window; the parent owns the replace-all PUT. */
   onSubmit: (draft: WindowDraft) => Promise<void>;
+  /** Weekday (0 = Sunday) the form starts on. Defaults to Monday. */
+  defaultDay?: number;
+  /** Pass a window to edit it; omit to add a new one. */
+  window?: WindowDraft | null;
+  /** The student's other weekly hours, used to suggest a free slot and catch duplicates. */
+  existing?: WindowDraft[];
+}
+
+const SUGGESTED_TIMES: Array<[string, string]> = [
+  ["18:00", "21:00"],
+  ["09:00", "12:00"],
+  ["14:00", "17:00"],
+  ["06:00", "08:00"],
+  ["21:00", "23:00"],
+];
+
+function minutesOf(time: string): number {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+}
+
+/** A window as same-day minute ranges; one that ends before it starts runs past midnight. */
+function rangesOf(window: Pick<WindowDraft, "startTime" | "endTime">): Array<[number, number]> {
+  const start = minutesOf(window.startTime);
+  const end = minutesOf(window.endTime);
+  return end > start ? [[start, end]] : [[start, 24 * 60], [0, end]];
+}
+
+function overlaps(a: WindowDraft, b: WindowDraft): boolean {
+  return rangesOf(a).some(([as, ae]) => rangesOf(b).some(([bs, be]) => as < be && bs < ae));
+}
+
+/** First common study slot that does not collide with the day's existing hours. */
+export function suggestWindowTimes(dayOfWeek: number, existing: WindowDraft[]): { startTime: string; endTime: string } {
+  const sameDay = existing.filter((w) => w.dayOfWeek === dayOfWeek);
+  const free = SUGGESTED_TIMES.find(([startTime, endTime]) =>
+    sameDay.every((w) => !overlaps({ dayOfWeek, startTime, endTime }, w)),
+  );
+  const [startTime, endTime] = free ?? SUGGESTED_TIMES[0];
+  return { startTime, endTime };
+}
+
+/** An existing window that already contains the whole draft, so saving would change nothing. */
+export function coveringWindow(draft: WindowDraft, existing: WindowDraft[]): WindowDraft | undefined {
+  const [inner, ...rest] = rangesOf(draft);
+  if (rest.length > 0) return undefined;
+  return existing.find((w) => {
+    if (w.dayOfWeek !== draft.dayOfWeek) return false;
+    return rangesOf(w).some(([s, e]) => s <= inner[0] && inner[1] <= e);
+  });
 }
 
 /**
- * Collects one recurring weekly window. The backend replaces the whole set on
- * every save and merges overlaps itself, so this only validates that the times
- * are present and not identical.
+ * Collects one recurring weekly window, new or edited. The backend replaces
+ * the whole set on every save and merges overlaps itself, so this suggests a
+ * free slot, refuses a window that is already fully covered, and otherwise
+ * only checks that the times differ.
  */
-export function AddWindowDialog({ open, onOpenChange, onSubmit }: AddWindowDialogProps) {
-  const [dayOfWeek, setDayOfWeek] = useState("1");
+export function AddWindowDialog({
+  open,
+  onOpenChange,
+  onSubmit,
+  defaultDay = 1,
+  window: editing = null,
+  existing = [],
+}: AddWindowDialogProps) {
+  const [dayOfWeek, setDayOfWeek] = useState(String(defaultDay));
   const [startTime, setStartTime] = useState("18:00");
   const [endTime, setEndTime] = useState("21:00");
+  const [initial, setInitial] = useState({ dayOfWeek: String(defaultDay), startTime: "18:00", endTime: "21:00" });
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
 
-  // Clear any stale error each time the dialog is reopened.
-  const [wasOpen, setWasOpen] = useState(open);
+  const others = editing
+    ? existing.filter(
+        (w) =>
+          !(w.dayOfWeek === editing.dayOfWeek && w.startTime === editing.startTime && w.endTime === editing.endTime),
+      )
+    : existing;
+
+  function seed(day: number) {
+    const times = editing ?? suggestWindowTimes(day, others);
+    const next = { dayOfWeek: String(editing?.dayOfWeek ?? day), startTime: times.startTime, endTime: times.endTime };
+    setDayOfWeek(next.dayOfWeek);
+    setStartTime(next.startTime);
+    setEndTime(next.endTime);
+    setInitial(next);
+  }
+
+  // Start each opening on the requested day with a slot that is actually free.
+  const [wasOpen, setWasOpen] = useState(false);
   if (open !== wasOpen) {
     setWasOpen(open);
     if (open) {
       setError(null);
       setDiscardOpen(false);
+      seed(defaultDay);
     }
   }
 
-  const isDirty = dayOfWeek !== "1" || startTime !== "18:00" || endTime !== "21:00";
+  const timesUntouched = startTime === initial.startTime && endTime === initial.endTime;
+  const isDirty = dayOfWeek !== initial.dayOfWeek || !timesUntouched;
 
-  function resetForm() {
-    setDayOfWeek("1");
-    setStartTime("18:00");
-    setEndTime("21:00");
-    setError(null);
+  function changeDay(next: string) {
+    setDayOfWeek(next);
+    // Follow the new day with a free slot unless the student chose the times.
+    if (!editing && timesUntouched) {
+      const times = suggestWindowTimes(Number(next), others);
+      setStartTime(times.startTime);
+      setEndTime(times.endTime);
+      setInitial({ dayOfWeek: initial.dayOfWeek, ...times });
+    }
   }
 
   function requestClose() {
@@ -83,15 +164,22 @@ export function AddWindowDialog({ open, onOpenChange, onSubmit }: AddWindowDialo
       setError("Start and end times must differ.");
       return;
     }
+    const draft = { dayOfWeek: Number(dayOfWeek), startTime, endTime };
+    const cover = coveringWindow(draft, others);
+    if (cover) {
+      setError(
+        `${DAY_NAMES[cover.dayOfWeek]} already has study hours from ${cover.startTime} to ${cover.endTime}, which cover this time.`,
+      );
+      return;
+    }
 
     setError(null);
     setIsSaving(true);
     try {
-      await onSubmit({ dayOfWeek: Number(dayOfWeek), startTime, endTime });
-      resetForm();
+      await onSubmit(draft);
       onOpenChange(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save the window.");
+      setError(cause instanceof Error ? cause.message : "Could not save these study hours.");
     } finally {
       setIsSaving(false);
     }
@@ -107,9 +195,9 @@ export function AddWindowDialog({ open, onOpenChange, onSubmit }: AddWindowDialo
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Add availability window</DialogTitle>
+          <DialogTitle>{editing ? "Edit study hours" : "Add study hours"}</DialogTitle>
           <DialogDescription>
-            A recurring weekly block. An end time earlier than the start crosses midnight.
+            A time you can study every week. An end time earlier than the start runs past midnight.
           </DialogDescription>
         </DialogHeader>
 
@@ -122,9 +210,9 @@ export function AddWindowDialog({ open, onOpenChange, onSubmit }: AddWindowDialo
           )}
 
           <div className="space-y-1.5">
-            <Label className="text-xs font-medium">Day</Label>
-            <Select value={dayOfWeek} onValueChange={(v) => v && setDayOfWeek(v as string)}>
-              <SelectTrigger className="w-full">
+            <Label htmlFor="window-day" className="text-xs font-medium">Day</Label>
+            <Select value={dayOfWeek} onValueChange={(v) => v && changeDay(v as string)}>
+              <SelectTrigger id="window-day" aria-label="Day" className="w-full">
                 {/* Base UI renders the raw value unless given a render
                     function, which would show the index instead of the day. */}
                 <SelectValue>{(value) => DAY_NAMES[Number(value)]}</SelectValue>
@@ -168,7 +256,7 @@ export function AddWindowDialog({ open, onOpenChange, onSubmit }: AddWindowDialo
             </Button>
             <Button type="submit" disabled={isSaving}>
               {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Add window
+              {editing ? "Save changes" : "Add study hours"}
             </Button>
           </DialogFooter>
         </form>
@@ -185,7 +273,6 @@ export function AddWindowDialog({ open, onOpenChange, onSubmit }: AddWindowDialo
         focusCancel
         onConfirm={() => {
           setDiscardOpen(false);
-          resetForm();
           onOpenChange(false);
         }}
       />

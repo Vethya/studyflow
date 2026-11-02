@@ -124,7 +124,9 @@ export function formatDateTime(
   options: Intl.DateTimeFormatOptions,
 ): string {
   const date = value instanceof Date ? value : new Date(value);
-  return date.toLocaleString(undefined, { ...options, timeZone });
+  // Times read the same everywhere in the app: 24-hour, like formatClock.
+  const clock = options.hour !== undefined ? { hourCycle: "h23" as const } : {};
+  return date.toLocaleString(undefined, { ...options, ...clock, timeZone });
 }
 
 /** Account-local date key, `YYYY-MM-DD`. */
@@ -161,10 +163,8 @@ export function zonedCalendarDate(
   return new TZDate(year, month, day, timeZone);
 }
 
-/** `"7am"`, `"12pm"`, `"9pm"` — the one hour label used by every time grid. */
+/** `"07:00"`, `"12:00"`, `"21:00"` — the one hour label used by every time grid. */
 export function formatHour(hour: number): string {
   const h = ((hour % 24) + 24) % 24;
-  if (h === 0) return "12am";
-  if (h === 12) return "12pm";
-  return h < 12 ? `${h}am` : `${h - 12}pm`;
+  return `${String(h).padStart(2, "0")}:00`;
 }

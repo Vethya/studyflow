@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" fill="none" role="img" aria-labelledby="title">
+  <title id="title">StudyFlow</title>
+  <g fill="#182230">
+    <path d="M54 18H30C20.059 18 12 26.059 12 36C12 45.941 20.059 54 30 54H38C41.314 54 44 56.686 44 60C44 63.314 41.314 66 38 66H12V78H38C47.941 78 56 69.941 56 60C56 50.059 47.941 42 38 42H30C26.686 42 24 39.314 24 36C24 32.686 26.686 30 30 30H54V18Z" />
+    <path d="M64 18H76L88 30H76V42H86V54H76V78H64V18Z" />
+  </g>
+  <path d="M76 18L88 30H76V18Z" fill="#182230" />
+</svg>

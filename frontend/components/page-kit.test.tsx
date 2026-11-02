@@ -26,7 +26,7 @@ describe("PageHeader responsive actions", () => {
     expect(actions?.className ?? "").toContain("w-full");
     expect(actions?.className ?? "").toContain("min-w-0");
     expect(actions?.className ?? "").toContain("max-w-full");
-    expect(actions?.className ?? "").toContain("sm:w-auto");
-    expect(actions?.className ?? "").toContain("sm:shrink-0");
+    expect(actions?.className ?? "").toContain("@2xl/dashboard:w-auto");
+    expect(actions?.className ?? "").toContain("@2xl/dashboard:shrink-0");
   });
 });

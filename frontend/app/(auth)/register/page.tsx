@@ -6,12 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertCircle, ArrowLeft, CheckCircle2, Loader2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, CheckCircle2, Loader2 } from "@/components/icons";
 import { ApiError, auth } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
 import { detectTimezone } from "@/lib/timezones";
 import { FieldError } from "@/components/ui/field-error";
 import { GuestOnly } from "@/components/auth/guest-only";
+import { rememberSignupEmail } from "@/lib/signup-email";
 
 const GoogleIcon = () => (
   <svg className="h-4 w-4" viewBox="0 0 48 48" aria-hidden="true">
@@ -51,6 +52,7 @@ export default function RegisterPage() {
     setIsSubmitting(true);
     try {
       await auth.register(email);
+      rememberSignupEmail(trimmed);
       setSent(true);
     } catch (cause) {
       if (cause instanceof ApiError && cause.isRateLimited) {

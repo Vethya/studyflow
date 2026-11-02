@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import { apiJson, apiVoid, ApiError, buildQuery, readCsrfToken } from "./client";
+import { apiJson, apiVoid, ApiError, buildQuery, OFFLINE_MESSAGE, readCsrfToken, setRequestKeepalive, UNREADABLE_REPLY_MESSAGE } from "./client";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -84,6 +84,20 @@ it("supports CSRF-free requests and suppresses mutation notifications when reque
   window.removeEventListener("studyflow:data-changed", changed);
 });
 
+it("marks requests keepalive only while the page is unloading", async () => {
+  const inits: RequestInit[] = [];
+  vi.stubGlobal("fetch", async (...args: [string, RequestInit]) => {
+    inits.push(args[1]);
+    return new Response(null, { status: 204 });
+  });
+  setRequestKeepalive(true);
+  await apiVoid("/tasks/a", { method: "DELETE" });
+  setRequestKeepalive(false);
+  await apiVoid("/tasks/b", { method: "DELETE" });
+  expect(inits[0].keepalive).toBe(true);
+  expect(inits[1]).not.toHaveProperty("keepalive");
+});
+
 it("exposes the HTTP status helpers on ApiError", () => {
   expect(new ApiError(401, "signed out")).toMatchObject({
     isUnauthenticated: true,
@@ -129,20 +143,37 @@ it("handles structured and non-JSON error bodies", async () => {
     new Response("not json", { status: 500, statusText: "Server unavailable" }),
   );
   await expect(apiJson("/tasks")).rejects.toMatchObject({
-    detail: "Server unavailable",
+    detail: "StudyFlow's server had a problem. Please try again in a moment.",
     retryAfterSeconds: null,
   });
 
   vi.stubGlobal("fetch", async () =>
     Response.json({ detail: [] }, { status: 400 }),
   );
-  await expect(apiJson("/tasks")).rejects.toMatchObject({ detail: "Request failed with status 400" });
+  await expect(apiJson("/tasks")).rejects.toMatchObject({ detail: "Something went wrong (error 400). Please try again." });
 
   vi.stubGlobal("fetch", async () => Response.json({}, { status: 400 }));
-  await expect(apiJson("/tasks")).rejects.toMatchObject({ detail: "Request failed with status 400" });
+  await expect(apiJson("/tasks")).rejects.toMatchObject({ detail: "Something went wrong (error 400). Please try again." });
 
   vi.stubGlobal("fetch", async () => new Response(null, { status: 500 }));
-  await expect(apiJson("/tasks")).rejects.toMatchObject({ detail: "Request failed with status 500" });
+  await expect(apiJson("/tasks")).rejects.toMatchObject({ detail: "StudyFlow's server had a problem. Please try again in a moment." });
+});
+
+it("rewords unreadable replies and lost connections, but keeps other failures", async () => {
+  vi.stubGlobal("fetch", async () => new Response("<html>proxy page</html>", { status: 200 }));
+  await expect(apiJson("/tasks")).rejects.toMatchObject({ status: 200, detail: UNREADABLE_REPLY_MESSAGE });
+
+  const broken = new Response("{}", { status: 200 });
+  vi.spyOn(broken, "json").mockRejectedValue(new RangeError("other"));
+  vi.stubGlobal("fetch", async () => broken);
+  await expect(apiJson("/tasks")).rejects.toBeInstanceOf(RangeError);
+
+  vi.stubGlobal("fetch", async () => { throw new TypeError("Failed to fetch"); });
+  await expect(apiJson("/tasks")).rejects.toMatchObject({ status: 0, detail: OFFLINE_MESSAGE });
+
+  const abort = new DOMException("aborted", "AbortError");
+  vi.stubGlobal("fetch", async () => { throw abort; });
+  await expect(apiJson("/tasks")).rejects.toBe(abort);
 });
 
 it("invalidates the session only for protected 401 responses", async () => {

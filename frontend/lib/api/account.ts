@@ -24,10 +24,7 @@ export interface PreferencesInput {
   minimumBreak: number;
 }
 
-/**
- * The backend requires all three fields on every update, so callers must send
- * the current values for anything they are not changing.
- */
+/** The backend requires every field on each update, so send the current values for the rest. */
 export function updatePreferences(
   input: PreferencesInput,
   signal?: AbortSignal,

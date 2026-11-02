@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Globe, Loader2 } from "lucide-react";
+import { Globe, Loader2 } from "@/components/icons";
 import { toast } from "sonner";
 import {
   Dialog,

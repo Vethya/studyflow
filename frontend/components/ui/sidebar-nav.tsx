@@ -127,6 +127,7 @@ export function SidebarNav({
           <Link
             key={item.url}
             href={item.url}
+            aria-label={isCollapsed ? item.title : undefined}
             data-active={active ? "true" : undefined}
             aria-current={active ? "page" : undefined}
             onClick={closeMobileSidebar}

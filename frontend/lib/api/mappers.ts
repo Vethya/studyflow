@@ -8,11 +8,12 @@ import type { AvailabilityWindow, UnavailablePeriod } from "@/types/availability
 import type { StudentAccount } from "@/types/user";
 import type { SessionOutcome, StudySession } from "@/types/session";
 import type { ScheduleProposal, ScheduleScenario } from "@/types/schedule";
-import type { EffortProgress } from "@/types/progress";
+import type { EffortProgress, EstimationAccuracy } from "@/types/progress";
 import type {
   WireAcademicTask,
   WireAvailabilityWindow,
   WireEffortProgress,
+  WireEstimationAccuracy,
   WireLinkedIdentity,
   WireStudyPreferences,
   WireTaskCategory,
@@ -170,15 +171,17 @@ export function toStudentAccount(
 
 // ─── Study sessions and scheduling ──────────────────────────────
 
+/** The task label a session carries; used only when the API sent none. */
+export type SessionTask = Pick<AcademicTask, "title" | "category">;
+
 /**
  * A session is "awaiting outcome" when it has finished but carries none
- * (SPEC §12.1). The API does not flag this; it is derived from the clock,
- * which is also how the app treats the work — still remaining, never
- * auto-marked Missed.
+ * (SPEC §12.1). It is derived from the clock, which is also how the app
+ * treats the work — still remaining, never auto-marked Missed.
  */
 export function toStudySession(
   wire: WireStudySession,
-  titles?: Map<string, string>,
+  fallback?: SessionTask,
 ): StudySession {
   const kind = wire.outcome?.kind;
   const outcome: SessionOutcome | undefined =
@@ -190,8 +193,10 @@ export function toStudySession(
   return {
     id: wire.id,
     taskId: wire.task_id,
-    taskTitle: titles?.get(wire.task_id) ?? "Untitled task",
-    category: "Other",
+    taskTitle: wire.task_title ?? fallback?.title ?? "Untitled task",
+    category: wire.task_category
+      ? CATEGORY_FROM_WIRE[wire.task_category]
+      : (fallback?.category ?? "Other"),
     startTime: wire.starts_at,
     endTime: wire.ends_at,
     plannedDuration: wire.planned_duration_minutes,
@@ -293,5 +298,19 @@ export function toEffortProgress(wire: WireEffortProgress): EffortProgress {
     sessionsCompleted: wire.sessions_completed,
     sessionsUpcoming: wire.sessions_upcoming,
     status: STATUS_FROM_WIRE[wire.status],
+    estimationAccuracy: toEstimationAccuracy(wire.estimation_accuracy ?? null),
+  };
+}
+
+export function toEstimationAccuracy(
+  wire: WireEstimationAccuracy | null,
+): EstimationAccuracy | null {
+  if (!wire) return null;
+  return {
+    sampleSize: wire.sample_size,
+    originalMeanAbsoluteError: wire.original_mean_absolute_error_minutes,
+    adaptiveMeanAbsoluteError: wire.adaptive_mean_absolute_error_minutes,
+    improvementPercent: wire.improvement_percent,
+    adaptiveQualified: wire.adaptive_qualified,
   };
 }

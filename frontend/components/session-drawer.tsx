@@ -2,12 +2,12 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { CalendarClock, CheckCircle2, Clock, Pencil, Trash2, XCircle } from "lucide-react";
+import { CalendarClock, CheckCircle2, Clock, Pencil, Trash2, XCircle } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Callout } from "@/components/ui/callout";
 import { DetailDrawer } from "@/components/detail-drawer";
-import { formatDuration, CATEGORY_CONFIG } from "@/lib/constants";
+import { formatDuration, CATEGORY_CONFIG, STATUS_CONFIG } from "@/lib/constants";
 import { describeDeadline, formatClock, formatDate } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import type { StudySession } from "@/types/session";
@@ -83,20 +83,25 @@ export function SessionDrawer({
       }
       footer={
         <>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-destructive"
-            onClick={onDeleteTask}
-          >
-            <Trash2 />
-            Delete task
-          </Button>
-          <Button variant="outline" size="sm" onClick={onEditTask}>
-            <Pencil />
-            Edit task
-          </Button>
-          {isPast && !session.outcome && (
+          {task && (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-destructive"
+                onClick={onDeleteTask}
+              >
+                <Trash2 />
+                Delete task
+              </Button>
+              <Button variant="outline" size="sm" onClick={onEditTask}>
+                <Pencil />
+                Edit task
+              </Button>
+            </>
+          )}
+          {/* The waiting callout already carries this action. */}
+          {isPast && !session.outcome && !session.isAwaitingOutcome && (
             <Button size="sm" onClick={onRecordOutcome}>
               Record what happened
             </Button>
@@ -134,7 +139,7 @@ export function SessionDrawer({
 
         {task && (
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">{task.status}</Badge>
+            <Badge variant="secondary">{STATUS_CONFIG[task.status].label}</Badge>
             {task.priority === "High" && <Badge variant="outline">High priority</Badge>}
           </div>
         )}

@@ -11,11 +11,11 @@ import {
   recordOutcome,
   rejectProposal,
   ScheduleTechnicalFailure,
+  ensureSentence,
   simulatePlan,
 } from "./scheduling";
 import type { WireScheduleProposal } from "./wire";
 import type { OutcomeFormData } from "@/types/session";
-import type { AcademicTask } from "@/types/task";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -80,6 +80,8 @@ const proposal: WireScheduleProposal = {
 const session = {
   id: "session-1",
   task_id: "task-1",
+  task_title: "Read" as string | null,
+  task_category: "reading" as "reading" | null,
   starts_at: "2026-09-01T18:00:00+07:00",
   ends_at: "2026-09-01T19:00:00+07:00",
   planned_duration_minutes: 60,
@@ -135,6 +137,8 @@ it("turns a scheduler 503 into a technical failure without relabelling it overlo
 
 it("uses the default technical-failure message", () => {
   expect(new ScheduleTechnicalFailure().message).toBe("The scheduler could not finish in time.");
+  expect(ensureSentence("The scheduler stopped")).toBe("The scheduler stopped.");
+  expect(ensureSentence("The scheduler stopped.")).toBe("The scheduler stopped.");
 });
 
 it("generates a proposal without scenario overrides", async () => {
@@ -155,6 +159,8 @@ it("rethrows non-technical proposal failures", async () => {
 
 it("treats a missing pending revision as an empty state", async () => {
   stubFetch(() => Response.json({ detail: "No current proposal" }, { status: 404 }));
+  await expect(getPendingRevision()).resolves.toBeNull();
+  stubFetch(() => Response.json(null));
   await expect(getPendingRevision()).resolves.toBeNull();
 });
 
@@ -243,32 +249,58 @@ it("accepts a proposal without refetching when the caller only needs completion"
   );
 });
 
-it("lists sessions, gets one session, and wraps the active schedule", async () => {
-  const tasks = [{ id: "task-1", title: "Read" }] as unknown as AcademicTask[];
+it("lists sessions, gets one session, and wraps the active schedule without loading tasks", async () => {
   const fetchMock = stubFetch((url) => {
     if (url.endsWith("/study-sessions")) return Response.json([session]);
-    if (url.endsWith("/study-sessions/session-1")) return Response.json(session);
-    if (url.endsWith("/tasks")) return Response.json([]);
-    if (url.endsWith("/progress")) return Response.json([]);
+    if (url.endsWith("/study-sessions/session-1")) {
+      return Response.json({ ...session, task_title: null, task_category: null });
+    }
     return Response.json({ detail: "missing" }, { status: 404 });
   });
 
-  await expect(listSessions(undefined, tasks)).resolves.toMatchObject([
-    { id: "session-1", taskTitle: "Read", outcome: "Delayed" },
+  await expect(listSessions()).resolves.toMatchObject([
+    { id: "session-1", taskTitle: "Read", category: "Reading", outcome: "Delayed" },
   ]);
-  await expect(getSession("session-1")).resolves.toMatchObject({ id: "session-1", taskTitle: "Untitled task" });
-  await expect(getActiveSchedule(undefined, tasks)).resolves.toMatchObject({
+  await expect(getSession("session-1")).resolves.toMatchObject({
+    id: "session-1",
+    taskTitle: "Untitled task",
+    category: "Other",
+  });
+  await expect(getActiveSchedule()).resolves.toMatchObject({
     id: "active",
     sessions: [{ id: "session-1" }],
     isActive: true,
   });
-  expect(fetchMock).toHaveBeenCalled();
+  expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+    "/api/v1/study-sessions",
+    "/api/v1/study-sessions/session-1",
+    "/api/v1/study-sessions",
+  ]);
+});
+
+it("sends session time-range and awaiting-outcome filters", async () => {
+  const fetchMock = stubFetch(() => Response.json([]));
+
+  await listSessions(undefined, {
+    from: "2026-09-01T00:00:00+07:00",
+    to: "2026-09-08T00:00:00+07:00",
+    awaitingOutcome: true,
+  });
+  await listSessions(undefined, { awaitingOutcome: false });
+
+  const urls = fetchMock.mock.calls.map(([url]) => new URL(String(url), "http://test"));
+  expect(urls[0]?.pathname).toBe("/api/v1/study-sessions");
+  expect(Object.fromEntries(urls[0]!.searchParams)).toEqual({
+    from: "2026-09-01T00:00:00+07:00",
+    to: "2026-09-08T00:00:00+07:00",
+    awaiting_outcome: "true",
+  });
+  expect(Object.fromEntries(urls[1]!.searchParams)).toEqual({ awaiting_outcome: "false" });
 });
 
 it("returns no active schedule when there are no sessions", async () => {
-  const tasks = [] as unknown as AcademicTask[];
-  stubFetch((url) => url.endsWith("/study-sessions") ? Response.json([]) : Response.json([]));
-  await expect(getActiveSchedule(undefined, tasks)).resolves.toBeNull();
+  stubFetch(() => Response.json([]));
+  await expect(getActiveSchedule()).resolves.toBeNull();
 });
 
 it("refreshes the active schedule after accepting and can reject a proposal", async () => {
@@ -310,7 +342,10 @@ it("uses an empty schedule fallback after accepting when no sessions exist", asy
 it("records an outcome and maps the returned session and recovery revision", async () => {
   const fetchMock = stubFetch((_url, init) => {
     expect(init.method).toBe("POST");
-    return Response.json({ session, revision: { ...proposal, kind: "revision", revision_reason: "Missed work" } });
+    return Response.json({
+      session: { ...session, task_title: null, task_category: null },
+      revision: { ...proposal, kind: "revision", revision_reason: "Missed work" },
+    });
   });
   const data: OutcomeFormData = {
     outcome: "Delayed",
@@ -318,11 +353,12 @@ it("records an outcome and maps the returned session and recovery revision", asy
     revisedRemainingMinutes: 20,
   };
 
-  await expect(recordOutcome("session-1", data, undefined, "Read chapter")).resolves.toMatchObject({
+  await expect(recordOutcome("session-1", data, undefined, { title: "Read chapter", category: "Reading" })).resolves.toMatchObject({
     session: {
       id: "session-1",
       taskId: "task-1",
       taskTitle: "Read chapter",
+      category: "Reading",
       outcome: "Delayed",
       actualDuration: 40,
     },
@@ -342,18 +378,14 @@ it("records an outcome and maps the returned session and recovery revision", asy
   );
 });
 
-it("records an outcome without a revision and loads titles when none is supplied", async () => {
-  const fetchMock = stubFetch((url) => {
-    if (url.endsWith("/outcomes")) return Response.json({ session: { ...session, outcome: null }, revision: null });
-    if (url.endsWith("/tasks")) return Response.json([]);
-    if (url.endsWith("/progress")) return Response.json([]);
-    return Response.json({});
-  });
+it("records an outcome without a revision using the embedded task label", async () => {
+  const fetchMock = stubFetch(() => Response.json({ session: { ...session, outcome: null }, revision: null }));
 
   await expect(recordOutcome("session-1", { outcome: "Missed", actualMinutes: 0 })).resolves.toMatchObject({
-    session: { taskTitle: "Untitled task" },
+    session: { taskTitle: "Read", category: "Reading" },
     revision: null,
   });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/v1/study-sessions/session-1/outcomes",
     expect.objectContaining({ method: "POST" }),
@@ -371,7 +403,7 @@ it("normalizes a revision without an explicit reason", async () => {
     return Response.json([]);
   });
 
-  await expect(recordOutcome("session-1", { outcome: "Missed", actualMinutes: 0 }, undefined, "Read chapter"))
+  await expect(recordOutcome("session-1", { outcome: "Missed", actualMinutes: 0 }, undefined, { title: "Read chapter", category: "Reading" }))
     .resolves.toMatchObject({ revision: { reason: "" } });
 });
 

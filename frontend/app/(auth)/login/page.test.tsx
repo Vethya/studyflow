@@ -78,7 +78,7 @@ it("logs in, refreshes the session, and returns to a safe requested page", async
   fireEvent.change(screen.getByLabelText("Password"), {
     target: { value: "correct-password" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Sign In" }));
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
   await waitFor(() => expect(loginMock).toHaveBeenCalledWith("student@example.com", "correct-password"));
   expect(refreshMock).toHaveBeenCalledOnce();
@@ -97,11 +97,18 @@ it("shows a login error and does not redirect when authentication fails", async 
   fireEvent.change(screen.getByLabelText("Password"), {
     target: { value: "wrong-password" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Sign In" }));
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
   expect(await screen.findByText("Invalid email or password")).toBeTruthy();
   expect(refreshMock).not.toHaveBeenCalled();
   expect(replaceMock).not.toHaveBeenCalled();
+});
+
+it("confirms that the account was deleted", () => {
+  searchParamsMock.get.mockReturnValue(null);
+  searchParamsMock.has.mockImplementation((name: string) => name === "deleted");
+  render(<LoginPage />);
+  expect(screen.getByText("Your account has been deleted.")).toBeTruthy();
 });
 
 it("shows the registration confirmation message", () => {
@@ -111,6 +118,37 @@ it("shows the registration confirmation message", () => {
   render(<LoginPage />);
 
   expect(screen.getByText(/account is ready/i)).toBeTruthy();
+  expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("");
+});
+
+it("fills in the address just registered and forgets it after signing in", async () => {
+  window.localStorage.setItem("studyflow:signup-email", JSON.stringify({ email: "new@example.com", savedAt: Date.now() }));
+  loginMock.mockResolvedValue(undefined);
+  refreshMock.mockResolvedValue(undefined);
+  searchParamsMock.get.mockReturnValue(null);
+  searchParamsMock.has.mockImplementation((name: string) => name === "registered");
+
+  render(<LoginPage />);
+  expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("new@example.com");
+  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  await waitFor(() => expect(loginMock).toHaveBeenCalledWith("new@example.com", "secret"));
+  expect(window.localStorage.getItem("studyflow:signup-email")).toBeNull();
+});
+
+it("explains a missing or malformed email and a missing password next to the fields", async () => {
+  searchParamsMock.get.mockReturnValue(null);
+  searchParamsMock.has.mockReturnValue(false);
+  render(<LoginPage />);
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  expect(await screen.findByText("Enter your email address.")).toBeTruthy();
+  expect(screen.getByText("Enter your password.")).toBeTruthy();
+  expect(screen.getByLabelText("Email").getAttribute("aria-invalid")).toBe("true");
+
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "not-an-email" } });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  expect(await screen.findByText(/Enter a valid email address/)).toBeTruthy();
+  expect(loginMock).not.toHaveBeenCalled();
 });
 
 it("covers reset messaging, unsafe next paths, rate limits, and Google errors", async () => {
@@ -121,7 +159,7 @@ it("covers reset messaging, unsafe next paths, rate limits, and Google errors", 
   loginMock.mockRejectedValueOnce(Object.assign(new ApiErrorMock(), { isRateLimited: true, retryAfterSeconds: 61 }));
   fireEvent.change(screen.getByLabelText("Email"), { target: { value: "student@example.com" } });
   fireEvent.change(screen.getByLabelText("Password"), { target: { value: "wrong" } });
-  fireEvent.click(screen.getByRole("button", { name: "Sign In" }));
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
   expect(await screen.findByText(/Try again in 2 minutes/)).toBeTruthy();
   cleanup();
 
@@ -131,7 +169,7 @@ it("covers reset messaging, unsafe next paths, rate limits, and Google errors", 
   render(<LoginPage />);
   fireEvent.change(screen.getByLabelText("Email"), { target: { value: "student@example.com" } });
   fireEvent.change(screen.getByLabelText("Password"), { target: { value: "wrong" } });
-  fireEvent.click(screen.getByRole("button", { name: "Sign In" }));
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
   expect(await screen.findByText(/Try again later/)).toBeTruthy();
 
   googleMock.mockRejectedValueOnce(new Error("google unavailable"));

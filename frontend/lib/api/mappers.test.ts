@@ -136,12 +136,21 @@ it("derives awaiting outcomes only for finished sessions without an outcome", ()
     ends_at: "2026-10-01T18:00:00Z",
     planned_duration_minutes: 60,
     outcome: null,
+    task_title: null,
+    task_category: null,
   };
 
-  expect(toStudySession(wire, new Map([["task-1", "Read"]]))).toMatchObject({
+  expect(toStudySession(wire, { title: "Read", category: "Reading" })).toMatchObject({
     taskTitle: "Read",
+    category: "Reading",
     isAwaitingOutcome: true,
   });
+  expect(
+    toStudySession(
+      { ...wire, task_title: "Essay draft", task_category: "research_writing" },
+      { title: "Stale title", category: "Reading" },
+    ),
+  ).toMatchObject({ taskTitle: "Essay draft", category: "Research/Writing" });
   expect(toStudySession({ ...wire, outcome: {
     session_id: "session-1",
     kind: "missed",
@@ -157,9 +166,10 @@ it("derives awaiting outcomes only for finished sessions without an outcome", ()
     remaining_minutes: 0,
     recorded_at: "2026-10-01T19:00:00Z",
     rescheduled_at: null,
-  } }, new Map([["task-1", "Read"]]))).toMatchObject({ taskTitle: "Read", outcome: "Completed", isAwaitingOutcome: false });
+  } }, { title: "Read", category: "Reading" })).toMatchObject({ taskTitle: "Read", outcome: "Completed", isAwaitingOutcome: false });
   expect(toStudySession({ ...wire, task_id: "missing-task", outcome: null })).toMatchObject({
     taskTitle: "Untitled task",
+    category: "Other",
   });
 });
 
@@ -288,5 +298,32 @@ it("maps server effort progress into the UI vocabulary", () => {
     sessionsCompleted: 1,
     sessionsUpcoming: 2,
     status: "In Progress",
+    estimationAccuracy: null,
+  });
+});
+
+it("maps the account-wide estimation accuracy carried on progress rows", () => {
+  expect(toEffortProgress({
+    task_id: "task-1",
+    task_title: "Read",
+    actual_duration_minutes: 30,
+    estimated_remaining_minutes: 60,
+    effort_percent: 33,
+    sessions_completed: 1,
+    sessions_upcoming: 2,
+    status: "completed",
+    estimation_accuracy: {
+      sample_size: 12,
+      original_mean_absolute_error_minutes: 38.4,
+      adaptive_mean_absolute_error_minutes: 24.1,
+      improvement_percent: -5.5,
+      adaptive_qualified: false,
+    },
+  }).estimationAccuracy).toEqual({
+    sampleSize: 12,
+    originalMeanAbsoluteError: 38.4,
+    adaptiveMeanAbsoluteError: 24.1,
+    improvementPercent: -5.5,
+    adaptiveQualified: false,
   });
 });

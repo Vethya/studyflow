@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { apiJson } from "./client";
-import { listTasks } from "./tasks";
 import { recordOutcome } from "./scheduling";
 
 vi.mock("./client", () => ({
@@ -12,11 +11,11 @@ vi.mock("./client", () => ({
   buildQuery: vi.fn(() => ""),
 }));
 
-vi.mock("./tasks", () => ({ listTasks: vi.fn() }));
-
 const session = {
   id: "session-1",
   task_id: "task-1",
+  task_title: "Calculus",
+  task_category: "exam_preparation" as const,
   starts_at: "2026-09-03T09:00:00Z",
   ends_at: "2026-09-03T10:00:00Z",
   planned_duration_minutes: 60,
@@ -45,12 +44,7 @@ const revision = {
 
 describe("recordOutcome", () => {
   beforeEach(() => {
-    vi.mocked(listTasks).mockResolvedValue([
-      {
-        id: "task-1",
-        title: "Calculus",
-      },
-    ] as never);
+    vi.mocked(apiJson).mockReset();
   });
 
   it("maps the response session and revision returned by the endpoint", async () => {
@@ -63,9 +57,15 @@ describe("recordOutcome", () => {
         revisedRemainingMinutes: 45,
       }),
     ).resolves.toMatchObject({
-      session: { taskTitle: "Calculus", outcome: "Delayed", actualDuration: 30 },
+      session: {
+        taskTitle: "Calculus",
+        category: "Exam Preparation",
+        outcome: "Delayed",
+        actualDuration: 30,
+      },
       revision: { id: "revision-1", reason: "Some work remains." },
     });
+    expect(apiJson).toHaveBeenCalledTimes(1);
   });
 
   it("maps a nullable response revision to null", async () => {

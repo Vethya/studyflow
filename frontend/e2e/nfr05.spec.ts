@@ -29,7 +29,7 @@ const PUBLIC_ROUTES = [
 const AUTHENTICATED_ROUTES = [
   {
     path: "/dashboard",
-    heading: /Hello, Alex|Dashboard/,
+    heading: /Good (morning|afternoon|evening), Alex/,
     readyRequests: [
       "/api/v1/auth/session",
       "/api/v1/tasks",
@@ -56,7 +56,7 @@ const AUTHENTICATED_ROUTES = [
   },
   {
     path: "/calendar",
-    heading: /(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday), | – /,
+    heading: /^Calendar$/,
     readyRequests: [
       "/api/v1/auth/session",
       "/api/v1/tasks",
@@ -446,7 +446,7 @@ for (const viewport of VIEWPORTS) {
       await gotoAndWaitForPageReady(
         page,
         "/calendar",
-        /(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday), | – /,
+        /^Calendar$/,
         [
           "/api/v1/auth/session",
           "/api/v1/tasks",
@@ -463,7 +463,8 @@ for (const viewport of VIEWPORTS) {
       await dialog.getByLabel("Deadline").fill(
         new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString().slice(0, 16),
       );
-      await dialog.getByLabel("Estimate (minutes)").fill("60");
+      await dialog.getByLabel("Estimate hours").fill("1");
+      await dialog.getByLabel("Estimate minutes").fill("0");
       await dialog.getByRole("button", { name: "Add task", exact: true }).click();
 
       await expect(dialog).toBeHidden();
@@ -474,7 +475,8 @@ for (const viewport of VIEWPORTS) {
           response.url().endsWith("/api/v1/schedule-proposals") &&
           response.request().method() === "POST",
       );
-      await page.getByRole("button", { name: "Plan my time", exact: true }).click();
+      // The page header and the study agenda both offer this action on a phone.
+      await page.getByRole("button", { name: "Plan my time", exact: true }).first().click();
       await expect((await proposalResponse).status()).toBe(201);
       await expect(page.getByRole("heading", { name: "Your proposed plan" })).toBeVisible();
 
@@ -512,7 +514,7 @@ for (const viewport of VIEWPORTS) {
         /^Tasks$/,
         ["/api/v1/auth/session", "/api/v1/tasks"],
       );
-      await expect(page.getByText("Not started", { exact: true }).first()).toBeVisible();
+      await expect(page.getByText("To do", { exact: true }).first()).toBeVisible();
       await expect(page.getByText("In progress", { exact: true }).first()).toBeVisible();
       await assertNoHorizontalOverflow(page);
       await scanAccessibility(page, testInfo, "/tasks-status-cues");

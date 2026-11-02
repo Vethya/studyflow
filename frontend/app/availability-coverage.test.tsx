@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
@@ -21,8 +21,13 @@ vi.mock("@/hooks/use-api", () => ({
   describeError: (error: unknown) => error instanceof Error ? error.message : "Unknown error",
   useApi: (key: unknown, loader?: (signal: AbortSignal) => unknown) => {
     if (loader) void loader(new AbortController().signal);
-    const setData = vi.fn();
     const head = Array.isArray(key) ? String(key[0]) : String(key);
+    // Run functional updates against both a loaded and an empty cache.
+    const setData = vi.fn((next: unknown) => {
+      if (typeof next !== "function") return;
+      next(head.includes("windows") ? state.windows : state.periods);
+      next(null);
+    });
     if (state.mode === "loading") return { data: null, error: null, isLoading: true, isValidating: true, reload: vi.fn(), setData };
     if (state.mode === "error") return { data: null, error: new Error("availability failed"), isLoading: false, isValidating: false, reload: vi.fn(), setData };
     if (head.includes("windows")) return { data: state.windows, error: null, isLoading: false, isValidating: false, reload: vi.fn(), setData };
@@ -33,6 +38,7 @@ vi.mock("sonner", () => ({ toast: state.toast }));
 vi.mock("@/lib/api", () => {
   return {
     ScheduleTechnicalFailure: TechnicalFailure,
+    ensureSentence: (detail: string) => /[.!?]$/.test(detail) ? detail : `${detail}.`,
     availability: {
       listWindows: vi.fn(), listUnavailablePeriods: vi.fn(), replaceWindows: state.api.replaceWindows,
       updateUnavailablePeriod: state.api.updatePeriod, createUnavailablePeriod: state.api.createPeriod,
@@ -57,13 +63,23 @@ vi.mock("@/components/week-grid", () => ({
 vi.mock("@/components/schedule-preview", () => ({ SchedulePreview: ({ open, onAccepted, onRejected }: any) => open ? <div><button onClick={onAccepted}>Accept plan</button><button onClick={onRejected}>Reject plan</button></div> : null }));
 vi.mock("@/components/plan-generation-dialog", () => ({ PlanGenerationDialog: ({ open }: any) => open ? <div>Generating</div> : null }));
 vi.mock("@/components/availability-dialogs", () => ({
-  AddWindowDialog: ({ open, onSubmit }: any) => open ? <button onClick={() => void onSubmit({ dayOfWeek: 5, startTime: "10:00", endTime: "11:00" })}>Save window</button> : null,
+  AddWindowDialog: ({ open, onSubmit, onOpenChange, window, existing }: any) => open ? <><button onClick={() => void onSubmit({ dayOfWeek: 5, startTime: "10:00", endTime: "11:00" })}>{window ? `Save edit of ${window.startTime}` : "Save window"}</button><span>{existing.length} existing</span><button onClick={() => onOpenChange?.(false)}>Close window dialog</button><button onClick={() => onOpenChange?.(true)}>Open window event</button></> : null,
   ExceptionDialog: ({ open, period, onSubmit, onOpenChange }: any) => open ? <><button onClick={() => void onSubmit({ startsAt: "2026-10-02T09:00:00Z", endsAt: "2026-10-02T10:00:00Z", reason: period ? "Updated" : "New" })}>{period ? "Save exception" : "Add exception form"}</button><button onClick={() => onOpenChange?.(false)}>Close exception</button><button onClick={() => onOpenChange?.(true)}>Open exception event</button></> : null,
 }));
-vi.mock("@/components/ui/confirm-dialog", () => ({ ConfirmDialog: ({ open, confirmLabel, onConfirm, onOpenChange }: any) => <><button onClick={() => void onConfirm()}>Invoke confirm with no target</button>{open ? <><button onClick={() => void onConfirm()}>{confirmLabel}</button><button onClick={() => onOpenChange?.(false)}>Cancel window</button><button onClick={() => onOpenChange?.(true)}>Open confirm event</button></> : null}</> }));
 vi.mock("@/components/ui/popover", () => ({ Popover: ({ children, open, onOpenChange }: any) => <div>{open && <><button onClick={() => onOpenChange?.(false)}>Close popover</button><button onClick={() => onOpenChange?.(true)}>Open popover event</button></>}{children}</div>, PopoverContent: ({ children }: any) => <div>{children}</div>, PopoverHeader: ({ children }: any) => <div>{children}</div>, PopoverTitle: ({ children }: any) => <h3>{children}</h3>, PopoverDescription: ({ children }: any) => <p>{children}</p> }));
 
 import AvailabilityPage from "./(app)/availability/page";
+import { flushPendingActions, resetUndoState, UNDO_WINDOW_MS } from "@/lib/undo";
+
+/** Removals wait out an undo window; tests commit them at once. */
+const commitPending = () => act(() => flushPendingActions());
+
+/** A server that saves exactly the week it is sent. */
+const echoSave = async (drafts: any[]) => ({
+  windows: drafts.map((draft, index) => ({ id: `saved-${index}`, ...draft })),
+  invalidatedFutureSessionIds: [],
+});
+const wednesdayDraft = { dayOfWeek: 3, startTime: "18:00", endTime: "20:00" };
 
 function normal() {
   state.mode = "normal";
@@ -76,50 +92,109 @@ function normal() {
   state.api.generate.mockResolvedValue({ id: "proposal-1", unscheduledWork: [] });
 }
 beforeEach(() => { normal(); vi.clearAllMocks(); });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  resetUndoState();
+});
 
 describe("availability page", () => {
-  it("adds and removes windows, edits exceptions, and re-plans", async () => {
+  it("adds, edits and removes study hours with undo, edits exceptions, and re-plans", async () => {
     const view = render(<AvailabilityPage />);
     expect(screen.getByRole("heading", { name: "Availability" })).toBeTruthy();
-    screen.getByRole("button", { name: "Invoke confirm with no target" }).click();
+    expect(screen.getByText(/2 blocks of study hours on 2 days/)).toBeTruthy();
     screen.getAllByRole("button", { name: "Select without anchor" })[0].click();
     screen.getAllByRole("button", { name: "Re-plan my time" }).at(-1)!.click();
     await waitFor(() => expect(screen.getByRole("button", { name: "Accept plan" })).toBeTruthy());
     screen.getByRole("button", { name: "Accept plan" }).click();
-    screen.getByRole("button", { name: "Add window" }).click();
+    screen.getByRole("button", { name: "Add study hours" }).click();
     await waitFor(() => expect(screen.getByRole("button", { name: "Save window" })).toBeTruthy());
+    expect(screen.getByText("2 existing")).toBeTruthy();
+    screen.getByRole("button", { name: "Open window event" }).click();
     screen.getByRole("button", { name: "Save window" }).click();
+    await waitFor(() => expect(state.toast.success).toHaveBeenCalledWith("Study hours added"));
+    expect(state.api.replaceWindows).toHaveBeenLastCalledWith([
+      { dayOfWeek: 1, startTime: "09:00", endTime: "11:00" },
+      { dayOfWeek: 3, startTime: "18:00", endTime: "20:00" },
+      { dayOfWeek: 5, startTime: "10:00", endTime: "11:00" },
+    ]);
     await waitFor(() => expect(screen.getByText(/Your plan is out of date|planned session/)).toBeTruthy());
     screen.getAllByRole("button", { name: "Re-plan my time" }).at(-1)!.click();
     await waitFor(() => expect(screen.getByRole("button", { name: "Reject plan" })).toBeTruthy());
     screen.getByRole("button", { name: "Reject plan" }).click();
     screen.getByRole("button", { name: "Not now" }).click();
+    screen.getByRole("button", { name: "Close window dialog" }).click();
 
+    // The page refetches after a save; the mock server answers with the
+    // original week again.
+    const revalidate = () => {
+      state.windows = [windowOne, windowTwo];
+      view.rerender(<AvailabilityPage />);
+    };
+
+    // Edit from the grid popover replaces just that window.
+    revalidate();
     screen.getByRole("button", { name: "Monday 09:00–11:00" }).click();
     fireEvent.mouseEnter(screen.getByText("09:00–11:00"));
     fireEvent.mouseLeave(screen.getByText("09:00–11:00"));
     fireEvent.mouseEnter(screen.getByRole("button", { name: "Monday 09:00–11:00" }));
     fireEvent.mouseLeave(screen.getByRole("button", { name: "Monday 09:00–11:00" }));
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "Delete window" }).length).toBeGreaterThan(0));
     screen.getByRole("button", { name: "Open popover event" }).click();
     screen.getByRole("button", { name: "Close popover" }).click();
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "Delete window" }).length).toBeGreaterThan(0));
-    screen.getAllByRole("button", { name: "Delete window" }).at(-1)!.click();
     screen.getByRole("button", { name: "Monday 09:00–11:00" }).click();
-    screen.getAllByRole("button", { name: "Delete window" }).at(-1)!.click();
-    await waitFor(() => expect(state.api.replaceWindows).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy());
+    screen.getByRole("button", { name: "Edit" }).click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save edit of 09:00" })).toBeTruthy());
+    screen.getByRole("button", { name: "Save edit of 09:00" }).click();
+    await waitFor(() => expect(state.toast.success).toHaveBeenCalledWith("Study hours updated"));
+    expect(state.api.replaceWindows).toHaveBeenLastCalledWith([
+      { dayOfWeek: 3, startTime: "18:00", endTime: "20:00" },
+      { dayOfWeek: 5, startTime: "10:00", endTime: "11:00" },
+    ]);
+    screen.getByRole("button", { name: "Close window dialog" }).click();
 
-    state.windows = [windowOne, windowTwo, { ...windowOne, id: "window-early", startTime: "08:00" }];
+    // Edit from the day list, then cancel.
+    screen.getByRole("button", { name: "Edit Wednesday 18:00 to 20:00" }).click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save edit of 18:00" })).toBeTruthy());
+    screen.getByRole("button", { name: "Close window dialog" }).click();
+
+    // Removal hides the window at once and saves after the undo window.
+    revalidate();
+    state.api.replaceWindows.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Monday 09:00–11:00" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Monday 09:00–11:00" })).toBeNull());
+    expect(state.toast.success).toHaveBeenCalledWith("Study hours removed", expect.objectContaining({ description: "Monday 09:00–11:00" }));
+    expect(state.api.replaceWindows).not.toHaveBeenCalled();
+    await commitPending();
+    expect(state.api.replaceWindows).toHaveBeenCalledWith([{ dayOfWeek: 3, startTime: "18:00", endTime: "20:00" }]);
+
+    // Two removals committed together save one after the other, each
+    // leaving out only its own window from what the one before it saved.
+    state.api.replaceWindows.mockClear();
+    state.api.replaceWindows.mockImplementation(echoSave);
+    state.windows = [windowOne, windowTwo];
     view.rerender(<AvailabilityPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Monday 09:00–11:00" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Monday 09:00–11:00" })).toBeNull());
+    screen.getByRole("button", { name: /Remove Wednesday/ }).click();
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Remove Wednesday/ })).toBeNull());
+    await commitPending();
+    expect(state.api.replaceWindows.mock.calls).toEqual([[[wednesdayDraft]], [[]]]);
 
-    screen.getAllByRole("button", { name: /Remove Monday/ })[0].click();
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "Delete window" }).length).toBeGreaterThan(1));
-    screen.getByRole("button", { name: "Open confirm event" }).click();
-    screen.getByRole("button", { name: "Cancel window" }).click();
-    screen.getAllByRole("button", { name: /Remove Monday/ })[0].click();
-    screen.getAllByRole("button", { name: "Delete window" }).at(-1)!.click();
-    await waitFor(() => expect(state.api.replaceWindows).toHaveBeenCalled());
+    // Undo brings a removed window back without saving anything.
+    state.api.replaceWindows.mockClear();
+    view.rerender(<AvailabilityPage />);
+    screen.getByRole("button", { name: /Remove Wednesday/ }).click();
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Remove Wednesday/ })).toBeNull());
+    const undo = state.toast.success.mock.calls.at(-1)![1].action.onClick;
+    act(() => undo());
+    expect(screen.getByRole("button", { name: /Remove Wednesday/ })).toBeTruthy();
+    await commitPending();
+    expect(state.api.replaceWindows).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Monday 09:00–11:00" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close popover" }));
+    screen.getAllByRole("button", { name: "Select without anchor" })[0].click();
 
     screen.getByRole("button", { name: "Add exception" }).click();
     await waitFor(() => expect(screen.getByRole("button", { name: "Add exception form" })).toBeTruthy());
@@ -133,35 +208,93 @@ describe("availability page", () => {
     screen.getByRole("button", { name: "Save exception" }).click();
     screen.getByRole("button", { name: "Close exception" }).click();
     screen.getByRole("button", { name: "Delete Exam" }).click();
-    await waitFor(() => expect(state.api.deletePeriod).toHaveBeenCalledWith("period-1"));
-
-    state.windows = [{ ...windowTwo, id: "replacement" }];
-    view.rerender(<AvailabilityPage />);
-
-    screen.getByRole("button", { name: "Wednesday 18:00–20:00" }).click();
-    state.windows = [{ ...windowTwo, id: "replacement-2" }];
-    view.rerender(<AvailabilityPage />);
-    screen.getAllByRole("button", { name: "Delete window" }).at(-1)!.click();
-    await waitFor(() => expect(state.api.replaceWindows).toHaveBeenCalled());
-
-    state.windows = [windowTwo];
-    view.rerender(<AvailabilityPage />);
-    screen.getByRole("button", { name: "Wednesday 18:00–20:00" }).click();
-    state.windows = [];
-    view.rerender(<AvailabilityPage />);
-    screen.getAllByRole("button", { name: "Delete window" }).at(-1)!.click();
-    screen.getAllByRole("button", { name: "Delete window" }).at(-1)!.click();
-    await waitFor(() => expect(state.toast.info).toHaveBeenCalledWith("This window is no longer active"));
+    // The row leaves at once; the request waits out the undo window.
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Delete Exam" })).toBeNull());
+    expect(state.toast.success).toHaveBeenCalledWith("Exception removed", expect.objectContaining({ description: "Exam" }));
+    expect(state.api.deletePeriod).not.toHaveBeenCalled();
+    await commitPending();
+    expect(state.api.deletePeriod).toHaveBeenCalledWith("period-1");
 
     state.periods = [period, { ...period, id: "period-wide", endDate: "2026-10-02T10:00:00Z" }];
     view.rerender(<AvailabilityPage />);
     expect(screen.getAllByText("Exam").length).toBeGreaterThan(0);
   });
 
+  it("keeps a pending removal undoable after another removal saves", async () => {
+    vi.useFakeTimers();
+    try {
+      state.api.replaceWindows.mockImplementation(echoSave);
+      render(<AvailabilityPage />);
+      fireEvent.click(screen.getByRole("button", { name: /Remove Monday/ }));
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      fireEvent.click(screen.getByRole("button", { name: /Remove Wednesday/ }));
+      const undoWednesday = state.toast.success.mock.calls.at(-1)![1].action.onClick;
+
+      // Monday's timer fires first; its save must still contain Wednesday.
+      await act(() => vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS - 1000));
+      expect(state.api.replaceWindows.mock.calls).toEqual([[[wednesdayDraft]]]);
+
+      act(() => undoWednesday());
+      expect(screen.getByRole("button", { name: /Remove Wednesday/ })).toBeTruthy();
+      await commitPending();
+      await act(() => vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS));
+      expect(state.api.replaceWindows).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits for an earlier save before sending the next one", async () => {
+    let finishFirst!: () => void;
+    state.api.replaceWindows
+      .mockImplementationOnce((drafts: any[]) => new Promise((resolve) => { finishFirst = () => resolve(echoSave(drafts)); }))
+      .mockImplementation(echoSave);
+    render(<AvailabilityPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Remove Monday/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Remove Wednesday/ }));
+    let flushed = false;
+    const flushing = (async () => {
+      await commitPending();
+      flushed = true;
+    })();
+    await waitFor(() => expect(state.api.replaceWindows).toHaveBeenCalledTimes(1));
+    expect(flushed).toBe(false);
+    finishFirst();
+    await flushing;
+    expect(flushed).toBe(true);
+    expect(state.api.replaceWindows.mock.calls).toEqual([[[wednesdayDraft]], [[]]]);
+  });
+
+  it("opens dialogs from day rows and exception shortcuts, and commits a removal", async () => {
+    // A zero-length window is drawn as nothing on the hour strip.
+    state.windows = [windowOne, { ...windowOne, id: "window-empty", startTime: "12:00", endTime: "12:00" }];
+    const view = render(<AvailabilityPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Add study hours on Monday" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save window" })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Add another exception" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add exception form" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Close exception" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Exam" }));
+    await commitPending();
+    expect(state.api.deletePeriod).toHaveBeenCalledWith("period-1");
+
+    state.periods = [];
+    view.rerender(<AvailabilityPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Add an exception" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add exception form" })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Save window" }));
+    await waitFor(() => expect(screen.getByText(/planned session no longer fits/)).toBeTruthy());
+    fireEvent.click(screen.getAllByRole("button", { name: "Re-plan my time" })[0]);
+    await waitFor(() => expect(state.api.generate).toHaveBeenCalled());
+  });
+
   it("shows the stale-plan warning when a window invalidates no sessions", async () => {
     state.api.replaceWindows.mockResolvedValue({ windows: [windowOne], invalidatedFutureSessionIds: [] });
     render(<AvailabilityPage />);
-    screen.getByRole("button", { name: "Add window" }).click();
+    screen.getByRole("button", { name: "Add study hours" }).click();
     await waitFor(() => expect(screen.getByRole("button", { name: "Save window" })).toBeTruthy());
     screen.getByRole("button", { name: "Save window" }).click();
     await waitFor(() => expect(screen.getByText("Your plan is out of date")).toBeTruthy());
@@ -170,26 +303,6 @@ describe("availability page", () => {
     screen.getByRole("button", { name: "Save window" }).click();
     await waitFor(() => expect(screen.getByText(/2 planned sessions no longer fit/)).toBeTruthy());
     screen.getByRole("button", { name: "Not now" }).click();
-  });
-
-  it("deletes a replaced window by matching its current details", async () => {
-    const view = render(<AvailabilityPage />);
-    screen.getByRole("button", { name: "Monday 09:00–11:00" }).click();
-    state.windows = [{ ...windowOne, id: "replacement" }];
-    view.rerender(<AvailabilityPage />);
-    screen.getAllByRole("button", { name: "Delete window" }).at(-1)!.click();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Delete window" })).toBeTruthy());
-    screen.getAllByRole("button", { name: "Delete window" }).at(-1)!.click();
-    await waitFor(() => expect(state.api.replaceWindows).toHaveBeenCalled());
-
-    cleanup();
-    normal();
-    const staleView = render(<AvailabilityPage />);
-    screen.getByRole("button", { name: "Monday 09:00–11:00" }).click();
-    state.windows = [windowTwo];
-    staleView.rerender(<AvailabilityPage />);
-    screen.getAllByRole("button", { name: "Delete window" }).at(-1)!.click();
-    await waitFor(() => expect(state.api.replaceWindows).toHaveBeenCalled());
   });
 
   it("covers loading, empty, errors, and failed mutations", async () => {
@@ -209,24 +322,29 @@ describe("availability page", () => {
     state.api.generate.mockRejectedValueOnce(new Error("planner failed"));
     render(<AvailabilityPage />);
     expect(screen.getByText("No study hours yet")).toBeTruthy();
-    screen.getByRole("button", { name: "Add your first window" }).click();
+    screen.getByRole("button", { name: "Add your first study hours" }).click();
     await waitFor(() => expect(screen.getByRole("button", { name: "Save window" })).toBeTruthy());
     screen.getByRole("button", { name: "Save window" }).click();
+    await waitFor(() => expect(state.api.replaceWindows).toHaveBeenCalled());
     state.api.replaceWindows.mockRejectedValueOnce(new Error("save failed"));
     state.windows = [windowOne];
     cleanup();
     render(<AvailabilityPage />);
     screen.getByRole("button", { name: /Remove Monday/ }).click();
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "Delete window" }).length).toBeGreaterThan(1));
-    screen.getAllByRole("button", { name: "Delete window" }).at(-1)!.click();
+    await commitPending();
     await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("save failed"));
+    // A failed removal puts the study hours back.
+    expect(screen.getByRole("button", { name: /Remove Monday/ })).toBeTruthy();
 
     state.api.deletePeriod.mockRejectedValueOnce(new Error("delete failed"));
     state.periods = [period];
     cleanup();
     render(<AvailabilityPage />);
     screen.getByRole("button", { name: "Delete Exam" }).click();
+    await commitPending();
     await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("delete failed"));
+    // A failed removal puts the exception back.
+    expect(screen.getByRole("button", { name: "Delete Exam" })).toBeTruthy();
     screen.getAllByRole("button", { name: "Re-plan my time" }).at(-1)!.click();
     await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("planner failed"));
 

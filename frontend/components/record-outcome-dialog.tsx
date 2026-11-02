@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, Clock, Loader2, XCircle } from "lucide-react";
+import { CheckCircle2, Clock, Loader2, XCircle } from "@/components/icons";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -74,6 +74,7 @@ export function RecordOutcomeDialog({
   const [worked, setWorked] = React.useState("");
   const [remaining, setRemaining] = React.useState("");
   const [remainingTouched, setRemainingTouched] = React.useState(false);
+  const [workedTouched, setWorkedTouched] = React.useState(false);
   const [isSaving, setSaving] = React.useState(false);
   const [confirmLarge, setConfirmLarge] = React.useState(false);
   const saveButtonRef = React.useRef<HTMLButtonElement>(null);
@@ -96,6 +97,7 @@ export function RecordOutcomeDialog({
     setWorked(String(session.plannedDuration));
     setRemaining("");
     setRemainingTouched(false);
+    setWorkedTouched(false);
     setDiscardOpen(false);
   } else if (!open && lastSessionId !== null) {
     setLastSessionId(null);
@@ -110,6 +112,18 @@ export function RecordOutcomeDialog({
     }
     setRemaining("");
     setRemainingTouched(false);
+    setWorkedTouched(false);
+  }
+
+  /**
+   * "Partly done" with the full planned time worked would leave nothing to
+   * guess as remaining, so until the student types their own figure the
+   * worked default follows the outcome: all of it, or half of it.
+   */
+  function chooseOutcome(next: SessionOutcome) {
+    setOutcome(next);
+    if (workedTouched) return;
+    setWorked(String(next === "Delayed" ? Math.max(1, Math.round(planned / 2)) : planned));
   }
 
   const workedNumber = Number(worked);
@@ -160,7 +174,7 @@ export function RecordOutcomeDialog({
         session.id,
         largeActualConfirmed ? withLargeActualConfirmation(data) : data,
         undefined,
-        session.taskTitle,
+        { title: session.taskTitle, category: session.category },
       );
       toast.success(outcomeSuccessCopy(outcome, result.revision));
       onRecorded(result);
@@ -215,16 +229,15 @@ export function RecordOutcomeDialog({
                 {OPTIONS.map((option) => {
                   const selected = outcome === option.value;
                   return (
-                    <button
+                    <Button
                       key={option.value}
                       type="button"
-                      onClick={() => setOutcome(option.value)}
+                      variant="outline"
+                      onClick={() => chooseOutcome(option.value)}
                       aria-pressed={selected}
                       className={cn(
-                        "flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                        selected
-                          ? "border-foreground bg-muted"
-                          : "border-border hover:bg-muted/50",
+                        "h-auto w-full justify-start gap-3 whitespace-normal rounded-lg px-3 py-2.5 text-left font-normal",
+                        selected && "border-primary bg-primary/5 hover:bg-primary/5",
                       )}
                     >
                       <option.icon
@@ -240,7 +253,7 @@ export function RecordOutcomeDialog({
                           {option.hint}
                         </span>
                       </span>
-                    </button>
+                    </Button>
                   );
                 })}
               </div>
@@ -260,7 +273,10 @@ export function RecordOutcomeDialog({
                     step={1}
                     max={1440}
                     value={worked}
-                    onChange={(event) => setWorked(event.target.value)}
+                    onChange={(event) => {
+                      setWorkedTouched(true);
+                      setWorked(event.target.value);
+                    }}
                     aria-invalid={workedInvalid || undefined}
                   />
                   {workedInvalid && (
@@ -292,9 +308,11 @@ export function RecordOutcomeDialog({
                     <p className="text-xs text-muted-foreground">
                       {remainingTouched
                         ? "Your estimate of what is left."
-                        : "Our guess — change it if you know better."}
+                        : remainingValue
+                          ? "Our guess — change it if you know better."
+                          : "How many minutes of work are still left?"}
                     </p>
-                    {remainingInvalid && (
+                    {remainingInvalid && remainingTouched && (
                       <p className="text-xs text-deficit">
                         Enter a whole number of minutes greater than 0.
                       </p>

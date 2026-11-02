@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Eye } from "lucide-react";
+import { Eye } from "@/components/icons";
 
 import { Input } from "@/components/ui/input";
 import styles from "./password-input.module.css";
@@ -32,7 +32,7 @@ function PasswordInput({ className, disabled, ...props }: PasswordInputProps) {
           setVisible((value) => !value);
           setHasToggled(true);
         }}
-        className="absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50"
+        className="absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground disabled:cursor-not-allowed disabled:opacity-50"
       >
         <span aria-hidden="true" className="relative size-4">
           <Eye className="absolute inset-0 size-4" />

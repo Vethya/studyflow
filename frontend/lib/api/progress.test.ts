@@ -56,6 +56,7 @@ it("maps server effort progress without recalculating it", async () => {
       sessionsCompleted: 1,
       sessionsUpcoming: 2,
       status: "In Progress",
+      estimationAccuracy: null,
     },
   ]);
 });

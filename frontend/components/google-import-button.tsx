@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { CalendarDays, GraduationCap, Loader2 } from "lucide-react";
+import { CalendarDays, GraduationCap, Loader2 } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import {

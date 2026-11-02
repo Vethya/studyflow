@@ -13,21 +13,21 @@ const state = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({ usePathname: () => state.pathname, useRouter: () => ({ replace: state.replace }) }));
 vi.mock("@/hooks/use-session", () => ({ useSession: () => ({ status: state.status }) }));
 vi.mock("@/hooks/use-account-timezone", () => ({ AccountTimezoneProvider: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
+vi.mock("@/hooks/use-warm-cache", () => ({ useWarmCache: vi.fn() }));
 vi.mock("@/lib/webmcp/register", () => ({ startStudyFlowWebMcp: () => state.registration }));
-vi.mock("@/components/app-sidebar", () => ({ AppSidebar: () => <aside>sidebar</aside> }));
-vi.mock("@/components/top-bar", () => ({ TopBar: () => <div>topbar</div> }));
-vi.mock("@/components/ui/sidebar", () => ({
-  SidebarProvider: ({ children }: { children: React.ReactNode }) => <div data-testid="sidebar-provider">{children}</div>,
-  SidebarInset: ({ children }: { children: React.ReactNode }) => <div data-testid="sidebar-inset">{children}</div>,
-  SidebarTrigger: () => <button>menu</button>,
+// Layout tests isolate the shell; its real navigation is exercised by the browser smoke checks.
+vi.mock("@/components/shadcn-space/blocks/dashboard-shell-01/app-sidebar", () => ({
+  default: ({ children }: { children: React.ReactNode }) => <div><aside>sidebar</aside><div>topbar</div>{children}</div>,
 }));
 
+import { consumeAccountDeleted, markAccountDeleted } from "@/lib/user-storage";
 import AppLayout from "./(app)/layout";
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   state.registration = null;
+  consumeAccountDeleted();
 });
 
 describe("authenticated app layout", () => {
@@ -39,6 +39,18 @@ describe("authenticated app layout", () => {
     rerender(<AppLayout><p>page</p></AppLayout>);
     await waitFor(() => expect(state.replace).toHaveBeenCalledWith("/login?next=%2Fdashboard"));
     expect(screen.getByText("Checking your session…")).toBeTruthy();
+  });
+
+  it("sends a deleted account to a confirmation instead of back to settings", async () => {
+    state.status = "unauthenticated";
+    state.pathname = "/settings";
+    markAccountDeleted();
+    render(
+      <AppLayout>
+        <p>page</p>
+      </AppLayout>,
+    );
+    await waitFor(() => expect(state.replace).toHaveBeenCalledWith("/login?deleted=1"));
   });
 
   it("renders the shell and disposes WebMCP registration", async () => {

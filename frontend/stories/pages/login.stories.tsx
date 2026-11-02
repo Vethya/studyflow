@@ -20,13 +20,13 @@ export const SignIn: Story = { play: async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   await userEvent.type(await canvas.findByLabelText("Email"), "alex@example.edu");
   await userEvent.type(canvas.getByLabelText("Password", { exact: true }), "local-demo-passphrase");
-  await userEvent.click(canvas.getByRole("button", { name: "Sign In" }));
+  await userEvent.click(canvas.getByRole("button", { name: "Sign in" }));
   await waitFor(() => expect(getRouter().replace).toHaveBeenCalledWith("/dashboard"));
 } };
 export const FailedSignIn: Story = { parameters: { api: { authenticated: false, state: "error" } }, play: async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   await userEvent.type(await canvas.findByLabelText("Email"), "alex@example.edu");
   await userEvent.type(canvas.getByLabelText("Password", { exact: true }), "local-demo-passphrase");
-  await userEvent.click(canvas.getByRole("button", { name: "Sign In" }));
+  await userEvent.click(canvas.getByRole("button", { name: "Sign in" }));
   await expect(await canvas.findByText(/service temporarily unavailable/)).toBeInTheDocument();
 } };

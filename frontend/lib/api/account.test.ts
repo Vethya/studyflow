@@ -26,6 +26,7 @@ import {
 afterEach(() => {
   apiJsonMock.mockReset();
   apiVoidMock.mockReset();
+  vi.unstubAllEnvs();
 });
 
 it("adds a password without sending a current password", async () => {

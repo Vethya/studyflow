@@ -12,7 +12,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Ready: Story = { play: async ({ canvasElement }) => {
-  await expect(await within(canvasElement).findByRole("heading", { name: "Hello, Alex" })).toBeInTheDocument();
+  await expect(await within(canvasElement).findByRole("heading", { name: "Good afternoon, Alex" })).toBeInTheDocument();
 } };
 export const Empty: Story = { parameters: { api: { state: "empty" } } };
 export const Loading: Story = { parameters: { api: { state: "loading" } } };

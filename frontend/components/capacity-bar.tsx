@@ -8,6 +8,8 @@ interface CapacityBarProps {
   available: number;
   /** Planned minutes owed in the same period. */
   committed: number;
+  /** `sm` is a slim bar for dense layouts such as the dashboard. */
+  size?: "default" | "sm";
   className?: string;
 }
 
@@ -20,7 +22,7 @@ interface CapacityBarProps {
  * clamped at full. A bar pinned at 100% reads as "done"; a bar breaking its
  * own container reads as "this does not fit", which is the point.
  */
-export function CapacityBar({ available, committed, className }: CapacityBarProps) {
+export function CapacityBar({ available, committed, size = "default", className }: CapacityBarProps) {
   const hasCapacity = available > 0;
   const overcommitted = committed > available;
 
@@ -35,8 +37,8 @@ export function CapacityBar({ available, committed, className }: CapacityBarProp
   const overflowClipped = overflowRaw > 100 - TRACK;
 
   return (
-    <div className={cn("space-y-3", className)}>
-      <div className="relative h-9">
+    <div className={cn(size === "sm" ? "space-y-2" : "space-y-3", className)}>
+      <div className={cn("relative", size === "sm" ? "h-4" : "h-9")}>
         {/* Track: the time you actually have */}
         <div
           className="absolute inset-y-0 left-0 rounded-l-md border border-border bg-muted"
@@ -95,7 +97,7 @@ export function CapacityBar({ available, committed, className }: CapacityBarProp
       </div>
 
       {/* The two quantities being compared, named in plain words. */}
-      <div className="flex items-baseline justify-between gap-4 text-xs text-muted-foreground">
+      <div className={cn("flex items-baseline justify-between gap-4 text-xs text-muted-foreground", size === "sm" && "sr-only")}>
         <span>
           <span className="font-medium tabular-nums text-foreground">
             {formatDuration(committed)}

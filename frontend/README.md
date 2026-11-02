@@ -39,6 +39,12 @@ The browser talks to the backend at `/api/v1/*` on this app's **own** origin;
 Set `BACKEND_ORIGIN` in `frontend/.env.local` if the backend is not on
 `http://localhost:8000`. See `.env.example`.
 
+**UI-only mode.** To work on screens without Docker, the backend or a database, run
+`pnpm dev:ui` (extra flags go to `next dev`, e.g. `pnpm dev:ui --port 3100`). It starts an
+in-memory mock API (`dev/mock-api/`, port `MOCK_API_PORT`, default 8010) already signed in as a
+demo student, and points `BACKEND_ORIGIN` at it. Data is seeded relative to today and resets on
+every restart.
+
 ## NFR-05 browser evidence
 
 Run the automated compatibility and accessibility evidence suite from this

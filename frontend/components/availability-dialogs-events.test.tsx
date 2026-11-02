@@ -17,16 +17,46 @@ vi.mock("@/components/ui/confirm-dialog", () => ({
   ConfirmDialog: ({ open, onOpenChange, onConfirm }: any) => open ? <div role="alertdialog"><button onClick={() => onOpenChange?.(false)}>Keep editing</button><button onClick={() => void onConfirm()}>Discard changes</button></div> : null,
 }));
 vi.mock("@/components/ui/select", () => ({
-  Select: ({ onValueChange, children }: any) => <div><button onClick={() => onValueChange?.("")}>Select empty</button><button onClick={() => onValueChange?.("2")}>Select Tuesday</button>{children}</div>,
+  Select: ({ onValueChange, children }: any) => <div><button type="button" onClick={() => onValueChange?.("")}>Select empty</button><button type="button" onClick={() => onValueChange?.("2")}>Select Tuesday</button><button type="button" onClick={() => onValueChange?.("5")}>Select Friday</button>{children}</div>,
   SelectContent: ({ children }: any) => <div>{children}</div>,
   SelectItem: ({ children }: any) => <span>{children}</span>,
-  SelectTrigger: ({ children }: any) => <button>{children}</button>,
+  SelectTrigger: ({ children }: any) => <button type="button">{children}</button>,
   SelectValue: ({ children }: any) => <span>{typeof children === "function" ? children("1") : children}</span>,
 }));
 
 import { AddWindowDialog, ExceptionDialog } from "./availability-dialogs";
 
 afterEach(cleanup);
+
+const startValue = () => (screen.getByLabelText("Start") as HTMLInputElement).value;
+
+it("re-suggests free times on a day change until the student picks times", async () => {
+  const onSubmit = vi.fn().mockResolvedValue(undefined);
+  const existing = [{ dayOfWeek: 5, startTime: "18:00", endTime: "21:00" }];
+  render(<AddWindowDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} existing={existing} />);
+  expect(startValue()).toBe("18:00");
+  fireEvent.click(screen.getByRole("button", { name: "Select Friday" }));
+  expect(startValue()).toBe("09:00");
+  fireEvent.click(screen.getByRole("button", { name: "Select Tuesday" }));
+  expect(startValue()).toBe("18:00");
+
+  fireEvent.change(screen.getByLabelText("Start"), { target: { value: "19:00" } });
+  fireEvent.click(screen.getByRole("button", { name: "Select Friday" }));
+  expect(startValue()).toBe("19:00");
+  fireEvent.click(screen.getByRole("button", { name: "Add study hours" }));
+  expect(await screen.findByText("Friday already has study hours from 18:00 to 21:00, which cover this time.")).toBeTruthy();
+  expect(onSubmit).not.toHaveBeenCalled();
+});
+
+it("keeps an edited window's times when its day changes", async () => {
+  const onSubmit = vi.fn().mockResolvedValue(undefined);
+  const window = { dayOfWeek: 1, startTime: "07:00", endTime: "08:00" };
+  render(<AddWindowDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} window={window} existing={[window]} />);
+  fireEvent.click(screen.getByRole("button", { name: "Select Friday" }));
+  expect(startValue()).toBe("07:00");
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ dayOfWeek: 5, startTime: "07:00", endTime: "08:00" }));
+});
 
 it("covers availability dialog event guards and selector no-ops", () => {
   const onOpenChange = vi.fn();

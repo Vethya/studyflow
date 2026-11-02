@@ -3,7 +3,7 @@
 import { use } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { AlertCircle, ArrowLeft } from "lucide-react";
+import { AlertCircle, ArrowLeft } from "@/components/icons";
 
 /**
  * The backend redirects a failed browser Google sign-in here, encoding why in

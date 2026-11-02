@@ -48,7 +48,7 @@ it.each(["unavailable", "failed", "acknowledgment required"])("saves frozen Adap
   expect(writes[0]).not.toHaveProperty("planned_duration_minutes");
   expect(screen.getByText("Your saved task plan")).toBeTruthy();
   expect(screen.queryByRole("button", { name: /Suggested/ })).toBeNull();
-  expect((screen.getByLabelText("Estimate (minutes)") as HTMLInputElement).disabled).toBe(true);
+  expect((screen.getByLabelText("Estimate minutes") as HTMLInputElement).disabled).toBe(true);
 });
 
 it("does not mistake an overdue but unfrozen task for a saved snapshot", async () => {
@@ -56,7 +56,7 @@ it("does not mistake an overdue but unfrozen task for a saved snapshot", async (
   const task = toAcademicTask({ ...wire, estimate_frozen: false });
   expect(task.estimateFrozen).toBe(false);
   render(<TaskFormDialog open task={task} onOpenChange={() => {}} onSaved={() => {}} />);
-  expect((screen.getByLabelText("Estimate (minutes)") as HTMLInputElement).disabled).toBe(false);
+  expect((screen.getByLabelText("Estimate minutes") as HTMLInputElement).disabled).toBe(false);
   expect(await screen.findByRole("button", { name: /Suggested/ })).toBeTruthy();
 });
 
@@ -89,7 +89,8 @@ it.each([false, true])("refreshes an adaptive conflict, retains entered fields, 
   await waitFor(() => expect(previews).toBeGreaterThan(1));
   expect(screen.queryByText(/already been started/)).toBeNull();
   expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("My draft");
-  expect((screen.getByLabelText("Estimate (minutes)") as HTMLInputElement).value).toBe("60");
+  expect((screen.getByLabelText("Estimate hours") as HTMLInputElement).value).toBe("1");
+  expect((screen.getByLabelText("Estimate minutes") as HTMLInputElement).value).toBe("0");
   if (needsAck) {
     fireEvent.click(await screen.findByRole("button", { name: /Suggested/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Use 3h" }));
@@ -208,10 +209,43 @@ it("updates the estimate through the input and closes a clean form", async () =>
   });
   const closed = vi.fn();
   render(<TaskFormDialog open onOpenChange={closed} onSaved={vi.fn()} />);
-  fireEvent.change(screen.getByLabelText("Estimate (minutes)"), { target: { value: "90" } });
+  fireEvent.change(screen.getByLabelText("Estimate minutes"), { target: { value: "30" } });
+  expect((screen.getByLabelText("Estimate minutes") as HTMLInputElement).value).toBe("30");
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   fireEvent.click(await screen.findByRole("button", { name: "Discard changes" }));
   expect(closed).toHaveBeenCalledWith(false);
+});
+
+it("starts new tasks due in a week and explains missing fields next to them", async () => {
+  const writes: Record<string, unknown>[] = [];
+  vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+    if (url.includes("/preview")) return Response.json({ ...preview, available: false });
+    writes.push(JSON.parse(init.body as string));
+    return Response.json(wire);
+  });
+  const saved = vi.fn();
+  render(<TaskFormDialog open onOpenChange={() => {}} onSaved={saved} />);
+  expect((screen.getByLabelText("Deadline") as HTMLInputElement).value).toMatch(/^\d{4}-\d{2}-\d{2}T23:59$/);
+  expect(screen.getByRole("combobox", { name: "Category" })).toBeTruthy();
+  expect(screen.getByRole("combobox", { name: "Priority" })).toBeTruthy();
+
+  fireEvent.change(screen.getByLabelText("Deadline"), { target: { value: "" } });
+  fireEvent.change(screen.getByLabelText("Estimate hours"), { target: { value: "" } });
+  fireEvent.submit(screen.getByLabelText("Title").closest("form")!);
+  expect(await screen.findByText("Give the task a name.")).toBeTruthy();
+  expect(screen.getByText("Pick when the task is due.")).toBeTruthy();
+  expect(screen.getByText("Add how long the whole task will take.")).toBeTruthy();
+  expect(screen.getByLabelText("Title").getAttribute("aria-invalid")).toBe("true");
+  expect(writes).toHaveLength(0);
+
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Essay" } });
+  fireEvent.change(screen.getByLabelText("Deadline"), { target: { value: "2099-09-12T09:00" } });
+  fireEvent.change(screen.getByLabelText("Estimate hours"), { target: { value: "2" } });
+  fireEvent.change(screen.getByLabelText("Estimate minutes"), { target: { value: "15" } });
+  fireEvent.submit(screen.getByLabelText("Title").closest("form")!);
+  await waitFor(() => expect(saved).toHaveBeenCalled());
+  expect(writes[0]).toMatchObject({ title: "Essay", original_estimate_minutes: 135 });
+  expect(screen.queryByText("Give the task a name.")).toBeNull();
 });
 
 it("keeps the estimate unset when the live preview fails", async () => {

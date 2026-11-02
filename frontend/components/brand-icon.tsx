@@ -1,0 +1,19 @@
+import { cn } from "@/lib/utils";
+
+/** Selected Page flow logo, kept as vector paths for sharp rendering at any size. */
+export function BrandIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 128 128"
+      fill="currentColor"
+      aria-hidden="true"
+      focusable="false"
+      data-brand-icon="page-flow"
+      className={cn("size-9 shrink-0 text-primary", className)}
+    >
+      <path d="M15 46C38 49 60 51 60 69V100.5C60 102.3 59.2 102.7 57.8 101.6C47 92.7 35 90.4 20 88C15.8 87.3 13 84.6 13 81.5V48C13 46.5 13.8 45.8 15 46Z" />
+      <path d="M66 100.5V66C68 55 76 50 85 46C96 41 104 34 109 26C110.4 23.8 113 24.5 113 27V77C113 86 104 89 96 91C83 94 75 97 68.2 101.6C66.8 102.5 66 102.3 66 100.5Z" />
+    </svg>
+  );
+}

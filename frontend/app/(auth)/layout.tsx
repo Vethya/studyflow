@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BrandIcon } from "@/components/brand-icon";
 
 /**
  * The shell every sign-in, sign-up and recovery screen sits in.
@@ -35,8 +36,9 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         <div className="relative z-10 flex w-full max-w-sm flex-col items-center">
           <Link
             href="/"
-            className="mb-6 flex items-center rounded-lg outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+            className="mb-6 flex items-center gap-2 rounded-lg outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
           >
+            <BrandIcon className="size-9 text-white" />
             <span className="font-display text-lg font-bold tracking-tight text-white">
               StudyFlow
             </span>

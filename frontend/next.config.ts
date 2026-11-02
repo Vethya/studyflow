@@ -12,6 +12,8 @@ import { staticSecurityHeaders } from "./lib/security/headers";
 const backendOrigin = process.env.BACKEND_ORIGIN ?? "http://localhost:8000";
 
 const nextConfig: NextConfig = {
+  // Keep the development launcher clear of the sidebar account menu.
+  devIndicators: { position: "bottom-right" },
   async rewrites() {
     return [
       {

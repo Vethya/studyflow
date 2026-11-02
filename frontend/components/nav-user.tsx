@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useTheme } from "next-themes";
 import { applyThemeWithTransition } from "@/lib/theme";
-import { ChevronsUpDown, Compass, LogOut, Palette, Settings } from "lucide-react";
+import { ChevronsUpDown, Compass, LogOut, Palette, Settings } from "@/components/icons";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -157,14 +157,13 @@ export function NavUser() {
             <DropdownMenuSeparator />
 
             <DropdownMenuItem
-              render={<Link href="/dashboard" />}
               onClick={() => {
                 closeMobileSidebar();
                 restartOnboarding();
               }}
             >
               <Compass />
-              Show me around
+              Show getting started
             </DropdownMenuItem>
 
             <DropdownMenuItem render={<Link href="/settings" />} onClick={closeMobileSidebar}>

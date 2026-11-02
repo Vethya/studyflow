@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
-import { LayoutDashboard, Calendar } from "lucide-react";
+import { LayoutDashboard, Calendar } from "@/components/icons";
 import { SidebarNav } from "@/components/ui/sidebar-nav";
 
 

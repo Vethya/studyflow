@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { AlertTriangle, CalendarOff, CheckCircle2, Info } from "lucide-react";
+import { AlertTriangle, CalendarOff, CheckCircle2, Info } from "@/components/icons";
 import { cn } from "@/lib/utils";
 
 /**

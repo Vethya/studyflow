@@ -4,8 +4,10 @@ import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 
 import { cn } from "@/lib/utils"
 
+// The first tooltip waits so passing pointers do not trigger it; once one is
+// open, neighbours open instantly (Base UI skips the delay within `timeout`).
 function TooltipProvider({
-  delay = 0,
+  delay = 350,
   ...props
 }: TooltipPrimitive.Provider.Props) {
   return (

@@ -81,7 +81,40 @@ describe("adaptive API contract", () => {
       basedOnTasks: 6,
       isCategorySpecific: true,
       needsAcknowledgment: true,
+      range: null,
+      sampleSize: null,
+      basis: null,
     });
+  });
+
+  it("maps the likely range, sample size, and history basis", () => {
+    const mapped = toAdaptiveEstimate({
+      ...preview,
+      low_minutes: 75,
+      high_minutes: 110,
+      sample_size: 8,
+      basis: {
+        scope: "size",
+        size_bucket: "medium",
+        completed_records: 6,
+        provisional_records: 2,
+        category_records: 3,
+        size_records: 5,
+      },
+    });
+    expect(mapped).toMatchObject({
+      range: { low: 75, high: 110 },
+      sampleSize: 8,
+      basis: {
+        scope: "size",
+        sizeBucket: "medium",
+        completedRecords: 6,
+        provisionalRecords: 2,
+        categoryRecords: 3,
+        sizeRecords: 5,
+      },
+    });
+    expect(toAdaptiveEstimate({ ...preview, low_minutes: 75, high_minutes: null })?.range).toBeNull();
   });
 
   it("marks overall history as non-category-specific", () => {

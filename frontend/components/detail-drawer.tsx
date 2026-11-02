@@ -66,7 +66,7 @@ export function DetailDrawer({
         )}
 
         <SheetHeader className="gap-1 border-b px-5 pb-4 pe-14 pt-4">
-          <SheetTitle className="font-display text-base font-semibold tracking-tight">
+          <SheetTitle className="text-xl leading-snug font-semibold tracking-tight">
             {title}
           </SheetTitle>
           {description && (

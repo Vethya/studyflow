@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { CalendarOff } from "lucide-react";
+import { CalendarOff } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { formatDuration } from "@/lib/constants";
@@ -43,7 +43,7 @@ export function OverloadWarningList({ warnings }: { warnings: OverloadWarning[] 
                 >
                   {warning.taskTitle}
                 </Link>
-                <span className="shrink-0 font-display text-base font-bold tabular-nums text-deficit">
+                <span className="shrink-0 text-lg leading-none tabular-nums text-deficit font-semibold tracking-tight">
                   {formatDuration(warning.shortfallMinutes)} short
                 </span>
               </span>

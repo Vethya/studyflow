@@ -9,6 +9,8 @@ import {
   subscribeToStudyFlowSessionInvalidation,
 } from "@/lib/data-events";
 import { SWR_KEYS } from "@/lib/swr-keys";
+import { cancelPendingActions, flushPendingActions } from "@/lib/undo";
+import { clearPerUserStorage } from "@/lib/user-storage";
 
 export interface SessionAccount {
   id: string;
@@ -51,6 +53,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const invalidate = () => {
+      cancelPendingActions();
       void mutate(null, { revalidate: false });
       void mutateAll(
         (key) => key !== SWR_KEYS.session,
@@ -67,9 +70,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, [mutate]);
 
   const signOut = useCallback(async () => {
+    // What the student asked for inside an undo window still happens, but on
+    // this account: after logout the next sign-in would receive it.
+    await flushPendingActions();
     try {
       await auth.logout();
     } finally {
+      clearPerUserStorage();
       notifyStudyFlowSessionInvalidated();
       router.replace("/login");
     }

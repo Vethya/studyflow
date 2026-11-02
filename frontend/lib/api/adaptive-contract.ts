@@ -105,5 +105,20 @@ export function toAdaptiveEstimate(
     basedOnTasks: wire.history_count,
     isCategorySpecific: wire.history_scope === "category",
     needsAcknowledgment: wire.acknowledgment_required,
+    range:
+      wire.low_minutes != null && wire.high_minutes != null
+        ? { low: wire.low_minutes, high: wire.high_minutes }
+        : null,
+    sampleSize: wire.sample_size ?? null,
+    basis: wire.basis
+      ? {
+          scope: wire.basis.scope,
+          sizeBucket: wire.basis.size_bucket,
+          completedRecords: wire.basis.completed_records,
+          provisionalRecords: wire.basis.provisional_records,
+          categoryRecords: wire.basis.category_records,
+          sizeRecords: wire.basis.size_records,
+        }
+      : null,
   };
 }

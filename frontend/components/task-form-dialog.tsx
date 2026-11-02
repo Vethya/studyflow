@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { FieldError } from "@/components/ui/field-error";
 import {
   Select,
   SelectContent,
@@ -23,10 +24,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, Loader2 } from "@/components/icons";
 import { CATEGORIES, PRIORITIES } from "@/types/task";
 import type { AcademicTask, Category, Priority, TaskFormData } from "@/types/task";
-import { isoToLocalInput, localInputToIso, nowLocalInput } from "@/lib/datetime";
+import { addZonedDays, dayKey, isoToLocalInput, localInputToIso, nowLocalInput } from "@/lib/datetime";
 import { ApiError, tasks as tasksApi, scheduling } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
 import { AdaptiveEstimateNote, LargeAdjustmentDialog, PersistedEstimateNote } from "@/components/adaptive-estimate";
@@ -54,21 +55,41 @@ type TaskFormState = Omit<TaskFormData, "course" | "notes" | "plannedSource"> & 
   plannedSource: "Original" | "Adaptive";
 };
 
-const EMPTY: TaskFormState = {
-  title: "",
-  category: "Assignment" as Category,
-  priority: "Medium" as Priority,
-  deadline: "",
-  originalEstimate: 60,
-  plannedSource: "Original",
-  course: "",
-  notes: "",
-};
+/** A new task starts due at the end of the day a week from now, a common hand-in gap. */
+function emptyForm(timeZone: string): TaskFormState {
+  return {
+    title: "",
+    category: "Assignment" as Category,
+    priority: "Medium" as Priority,
+    deadline: `${dayKey(addZonedDays(new Date(), 7, timeZone), timeZone)}T23:59`,
+    originalEstimate: 60,
+    plannedSource: "Original",
+    course: "",
+    notes: "",
+  };
+}
+
+type FieldErrors = Partial<Record<"title" | "deadline" | "estimate", string>>;
+
+function validate(form: TaskFormState): FieldErrors {
+  const errors: FieldErrors = {};
+  if (!form.title.trim()) errors.title = "Give the task a name.";
+  if (!form.deadline) errors.deadline = "Pick when the task is due.";
+  if (!(Number(form.originalEstimate) >= 1)) errors.estimate = "Add how long the whole task will take.";
+  return errors;
+}
+
+/** Reads a number field, treating a cleared box as zero. */
+function wholeNumber(value: string): number {
+  const parsed = Math.floor(Number(value));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
 
 export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDialogProps) {
   const timeZone = useAccountTimezone();
-  const [form, setForm] = useState(EMPTY);
-  const [initialForm, setInitialForm] = useState(EMPTY);
+  const [form, setForm] = useState(() => emptyForm(timeZone));
+  const [initialForm, setInitialForm] = useState(form);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [discardOpen, setDiscardOpen] = useState(false);
   /**
    * SPEC §15.4 / §15.6: the student's own history may suggest a very different
@@ -93,6 +114,7 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
   if (open && (session.open !== open || session.task !== task)) {
     setSession({ open, task });
     setError(null);
+    setFieldErrors({});
     setAckOpen(false);
     setDiscardOpen(false);
     setApplyPreviewDefault(!task);
@@ -107,7 +129,7 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
             course: task.course ?? "",
             notes: task.notes ?? "",
           }
-        : EMPTY;
+        : emptyForm(timeZone);
     setForm(initial);
     setInitialForm(initial);
   } else if (!open && session.open) {
@@ -188,6 +210,9 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+    const problems = validate(form);
+    setFieldErrors(problems);
+    if (Object.keys(problems).length > 0) return;
 
     // Ask before using a first-time large adjustment (SPEC §15.4).
     const adaptivePreviewMatchesForm =
@@ -253,11 +278,12 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit task" : "Add task"}</DialogTitle>
           <DialogDescription>
-            Deadlines are stored as absolute moments, interpreted in your timezone.
+            Tell StudyFlow what is due and roughly how long it takes, and it will find study time for it. Times
+            use your time zone ({timeZone}).
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="min-w-0 space-y-4">
+        <form onSubmit={handleSubmit} noValidate className="min-w-0 space-y-4">
           {error && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
@@ -274,12 +300,15 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
               maxLength={200}
               disabled={isSaving}
               required
+              aria-invalid={fieldErrors.title ? true : undefined}
+              aria-describedby={fieldErrors.title ? "task-title-error" : undefined}
             />
+            <FieldError id="task-title-error" message={fieldErrors.title} />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Category</Label>
+              <Label htmlFor="task-category" className="text-xs font-medium">Category</Label>
               <Select
                 value={form.category}
                 onValueChange={(v) => {
@@ -288,7 +317,7 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
                   setForm({ ...form, category: v as Category, plannedSource: estimateFrozen ? form.plannedSource : "Original" });
                 }}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger id="task-category" aria-label="Category" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -300,12 +329,12 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Priority</Label>
+              <Label htmlFor="task-priority" className="text-xs font-medium">Priority</Label>
               <Select
                 value={form.priority}
                 onValueChange={(v) => v && setForm({ ...form, priority: v as Priority })}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger id="task-priority" aria-label="Priority" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -328,39 +357,69 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
                 onChange={(e) => setForm({ ...form, deadline: e.target.value })}
                 disabled={isSaving}
                 required
+                aria-invalid={fieldErrors.deadline ? true : undefined}
+                aria-describedby={fieldErrors.deadline ? "task-deadline-error" : undefined}
               />
+              <FieldError id="task-deadline-error" message={fieldErrors.deadline} />
             </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="task-estimate" className="text-xs font-medium">
-                Estimate (minutes)
-              </Label>
-              <Input
-                id="task-estimate"
-                type="number"
-                min={1}
-                value={form.originalEstimate}
-                onChange={(e) => {
-                  setApplyPreviewDefault(true);
-                  setForm({
-                    ...form,
-                    originalEstimate: Number(e.target.value),
-                    plannedSource: "Original",
-                  });
-                }}
-                disabled={isSaving || estimateFrozen}
-                required
-              />
+            <fieldset className="min-w-0 space-y-1.5">
+              <legend className="mb-1.5 text-xs font-medium">How long it takes</legend>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="task-estimate-hours"
+                  aria-label="Estimate hours"
+                  type="number"
+                  inputMode="numeric"
+                  disabled={isSaving || estimateFrozen}
+                  min={0}
+                  value={Math.floor(form.originalEstimate / 60)}
+                  onChange={(e) => {
+                    setApplyPreviewDefault(true);
+                    setForm({
+                      ...form,
+                      originalEstimate: wholeNumber(e.target.value) * 60 + (form.originalEstimate % 60),
+                      plannedSource: "Original",
+                    });
+                  }}
+                  aria-invalid={fieldErrors.estimate ? true : undefined}
+                  aria-describedby={fieldErrors.estimate ? "task-estimate-error" : undefined}
+                />
+                <span aria-hidden className="text-xs text-muted-foreground">h</span>
+                <Input
+                  id="task-estimate"
+                  aria-label="Estimate minutes"
+                  type="number"
+                  inputMode="numeric"
+                  disabled={isSaving || estimateFrozen}
+                  min={0}
+                  max={59}
+                  step={5}
+                  value={form.originalEstimate % 60}
+                  onChange={(e) => {
+                    setApplyPreviewDefault(true);
+                    setForm({
+                      ...form,
+                      originalEstimate: Math.floor(form.originalEstimate / 60) * 60 + wholeNumber(e.target.value),
+                      plannedSource: "Original",
+                    });
+                  }}
+                  aria-invalid={fieldErrors.estimate ? true : undefined}
+                  aria-describedby={fieldErrors.estimate ? "task-estimate-error" : undefined}
+                />
+                <span aria-hidden className="text-xs text-muted-foreground">m</span>
+              </div>
+              <FieldError id="task-estimate-error" message={fieldErrors.estimate} />
               {estimateFrozen ? (
                 <p className="text-[11px] text-muted-foreground">
                   Frozen — this task has already been scheduled or started.
                 </p>
               ) : (
                 <p className="text-[11px] text-muted-foreground">
-                  How long the whole task will take, not one sitting.
+                  The whole task, not one sitting.
                 </p>
               )}
-            </div>
+            </fieldset>
           </div>
 
           <div className="space-y-1.5">

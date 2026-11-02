@@ -22,5 +22,11 @@ export const Range: Story = { args: { numberOfMonths: 2, buttonVariant: "outline
   const [selected, setSelected] = useState<DateRange | undefined>({ from: new Date("2026-10-16T12:00:00Z"), to: new Date("2026-10-20T12:00:00Z") });
   return <Calendar {...args} mode="range" selected={selected} onSelect={setSelected} />;
 }, play: async ({ canvasElement }) => {
-  await expect(within(canvasElement).getByRole("button", { name: /previous month/i })).toHaveClass(/btn-outline/);
+  const canvas = within(canvasElement);
+  const day = (name: RegExp) => canvas.getByRole("button", { name });
+  await expect(day(/October 16th/)).toHaveAttribute("data-range-start", "true");
+  await expect(day(/October 18th/)).toHaveAttribute("data-range-middle", "true");
+  await expect(day(/October 20th/)).toHaveAttribute("data-range-end", "true");
+  await expect(day(/October 21st/)).not.toHaveAttribute("data-range-middle", "true");
+  await expect(canvas.getByRole("button", { name: /previous month/i })).toBeEnabled();
 } };

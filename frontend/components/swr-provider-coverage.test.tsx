@@ -29,6 +29,7 @@ it("filters cache keys for every mutation event shape", () => {
     "/account/password",
     "/account/preferences",
     "/account/identities",
+    "/reminders/preferences",
     "/account/deletion/status",
     "/adaptive-estimates/Reading",
     "/schedule-proposals",
@@ -41,4 +42,6 @@ it("filters cache keys for every mutation event shape", () => {
   }
   window.dispatchEvent(new CustomEvent("studyflow:data-changed"));
   expect(mutate).toHaveBeenCalled();
+  // Revalidate only; a data argument would overwrite the cached lists.
+  for (const call of mutate.mock.calls) expect(call).toHaveLength(1);
 });

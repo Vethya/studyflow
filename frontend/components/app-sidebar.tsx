@@ -7,7 +7,7 @@ import {
   ListChecks,
   Clock3,
   ChartLine,
-} from "lucide-react";
+} from "@/components/icons";
 import {
   Sidebar,
   SidebarContent,

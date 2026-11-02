@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { useTheme } from "next-themes";
-import { Monitor, Moon, MoonStar, Sun } from "lucide-react";
+import { Monitor, Moon, MoonStar, Sun } from "@/components/icons";
 import {
   Select,
   SelectContent,
