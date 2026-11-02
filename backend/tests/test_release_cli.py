@@ -28,6 +28,7 @@ PRODUCTION_ENVIRONMENT = {
     "STUDYFLOW_EMAIL_FROM_ADDRESS": "studyflow@mail.example.com",
     "STUDYFLOW_TRUSTED_PROXY_HOPS": "2",
 }
+(CODE_HEAD,) = ScriptDirectory.from_config(Config(ALEMBIC_CONFIG)).get_heads()
 
 
 @pytest.fixture
@@ -206,7 +207,7 @@ def test_boot_refuses_to_start_when_the_database_is_behind(
     exit_code, output = run("boot")
 
     assert exit_code == 1
-    assert "database schema is at 20260903_15 but this build requires 20260918_23" in output
+    assert f"database schema is at 20260903_15 but this build requires {CODE_HEAD}" in output
     assert "docs/release.md" in output
     assert migrations == []
 
@@ -220,7 +221,7 @@ def test_boot_starts_when_the_database_is_current(
     exit_code, output = run("boot")
 
     assert exit_code == 0
-    assert "Database schema is current (20260918_23)." in output
+    assert f"Database schema is current ({CODE_HEAD})." in output
     assert migrations == []
 
 
@@ -245,7 +246,7 @@ def test_unknown_database_revision_fails_the_gate(
     exit_code, output = run(command_name)
 
     assert exit_code == 1
-    assert "database schema is at 20991231_99, which this build (20260918_23) does not know" in (
+    assert f"database schema is at 20991231_99, which this build ({CODE_HEAD}) does not know" in (
         output
     )
     assert "Database schema is current" not in output

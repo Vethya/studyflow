@@ -1,7 +1,7 @@
 """Evidence-gated adaptive estimate previews and prediction capture."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Literal
@@ -9,7 +9,11 @@ from uuid import UUID
 
 from studyflow.estimation.model import (
     CorrectionPrediction,
-    median_correction,
+    EstimateBasis,
+    EstimationAccuracy,
+    adaptive_correction,
+    category_correction_factor,
+    estimation_accuracy,
     qualifies,
 )
 from studyflow.estimation.repositories import AdaptivePredictionRepository
@@ -43,6 +47,9 @@ class AdaptiveEstimatePreview:
     available: bool
     planned_source: PlannedSource
     acknowledgment_required: bool
+    low_minutes: int | None = None
+    high_minutes: int | None = None
+    basis: EstimateBasis | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +62,11 @@ class AdaptiveEligibilityStatus:
 
 
 class AdaptiveEstimator:
-    """Calculates, gates, captures, and acknowledges correction predictions."""
+    """Calculates, gates, captures, and acknowledges correction predictions.
+
+    Large-factor acknowledgments use the size-independent category factor so that one
+    acknowledgment covers every task size in a category and cannot re-prompt in a loop.
+    """
 
     def __init__(
         self,
@@ -110,19 +121,18 @@ class AdaptiveEstimator:
     async def acknowledge(self, account_id: UUID, category: TaskCategory) -> bool:
         """Acknowledge the currently calculated qualified correction for a category."""
         history = await self._repository.history(account_id)
-        prediction = median_correction(history, category, 1)
-        if prediction is None or not qualifies(await self._repository.evaluations(account_id)):
+        factor = category_correction_factor(history, category)
+        if factor is None or not qualifies(await self._repository.evaluations(account_id)):
             raise AdaptiveEstimateUnavailableError
-        return await self._repository.acknowledge(
-            account_id,
-            category,
-            prediction.correction_factor,
-            self._clock(),
-        )
+        return await self._repository.acknowledge(account_id, category, factor, self._clock())
 
     async def is_qualified(self, account_id: UUID) -> bool:
         """Return whether the account currently qualifies for adaptive estimates."""
         return qualifies(await self._repository.evaluations(account_id))
+
+    async def accuracy(self, account_id: UUID) -> EstimationAccuracy | None:
+        """Compare original and adaptive-snapshot error over the account's completed tasks."""
+        return estimation_accuracy(await self._repository.evaluations(account_id))
 
     async def recalculate_after_deletion(
         self,
@@ -139,10 +149,9 @@ class AdaptiveEstimator:
             acknowledged_factor = await repo.acknowledgment(account_id, category)
             if acknowledged_factor is None:
                 continue
-            prediction = median_correction(history, category, 1)
-            if prediction is None:
+            factor = category_correction_factor(history, category)
+            if factor is None:
                 continue
-            factor = prediction.correction_factor
             if (
                 LARGE_FACTOR_LOWER_BOUND <= factor <= LARGE_FACTOR_UPPER_BOUND
                 or self._acknowledgment_required(factor, acknowledged_factor)
@@ -157,7 +166,7 @@ class AdaptiveEstimator:
         return AdaptiveEligibilityStatus(
             is_qualified=is_qualified,
             completed_predictions_count=len(completed_predictions),
-            eligible_history_count=len(history),
+            eligible_history_count=sum(1 for record in history if not record.provisional),
         )
 
     async def _evaluate(
@@ -168,13 +177,14 @@ class AdaptiveEstimator:
         repository: AdaptivePredictionRepository,
     ) -> tuple[AdaptiveEstimatePreview, CorrectionPrediction | None]:
         history = await repository.history(account_id)
-        prediction = median_correction(history, category, original_minutes)
+        prediction = adaptive_correction(history, category, original_minutes)
         if prediction is None or not qualifies(await repository.evaluations(account_id)):
             return self._unavailable_preview(category, original_minutes), prediction
 
+        category_factor = category_correction_factor(history, category)
         acknowledged_factor = await repository.acknowledgment(account_id, category)
-        acknowledgment_required = self._acknowledgment_required(
-            prediction.correction_factor, acknowledged_factor
+        acknowledgment_required = category_factor is not None and self._acknowledgment_required(
+            category_factor, acknowledged_factor
         )
         return (
             AdaptiveEstimatePreview(
@@ -187,6 +197,9 @@ class AdaptiveEstimator:
                 available=True,
                 planned_source=("original" if acknowledgment_required else "adaptive"),
                 acknowledgment_required=acknowledgment_required,
+                low_minutes=prediction.low_minutes,
+                high_minutes=prediction.high_minutes,
+                basis=prediction.basis,
             ),
             prediction,
         )
@@ -211,17 +224,7 @@ class AdaptiveEstimator:
     def _with_planned_source(
         preview: AdaptiveEstimatePreview, planned_source: PlannedSource
     ) -> AdaptiveEstimatePreview:
-        return AdaptiveEstimatePreview(
-            category=preview.category,
-            original_minutes=preview.original_minutes,
-            adaptive_minutes=preview.adaptive_minutes,
-            correction_factor=preview.correction_factor,
-            history_scope=preview.history_scope,
-            history_count=preview.history_count,
-            available=preview.available,
-            planned_source=planned_source,
-            acknowledgment_required=preview.acknowledgment_required,
-        )
+        return replace(preview, planned_source=planned_source)
 
     @staticmethod
     def _acknowledgment_required(

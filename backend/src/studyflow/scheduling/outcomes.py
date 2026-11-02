@@ -8,6 +8,7 @@ from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from studyflow.scheduling.proposals import StudySessionRecord
+from studyflow.tasks.service import TaskCategory
 
 MAX_DURATION_MINUTES = 2_147_483_647
 LARGE_ACTUAL_FACTOR = 2
@@ -33,6 +34,8 @@ class StudySessionOutcomeRecord:
 class StudySessionDetails:
     session: StudySessionRecord
     outcome: StudySessionOutcomeRecord | None
+    task_title: str | None = None
+    task_category: TaskCategory | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +43,8 @@ class StudySessionFilters:
     starts_from: datetime | None = None
     starts_to: datetime | None = None
     task_id: UUID | None = None
+    # True keeps only ended sessions without an outcome; False keeps every other session.
+    awaiting_outcome: bool | None = None
 
 
 class StudySessionOutcomeRepository(Protocol):

@@ -40,7 +40,7 @@ from studyflow.scheduling.proposals import (
 )
 from studyflow.scheduling.recovery import InvalidRecoveryTriggerError, ScheduleRecovery
 from studyflow.scheduling.service import ScheduleGenerationFailedError
-from studyflow.tasks.service import AcademicTasks
+from studyflow.tasks.service import AcademicTasks, TaskCategory
 
 NOW = datetime(2026, 8, 24, 12, tzinfo=UTC)
 ACCOUNT_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -900,7 +900,14 @@ async def test_study_session_api_lists_sessions_with_filters() -> None:
     sessions = StudySessionsStub(
         StudySessionDetails(session, outcome),
         outcome,
-        listed=[StudySessionDetails(session, outcome)],
+        listed=[
+            StudySessionDetails(
+                session,
+                outcome,
+                task_title="Essay",
+                task_category=TaskCategory.ASSIGNMENT,
+            )
+        ],
     )
     application = _api(sessions)
 
@@ -934,6 +941,8 @@ async def test_study_session_api_lists_sessions_with_filters() -> None:
                 "recorded_at": "2026-08-24T12:00:00Z",
                 "rescheduled_at": None,
             },
+            "task_title": "Essay",
+            "task_category": "assignment",
         }
     ]
     assert sessions.filters == StudySessionFilters(

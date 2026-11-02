@@ -345,3 +345,52 @@ def test_production_requires_https_for_google_import_redirect_uri() -> None:
             google_oidc_redirect_uri="https://studyflow.example.com/api/v1/auth/google/callback",
             google_import_redirect_uri="http://studyflow.example.com/import-callback",
         )
+
+
+def test_reminder_dispatch_token_is_optional_secret_and_blank_disables_it(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    assert Settings(environment=Environment.TEST).reminder_dispatch_token is None
+    assert Settings(reminder_dispatch_token=SecretStr("")).reminder_dispatch_token is None
+    monkeypatch.setenv("STUDYFLOW_REMINDER_DISPATCH_TOKEN", "")
+    assert Settings().reminder_dispatch_token is None
+
+    token = "r" * 64
+    monkeypatch.setenv("STUDYFLOW_REMINDER_DISPATCH_TOKEN", token)
+    settings = Settings()
+
+    assert isinstance(settings.reminder_dispatch_token, SecretStr)
+    assert settings.reminder_dispatch_token.get_secret_value() == token
+    assert token not in repr(settings)
+
+
+def test_reminder_dispatch_token_must_be_long_enough() -> None:
+    with raises(ValidationError, match="at least 32 characters"):
+        Settings(reminder_dispatch_token=SecretStr("short-token"))
+
+
+def test_reminder_dispatch_token_strips_surrounding_whitespace(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    token = "t" * 32
+    settings = Settings(reminder_dispatch_token=SecretStr(f"\n{token} \t"))
+    assert settings.reminder_dispatch_token is not None
+    assert settings.reminder_dispatch_token.get_secret_value() == token
+
+    monkeypatch.setenv("STUDYFLOW_REMINDER_DISPATCH_TOKEN", f"{token}\n")
+    from_env = Settings()
+    assert from_env.reminder_dispatch_token is not None
+    assert from_env.reminder_dispatch_token.get_secret_value() == token
+
+    assert Settings(reminder_dispatch_token=SecretStr(" \n\t")).reminder_dispatch_token is None
+    with raises(ValidationError, match="at least 32 characters"):
+        Settings(reminder_dispatch_token=SecretStr(f"{'s' * 31}\n"))
+
+
+def test_reminder_dispatch_token_is_hidden_in_validation_errors() -> None:
+    token = "short-token"
+    with raises(ValidationError) as caught:
+        Settings(reminder_dispatch_token=SecretStr(token))
+
+    assert token not in str(caught.value)
+    assert all(error.get("input") != token for error in caught.value.errors())

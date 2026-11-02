@@ -1,0 +1,43 @@
+name: Study reminders
+
+# Render Free has no background workers, so GitHub's scheduler wakes the API and asks it to
+# send due study reminder emails. The endpoint is idempotent: overlapping or repeated calls
+# never send the same reminder twice.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: study-reminders
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Dispatch due reminders
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call the reminder dispatch endpoint
+        env:
+          STUDYFLOW_API_URL: ${{ secrets.STUDYFLOW_API_URL }}
+          STUDYFLOW_REMINDER_DISPATCH_TOKEN: ${{ secrets.STUDYFLOW_REMINDER_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$STUDYFLOW_API_URL" ] || [ -z "$STUDYFLOW_REMINDER_DISPATCH_TOKEN" ]; then
+            echo "::warning title=Study reminders not configured::Set the STUDYFLOW_API_URL and STUDYFLOW_REMINDER_DISPATCH_TOKEN repository secrets to send study reminder emails. Skipping this run."
+            exit 0
+          fi
+          endpoint="${STUDYFLOW_API_URL%/}/api/v1/internal/reminders/dispatch"
+          # The first request after Render Free idles can take 30-60 seconds while the service wakes.
+          if ! summary=$(curl --silent --show-error --fail-with-body \
+            --max-time 120 --retry 2 --retry-delay 20 --retry-all-errors \
+            --request POST \
+            --header "Authorization: Bearer ${STUDYFLOW_REMINDER_DISPATCH_TOKEN}" \
+            --header "Accept: application/json" \
+            "$endpoint"); then
+            echo "::error title=Study reminder dispatch failed::POST $endpoint did not succeed. Response: ${summary:-<none>}"
+            exit 1
+          fi
+          echo "Reminder dispatch summary: $summary"

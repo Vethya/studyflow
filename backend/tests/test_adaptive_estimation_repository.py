@@ -518,3 +518,68 @@ async def test_acknowledgment_replaces_a_category_specific_factor_for_its_accoun
         )
     finally:
         await database.stop()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("session_bound", [False, True])
+async def test_history_adds_provisional_records_for_delayed_open_tasks(
+    session_bound: bool,
+) -> None:
+    database, owner_id, _ = await _database()
+    try:
+        completed = await _completed_task(
+            database, owner_id, completed_at=NOW - timedelta(days=1), actual_minutes=150
+        )
+        delayed = _task(owner_id, category="reading", estimate_frozen_at=NOW - timedelta(hours=3))
+        finished_early = _task(owner_id, estimate_frozen_at=NOW - timedelta(hours=3))
+        finished_early.finished_early_at = NOW
+        missed_only = _task(owner_id, estimate_frozen_at=NOW - timedelta(hours=3))
+        async with database.transaction() as session:
+            session.add_all([delayed, finished_early, missed_only])
+            outcomes = [
+                (delayed, 60, "delayed", 50, 30, NOW - timedelta(hours=2)),
+                (delayed, 40, "missed", 0, 40, NOW - timedelta(hours=1)),
+                (finished_early, 60, "delayed", 50, 30, NOW - timedelta(hours=2)),
+                (missed_only, 60, "missed", 0, 60, NOW - timedelta(hours=2)),
+            ]
+            for task, planned, kind, actual, remaining, recorded_at in outcomes:
+                study_session = SessionRow(
+                    account_id=owner_id,
+                    task_id=task.id,
+                    proposal_id=None,
+                    starts_at=recorded_at - timedelta(minutes=planned),
+                    ends_at=recorded_at,
+                    planned_duration_minutes=planned,
+                )
+                session.add(study_session)
+                await session.flush()
+                session.add(
+                    OutcomeRow(
+                        session_id=study_session.id,
+                        kind=kind,
+                        actual_minutes=actual,
+                        remaining_minutes=remaining,
+                        recorded_at=recorded_at,
+                        rescheduled_at=None,
+                    )
+                )
+        repository = SqlAlchemyAdaptivePredictionRepository(database)
+
+        if session_bound:
+            async with database.transaction() as session:
+                history = await repository.with_session(session).history(owner_id)
+        else:
+            history = await repository.history(owner_id)
+
+        assert [(record.task_id, record.provisional) for record in history] == [
+            (completed.id, False),
+            (delayed.id, True),
+        ]
+        provisional = history[1]
+        # 50 minutes worked plus 70 remaining: the 30 revised minutes and the missed 40.
+        assert provisional.actual_minutes == 120
+        assert provisional.original_minutes == 100
+        assert provisional.category is TaskCategory.READING
+        assert provisional.completed_at == NOW - timedelta(hours=2)
+    finally:
+        await database.stop()

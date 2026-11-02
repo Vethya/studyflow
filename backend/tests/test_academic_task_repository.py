@@ -223,12 +223,12 @@ async def test_task_repository_snapshots_qualified_adaptive_or_explicit_original
             automatic.adaptive_estimate_minutes,
             automatic.planned_source,
             automatic.planned_duration_minutes,
-        ) == (90, PlannedDurationSource.ADAPTIVE, 90)
+        ) == (86, PlannedDurationSource.ADAPTIVE, 86)
         assert (
             original.adaptive_estimate_minutes,
             original.planned_source,
             original.planned_duration_minutes,
-        ) == (90, PlannedDurationSource.ORIGINAL, 60)
+        ) == (86, PlannedDurationSource.ORIGINAL, 60)
     finally:
         await database.stop()
 
@@ -432,17 +432,21 @@ async def test_unqualified_recapture_removes_the_prior_prediction_snapshot() -> 
                 60,
             ),
         )
+        # Leave one completed task: adaptive estimates need at least two.
         async with database.transaction() as session:
-            history_id = await session.scalar(
-                select(AcademicTask.id)
-                .where(
-                    AcademicTask.account_id == account_id,
-                    AcademicTask.completed_at.is_not(None),
+            history_ids = list(
+                await session.scalars(
+                    select(AcademicTask.id)
+                    .where(
+                        AcademicTask.account_id == account_id,
+                        AcademicTask.completed_at.is_not(None),
+                    )
+                    .limit(4)
                 )
-                .limit(1)
             )
-            assert history_id is not None
-        assert await repository.delete(account_id, history_id)
+            assert len(history_ids) == 4
+        for history_id in history_ids:
+            assert await repository.delete(account_id, history_id)
 
         updated = await repository.update(
             account_id,

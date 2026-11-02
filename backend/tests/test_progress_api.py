@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import cast
 from uuid import UUID, uuid4
 
@@ -9,11 +10,13 @@ from httpx import ASGITransport, AsyncClient
 
 from studyflow.api.progress import (
     _response,
+    accuracy_response,
     get_academic_tasks,
     get_study_sessions,
 )
 from studyflow.app import create_app
 from studyflow.auth.session_authentication import SessionPrincipal
+from studyflow.estimation import AdaptiveEstimator, EstimationAccuracy
 from studyflow.progress import EffortProgressRecord
 from studyflow.scheduling.outcomes import (
     SessionOutcomeKind,
@@ -137,6 +140,16 @@ class StudySessionsStub:
         return self.adjustments
 
 
+@dataclass
+class EstimatorStub:
+    result: EstimationAccuracy | None = None
+    account_ids: list[UUID] = field(default_factory=list)
+
+    async def accuracy(self, account_id: UUID) -> EstimationAccuracy | None:
+        self.account_ids.append(account_id)
+        return self.result
+
+
 def sample_task() -> AcademicTaskRecord:
     return AcademicTaskRecord(
         id=TASK_ID,
@@ -184,6 +197,7 @@ async def test_list_effort_progress_unauthorized() -> None:
         session_authentication=AuthenticationStub(authenticated=False),
         academic_tasks=cast(AcademicTasks, TasksStub()),
         study_sessions=cast(StudySessions, StudySessionsStub()),
+        adaptive_estimator=cast(AdaptiveEstimator, EstimatorStub()),
     )
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -207,6 +221,7 @@ async def test_list_effort_progress_authenticated() -> None:
         session_authentication=AuthenticationStub(authenticated=True),
         academic_tasks=cast(AcademicTasks, tasks_stub),
         study_sessions=cast(StudySessions, sessions_stub),
+        adaptive_estimator=cast(AdaptiveEstimator, EstimatorStub()),
     )
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -231,6 +246,7 @@ async def test_list_effort_progress_authenticated() -> None:
     assert item["sessions_completed"] == 1
     assert item["sessions_upcoming"] == 0
     assert item["status"] == "in_progress"
+    assert item["estimation_accuracy"] is None
 
 
 def test_dependency_getters_and_response_mapping() -> None:
@@ -270,3 +286,45 @@ def test_dependency_getters_and_response_mapping() -> None:
     assert resp.sessions_completed == 1
     assert resp.sessions_upcoming == 1
     assert resp.status is TaskStatus.IN_PROGRESS
+    assert resp.estimation_accuracy is None
+
+
+@pytest.mark.anyio
+async def test_list_effort_progress_includes_account_estimation_accuracy() -> None:
+    task = sample_task()
+    estimator = EstimatorStub(
+        EstimationAccuracy(
+            sample_size=6,
+            original_mean_absolute_error_minutes=Decimal("26.7"),
+            adaptive_mean_absolute_error_minutes=Decimal("6.7"),
+            improvement_percent=Decimal("75.0"),
+            adaptive_qualified=True,
+        )
+    )
+    app = create_app(
+        session_authentication=AuthenticationStub(authenticated=True),
+        academic_tasks=cast(AcademicTasks, TasksStub(records=[task])),
+        study_sessions=cast(StudySessions, StudySessionsStub()),
+        adaptive_estimator=cast(AdaptiveEstimator, estimator),
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://test",
+        cookies={"studyflow_session": "valid-token"},
+    ) as client:
+        response = await client.get("/api/v1/progress")
+
+    assert response.status_code == 200
+    assert estimator.account_ids == [ACCOUNT_ID]
+    assert response.json()[0]["estimation_accuracy"] == {
+        "sample_size": 6,
+        "original_mean_absolute_error_minutes": 26.7,
+        "adaptive_mean_absolute_error_minutes": 6.7,
+        "improvement_percent": 75.0,
+        "adaptive_qualified": True,
+    }
+    assert accuracy_response(None) is None
+    no_change = accuracy_response(
+        EstimationAccuracy(3, Decimal("0.0"), Decimal("5.0"), None, adaptive_qualified=False)
+    )
+    assert no_change is not None and no_change.improvement_percent is None

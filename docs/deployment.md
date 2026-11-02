@@ -7,7 +7,8 @@ StudyFlow deploys at zero cost per `docs/adr/0005-use-zero-cost-render-and-neon-
 | API (Dockerized FastAPI) | Render | Free |
 | Frontend (React) | Vercel | Hobby |
 | PostgreSQL | Neon | Free |
-| Authentication email | Resend SMTP relay | Free |
+| Authentication and study reminder email | Resend SMTP relay | Free |
+| Study reminder trigger | GitHub Actions schedule | Free |
 
 The frontend proxies every API request through its own origin (the Next.js `/api/v1/*` rewrite in
 `frontend/next.config.ts`, which reads `BACKEND_ORIGIN`), so the
@@ -40,6 +41,7 @@ URL, and TLS for email delivery.
 | `STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET` | no | You (secret) | |
 | `STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI` | no | You (secret) | Paste `https://<frontend-origin>/api/v1/auth/google/callback`; must be HTTPS and must go through the frontend proxy |
 | `STUDYFLOW_GOOGLE_IMPORT_REDIRECT_URI` | no | You (secret) | Enables Google Calendar and Classroom import. Paste `https://<frontend-origin>/api/v1/integrations/google/callback`; requires the three OIDC values. See [google-import-setup.md](google-import-setup.md) |
+| `STUDYFLOW_REMINDER_DISPATCH_TOKEN` | no | You (secret) | Enables study reminder emails. At least 32 characters; must equal the GitHub secret of the same name. When unset, `POST /api/v1/internal/reminders/dispatch` responds `404`. See [Study reminder emails](#5-study-reminder-emails) |
 
 ## Client IP addresses and rate limits
 
@@ -176,6 +178,51 @@ silently overrides `BACKEND_ORIGIN`.
    variable changes only apply to new deployments.
 3. Application code calls `/api/...` relative to its own origin everywhere — never an
    absolute backend URL.
+
+### 5. Study reminder emails
+
+Students can opt in (Settings) to two emails: one shortly before a scheduled study session
+starts (30–120 minutes, default 30), and one after a session ends that asks them to record
+how it went. Render Free has no background workers or cron, so a scheduled GitHub Actions
+workflow (`.github/workflows/study-reminders.yml`) wakes the API every 30 minutes and calls
+`POST /api/v1/internal/reminders/dispatch` with a shared bearer token. Each reminder is
+recorded once it is sent, so repeated, overlapping, or retried calls never send duplicates;
+a failed email is not recorded and is retried on the next run. Reminder emails go through the
+same Resend SMTP settings as authentication email.
+
+1. Generate a random token, for example `openssl rand -hex 32` or
+   `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+2. On Render, set `STUDYFLOW_REMINDER_DISPATCH_TOKEN` to that value for each service that
+   should send reminders (it is declared with `sync: false` in `render.yaml`). Leave it unset
+   to keep the feature disabled; the dispatch endpoint then responds `404`.
+3. In the GitHub repository, open **Settings → Secrets and variables → Actions** and add:
+   - `STUDYFLOW_API_URL`: the API origin without a trailing slash, for example
+     `https://studyflow-api.onrender.com`. The endpoint needs no cookies, so the Render
+     domain can be called directly.
+   - `STUDYFLOW_REMINDER_DISPATCH_TOKEN`: the same token as on Render.
+4. Run the **Study reminders** workflow once from the Actions tab (`workflow_dispatch`) and check
+   that the log ends with a JSON summary such as
+   `{"sent_before":0,"sent_after":0,"skipped":0,"failed":0}`.
+
+If either secret is missing, the workflow logs a warning and exits successfully without calling
+the API. Because Render Free sleeps after about 15 minutes idle, the first call can take
+30–60 seconds while the service wakes; the workflow uses `curl --max-time 120` with retries.
+A 30-minute schedule leaves the free instance asleep between runs. Point the workflow at only one
+service, and disable it in the Actions tab if those hours are needed elsewhere.
+The shortest lead is 30 minutes to match this schedule: every session start then has at least
+one run inside its reminder window.
+GitHub may delay scheduled runs by several minutes at busy times, so a "before" reminder can
+arrive later than the chosen lead time, and one for a session that has already started is
+skipped. "After" reminders are sent from 10 minutes to 24 hours after a session ends, only while
+the session still has no recorded outcome.
+
+To trigger a run manually:
+
+```
+curl --max-time 120 --retry 2 --retry-all-errors -X POST \
+  -H "Authorization: Bearer $STUDYFLOW_REMINDER_DISPATCH_TOKEN" \
+  https://studyflow-api.onrender.com/api/v1/internal/reminders/dispatch
+```
 
 ## Separate dev and production frontends
 

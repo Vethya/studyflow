@@ -7,7 +7,11 @@ from httpx import ASGITransport, AsyncClient
 
 from studyflow.app import create_app
 from studyflow.auth.session_authentication import SessionPrincipal
-from studyflow.estimation import AdaptiveEstimatePreview, AdaptiveEstimateUnavailableError
+from studyflow.estimation import (
+    AdaptiveEstimatePreview,
+    AdaptiveEstimateUnavailableError,
+    EstimateBasis,
+)
 from studyflow.tasks.service import TaskCategory
 
 ACCOUNT_ID = UUID("5b15bfef-8c44-45d5-a70e-574beb999fb3")
@@ -49,6 +53,9 @@ class EstimatorStub:
             available=preview.available,
             planned_source=preview.planned_source,
             acknowledgment_required=preview.acknowledgment_required,
+            low_minutes=preview.low_minutes,
+            high_minutes=preview.high_minutes,
+            basis=preview.basis,
         )
 
     async def acknowledge(self, account_id: UUID, category: TaskCategory) -> bool:
@@ -67,6 +74,9 @@ def preview(
     history_count: int | None = None,
     planned_source: str = "original",
     acknowledgment_required: bool = False,
+    low_minutes: int | None = None,
+    high_minutes: int | None = None,
+    basis: EstimateBasis | None = None,
 ) -> AdaptiveEstimatePreview:
     return AdaptiveEstimatePreview(
         category=TaskCategory.READING,
@@ -78,6 +88,9 @@ def preview(
         available=available,
         planned_source=planned_source,  # type: ignore[arg-type]
         acknowledgment_required=acknowledgment_required,
+        low_minutes=low_minutes,
+        high_minutes=high_minutes,
+        basis=basis,
     )
 
 
@@ -148,6 +161,10 @@ async def test_preview_returns_unavailable_without_hidden_estimation_data() -> N
         "available": False,
         "planned_source": "original",
         "acknowledgment_required": False,
+        "low_minutes": None,
+        "high_minutes": None,
+        "sample_size": None,
+        "basis": None,
     }
 
 
@@ -162,6 +179,9 @@ async def test_preview_returns_qualified_student_safe_estimate_without_accuracy_
                 history_scope="category",
                 history_count=5,
                 planned_source="adaptive",
+                low_minutes=75,
+                high_minutes=110,
+                basis=EstimateBasis("category", "medium", 4, 1, 5, 3),
             )
         }
     )
@@ -189,6 +209,17 @@ async def test_preview_returns_qualified_student_safe_estimate_without_accuracy_
         "available": True,
         "planned_source": "adaptive",
         "acknowledgment_required": False,
+        "low_minutes": 75,
+        "high_minutes": 110,
+        "sample_size": 5,
+        "basis": {
+            "scope": "category",
+            "size_bucket": "medium",
+            "completed_records": 4,
+            "provisional_records": 1,
+            "category_records": 5,
+            "size_records": 3,
+        },
     }
 
 

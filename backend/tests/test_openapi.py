@@ -256,11 +256,26 @@ def test_openapi_documents_study_session_list_filters() -> None:
     operation = schema["paths"]["/api/v1/study-sessions"]["get"]
     parameters = {parameter["name"]: parameter for parameter in operation["parameters"]}
 
-    assert set(parameters) == {"from", "to", "task_id"}
+    assert set(parameters) == {"from", "to", "task_id", "awaiting_outcome"}
     assert parameters["from"]["required"] is False
     assert parameters["to"]["required"] is False
     assert parameters["task_id"]["required"] is False
+    assert parameters["awaiting_outcome"]["required"] is False
     assert set(operation["responses"]) >= {"200", "401", "422"}
+    session_schema = schema["components"]["schemas"]["StudySessionResponse"]
+    assert {"task_title", "task_category"} <= set(session_schema["required"])
+
+
+def test_openapi_documents_task_list_pagination() -> None:
+    schema = create_app().openapi()
+    operation = schema["paths"]["/api/v1/tasks"]["get"]
+    parameters = {parameter["name"]: parameter for parameter in operation["parameters"]}
+
+    assert parameters["offset"]["required"] is False
+    assert parameters["offset"]["schema"]["minimum"] == 0
+    assert parameters["offset"]["schema"]["default"] == 0
+    assert parameters["limit"]["schema"]["anyOf"][0]["maximum"] == 100
+    assert "X-Total-Count" in operation["responses"]["200"]["headers"]
 
 
 def test_openapi_documents_student_safe_adaptive_estimate_operations() -> None:
@@ -290,4 +305,8 @@ def test_openapi_documents_student_safe_adaptive_estimate_operations() -> None:
         "available",
         "planned_source",
         "acknowledgment_required",
+        "low_minutes",
+        "high_minutes",
+        "sample_size",
+        "basis",
     }

@@ -7,7 +7,7 @@ This specification consolidates the StudyFlow proposal, presentation, and the pr
 The approved revised requirements are authoritative when they differ from the original proposal or presentation:
 
 - FR-01 through FR-09 and NFR-01 through NFR-06 in this specification define the binding requirements baseline.
-- FR-10 from the original proposal is superseded. Effort Progress remains under FR-06, while estimation-accuracy analytics remain internal to adaptive qualification and thesis evaluation.
+- FR-10 from the original proposal is superseded. Effort Progress remains under FR-06; estimation-accuracy analytics remain internal except for the aggregate accuracy summary in Section 15.6.
 - `B11-P10_StudyFlow_Presentation.pdf` is an explanatory summary.
 - The proposal remains a historical source artifact; the scope decisions recorded here supersede its earlier requirement wording.
 - This specification resolves ambiguities left open by the proposal and presentation.
@@ -43,7 +43,7 @@ StudyFlow must:
 - **FR-08 — Overload:** The system shall detect when remaining workload cannot fit within valid study time before its Deadline and display the affected work, capacity shortfall, relevant constraints, and possible remedies.
 - **FR-09 — Unfinished-Work Revision:** After a Study Session is recorded as Delayed or Missed, the system shall automatically generate a proposed Schedule Revision for the unfinished work and require the student to accept it before it replaces the active schedule.
 
-FR-10 is removed. Internal estimate-comparison metrics remain required for adaptive-estimation qualification and thesis evaluation but are not presented to students as estimation-error statistics or model-accuracy analytics.
+FR-10 is removed. Internal estimate-comparison metrics remain required for adaptive-estimation qualification and thesis evaluation. Students see only the aggregate accuracy summary in Section 15.6, not per-task errors or signed bias.
 
 ## 3. Product Scope
 
@@ -689,73 +689,86 @@ Completed sessions never move or reappear.
 
 ### 15.2 Correction Baseline: Cold Start and Activation
 
-Tasks 1–5:
+Before two tasks are completed:
 
 - Collect completed behavior.
 - Adaptive Estimate remains unavailable.
 - Scheduling uses Original Estimate.
 
-Tasks 6–10:
+From two completed tasks onward:
 
-- Generate hidden chronological correction predictions.
-- Do not expose them to the student.
+- Generate hidden chronological correction predictions for each new task.
+- Do not expose them to the student until the correction qualifies.
 
-After task 10:
+Once five hidden predictions belong to completed tasks:
 
-- Evaluate the five hidden predictions.
-- Activate the correction Adaptive Estimate only if its MAE is at least 10% lower than Original Estimate MAE on the same tasks.
+- Evaluate them against the Original Estimates of the same tasks.
+- Activate the correction Adaptive Estimate only if its recency-weighted absolute error is at least 10% lower than the Original Estimate error on the same tasks.
 - Otherwise keep Adaptive Estimate unavailable.
 - Reassess after later completions.
 
 ### 15.3 Correction Formula
 
-For each completed task:
+For each eligible record:
 
-`ratio = Actual Duration / Original Estimate`
+`ratio = clamp(Actual Duration / Original Estimate, 0.25, 4)`
 
-Correction factor:
+Eligible records are completed tasks with positive confirmed Actual Duration and, as provisional evidence, in-progress tasks with at least one Delayed outcome. A provisional record uses the work recorded so far plus the task's revised remaining work as its projected Actual Duration and counts at half weight. Scheduling write paths are unchanged; provisional records are read-only inputs.
 
-- Median ratio from the latest 20 applicable completed records.
-- Use category-specific history when at least five completed tasks exist in that Category.
-- Otherwise use overall student history.
-- Do not use Course or Notes.
-- Do not cap the factor.
+Recency:
+
+- Read at most the newest 50 records, ordered by completion time (latest Delayed outcome time for provisional records), then task ID.
+- The newest record has weight 1 and each older rank is multiplied by 14/15, a half-life of about ten records.
+- Each scope uses the weighted median (weighted 25th and 75th percentiles for the range). When cumulative weight lands exactly on the target, the two neighbouring ratios are averaged.
+
+Scopes and shrinkage (deterministic hierarchy, general to specific):
+
+1. Neutral ratio 1.0.
+2. Overall history.
+3. Task-size bucket of the new task, by Original Estimate: small (under 60 minutes), medium (60–240 minutes), large (over 240 minutes).
+4. The task's Category.
+
+Each level is blended with its parent: `blended = (n × scope ratio + 5 × parent) / (n + 5)`, where `n` is the scope's evidence count (completed records count 1, provisional records 0.5) and 5 is the shrinkage strength. Scopes without records pass the parent through. Sparse history therefore stays close to the neutral ratio, and specific scopes gain influence gradually instead of at a hard cut-off.
 
 Prediction:
 
-`Adaptive Estimate = Original Estimate × median correction factor`
+- `Adaptive Estimate = Original Estimate × clamp(blended ratio, 1/3, 3)`, rounded half up to whole minutes, at least 1 minute.
+- Likely range: the same blend applied to the weighted 25th and 75th percentile ratios, clamped and rounded the same way.
+- Basis: sample size and the scope with the largest share of the final blend (category, size, or overall).
+- Do not use Course or Notes.
+- All arithmetic is exact rational arithmetic until the final rounding; the displayed correction factor is rounded to six decimal places.
 
-Why median:
+Why this shape:
 
-- A single extreme or erroneous record does not dominate.
-- Repeated genuine underestimation, including 4× behavior, remains learnable.
-
+- Clamping, medians, and shrinkage keep one extreme or erroneous record from dominating.
+- Repeated genuine underestimation remains learnable up to a 3× adjustment.
+- Recent behaviour matters more than old behaviour, without a hard window edge.
 ### 15.4 Large Adjustment Acknowledgment
 
-When a Category first produces an Adaptive Estimate:
+When a Category first produces a correction factor:
 
-- Greater than 2× Original Estimate; or
-- Less than 0.5× Original Estimate;
+- Greater than 2×; or
+- Less than 0.5×;
 
 StudyFlow must:
 
 - Explain the relevant history.
 - Ask whether to use Adaptive or Original for scheduling.
-- Preserve the uncapped Adaptive value.
+- Preserve the Adaptive value within its 1/3×–3× bounds.
+- Judge the threshold on the Category factor computed without the task-size level, so one acknowledgment covers every task size in that Category.
 
 After the student acknowledges that Category:
 
 - Continue showing the explanation.
 - Do not repeatedly block normal task creation for the same established pattern.
-- Require acknowledgment again only if the adjustment factor changes substantially; the precise material-change threshold remains an implementation acceptance detail.
+- Require acknowledgment again only if the Category factor changes by at least 25% relative to the acknowledged factor.
 
 ### 15.5 Continued Qualification
 
 After activation:
 
 - Re-evaluate after every completed task.
-- Use the latest 10 eligible chronological predictions when 10 are available; otherwise use every hidden eligible prediction, with a minimum of five.
-- The correction method must maintain a 10% MAE advantage over Original Estimates on the same tasks.
+- Use the latest 10 eligible chronological predictions when 10 are available; otherwise use every hidden eligible prediction, with a minimum of five. The newest prediction has weight 1 and each older one is multiplied by 14/15.- The correction method must maintain a 10% recency-weighted absolute-error advantage over Original Estimates on the same tasks.
 - If it loses qualification, Adaptive Estimate becomes unavailable and Planned Duration uses Original Estimate.
 
 This change affects new predictions only; existing task predictions remain frozen.
@@ -765,15 +778,14 @@ This change affects new predictions only; existing task predictions remain froze
 For any Adaptive Estimate, show:
 
 - Original Estimate.
-- Adaptive Estimate.
-- A short explanation that it is based on the student's earlier completion history.
+- Adaptive Estimate and its likely range.
+- A short explanation that it is based on the student's earlier history, including the number of records used and whether the Category, task size, or overall history dominated.
 - The Planned Duration selected for scheduling.
 
-Do not expose MAE, signed bias, prediction errors, eligible sample counts, or other model-accuracy analytics in the student interface.
-
+The Progress view may show an estimation-accuracy summary: the number of completed tasks that had an adaptive prediction, the mean absolute error of Original Estimates and of the predictions on those tasks, and the improvement percentage. Signed bias and per-task prediction errors remain internal.
 ## 16. Internal Estimation Evaluation
 
-The following calculations are required for adaptive qualification and thesis evaluation, not as student-facing product analytics.
+The following calculations are required for adaptive qualification and thesis evaluation. Only the aggregate summary described in Section 15.6 is shown to students.
 
 ### 16.1 Per-Task Evaluation Record
 
@@ -802,7 +814,7 @@ Fairness requirements:
 - Use only information available before each prediction.
 - Sessions without a confirmed Actual Duration remain pending and are not treated as zero-duration completions.
 
-Static-versus-adaptive schedule comparison belongs to technical evaluation tooling using identical task snapshots. Students see one active schedule and no model-accuracy dashboard.
+Static-versus-adaptive schedule comparison belongs to technical evaluation tooling using identical task snapshots. Students see one active schedule; beyond the Section 15.6 accuracy summary there is no model-accuracy dashboard.
 
 ## 17. Navigation and User Interface
 
@@ -1065,7 +1077,7 @@ Evidence uses the data inventory, deletion tests, and cross-user ownership tests
 ### 20.5 Estimation
 
 - Python.
-- Transparent median correction baseline.
+- Transparent correction baseline: clamped, recency-weighted medians blended across Category, task size, and overall history (Section 15.3).
 - Chronological prediction/evaluation only.
 
 ### 20.6 Testing
@@ -1253,10 +1265,10 @@ These metrics measure replanning disruption and recovery cost. They do not prove
 ## 25. Rejected or Superseded Decisions
 
 - Presentation or original proposal as the current requirements authority: superseded by the approved revised baseline in Section 2.1.
-- Three completed tasks as sufficient adaptive history: rejected.
+- Three completed tasks as sufficient adaptive history: superseded; hidden predictions start after two completed tasks, and exposure still requires five qualifying predictions.
 - Fifteen-minute duration rounding: rejected; exact whole minutes are preserved.
 - Copy Original Estimate into Adaptive Estimate during cold start: rejected; Adaptive is unavailable.
-- Hard 0.5×–2× correction cap: rejected; use an uncapped robust median plus acknowledgment.
+- Hard 0.5×–2× correction cap: rejected; use per-record ratio clamps (0.25×–4×), a 1/3×–3× prediction bound, and acknowledgment outside 0.5×–2×.
 - Arbitrary third Planned Duration: rejected.
 - Automatic Missed status when no outcome is recorded: rejected.
 - Study Timer: removed from the binding scope; Actual Duration uses manual entry.

@@ -31,7 +31,7 @@ from studyflow.scheduling.outcomes import (
 )
 from studyflow.scheduling.recovery import InvalidRecoveryTriggerError, ScheduleRecovery
 from studyflow.scheduling.service import ScheduleGenerationFailedError
-from studyflow.tasks.service import AcademicTasks
+from studyflow.tasks.service import AcademicTasks, TaskCategory
 
 router = APIRouter(prefix="/study-sessions", tags=["Study Sessions"])
 
@@ -52,6 +52,8 @@ class StudySessionResponse(BaseModel):
     ends_at: datetime
     planned_duration_minutes: int
     outcome: SessionOutcomeResponse | None
+    task_title: str | None = Field(description="Title of the owning Academic Task")
+    task_category: TaskCategory | None = Field(description="Category of the owning Academic Task")
 
 
 PositiveMinutes = Annotated[
@@ -127,6 +129,8 @@ def _session_response(details: StudySessionDetails) -> StudySessionResponse:
         ends_at=session.ends_at,
         planned_duration_minutes=session.planned_duration_minutes,
         outcome=_outcome_response(details.outcome) if details.outcome is not None else None,
+        task_title=details.task_title,
+        task_category=details.task_category,
     )
 
 
@@ -156,6 +160,15 @@ async def list_study_sessions(
     starts_from: Annotated[datetime | None, Query(alias="from")] = None,
     starts_to: Annotated[datetime | None, Query(alias="to")] = None,
     task_id: UUID | None = None,
+    awaiting_outcome: Annotated[
+        bool | None,
+        Query(
+            description=(
+                "true returns only ended sessions without an outcome; "
+                "false returns every other session"
+            )
+        ),
+    ] = None,
 ) -> list[StudySessionResponse]:
     for boundary in (starts_from, starts_to):
         if boundary is not None and boundary.tzinfo is None:
@@ -172,6 +185,7 @@ async def list_study_sessions(
         starts_from=starts_from.astimezone(UTC) if starts_from is not None else None,
         starts_to=starts_to.astimezone(UTC) if starts_to is not None else None,
         task_id=task_id,
+        awaiting_outcome=awaiting_outcome,
     )
     return [
         _session_response(details) for details in await sessions.list(principal.account_id, filters)

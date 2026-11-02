@@ -77,6 +77,7 @@ class TaskFilters:
     status: TaskStatus | None = None
     query: str | None = None
     limit: int | None = None
+    offset: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +128,19 @@ class AcademicTasks(Protocol):
     async def mark_started(self, account_id: UUID, task_id: UUID) -> bool: ...
 
 
+@dataclass(frozen=True, slots=True)
+class AcademicTaskPage:
+    items: list[AcademicTaskRecord]
+    total: int
+
+
+@runtime_checkable
+class AcademicTaskPages(Protocol):
+    async def list_page(
+        self, account_id: UUID, filters: TaskFilters | None = None
+    ) -> AcademicTaskPage: ...
+
+
 @runtime_checkable
 class AcademicTaskRepositorySnapshots(Protocol):
     async def list_snapshot(
@@ -171,6 +185,24 @@ class AcademicTaskService:
         self, account_id: UUID, filters: TaskFilters | None = None
     ) -> list[AcademicTaskRecord]:
         return await self._repository.list(account_id, filters or TaskFilters())
+
+    async def list_page(
+        self, account_id: UUID, filters: TaskFilters | None = None
+    ) -> AcademicTaskPage:
+        resolved_filters = filters or TaskFilters()
+        if isinstance(self._repository, AcademicTaskPages):
+            return await self._repository.list_page(account_id, resolved_filters)
+        everything = await self._repository.list(
+            account_id, replace(resolved_filters, limit=None, offset=0)
+        )
+        end = (
+            None
+            if resolved_filters.limit is None
+            else resolved_filters.offset + resolved_filters.limit
+        )
+        return AcademicTaskPage(
+            items=everything[resolved_filters.offset : end], total=len(everything)
+        )
 
     async def list_snapshot(
         self, account_id: UUID, filters: TaskFilters | None = None

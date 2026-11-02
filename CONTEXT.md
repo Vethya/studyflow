@@ -45,7 +45,7 @@ The student's initial prediction of an Academic Task's total required duration. 
 _Avoid_: Planned Duration
 
 **Adaptive Estimate**:
-StudyFlow's prediction of an Academic Task's total required duration based only on the student's earlier completion history. It is explicitly unavailable until sufficient history exists.
+StudyFlow's prediction of an Academic Task's total required duration based only on the student's earlier completion history, plus reported progress on in-progress tasks with a Delayed outcome. It comes with a likely range and is explicitly unavailable until sufficient history exists and the method has proven more accurate than Original Estimates.
 _Avoid_: Original Estimate
 
 **Planned Duration**:

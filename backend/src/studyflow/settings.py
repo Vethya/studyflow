@@ -24,6 +24,7 @@ class Settings(BaseSettings):
         env_prefix="STUDYFLOW_",
         extra="ignore",
         frozen=True,
+        hide_input_in_errors=True,
     )
 
     environment: Environment = Environment.DEVELOPMENT
@@ -48,6 +49,7 @@ class Settings(BaseSettings):
     google_oidc_client_secret: SecretStr | None = None
     google_oidc_redirect_uri: str | None = None
     google_import_redirect_uri: str | None = None
+    reminder_dispatch_token: SecretStr | None = None
 
     @field_validator("database_url")
     @classmethod
@@ -140,6 +142,23 @@ class Settings(BaseSettings):
     def normalize_blank_oidc_setting(cls, value: object) -> object:
         if value == "" or (isinstance(value, SecretStr) and value.get_secret_value() == ""):
             return None
+        return value
+
+    @field_validator("reminder_dispatch_token", mode="before")
+    @classmethod
+    def normalize_blank_reminder_dispatch_token(cls, value: object) -> object:
+        if isinstance(value, SecretStr):
+            value = value.get_secret_value()
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        return None if stripped == "" else stripped
+
+    @field_validator("reminder_dispatch_token")
+    @classmethod
+    def require_strong_reminder_dispatch_token(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and len(value.get_secret_value()) < 32:
+            raise ValueError("Reminder dispatch token must be at least 32 characters")
         return value
 
     @field_validator("google_oidc_redirect_uri")

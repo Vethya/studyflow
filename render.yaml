@@ -47,6 +47,8 @@ projects:
                 sync: false
               - key: STUDYFLOW_GOOGLE_IMPORT_REDIRECT_URI
                 sync: false
+              - key: STUDYFLOW_REMINDER_DISPATCH_TOKEN
+                sync: false
               # Dev keeps applying migrations at start so every push to dev rehearses them.
               - key: STUDYFLOW_MIGRATE_ON_START
                 value: "true"
@@ -99,6 +101,8 @@ projects:
               - key: STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI
                 sync: false
               - key: STUDYFLOW_GOOGLE_IMPORT_REDIRECT_URI
+                sync: false
+              - key: STUDYFLOW_REMINDER_DISPATCH_TOKEN
                 sync: false
               # A Blueprint sync resets any dashboard override of this value.
               - key: STUDYFLOW_MIGRATE_ON_START

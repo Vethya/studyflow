@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import delete, or_, select, update
+from sqlalchemy import ColumnElement, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,7 @@ from studyflow.estimation import (
 )
 from studyflow.estimation.repositories import SqlAlchemyAdaptivePredictionRepository
 from studyflow.tasks.service import (
+    AcademicTaskPage,
     AcademicTaskRecord,
     DuplicateExternalTaskError,
     EstimateFrozenError,
@@ -263,6 +264,22 @@ class SqlAlchemyAcademicTaskRepository:
             await self._freeze_started_estimates(session, account_id, now)
             return await self._list_records(session, account_id, filters, now)
 
+    async def list_page(
+        self, account_id: UUID, filters: TaskFilters | None = None
+    ) -> AcademicTaskPage:
+        async with self._database.transaction() as session:
+            filters = filters or TaskFilters()
+            now = self._clock()
+            await self._reconcile_overdue(session, account_id, now)
+            await self._freeze_started_estimates(session, account_id, now)
+            items = await self._list_records(session, account_id, filters, now)
+            total = await session.scalar(
+                select(func.count())
+                .select_from(AcademicTask)
+                .where(*self._list_conditions(account_id, filters, now))
+            )
+            return AcademicTaskPage(items=items, total=int(total or 0))
+
     async def list_snapshot(
         self, account_id: UUID, filters: TaskFilters | None = None
     ) -> builtins.list[AcademicTaskRecord]:
@@ -281,7 +298,23 @@ class SqlAlchemyAcademicTaskRepository:
         filters: TaskFilters,
         now: datetime,
     ) -> builtins.list[AcademicTaskRecord]:
-        conditions = [AcademicTask.account_id == account_id]
+        stmt = (
+            select(AcademicTask)
+            .where(*self._list_conditions(account_id, filters, now))
+            .order_by(AcademicTask.deadline_at, AcademicTask.id)
+        )
+        if filters.limit is not None:
+            stmt = stmt.limit(filters.limit)
+        if filters.offset:
+            stmt = stmt.offset(filters.offset)
+        rows = await session.scalars(stmt)
+        return [self._to_record(row, now) for row in rows]
+
+    @staticmethod
+    def _list_conditions(
+        account_id: UUID, filters: TaskFilters, now: datetime
+    ) -> builtins.list[ColumnElement[bool]]:
+        conditions: builtins.list[ColumnElement[bool]] = [AcademicTask.account_id == account_id]
         if filters.course is not None:
             conditions.append(AcademicTask.course == filters.course)
         if filters.category is not None:
@@ -336,15 +369,7 @@ class SqlAlchemyAcademicTaskRepository:
                     AcademicTask.course.ilike(pattern, escape="\\"),
                 )
             )
-        stmt = (
-            select(AcademicTask)
-            .where(*conditions)
-            .order_by(AcademicTask.deadline_at, AcademicTask.id)
-        )
-        if filters.limit is not None:
-            stmt = stmt.limit(filters.limit)
-        rows = await session.scalars(stmt)
-        return [self._to_record(row, now) for row in rows]
+        return conditions
 
     async def get(self, account_id: UUID, task_id: UUID) -> AcademicTaskRecord | None:
         async with self._database.transaction() as session:

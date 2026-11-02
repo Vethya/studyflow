@@ -8,12 +8,33 @@ from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, Field
 
 from studyflow.api.account import AccountError, require_session
+from studyflow.api.adaptive_estimates import get_adaptive_estimator
 from studyflow.auth.session_authentication import SessionPrincipal
+from studyflow.estimation import AdaptiveEstimator, EstimationAccuracy
 from studyflow.progress import EffortProgressRecord, calculate_effort_progress
 from studyflow.scheduling.outcomes import StudySessionFilters, StudySessions
 from studyflow.tasks.service import AcademicTasks, TaskStatus
 
 router = APIRouter(prefix="/progress", tags=["Progress"])
+
+
+class EstimationAccuracyResponse(BaseModel):
+    """Account-level accuracy of adaptive snapshots against the original estimates."""
+
+    sample_size: int = Field(
+        ge=0, description="Completed tasks that had an adaptive estimate snapshot."
+    )
+    original_mean_absolute_error_minutes: float = Field(ge=0)
+    adaptive_mean_absolute_error_minutes: float = Field(ge=0)
+    improvement_percent: float | None = Field(
+        description=(
+            "Percentage reduction in absolute error from original to adaptive estimates; "
+            "negative when adaptive estimates were worse, null when original error is zero."
+        )
+    )
+    adaptive_qualified: bool = Field(
+        description="Whether adaptive estimates currently qualify to be offered."
+    )
 
 
 class EffortProgressResponse(BaseModel):
@@ -25,6 +46,13 @@ class EffortProgressResponse(BaseModel):
     sessions_completed: int = Field(ge=0)
     sessions_upcoming: int = Field(ge=0)
     status: TaskStatus
+    estimation_accuracy: EstimationAccuracyResponse | None = Field(
+        default=None,
+        description=(
+            "Account-level estimation accuracy, repeated on every item because this endpoint "
+            "returns a list; null until at least three snapshot tasks are completed."
+        ),
+    )
 
 
 def get_academic_tasks(request: Request) -> AcademicTasks:
@@ -35,7 +63,28 @@ def get_study_sessions(request: Request) -> StudySessions:
     return cast(StudySessions, request.app.state.study_sessions)
 
 
-def _response(progress: EffortProgressRecord) -> EffortProgressResponse:
+def accuracy_response(
+    accuracy: EstimationAccuracy | None,
+) -> EstimationAccuracyResponse | None:
+    if accuracy is None:
+        return None
+    return EstimationAccuracyResponse(
+        sample_size=accuracy.sample_size,
+        original_mean_absolute_error_minutes=float(accuracy.original_mean_absolute_error_minutes),
+        adaptive_mean_absolute_error_minutes=float(accuracy.adaptive_mean_absolute_error_minutes),
+        improvement_percent=(
+            float(accuracy.improvement_percent)
+            if accuracy.improvement_percent is not None
+            else None
+        ),
+        adaptive_qualified=accuracy.adaptive_qualified,
+    )
+
+
+def _response(
+    progress: EffortProgressRecord,
+    estimation_accuracy: EstimationAccuracyResponse | None = None,
+) -> EffortProgressResponse:
     return EffortProgressResponse(
         task_id=progress.task_id,
         task_title=progress.task_title,
@@ -45,6 +94,7 @@ def _response(progress: EffortProgressRecord) -> EffortProgressResponse:
         sessions_completed=progress.sessions_completed,
         sessions_upcoming=progress.sessions_upcoming,
         status=progress.status,
+        estimation_accuracy=estimation_accuracy,
     )
 
 
@@ -56,13 +106,14 @@ def _response(progress: EffortProgressRecord) -> EffortProgressResponse:
     description=(
         "Returns Effort Progress for every Academic Task owned by the authenticated student. "
         "Effort Progress measures expected effort consumed, not content completion, quality, "
-        "or grade."
+        "or grade. Each item also carries the account-level estimation accuracy summary."
     ),
 )
 async def list_effort_progress(
     principal: Annotated[SessionPrincipal, Depends(require_session)],
     tasks: Annotated[AcademicTasks, Depends(get_academic_tasks)],
     sessions: Annotated[StudySessions, Depends(get_study_sessions)],
+    estimator: Annotated[AdaptiveEstimator, Depends(get_adaptive_estimator)],
 ) -> list[EffortProgressResponse]:
     task_records = await tasks.list(principal.account_id)
     session_details = await sessions.list(principal.account_id, StudySessionFilters())
@@ -73,4 +124,7 @@ async def list_effort_progress(
         schedule_adjustments,
         now=datetime.now(UTC),
     )
-    return [_response(item) for item in progress]
+    accuracy = (
+        accuracy_response(await estimator.accuracy(principal.account_id)) if progress else None
+    )
+    return [_response(item, accuracy) for item in progress]

@@ -67,9 +67,11 @@
 - **FR-07-AC01:** Given completed tasks with original estimates and actual durations, when a later estimate is generated, then only records completed before that task’s prediction are used.
 - **FR-07-AC02:** Given a history where actual durations consistently exceed estimates, then the adaptive estimate is greater than the equivalent unadjusted estimate.
 - **FR-07-AC03:** Given a history where actual durations consistently fall below estimates, then the adaptive estimate is lower than the equivalent unadjusted estimate.
-- **FR-07-AC04:** Given insufficient history or a correction that has not shown at least a 10% MAE advantage over Original Estimates on the same tasks, then no Adaptive Estimate is shown and the Original Estimate is used for scheduling.
+- **FR-07-AC04:** Given fewer than two completed tasks, or a correction whose recency-weighted absolute error over its latest (at least five) completed predictions is not at least 10% lower than the Original Estimates on the same tasks, then no Adaptive Estimate is shown and the Original Estimate is used for scheduling.
 - **FR-07-AC05:** Repeating estimation with identical inputs and history produces the same result.
-- **FR-07-AC06 (evaluation-only):** Original-versus-Adaptive comparison metrics are retained for adaptive-estimation qualification and thesis evaluation, but are not presented as student-facing estimation-error statistics or model-accuracy analytics.
+- **FR-07-AC06:** Original-versus-Adaptive comparison metrics are retained for adaptive-estimation qualification and thesis evaluation. Students see only an aggregate summary (sample size, Original and Adaptive mean absolute error, improvement percentage); per-task errors and signed bias stay internal.
+- **FR-07-AC07:** An Adaptive Estimate is shown with a likely range and its basis (number of records used and whether Category, task size, or overall history dominated). Extreme records cannot move a prediction beyond 1/3× to 3× the Original Estimate.
+- **FR-07-AC08:** In-progress tasks with a Delayed outcome contribute to later estimates at reduced weight using work recorded so far plus revised remaining work.
 
 ### FR-08 — Overload detection
 

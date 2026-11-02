@@ -8,6 +8,7 @@ from studyflow.api.google_import import router as google_import_router
 from studyflow.api.health import router as health_router
 from studyflow.api.progress import router as progress_router
 from studyflow.api.readiness import router as readiness_router
+from studyflow.api.reminders import router as reminders_router
 from studyflow.api.schedule_proposals import router as schedule_proposals_router
 from studyflow.api.study_sessions import router as study_sessions_router
 from studyflow.api.tasks import router as tasks_router
@@ -23,6 +24,7 @@ api_router.include_router(google_import_router)
 api_router.include_router(health_router)
 api_router.include_router(readiness_router)
 api_router.include_router(progress_router)
+api_router.include_router(reminders_router)
 api_router.include_router(schedule_proposals_router)
 api_router.include_router(study_sessions_router)
 api_router.include_router(tasks_router)

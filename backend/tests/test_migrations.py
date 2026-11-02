@@ -94,7 +94,7 @@ def test_alembic_migration_graph_has_a_single_head() -> None:
 
     scripts = ScriptDirectory.from_config(configuration)
 
-    assert scripts.get_heads() == ["20260918_23"]
+    assert scripts.get_heads() == ["20261018_25"]
 
 
 def test_migrations_share_application_metadata() -> None:
@@ -201,6 +201,25 @@ def test_account_authentication_schema_is_in_the_upgrade_path() -> None:
         "ck_academic_tasks_completion_requires_start",
     ):
         assert f"CONSTRAINT {constraint_name} CHECK" in result.stdout
+
+
+def test_study_reminder_schema_is_in_the_upgrade_path() -> None:
+    result = run_alembic("upgrade", "head", "--sql")
+
+    assert result.returncode == 0, result.stderr
+    assert "CREATE TABLE reminder_preferences" in result.stdout
+    assert "CREATE TABLE reminder_deliveries" in result.stdout
+    assert "CONSTRAINT uq_reminder_deliveries_session_kind UNIQUE (session_id, kind)" in (
+        result.stdout
+    )
+    assert "CONSTRAINT ck_reminder_preferences_before_session_minutes CHECK" in result.stdout
+    assert (
+        "FOREIGN KEY(account_id) REFERENCES student_accounts (id) ON DELETE CASCADE"
+        in result.stdout
+    )
+    assert "FOREIGN KEY(session_id) REFERENCES study_sessions (id) ON DELETE CASCADE" in (
+        result.stdout
+    )
 
 
 def test_task_title_migration_preserves_postgresql_whitespace_regex() -> None:

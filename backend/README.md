@@ -128,26 +128,40 @@ uv run python -c "import asyncio; asyncio.set_event_loop_policy(asyncio.WindowsS
 
 - `GET /api/v1/adaptive-estimates/preview?category=reading&original_minutes=60` requires a
   session and returns a non-persisting preview: availability, original/adaptive/planned minutes,
-  selected source, correction factor, history scope/count, and acknowledgment requirement.
+  selected source, correction factor, history scope/count, likely range, basis, and
+  acknowledgment requirement.
 - `POST /api/v1/adaptive-estimates/acknowledgments` requires a session and CSRF token, takes
   `{"category":"reading"}`, and returns 204 after acknowledging the current qualified factor.
   An unavailable estimate returns 422; an absent authenticated account returns 401.
 
-Cold start uses Original. Five completed tasks with positive confirmed actual minutes enable
+Cold start uses Original. Two completed tasks with positive confirmed actual minutes enable
 hidden pre-task predictions. These predictions count toward qualification only after their tasks
 complete; historical completed tasks are not retroactively predicted. At least five evaluations
-are required, and the most recent ten must reduce mean absolute error by at least 10% versus the
-original estimates. A perfect original baseline cannot qualify. Accuracy/error metrics remain
-internal and are omitted from student-facing responses.
+are required, and over the most recent ten (newest weighted 1, each older one multiplied by
+14/15) the adaptive absolute error must be at most 90% of the original-estimate error. A perfect
+original baseline cannot qualify.
 
-Prediction uses the median actual/original ratio of the latest twenty eligible tasks. It uses
-category history when at least five examples exist, otherwise overall history. Qualified Adaptive
-is the default unless a large adjustment needs acknowledgment; callers may explicitly select
-Original. Factors outside the inclusive 0.5–2.0 interval require acknowledgment and prompt again
-after a relative change of at least 25%. Task writes atomically save the prediction and separate
+Prediction (`estimation/model.py`) clamps each actual/original ratio to 0.25–4, reads the newest
+50 records with recency weight `(14/15)^rank`, and takes weighted medians per scope. Scopes are
+blended general to specific, neutral 1.0 -> overall -> task-size bucket (under 60, 60-240, over
+240 original minutes) -> category, each as `(n * scope + 5 * parent) / (n + 5)`. In-progress
+tasks with a Delayed outcome add provisional records (work so far plus revised remaining) at half
+weight. The blended ratio is bounded to 1/3–3 and rounded half up, minimum 1 minute. The preview
+also returns `low_minutes`/`high_minutes` (the same blend over weighted 25th/75th percentiles),
+`sample_size`, and `basis` (`scope`, `size_bucket`, and record counts). Persisted
+`history_scope` is `category` when category evidence dominates, otherwise `overall`.
+
+Qualified Adaptive is the default unless a large adjustment needs acknowledgment; callers may
+explicitly select Original. Acknowledgment uses the size-independent category factor: factors
+outside the inclusive 0.5–2.0 interval require acknowledgment and prompt again after a relative
+change of at least 25%. Task writes atomically save the prediction and separate
 original/adaptive/planned fields. Planned minutes come from the selected source; frozen task
 estimates cannot be replaced. Unavailable previews expose no hidden adaptive value.
 
+`GET /api/v1/progress` items carry `estimation_accuracy` (the same account-level object on every
+item, or `null` until three snapshot tasks are completed): `sample_size`,
+`original_mean_absolute_error_minutes`, `adaptive_mean_absolute_error_minutes`,
+`improvement_percent` (nullable), and `adaptive_qualified`.
 Task responses include `estimate_frozen`, derived from the persisted snapshot lock rather than
 task status (an Overdue task may be frozen or editable). Frozen forms display their saved plan
 read-only and permit unrelated edits with unchanged original minutes and planned source,

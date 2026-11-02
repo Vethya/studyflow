@@ -11,6 +11,7 @@ from studyflow.api.account import AccountError, require_csrf_session, require_se
 from studyflow.auth.session_authentication import SessionPrincipal
 from studyflow.estimation import AdaptiveEstimateUnavailableError
 from studyflow.tasks.service import (
+    AcademicTaskPages,
     AcademicTaskRecord,
     AcademicTasks,
     EstimateFrozenError,
@@ -25,6 +26,9 @@ from studyflow.tasks.service import (
 )
 
 router = APIRouter(prefix="/tasks", tags=["Academic Tasks"])
+
+TOTAL_COUNT_HEADER = "X-Total-Count"
+MAX_TASK_LIST_OFFSET = 2_147_483_647
 
 
 def normalize_course(value: str | None) -> str | None:
@@ -194,6 +198,14 @@ async def create_task(
     "",
     response_model=list[AcademicTaskResponse],
     responses={
+        status.HTTP_200_OK: {
+            "headers": {
+                TOTAL_COUNT_HEADER: {
+                    "description": "Tasks matching the filters, ignoring limit and offset",
+                    "schema": {"type": "integer", "minimum": 0},
+                }
+            }
+        },
         status.HTTP_401_UNAUTHORIZED: {"model": AccountError},
         status.HTTP_422_UNPROCESSABLE_CONTENT: {
             "description": "Invalid task filters",
@@ -222,6 +234,7 @@ async def list_tasks(
     task_status: Annotated[TaskStatus | None, Query(alias="status")] = None,
     query: Annotated[str | None, Query(max_length=200)] = None,
     limit: Annotated[int | None, Query(ge=1, le=100)] = None,
+    offset: Annotated[int, Query(ge=0, le=MAX_TASK_LIST_OFFSET)] = 0,
 ) -> list[AcademicTaskResponse]:
     response.headers["Cache-Control"] = "no-store"
     for deadline in (deadline_from, deadline_to):
@@ -244,7 +257,12 @@ async def list_tasks(
         status=task_status,
         query=normalize_query(query),
         limit=limit,
+        offset=offset,
     )
+    if isinstance(tasks, AcademicTaskPages):
+        page = await tasks.list_page(principal.account_id, filters)
+        response.headers[TOTAL_COUNT_HEADER] = str(page.total)
+        return [_response(task) for task in page.items]
     return [_response(task) for task in await tasks.list(principal.account_id, filters)]
 
 

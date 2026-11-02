@@ -107,6 +107,13 @@ from studyflow.integrations.google_import import (
     UnconfiguredGoogleImports,
 )
 from studyflow.integrations.repositories import SqlAlchemyGoogleImportRepository
+from studyflow.reminders.email import SmtpReminderEmailSender
+from studyflow.reminders.preferences import ReminderPreferencesService, ReminderSettings
+from studyflow.reminders.repositories import (
+    SqlAlchemyReminderDispatchRepository,
+    SqlAlchemyReminderPreferencesRepository,
+)
+from studyflow.reminders.service import ReminderDispatch, ReminderDispatchService
 from studyflow.scheduling.acceptance import ScheduleAcceptance, ScheduleAcceptanceService
 from studyflow.scheduling.outcome_repositories import SqlAlchemyStudySessionOutcomeRepository
 from studyflow.scheduling.outcomes import StudySessions, StudySessionService
@@ -186,6 +193,8 @@ def create_app(
     study_time_updates: StudyTimeUpdates | None = None,
     google_imports: GoogleImports | None = None,
     google_import_start_rate_limiter: GoogleImportStartRateLimit | None = None,
+    reminder_settings: ReminderSettings | None = None,
+    reminder_dispatch: ReminderDispatch | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
     hide_api_docs = resolved_settings.environment is Environment.PRODUCTION
@@ -472,9 +481,35 @@ def create_app(
     application.state.google_import_start_rate_limiter = (
         google_import_start_rate_limiter or DatabaseGoogleImportStartRateLimiter(transactions)
     )
+    application.state.reminder_settings = reminder_settings or ReminderPreferencesService(
+        SqlAlchemyReminderPreferencesRepository(transactions)
+    )
+    application.state.reminder_dispatch = reminder_dispatch or _reminder_dispatch(
+        resolved_settings, transactions
+    )
     application.include_router(api_router)
 
     return application
+
+
+def _reminder_dispatch(settings: Settings, transactions: SessionTransactions) -> ReminderDispatch:
+    smtp_password = (
+        settings.smtp_password.get_secret_value() if settings.smtp_password is not None else None
+    )
+    return ReminderDispatchService(
+        SqlAlchemyReminderDispatchRepository(transactions),
+        SmtpReminderEmailSender(
+            transport=AiosmtplibEmailTransport(
+                hostname=settings.smtp_host,
+                port=settings.smtp_port,
+                username=settings.smtp_username,
+                password=smtp_password,
+                start_tls=settings.smtp_start_tls,
+            ),
+            from_address=str(settings.email_from_address),
+            public_app_url=settings.public_app_url,
+        ),
+    )
 
 
 app = create_app()

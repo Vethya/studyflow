@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, and_, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from studyflow.auth.repositories import SessionTransactions
@@ -24,6 +24,7 @@ from studyflow.scheduling.outcomes import (
     normalize_outcome_minutes,
 )
 from studyflow.scheduling.proposals import StudySessionRecord
+from studyflow.tasks.service import TaskCategory
 
 
 class TaskProposalInvalidator(Protocol):
@@ -91,49 +92,71 @@ class SqlAlchemyStudySessionOutcomeRepository:
         self, account_id: UUID, filters: StudySessionFilters
     ) -> list[StudySessionDetails]:
         async with self._database.transaction() as session:
-            await self._reconcile_overdue(session, account_id, self._clock())
-            statement = (
-                select(SessionRow, OutcomeRow)
-                .outerjoin(OutcomeRow, OutcomeRow.session_id == SessionRow.id)
-                .where(
-                    SessionRow.account_id == account_id,
-                    SessionRow.proposal_id.is_(None),
-                    SessionRow.invalidated_at.is_(None),
-                )
-            )
+            now = self._clock()
+            await self._reconcile_overdue(session, account_id, now)
+            statement = self._details_statement(account_id)
             if filters.starts_from is not None:
                 statement = statement.where(SessionRow.ends_at > filters.starts_from)
             if filters.starts_to is not None:
                 statement = statement.where(SessionRow.starts_at < filters.starts_to)
             if filters.task_id is not None:
                 statement = statement.where(SessionRow.task_id == filters.task_id)
-            rows = await session.execute(statement.order_by(SessionRow.starts_at, SessionRow.id))
-            return [
-                StudySessionDetails(
-                    self._session_record(session_row),
-                    self._outcome_record(outcome_row) if outcome_row is not None else None,
+            if filters.awaiting_outcome is not None:
+                awaiting = and_(
+                    OutcomeRow.session_id.is_(None),
+                    SessionRow.ends_at <= self._aware(now).astimezone(UTC),
                 )
-                for session_row, outcome_row in rows
-            ]
+                statement = statement.where(
+                    awaiting if filters.awaiting_outcome else not_(awaiting)
+                )
+            rows = await session.execute(statement.order_by(SessionRow.starts_at, SessionRow.id))
+            return [self._details(*row) for row in rows]
 
     async def get(self, account_id: UUID, session_id: UUID) -> StudySessionDetails | None:
         async with self._database.transaction() as session:
             await self._reconcile_overdue(session, account_id, self._clock())
-            row = await session.scalar(
-                select(SessionRow).where(
-                    SessionRow.id == session_id,
-                    SessionRow.account_id == account_id,
-                    SessionRow.proposal_id.is_(None),
-                    SessionRow.invalidated_at.is_(None),
+            row = (
+                await session.execute(
+                    self._details_statement(account_id).where(SessionRow.id == session_id)
                 )
+            ).one_or_none()
+            return self._details(*row) if row is not None else None
+
+    @staticmethod
+    def _details_statement(
+        account_id: UUID,
+    ) -> Select[tuple[SessionRow, OutcomeRow, str, str]]:
+        return (
+            select(SessionRow, OutcomeRow, AcademicTask.title, AcademicTask.category)
+            .join(
+                AcademicTask,
+                and_(
+                    AcademicTask.id == SessionRow.task_id,
+                    AcademicTask.account_id == account_id,
+                ),
             )
-            if row is None:
-                return None
-            outcome = await session.get(OutcomeRow, session_id)
-            return StudySessionDetails(
-                self._session_record(row),
-                self._outcome_record(outcome) if outcome is not None else None,
+            .outerjoin(OutcomeRow, OutcomeRow.session_id == SessionRow.id)
+            .where(
+                SessionRow.account_id == account_id,
+                SessionRow.proposal_id.is_(None),
+                SessionRow.invalidated_at.is_(None),
             )
+        )
+
+    @classmethod
+    def _details(
+        cls,
+        session_row: SessionRow,
+        outcome_row: OutcomeRow | None,
+        task_title: str,
+        task_category: str,
+    ) -> StudySessionDetails:
+        return StudySessionDetails(
+            cls._session_record(session_row),
+            cls._outcome_record(outcome_row) if outcome_row is not None else None,
+            task_title=task_title,
+            task_category=TaskCategory(task_category),
+        )
 
     async def record(
         self,

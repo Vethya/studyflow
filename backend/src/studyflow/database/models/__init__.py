@@ -17,6 +17,7 @@ from studyflow.database.models.integrations import (
     GoogleImportSnapshot,
     GoogleImportState,
 )
+from studyflow.database.models.reminders import ReminderDelivery, ReminderPreference
 from studyflow.database.models.scheduling import (
     ProposalTaskAllocation,
     RecoverySnapshotOutcome,
@@ -52,6 +53,8 @@ __all__ = [
     "ProposalTaskAllocation",
     "RecoverySnapshotOutcome",
     "RecoveryTaskWork",
+    "ReminderDelivery",
+    "ReminderPreference",
     "ScheduleProposal",
     "ScheduleRecoverySnapshot",
     "StudentAccount",

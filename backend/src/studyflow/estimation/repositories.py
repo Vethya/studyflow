@@ -1,5 +1,6 @@
 """SQLAlchemy persistence for chronological adaptive-estimation evidence."""
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Protocol
@@ -46,6 +47,123 @@ def _evaluation_statement(
         .group_by(PredictionRow.task_id, AcademicTask.completed_at, AcademicTask.id)
         .order_by(AcademicTask.completed_at, AcademicTask.id)
     )
+
+
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+async def _load_history(session: AsyncSession, account_id: UUID) -> list[HistoryRecord]:
+    """Load completed-task history followed by provisional in-progress records.
+
+    A provisional record is an open task with at least one Delayed outcome. Its projected
+    duration is the confirmed work so far plus the task's remaining planned work, where the
+    remaining work subtracts each outcome's resolved share (session planned minutes minus the
+    outcome's revised remaining minutes), mirroring the Effort Progress calculation.
+    """
+    actual_duration = func.sum(OutcomeRow.actual_minutes).label("actual_duration")
+    completed_rows = await session.execute(
+        select(
+            AcademicTask.id,
+            AcademicTask.category,
+            AcademicTask.original_estimate_minutes,
+            actual_duration,
+            AcademicTask.completed_at,
+        )
+        .join(SessionRow, SessionRow.task_id == AcademicTask.id)
+        .join(OutcomeRow, OutcomeRow.session_id == SessionRow.id)
+        .where(
+            AcademicTask.account_id == account_id,
+            SessionRow.account_id == account_id,
+            AcademicTask.completed_at.is_not(None),
+            OutcomeRow.kind.in_(("completed", "delayed")),
+        )
+        .group_by(
+            AcademicTask.id,
+            AcademicTask.category,
+            AcademicTask.original_estimate_minutes,
+            AcademicTask.completed_at,
+        )
+        .having(func.sum(OutcomeRow.actual_minutes) > 0)
+        .order_by(AcademicTask.completed_at, AcademicTask.id)
+    )
+    history = [
+        HistoryRecord(
+            task_id=row.id,
+            category=TaskCategory(row.category),
+            original_minutes=row.original_estimate_minutes,
+            actual_minutes=int(row.actual_duration),
+            completed_at=_aware(row.completed_at),
+        )
+        for row in completed_rows
+    ]
+
+    open_rows = await session.execute(
+        select(
+            AcademicTask.id,
+            AcademicTask.category,
+            AcademicTask.original_estimate_minutes,
+            AcademicTask.planned_duration_minutes,
+            SessionRow.planned_duration_minutes.label("session_minutes"),
+            OutcomeRow.kind,
+            OutcomeRow.actual_minutes,
+            OutcomeRow.remaining_minutes,
+            OutcomeRow.recorded_at,
+        )
+        .join(SessionRow, SessionRow.task_id == AcademicTask.id)
+        .join(OutcomeRow, OutcomeRow.session_id == SessionRow.id)
+        .where(
+            AcademicTask.account_id == account_id,
+            SessionRow.account_id == account_id,
+            SessionRow.proposal_id.is_(None),
+            AcademicTask.completed_at.is_(None),
+            AcademicTask.finished_early_at.is_(None),
+        )
+        .order_by(AcademicTask.id, OutcomeRow.recorded_at, OutcomeRow.session_id)
+    )
+    progress: dict[UUID, _OpenTaskProgress] = {}
+    for row in open_rows:
+        item = progress.setdefault(
+            row.id,
+            _OpenTaskProgress(
+                category=TaskCategory(row.category),
+                original_minutes=row.original_estimate_minutes,
+                planned_minutes=row.planned_duration_minutes,
+            ),
+        )
+        if row.kind in ("completed", "delayed"):
+            item.actual_minutes += row.actual_minutes
+        item.resolved_minutes += row.session_minutes - row.remaining_minutes
+        if row.kind == "delayed":
+            recorded_at = _aware(row.recorded_at)
+            if item.last_delayed_at is None or recorded_at > item.last_delayed_at:
+                item.last_delayed_at = recorded_at
+
+    provisional = [
+        HistoryRecord(
+            task_id=task_id,
+            category=item.category,
+            original_minutes=item.original_minutes,
+            actual_minutes=item.actual_minutes
+            + max(item.planned_minutes - item.resolved_minutes, 0),
+            completed_at=item.last_delayed_at,
+            provisional=True,
+        )
+        for task_id, item in progress.items()
+        if item.last_delayed_at is not None and item.actual_minutes > 0
+    ]
+    provisional.sort(key=lambda record: (record.completed_at, record.task_id))
+    return history + provisional
+
+
+@dataclass(slots=True)
+class _OpenTaskProgress:
+    category: TaskCategory
+    original_minutes: int
+    planned_minutes: int
+    actual_minutes: int = 0
+    resolved_minutes: int = 0
+    last_delayed_at: datetime | None = None
 
 
 class AdaptivePredictionRepository(Protocol):
@@ -97,43 +215,8 @@ class SqlAlchemyAdaptivePredictionRepository:
         return SessionAdaptivePredictionRepository(session)
 
     async def history(self, account_id: UUID) -> list[HistoryRecord]:
-        actual_duration = func.sum(OutcomeRow.actual_minutes).label("actual_duration")
         async with self._database.transaction() as session:
-            rows = await session.execute(
-                select(
-                    AcademicTask.id,
-                    AcademicTask.category,
-                    AcademicTask.original_estimate_minutes,
-                    actual_duration,
-                    AcademicTask.completed_at,
-                )
-                .join(SessionRow, SessionRow.task_id == AcademicTask.id)
-                .join(OutcomeRow, OutcomeRow.session_id == SessionRow.id)
-                .where(
-                    AcademicTask.account_id == account_id,
-                    SessionRow.account_id == account_id,
-                    AcademicTask.completed_at.is_not(None),
-                    OutcomeRow.kind.in_(("completed", "delayed")),
-                )
-                .group_by(
-                    AcademicTask.id,
-                    AcademicTask.category,
-                    AcademicTask.original_estimate_minutes,
-                    AcademicTask.completed_at,
-                )
-                .having(func.sum(OutcomeRow.actual_minutes) > 0)
-                .order_by(AcademicTask.completed_at, AcademicTask.id)
-            )
-            return [
-                HistoryRecord(
-                    task_id=row.id,
-                    category=TaskCategory(row.category),
-                    original_minutes=row.original_estimate_minutes,
-                    actual_minutes=int(row.actual_duration),
-                    completed_at=self._aware(row.completed_at),
-                )
-                for row in rows
-            ]
+            return await _load_history(session, account_id)
 
     async def evaluations(self, account_id: UUID) -> list[PredictionEvaluation]:
         async with self._database.transaction() as session:
@@ -311,42 +394,7 @@ class SessionAdaptivePredictionRepository:
         self._session = session
 
     async def history(self, account_id: UUID) -> list[HistoryRecord]:
-        actual_duration = func.sum(OutcomeRow.actual_minutes).label("actual_duration")
-        rows = await self._session.execute(
-            select(
-                AcademicTask.id,
-                AcademicTask.category,
-                AcademicTask.original_estimate_minutes,
-                actual_duration,
-                AcademicTask.completed_at,
-            )
-            .join(SessionRow, SessionRow.task_id == AcademicTask.id)
-            .join(OutcomeRow, OutcomeRow.session_id == SessionRow.id)
-            .where(
-                AcademicTask.account_id == account_id,
-                SessionRow.account_id == account_id,
-                AcademicTask.completed_at.is_not(None),
-                OutcomeRow.kind.in_(("completed", "delayed")),
-            )
-            .group_by(
-                AcademicTask.id,
-                AcademicTask.category,
-                AcademicTask.original_estimate_minutes,
-                AcademicTask.completed_at,
-            )
-            .having(func.sum(OutcomeRow.actual_minutes) > 0)
-            .order_by(AcademicTask.completed_at, AcademicTask.id)
-        )
-        return [
-            HistoryRecord(
-                task_id=row.id,
-                category=TaskCategory(row.category),
-                original_minutes=row.original_estimate_minutes,
-                actual_minutes=int(row.actual_duration),
-                completed_at=SqlAlchemyAdaptivePredictionRepository._aware(row.completed_at),
-            )
-            for row in rows
-        ]
+        return await _load_history(self._session, account_id)
 
     async def evaluations(self, account_id: UUID) -> list[PredictionEvaluation]:
         rows = await self._session.execute(_evaluation_statement(account_id))

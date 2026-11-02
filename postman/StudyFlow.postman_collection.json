@@ -784,8 +784,8 @@
           "request": {
             "method": "GET",
             "header": [{ "key": "Accept", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/tasks?course=Algorithms&category=reading&priority=medium&status=not_started", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks"], "query": [{ "key": "course", "value": "Algorithms" }, { "key": "category", "value": "reading" }, { "key": "priority", "value": "medium" }, { "key": "status", "value": "not_started" }] },
-            "description": "Lists only owned tasks, ordered by deadline. Supports Course, Category, Priority, and deadline-range filters; Task Status is added with lifecycle derivation."
+            "url": { "raw": "{{base_url}}/api/v1/tasks?course=Algorithms&category=reading&priority=medium&status=not_started", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks"], "query": [{ "key": "course", "value": "Algorithms" }, { "key": "category", "value": "reading" }, { "key": "priority", "value": "medium" }, { "key": "status", "value": "not_started" }, { "key": "limit", "value": "50", "disabled": true }, { "key": "offset", "value": "0", "disabled": true }] },
+            "description": "Lists only owned tasks, ordered by deadline then id. Supports Course, Category, Priority, and deadline-range filters; Task Status is added with lifecycle derivation. Optional limit (1-100) and offset (>= 0) page the result; the X-Total-Count response header reports the number of matching tasks before paging."
           },
           "response": [],
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
@@ -1413,8 +1413,8 @@
           "request": {
             "method": "GET",
             "header": [{ "key": "Accept", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/study-sessions", "host": ["{{base_url}}"], "path": ["api", "v1", "study-sessions"] },
-            "description": "Lists the authenticated student's accepted, non-invalidated Study Sessions. Optional from and to timestamps use an inclusive-start, exclusive-end overlap range; task_id narrows the result to one Academic Task."
+            "url": { "raw": "{{base_url}}/api/v1/study-sessions", "host": ["{{base_url}}"], "path": ["api", "v1", "study-sessions"], "query": [{ "key": "from", "value": "2026-08-24T00:00:00Z", "disabled": true }, { "key": "to", "value": "2026-08-31T00:00:00Z", "disabled": true }, { "key": "task_id", "value": "{{task_id}}", "disabled": true }, { "key": "awaiting_outcome", "value": "true", "disabled": true }] },
+            "description": "Lists the authenticated student's accepted, non-invalidated Study Sessions with their task_title and task_category. Optional from and to timestamps use an inclusive-start, exclusive-end overlap range; task_id narrows the result to one Academic Task; awaiting_outcome=true keeps only ended sessions without an outcome and awaiting_outcome=false keeps every other session."
           },
           "response": [],
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) {", "  const sessions = pm.response.json();", "  const eligible = sessions.find((session) => session.outcome === null && new Date(session.ends_at) <= new Date());", "  pm.collectionVariables.unset('session_id');", "  pm.collectionVariables.unset('planned_minutes');", "  if (eligible) {", "    pm.collectionVariables.set('session_id', eligible.id);", "    pm.collectionVariables.set('planned_minutes', String(eligible.planned_duration_minutes));", "    console.log(`Selected ended session ${eligible.id} for outcome recording.`);", "  } else {", "    console.warn('No ended session without an outcome was found; set session_id and planned_minutes manually before recording an outcome.');", "  }", "}"] } }]
@@ -1486,6 +1486,151 @@
           },
           "response": [],
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) {", "  const body = pm.response.json();", "  pm.expect(body).to.be.an('array');", "  if (body.length) pm.expect(body[0]).to.include.all.keys('task_id', 'task_title', 'actual_duration_minutes', 'estimated_remaining_minutes', 'effort_percent', 'sessions_completed', 'sessions_upcoming', 'status');", "}"] } }]
+        }
+      ]
+    },
+    {
+      "name": "Reminders",
+      "description": "Opt-in study reminder emails and the scheduler-only dispatch trigger.",
+      "item": [
+        {
+          "name": "Get reminder preferences",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/reminders/preferences",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reminders",
+                "preferences"
+              ]
+            },
+            "description": "Returns the signed-in student's reminder email preferences, whether their email is verified, and whether this server delivers reminders."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('matches the reminder preferences contract', () => {",
+                  "  pm.expect(pm.response.json()).to.have.all.keys('email_enabled', 'before_session_minutes', 'after_session', 'email_verified', 'delivery_available');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update reminder preferences",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email_enabled\": true,\n  \"before_session_minutes\": 30,\n  \"after_session\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/reminders/preferences",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reminders",
+                "preferences"
+              ]
+            },
+            "description": "Replaces the reminder preferences. before_session_minutes is 0 (off) or 30-120; reminders are only sent to verified email addresses."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dispatch Due Reminders",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{reminder_dispatch_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/internal/reminders/dispatch",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "internal",
+                "reminders",
+                "dispatch"
+              ]
+            },
+            "description": "Scheduler-only trigger that sends due study reminder emails. Requires the server's STUDYFLOW_REMINDER_DISPATCH_TOKEN as a bearer token and no session cookie; responds 404 when reminders are disabled. Repeated calls never send a reminder twice."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('returns a dispatch summary', () => {",
+                  "  pm.expect(pm.response.json()).to.have.all.keys('sent_before', 'sent_after', 'skipped', 'failed');",
+                  "});"
+                ]
+              }
+            }
+          ]
         }
       ]
     }
@@ -1562,6 +1707,12 @@
       "value": "",
       "type": "string",
       "description": "Automatically populated when Google matches an existing password account."
+    },
+    {
+      "key": "reminder_dispatch_token",
+      "value": "",
+      "type": "string",
+      "description": "Paste the server's STUDYFLOW_REMINDER_DISPATCH_TOKEN to call the internal reminder dispatch request. Never commit a real value."
     }
   ]
 }
