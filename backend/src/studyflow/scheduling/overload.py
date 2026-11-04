@@ -417,6 +417,14 @@ def _minimum_break_capacity(
             if credited_endings:
                 model.add(sum(credited_endings) <= 1)
 
+        # Same-duration sessions share domains and credit options, so order them.
+        starts_by_duration: dict[int, list[tuple[str, cp_model.IntVar]]] = defaultdict(list)
+        for session, start in zip(task.sessions, starts, strict=True):
+            starts_by_duration[session.duration_minutes].append((session.session_id, start))
+        for group in starts_by_duration.values():
+            for (_, previous), (_, following) in pairwise(sorted(group, key=lambda item: item[0])):
+                model.add(previous < following).only_enforce_if(active)
+
         model.add_no_overlap(intervals)
         model.add(sum(final_session) == active)
         for index, is_final in enumerate(final_session):

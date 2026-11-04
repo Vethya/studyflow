@@ -1618,3 +1618,42 @@ def test_real_solver_places_every_demand_within_a_short_budget(
         )
     for previous, following in pairwise(result.sessions):
         assert following.start_minute >= previous.end_minute + problem.minimum_break_minutes
+
+
+def test_same_length_sessions_prove_break_capacity_within_budget() -> None:
+    windows = tuple(
+        MinuteWindow(start, end)
+        for start, end in (
+            (1_080, 1_320),
+            (2_520, 2_760),
+            (3_960, 4_200),
+            (5_400, 5_640),
+            (6_840, 7_080),
+            (7_800, 8_280),
+            (9_240, 9_720),
+            (11_160, 11_400),
+            (12_600, 12_840),
+        )
+    )
+    sessions = tuple(
+        SessionDemand(
+            draft.session_id,
+            "task-000",
+            draft.duration_minutes,
+            12_960,
+            windows,
+            TaskPriority.HIGH,
+        )
+        for draft in split_task_sessions("task-000", 273, 30)
+    )
+    problem = FeasibilityProblem(
+        sessions,
+        planning_start_minute=0,
+        minimum_break_minutes=10,
+        max_solve_seconds=4.0,
+        planning_days=tuple(PlanningDay(day, day * 1_440, (day + 1) * 1_440) for day in range(14)),
+    )
+
+    result = solve_with_overload(problem)
+
+    assert result.status is not KernelStatus.TECHNICAL_FAILURE
