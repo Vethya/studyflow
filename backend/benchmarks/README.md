@@ -71,3 +71,39 @@ The selected account must use the benchmark scheduling preferences: UTC,
 60-minute preferred sessions, a 10-minute minimum break, and confirmed timezone
 availability. The evidence runner also requires the Git SHA deployed at the
 target frontend URL so the report identifies the code that was measured.
+
+## Technical-note and robustness experiments
+
+Run these commands from `backend/`:
+
+```console
+uv run python benchmarks/technical_note.py --seeds 10 --csv /tmp/bench.csv
+uv run python benchmarks/robustness_experiment.py
+uv run python benchmarks/robustness_controlled.py audit
+uv run python benchmarks/robustness_controlled.py run
+```
+
+`technical_note.py` measures solve time, solver path, status, and placement
+on synthetic instances. It prints a summary and writes per-run rows to
+`/tmp/bench.csv` with the command above. Its `build_instance` function supplies
+the scenarios used by `robustness_experiment.py`.
+
+`robustness_experiment.py` compares original, median-adjusted, and
+75th-percentile duration estimates against sampled true durations. It measures
+deadline misses and unused planned time. Its default output paths, relative to
+the repository root, are `docs/evidence/robustness-2026-11-07.json` and `.md`.
+Use `--resummarize` to rebuild Markdown from saved JSON without solving.
+
+`robustness_controlled.py` imports the first experiment's task and simulation
+helpers. Run the first experiment before `audit`, which reads its dated JSON
+and checks deadline overload. Then run `run` to compare the same planning
+conditions at controlled deadline loads. Both commands update
+`docs/evidence/robustness-controlled-2026-11-07.json` and `.md`.
+The `run` command also writes
+`docs/evidence/robustness-controlled-rows.partial.json`.
+The `markdown` command regenerates the controlled report from saved JSON.
+
+The imports require all three scripts; the technical-note CSV is not an input
+to either robustness experiment. Solver runs use a four-second time limit,
+so a re-run on another machine can give different numbers. The dated files in
+`docs/evidence/` are the record of the reported run.
