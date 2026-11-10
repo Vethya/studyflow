@@ -45,6 +45,14 @@ URL, and TLS for email delivery.
 
 ## Client IP addresses and rate limits
 
+Login failures use two budgets with a 15-minute window: 5 failures per email and client
+address, and 50 failures per email across all clients. The global per-email budget stays
+to limit distributed credential stuffing. We accept that a distributed attacker can block
+one email for the window, including the real user's login with the correct password.
+Completing a password reset clears the global budget and the resetting client's failure
+budget. The login page's HTTP 429 message shows the wait time and a password reset
+link to sign in now. The message is the same whether or not the account exists.
+
 Registration, login, password reset, verification resend, Google sign-in and Google import are
 rate limited per client IP address (`backend/src/studyflow/auth/rate_limits.py`). The API never
 lets Uvicorn rewrite the client address from proxy headers: the Dockerfile starts Uvicorn with

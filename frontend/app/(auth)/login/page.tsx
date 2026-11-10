@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -85,7 +85,7 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [emailError, setEmailError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ReactNode>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
 
@@ -123,9 +123,16 @@ function LoginForm() {
       if (cause instanceof ApiError && cause.isRateLimited) {
         const wait = cause.retryAfterSeconds;
         setError(
-          wait
-            ? `Too many attempts. Try again in ${Math.ceil(wait / 60)} minutes.`
-            : "Too many attempts. Try again later.",
+          <>
+            Too many attempts. Try again {wait ? `in ${Math.ceil(wait / 60)} minutes` : "later"}, or{" "}
+            <Link
+              href="/forgot-password"
+              className="font-medium underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            >
+              reset your password
+            </Link>{" "}
+            to sign in now.
+          </>,
         );
       } else {
         setError(describeError(cause));

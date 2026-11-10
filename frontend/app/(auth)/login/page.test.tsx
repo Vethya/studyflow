@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 const {
   loginMock,
@@ -151,26 +151,36 @@ it("explains a missing or malformed email and a missing password next to the fie
   expect(loginMock).not.toHaveBeenCalled();
 });
 
-it("covers reset messaging, unsafe next paths, rate limits, and Google errors", async () => {
+it.each([
+  ["student@example.com", 900, "in 15 minutes"],
+  ["unknown@example.com", 61, "in 2 minutes"],
+  ["student@example.com", undefined, "later"],
+])("offers a wait or password reset after a login 429 for %s (%s s)", async (email, retryAfterSeconds, wait) => {
+  searchParamsMock.get.mockReturnValue(null);
+  searchParamsMock.has.mockReturnValue(false);
+  loginMock.mockRejectedValueOnce(Object.assign(new ApiErrorMock(), { isRateLimited: true, retryAfterSeconds }));
+  render(<LoginPage />);
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: email } });
+  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "wrong" } });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toBe(`Too many attempts. Try again ${wait}, or reset your password to sign in now.`);
+  expect(within(alert).getByRole("link", { name: "reset your password" }).getAttribute("href")).toBe("/forgot-password");
+  expect(refreshMock).not.toHaveBeenCalled();
+  expect(replaceMock).not.toHaveBeenCalled();
+});
+
+it("covers reset messaging, unsafe next paths, and Google errors", async () => {
   searchParamsMock.get.mockReturnValue("//evil.example");
   searchParamsMock.has.mockImplementation((name: string) => name === "reset");
   render(<LoginPage />);
   expect(screen.getByText(/password has been reset/i)).toBeTruthy();
-  loginMock.mockRejectedValueOnce(Object.assign(new ApiErrorMock(), { isRateLimited: true, retryAfterSeconds: 61 }));
-  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "student@example.com" } });
-  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "wrong" } });
-  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-  expect(await screen.findByText(/Try again in 2 minutes/)).toBeTruthy();
   cleanup();
 
   searchParamsMock.get.mockReturnValue("/login");
   searchParamsMock.has.mockReturnValue(false);
-  loginMock.mockRejectedValueOnce(Object.assign(new ApiErrorMock(), { isRateLimited: true }));
   render(<LoginPage />);
-  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "student@example.com" } });
-  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "wrong" } });
-  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-  expect(await screen.findByText(/Try again later/)).toBeTruthy();
 
   googleMock.mockRejectedValueOnce(new Error("google unavailable"));
   fireEvent.click(screen.getByRole("button", { name: "Continue with Google" }));
