@@ -1,7 +1,7 @@
 # StudyFlow production release runbook
 
 Use this runbook every time `master` gains database migrations, and for the first merge of `dev`
-into `master`. That merge adds the `20260901_15` to `20260918_23` revisions: eight schema changes
+into `master`. That merge adds the `20260901_15` to `20261018_25` revisions: nine schema changes
 and two merge revisions, all of them additive.
 
 ## How releases are wired
@@ -66,7 +66,7 @@ environment, and never print configured values.
    export STUDYFLOW_DATABASE_URL='postgresql+psycopg://USER:PASSWORD@ep-BRANCH.REGION.aws.neon.tech/neondb?sslmode=require'
    uv run python -m studyflow.cli.release check-schema   # expect: behind (20260903_15)
    uv run python -m studyflow.cli.release migrate
-   uv run python -m studyflow.cli.release check-schema   # expect: current (20260918_23)
+   uv run python -m studyflow.cli.release check-schema   # expect: current (20261018_25)
    uv run alembic check                                  # expect: no new upgrade operations
    ```
 
@@ -104,7 +104,7 @@ environment, and never print configured values.
 
    For later releases where both builds have the gate, first set
    `STUDYFLOW_ACCEPTED_NEWER_SCHEMA_REVISIONS` on `studyflow-api` to the new head revision,
-   such as `20260918_23`, after confirming the migrations are additive. Choose **Save and
+   such as `20261018_25`, after confirming the migrations are additive. Choose **Save and
    deploy** and wait for the existing build to deploy successfully before migrating. Record
    this deploy as the rollback target. Render's [environment variable documentation](https://render.com/docs/configure-environment-variables)
    says **Save only** leaves the value unused until the next deploy. **Save and deploy**
@@ -125,7 +125,7 @@ environment, and never print configured values.
 
 8. **Deploy.** If `render.yaml` changed, run the Blueprint's **Manual Sync** first. Then, in the
    Render Dashboard, open `studyflow-api` → Manual Deploy → **Deploy latest commit**. The deploy log should show
-   `Database schema is current (20260918_23).` before Uvicorn starts.
+   `Database schema is current (20261018_25).` before Uvicorn starts.
 9. **Verify** with the post-deployment checklist in [`deployment.md`](deployment.md), against
    `https://studyflow-api.onrender.com` directly. The shared frontend still uses the dev API
    (see below).
