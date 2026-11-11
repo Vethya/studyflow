@@ -13,26 +13,30 @@ beforeEach(() => { state.status = "loading"; });
 afterEach(cleanup);
 
 describe("landing page", () => {
-  it("renders the current product sections, navigation and signup links", () => {
+  it("renders the product story, pricing and signup links", () => {
     const { container } = render(<LandingPage />);
     expect(screen.getByRole("heading", { level: 1, name: "Know if your week fits" })).toBeTruthy();
-    expect(screen.getAllByText("Get started for free").length).toBeGreaterThan(0);
-    expect(screen.getByText("Coming soon")).toBeTruthy();
-    const features = within(container.querySelector<HTMLElement>("#features")!);
     for (const name of ["Tell it when you’re free", "Add your coursework", "Find the hours you’re short"]) {
-      expect(features.getByRole("heading", { level: 3, name })).toBeTruthy();
+      expect(screen.getByRole("heading", { level: 3, name })).toBeTruthy();
     }
-    expect(screen.getByRole("heading", { name: "Stop finding out the night before" })).toBeTruthy();
-    expect(screen.getByText("How StudyFlow works")).toBeTruthy();
+    for (const name of ["Stop finding out the night before", "Pricing", "Plan your first week"]) {
+      expect(screen.getByRole("heading", { name })).toBeTruthy();
+    }
+    expect(screen.getByRole("heading", { name: "Free", level: 3 })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Pro", level: 3 })).toBeTruthy();
+    expect(screen.getByText("$0")).toBeTruthy();
+    expect(screen.getByText("$2.50")).toBeTruthy();
+    expect(screen.getByText("Coming soon")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Sign up for free" }).getAttribute("href")).toBe("/register");
-    for (const [name, href] of [["Features", "#features"], ["How it works", "#how-it-works"], ["Pricing", "#pricing"]]) {
-      for (const link of screen.getAllByRole("link", { name })) {
-        expect(link.getAttribute("href")).toBe(href);
-      }
-      expect(container.querySelector(href)).toBeTruthy();
-    }
-    expect(container.querySelector("a button")).toBeNull();
     expect(screen.getByRole("link", { name: "See how it works" }).getAttribute("href")).toBe("#features");
+    expect(container.querySelector('[id="how-it-works"]')).toBeNull();
+    const navLinks = screen.getAllByRole("link", { name: "How it works" });
+    expect(navLinks).toHaveLength(2);
+    for (const link of navLinks) {
+      expect(link.getAttribute("href")).toBe("#features");
+    }
+    expect(screen.queryByRole("link", { name: "Features" })).toBeNull();
+    expect(container.querySelector("a button")).toBeNull();
     expect(container.querySelector("img")).toBeNull();
   });
 
@@ -63,7 +67,7 @@ describe("landing page", () => {
     const { container } = render(<LandingPage />);
     const heroElements = container.querySelectorAll<HTMLElement>(".landing-rise");
     expect(Array.from(heroElements, (element) => element.style.getPropertyValue("--landing-delay"))).toEqual(["", "120ms", "240ms", "360ms"]);
-    expect(container.querySelectorAll(".landing-reveal")).toHaveLength(12);
+    expect(container.querySelectorAll(".landing-reveal")).toHaveLength(8);
   });
 
   it("keeps the landing wrapper from becoming a scroll container", () => {

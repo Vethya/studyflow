@@ -33,9 +33,9 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "StudyFlow — Know if your coursework fits",
+  title: "Know if your coursework fits | StudyFlow",
   description:
-    "StudyFlow weighs the coursework you owe against the study time you actually have, so you find out you are overcommitted while there is still time to do something about it.",
+    "StudyFlow compares your coursework with the hours you’re free and tells you how many hours short you are, weeks before anything is due.",
   keywords: ["study planner", "academic workload", "student productivity", "deadline tracking"],
 };
 

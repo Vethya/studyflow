@@ -22,11 +22,10 @@ describe("landing page server module", () => {
     expect(html).toContain("Add your coursework");
     expect(html).toContain("Find the hours you’re short");
     expect(html).toContain("Stop finding out the night before");
+    expect(html).toContain("Pricing");
+    expect(html).toContain("Plan your first week");
+    expect(html).not.toContain('id="how-it-works"');
+    expect(html.match(/<a[^>]*href="#features"[^>]*>How it works<\/a>/g)).toHaveLength(2);
     expect(html.match(/role="img"/g)).toHaveLength(4);
-    expect(html).toContain("How StudyFlow works");
-    expect(html).toContain("Simple pricing for students");
-    expect(html).toContain("Know now, not in week nine.");
-    expect(html).toContain('id="how-it-works"');
-    expect(html).not.toMatch(/<a[^>]*>\s*<button/);
   });
 });

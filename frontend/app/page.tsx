@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import Link from "next/link";
-import { Calendar, BarChart3, BookOpen, Clock, Sparkles, Target, Check } from "@/components/icons";
+import { Calendar, BarChart3, BookOpen, Check } from "@/components/icons";
 import { BrandIcon } from "@/components/brand-icon";
 import { CapacityBar } from "@/components/capacity-bar";
 import { WeekLoad } from "@/components/week-load";
@@ -12,43 +12,42 @@ import { demoCapacity, demoColumns, demoBlocks, demoDays, demoTasks } from "@/co
 const PLANS = [
   {
     name: "Free",
-    tagline: "The full planner, for every student.",
+    tagline: "Everything you need to plan a term.",
     price: "$0",
     period: "forever",
     note: "No card needed.",
     features: [
       "Unlimited tasks and deadlines",
-      "Weekly availability and blocked days",
+      "Weekly study hours and blocked days",
       "Automatic study schedule",
-      "Overload warnings before you fall behind",
-      "Effort progress for every task",
+      "Warnings when a week doesn’t fit",
+      "Progress on every task",
     ],
-    cta: "Get started for free",
+    cta: "Start for free",
     href: "/register",
     highlighted: false,
     badge: null,
   },
   {
     name: "Pro",
-    tagline: "More insight for a heavier term.",
+    tagline: "For a heavier term.",
     price: "$2.50",
     period: "per month",
-    note: "Or $24 a year — two months free.",
+    note: "Or $24 a year, two months free.",
     features: [
       "Everything in Free",
       "Sync sessions to Google Calendar",
-      "End-of-term reports you can export as PDF",
-      "Keep past terms to compare your workload",
+      "End-of-term reports as PDF",
+      "Compare past terms",
       "Priority email support",
     ],
-    cta: "Start with Free, upgrade later",
+    cta: "Start free, upgrade later",
     href: "/register",
     highlighted: true,
     badge: "Coming soon",
   },
 ];
 
-/* ─── Navigation (transparent over gradient) ─── */
 function Navigation() {
   return (
     <nav className="absolute top-0 left-0 right-0 z-50 w-full">
@@ -64,9 +63,6 @@ function Navigation() {
         {/* Center nav */}
         <div className="hidden md:flex items-center gap-8">
           <Link href="#features" className="text-[14px] font-medium tracking-[-0.01em] text-white/90 hover:text-white transition-colors">
-            Features
-          </Link>
-          <Link href="#how-it-works" className="text-[14px] font-medium tracking-[-0.01em] text-white/90 hover:text-white transition-colors">
             How it works
           </Link>
           <Link href="#pricing" className="text-[14px] font-medium tracking-[-0.01em] text-white/90 hover:text-white transition-colors">
@@ -80,7 +76,6 @@ function Navigation() {
   );
 }
 
-/* ─── Main Page ─── */
 export default function LandingPage() {
   return (
     <div className="landing-page min-h-screen">
@@ -192,65 +187,15 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ═══════ How It Works ═══════ */}
-    
-      <section id="how-it-works" className="landing-canvas py-28">
-        <div className="max-w-[1200px] mx-auto px-6">
-          <h2 className="landing-reveal font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-[1.1] text-center mb-16">
-            How StudyFlow works
-          </h2>
-
-          <div className="steps-grid grid grid-cols-1 md:grid-cols-3 gap-8">
-            {[
-              {
-                icon: Target,
-                step: "01",
-                title: "Set your hours",
-                desc: "Add the weekly windows you can study, and block out the days you cannot.",
-              },
-              {
-                icon: Sparkles,
-                step: "02",
-                title: "Add your coursework",
-                desc: "Every task gets a deadline and an estimate of how long it will take you.",
-              },
-              {
-                icon: Clock,
-                step: "03",
-                title: "Read the balance",
-                desc: "One figure: the hours you are short, or the hours you have spare. Change something while it still helps.",
-              },
-            ].map((item, i) => (
-              <div key={i} className="landing-reveal landing-surface landing-card-shadow rounded-[18px] p-8 hover:-translate-y-1 transition-transform duration-300">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="w-10 h-10 rounded-lg landing-canvas flex items-center justify-center">
-                    <item.icon className="w-5 h-5 landing-accent" />
-                  </div>
-                  <span className="step-number font-[family-name:var(--font-display)] text-[48px] font-bold landing-subtle leading-none tracking-[-0.04em]">
-                    {item.step}
-                  </span>
-                </div>
-                <h3 className="font-[family-name:var(--font-display)] text-[20px] font-semibold tracking-[-0.01em] landing-ink leading-[1.3] mb-3">
-                  {item.title}
-                </h3>
-                <p className="text-[14px] landing-muted leading-[1.5] tracking-[-0.01em]">
-                  {item.desc}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* ═══════ Pricing ═══════ */}
       <section id="pricing" className="landing-surface py-28 scroll-mt-20">
         <div className="max-w-[960px] mx-auto px-6">
           <div className="text-center mb-14">
             <h2 className="landing-reveal font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-[1.1] mb-4">
-              Simple pricing for students
+              Pricing
             </h2>
             <p className="text-[16px] md:text-[18px] landing-muted leading-[1.5] tracking-[-0.01em] max-w-[520px] mx-auto">
-              Everything you need to plan a term is free. Pro adds extras for students who want more.
+              Planning your term is free. Pro adds calendar sync and reports when it launches.
             </p>
           </div>
 
@@ -306,13 +251,13 @@ export default function LandingPage() {
       {/* ═══════ CTA Banner ═══════ */}
       <section className="landing-reveal landing-surface py-28">
         <div className="max-w-[700px] mx-auto px-6 text-center">
-          <h2 className="cta-heading font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-[1.1] mb-6">
-Know now, not in week nine.
+          <h2 className="font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-[1.1] mb-6">
+            Plan your first week
           </h2>
-          <p className="cta-sub text-[16px] md:text-[18px] landing-muted leading-[1.5] tracking-[-0.01em] mb-10 max-w-[480px] mx-auto">
-It takes about five minutes to enter a term of coursework and the hours you have for it.
+          <p className="text-[16px] md:text-[18px] landing-muted leading-[1.5] tracking-[-0.01em] mb-10 max-w-[480px] mx-auto">
+            It takes about five minutes to add your coursework and the hours you’re free.
           </p>
-          <div className="cta-btn flex items-center justify-center gap-4">
+          <div className="flex items-center justify-center gap-4">
             <Link href="/register" className="landing-ink-button px-8 py-3.5 rounded-full text-[16px] font-semibold tracking-[-0.01em] transition-all duration-300">
               Get started for free
             </Link>
@@ -322,7 +267,7 @@ It takes about five minutes to enter a term of coursework and the hours you have
 
       {/* ═══════ Footer ═══════ */}
       <footer className="landing-surface border-t landing-border py-16">
-        <div className="footer-content max-w-[1200px] mx-auto px-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
+        <div className="max-w-[1200px] mx-auto px-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
           <Link href="/" aria-label="StudyFlow home" className="flex items-center gap-2 rounded-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
             <BrandIcon className="size-8" />
             <span className="font-[family-name:var(--font-display)] font-bold text-[16px] tracking-[-0.01em] landing-ink">
@@ -331,8 +276,7 @@ It takes about five minutes to enter a term of coursework and the hours you have
           </Link>
 
           <div className="flex flex-wrap gap-8">
-            <Link href="#features" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">Features</Link>
-            <Link href="#how-it-works" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">How it works</Link>
+            <Link href="#features" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">How it works</Link>
             <Link href="#pricing" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">Pricing</Link>
             <Link href="/privacy" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">Privacy</Link>
             <Link href="/terms" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">Terms</Link>
