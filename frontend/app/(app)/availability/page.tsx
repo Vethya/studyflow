@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Callout } from "@/components/ui/callout";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   GoogleImportButton,
   GoogleImportReminder,
@@ -80,6 +81,8 @@ export default function AvailabilityPage() {
   const [editingWindow, setEditingWindow] = useState<AvailabilityWindow | null>(null);
   const [exceptionDialogOpen, setExceptionDialogOpen] = useState(false);
   const [editingPeriod, setEditingPeriod] = useState<UnavailablePeriod | null>(null);
+  const [confirmWindow, setConfirmWindow] = useState<AvailabilityWindow | null>(null);
+  const [confirmPeriod, setConfirmPeriod] = useState<UnavailablePeriod | null>(null);
   /**
    * SPEC §17.5: a saved availability change can invalidate future sessions.
    * Their count is surfaced, and the student may then ask for a new plan —
@@ -598,7 +601,7 @@ export default function AvailabilityPage() {
                                 <Button
                                   variant="ghost"
                                   size="icon-xs"
-                                  onClick={() => handleDeleteWindow(w)}
+                                  onClick={() => setConfirmWindow(w)}
                                   aria-label={`Remove ${DAY_NAMES[dayIdx]} ${w.startTime} to ${w.endTime}`}
                                   className="size-5 rounded-full text-muted-foreground hover:bg-card hover:text-deficit"
                                 >
@@ -709,7 +712,7 @@ export default function AvailabilityPage() {
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                          onClick={() => handleDeleteException(period)}
+                          onClick={() => setConfirmPeriod(period)}
                           aria-label={`Delete ${period.title}`}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -761,6 +764,39 @@ export default function AvailabilityPage() {
         onSubmit={handleSaveException}
       />
 
+      <ConfirmDialog
+        open={confirmWindow !== null}
+        onOpenChange={() => setConfirmWindow(null)}
+        title={confirmWindow ? `Remove ${DAY_NAMES[confirmWindow.dayOfWeek]} ${confirmWindow.startTime}–${confirmWindow.endTime}?` : ""}
+        description="You will have less time to study on this day. Planned sessions may need rescheduling."
+        confirmLabel="Remove study hours"
+        destructive
+        focusCancel
+        onConfirm={() => {
+          const target = confirmWindow;
+          /* c8 ignore next -- confirmation is only available with a selected window. */
+          if (!target) return;
+          setConfirmWindow(null);
+          handleDeleteWindow(target);
+        }}
+      />
+      <ConfirmDialog
+        open={confirmPeriod !== null}
+        onOpenChange={() => setConfirmPeriod(null)}
+        title={`Delete “${confirmPeriod?.title ?? ""}”?`}
+        description="This time will be open for study again."
+        confirmLabel="Delete exception"
+        destructive
+        focusCancel
+        onConfirm={() => {
+          const target = confirmPeriod;
+          /* c8 ignore next -- confirmation is only available with a selected exception. */
+          if (!target) return;
+          setConfirmPeriod(null);
+          handleDeleteException(target);
+        }}
+      />
+
       <Popover
         open={selectedWindow !== null}
         onOpenChange={(next) => {
@@ -800,7 +836,7 @@ export default function AvailabilityPage() {
                   size="sm"
                   onClick={() => {
                     setSelectedWindow(null);
-                    handleDeleteWindow(selectedWindow.window);
+                    setConfirmWindow(selectedWindow.window);
                   }}
                 >
                   <Trash2 className="size-3.5" />

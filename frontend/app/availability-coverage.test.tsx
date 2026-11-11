@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
@@ -74,6 +74,12 @@ import { flushPendingActions, resetUndoState, UNDO_WINDOW_MS } from "@/lib/undo"
 /** Removals wait out an undo window; tests commit them at once. */
 const commitPending = () => act(() => flushPendingActions());
 
+async function confirmRemoval(label: string) {
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: label }));
+  });
+}
+
 /** A server that saves exactly the week it is sent. */
 const echoSave = async (drafts: any[]) => ({
   windows: drafts.map((draft, index) => ({ id: `saved-${index}`, ...draft })),
@@ -98,6 +104,61 @@ afterEach(() => {
 });
 
 describe("availability page", () => {
+  it.each(["chip", "popover", "exception"] as const)("confirms removal from the %s, supports Cancel, and keeps Undo", async (entry) => {
+    render(<AvailabilityPage />);
+    const isException = entry === "exception";
+    const itemLabel = isException ? "Delete Exam" : "Remove Monday 09:00 to 11:00";
+    const confirmLabel = isException ? "Delete exception" : "Remove study hours";
+    const title = isException ? "Delete “Exam”?" : "Remove Monday 09:00–11:00?";
+    const item = screen.getByRole("button", { name: itemLabel });
+    const openConfirmation = () => {
+      if (entry === "popover") {
+        fireEvent.click(screen.getByRole("button", { name: "Monday 09:00–11:00" }));
+        fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+        expect(screen.queryByText("Study hours every week")).toBeNull();
+      } else {
+        fireEvent.click(item);
+      }
+    };
+
+    openConfirmation();
+    const dialog = screen.getByRole("dialog", { name: title });
+    expect(within(dialog).getByText(isException
+      ? "This time will be open for study again."
+      : "You will have less time to study on this day. Planned sessions may need rescheduling.")).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Cancel" })));
+    expect(item.isConnected).toBe(true);
+    expect(state.toast.success).not.toHaveBeenCalled();
+    await commitPending();
+    expect(state.api.replaceWindows).not.toHaveBeenCalled();
+    expect(state.api.deletePeriod).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByRole("button", { name: itemLabel })).toBeTruthy();
+    await commitPending();
+    expect(state.api.replaceWindows).not.toHaveBeenCalled();
+    expect(state.api.deletePeriod).not.toHaveBeenCalled();
+    expect(state.toast.success).not.toHaveBeenCalled();
+
+    openConfirmation();
+    await confirmRemoval(confirmLabel);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("button", { name: itemLabel })).toBeNull();
+    expect(state.toast.success).toHaveBeenCalledWith(isException ? "Exception removed" : "Study hours removed", expect.objectContaining({
+      description: isException ? "Exam" : "Monday 09:00–11:00",
+      duration: UNDO_WINDOW_MS,
+      action: { label: "Undo", onClick: expect.any(Function) },
+    }));
+    expect(state.api.replaceWindows).not.toHaveBeenCalled();
+    expect(state.api.deletePeriod).not.toHaveBeenCalled();
+    act(() => state.toast.success.mock.calls.at(-1)![1].action.onClick());
+    expect(screen.getByRole("button", { name: itemLabel })).toBeTruthy();
+    await commitPending();
+    expect(state.api.replaceWindows).not.toHaveBeenCalled();
+    expect(state.api.deletePeriod).not.toHaveBeenCalled();
+  });
+
   it("adds, edits and removes study hours with undo, edits exceptions, and re-plans", async () => {
     const view = render(<AvailabilityPage />);
     expect(screen.getByRole("heading", { name: "Availability" })).toBeTruthy();
@@ -157,11 +218,12 @@ describe("availability page", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Save edit of 18:00" })).toBeTruthy());
     screen.getByRole("button", { name: "Close window dialog" }).click();
 
-    // Removal hides the window at once and saves after the undo window.
+    // Confirmed removal hides the window and saves after the undo window.
     revalidate();
     state.api.replaceWindows.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Monday 09:00–11:00" }));
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await confirmRemoval("Remove study hours");
     await waitFor(() => expect(screen.queryByRole("button", { name: "Monday 09:00–11:00" })).toBeNull());
     expect(state.toast.success).toHaveBeenCalledWith("Study hours removed", expect.objectContaining({ description: "Monday 09:00–11:00" }));
     expect(state.api.replaceWindows).not.toHaveBeenCalled();
@@ -176,8 +238,10 @@ describe("availability page", () => {
     view.rerender(<AvailabilityPage />);
     fireEvent.click(screen.getByRole("button", { name: "Monday 09:00–11:00" }));
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await confirmRemoval("Remove study hours");
     await waitFor(() => expect(screen.queryByRole("button", { name: "Monday 09:00–11:00" })).toBeNull());
-    screen.getByRole("button", { name: /Remove Wednesday/ }).click();
+    fireEvent.click(screen.getByRole("button", { name: /Remove Wednesday/ }));
+    await confirmRemoval("Remove study hours");
     await waitFor(() => expect(screen.queryByRole("button", { name: /Remove Wednesday/ })).toBeNull());
     await commitPending();
     expect(state.api.replaceWindows.mock.calls).toEqual([[[wednesdayDraft]], [[]]]);
@@ -185,7 +249,8 @@ describe("availability page", () => {
     // Undo brings a removed window back without saving anything.
     state.api.replaceWindows.mockClear();
     view.rerender(<AvailabilityPage />);
-    screen.getByRole("button", { name: /Remove Wednesday/ }).click();
+    fireEvent.click(screen.getByRole("button", { name: /Remove Wednesday/ }));
+    await confirmRemoval("Remove study hours");
     await waitFor(() => expect(screen.queryByRole("button", { name: /Remove Wednesday/ })).toBeNull());
     const undo = state.toast.success.mock.calls.at(-1)![1].action.onClick;
     act(() => undo());
@@ -207,7 +272,8 @@ describe("availability page", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Save exception" })).toBeTruthy());
     screen.getByRole("button", { name: "Save exception" }).click();
     screen.getByRole("button", { name: "Close exception" }).click();
-    screen.getByRole("button", { name: "Delete Exam" }).click();
+    fireEvent.click(screen.getByRole("button", { name: "Delete Exam" }));
+    await confirmRemoval("Delete exception");
     // The row leaves at once; the request waits out the undo window.
     await waitFor(() => expect(screen.queryByRole("button", { name: "Delete Exam" })).toBeNull());
     expect(state.toast.success).toHaveBeenCalledWith("Exception removed", expect.objectContaining({ description: "Exam" }));
@@ -226,8 +292,10 @@ describe("availability page", () => {
       state.api.replaceWindows.mockImplementation(echoSave);
       render(<AvailabilityPage />);
       fireEvent.click(screen.getByRole("button", { name: /Remove Monday/ }));
+      await confirmRemoval("Remove study hours");
       await act(() => vi.advanceTimersByTimeAsync(1000));
       fireEvent.click(screen.getByRole("button", { name: /Remove Wednesday/ }));
+      await confirmRemoval("Remove study hours");
       const undoWednesday = state.toast.success.mock.calls.at(-1)![1].action.onClick;
 
       // Monday's timer fires first; its save must still contain Wednesday.
@@ -251,7 +319,9 @@ describe("availability page", () => {
       .mockImplementation(echoSave);
     render(<AvailabilityPage />);
     fireEvent.click(screen.getByRole("button", { name: /Remove Monday/ }));
+    await confirmRemoval("Remove study hours");
     fireEvent.click(screen.getByRole("button", { name: /Remove Wednesday/ }));
+    await confirmRemoval("Remove study hours");
     let flushed = false;
     const flushing = (async () => {
       await commitPending();
@@ -277,6 +347,7 @@ describe("availability page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close exception" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Delete Exam" }));
+    await confirmRemoval("Delete exception");
     await commitPending();
     expect(state.api.deletePeriod).toHaveBeenCalledWith("period-1");
 
@@ -330,7 +401,8 @@ describe("availability page", () => {
     state.windows = [windowOne];
     cleanup();
     render(<AvailabilityPage />);
-    screen.getByRole("button", { name: /Remove Monday/ }).click();
+    fireEvent.click(screen.getByRole("button", { name: /Remove Monday/ }));
+    await confirmRemoval("Remove study hours");
     await commitPending();
     await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("save failed"));
     // A failed removal puts the study hours back.
@@ -340,7 +412,8 @@ describe("availability page", () => {
     state.periods = [period];
     cleanup();
     render(<AvailabilityPage />);
-    screen.getByRole("button", { name: "Delete Exam" }).click();
+    fireEvent.click(screen.getByRole("button", { name: "Delete Exam" }));
+    await confirmRemoval("Delete exception");
     await commitPending();
     await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("delete failed"));
     // A failed removal puts the exception back.
