@@ -17,6 +17,10 @@ projects:
                 value: production
               - key: STUDYFLOW_TRUSTED_PROXY_HOPS
                 value: "3"
+              # Neon is far from Render, so a cold connection takes over the 2 s default
+              # and /api/v1/ready would never recover (the attempt is cancelled each time).
+              - key: STUDYFLOW_DATABASE_READINESS_TIMEOUT_SECONDS
+                value: "8"
               - key: STUDYFLOW_FRONTEND_PROXY_SECRET
                 sync: false
               - key: STUDYFLOW_DATABASE_URL
@@ -74,6 +78,10 @@ projects:
                 value: production
               - key: STUDYFLOW_TRUSTED_PROXY_HOPS
                 value: "3"
+              # Neon is far from Render, so a cold connection takes over the 2 s default
+              # and /api/v1/ready would never recover (the attempt is cancelled each time).
+              - key: STUDYFLOW_DATABASE_READINESS_TIMEOUT_SECONDS
+                value: "8"
               - key: STUDYFLOW_FRONTEND_PROXY_SECRET
                 sync: false
               - key: STUDYFLOW_DATABASE_URL
