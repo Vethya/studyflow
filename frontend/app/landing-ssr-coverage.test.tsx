@@ -1,14 +1,21 @@
 // @vitest-environment node
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("next/link", () => ({ default: () => null }));
-vi.mock("next/image", () => ({ default: () => null }));
-vi.mock("@/hooks/use-session", () => ({ useSession: () => ({ status: "unauthenticated" }) }));
+// The root layout normally supplies the session provider.
+vi.mock("@/hooks/use-session", () => ({ useSession: () => ({ status: "loading" }) }));
 
 describe("landing page server module", () => {
-  // A cold import of the whole landing page; under coverage on a busy machine it can pass 20s.
-  it("loads without a browser global", { timeout: 60_000 }, async () => {
-    const landingModule = await import("./page");
-    expect(landingModule.default).toBeTypeOf("function");
+  it("imports and renders without browser globals", { timeout: 60_000 }, async () => {
+    expect(typeof window).toBe("undefined");
+    const { default: LandingPage } = await import("./page");
+    const html = renderToStaticMarkup(LandingPage());
+    expect(html).toContain("Does it all");
+    expect(html).toContain("Your real hours, not an ideal week.");
+    expect(html).toContain("How StudyFlow works");
+    expect(html).toContain("Simple pricing for students");
+    expect(html).toContain("Know now, not in week nine.");
+    expect(html).toContain('id="how-it-works"');
+    expect(html).not.toMatch(/<a[^>]*>\s*<button/);
   });
 });

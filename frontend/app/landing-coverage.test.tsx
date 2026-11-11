@@ -12,24 +12,65 @@ vi.mock("next/image", () => ({ default: (props: React.ImgHTMLAttributes<HTMLImag
 } }));
 
 import LandingPage from "./page";
+import { NavAuth } from "@/components/landing/nav-auth";
 
 beforeEach(() => { state.status = "loading"; });
 afterEach(cleanup);
 
 describe("landing page", () => {
-  it("renders all product sections and authentication navigation states", () => {
-    const { rerender } = render(<LandingPage />);
+  it("renders the current product sections, navigation and signup links", () => {
+    const { container } = render(<LandingPage />);
     expect(screen.getByRole("heading", { name: /Does it all/ })).toBeTruthy();
     expect(screen.getAllByText("Get started for free").length).toBeGreaterThan(0);
     expect(screen.getByText("Coming soon")).toBeTruthy();
     expect(screen.getByText("Your real hours, not an ideal week.")).toBeTruthy();
     expect(screen.getByText("How StudyFlow works")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Sign up for free" }).getAttribute("href")).toBe("/register");
+    for (const [name, href] of [["Features", "#features"], ["How it works", "#how-it-works"], ["Pricing", "#pricing"]]) {
+      for (const link of screen.getAllByRole("link", { name })) {
+        expect(link.getAttribute("href")).toBe(href);
+      }
+      expect(container.querySelector(href)).toBeTruthy();
+    }
+    expect(container.querySelector("a button")).toBeNull();
+    expect(screen.getAllByRole("img")).toHaveLength(3);
+  });
+
+  it("applies staggered hero motion and section reveals", () => {
+    const { container } = render(<LandingPage />);
+    const heroElements = container.querySelectorAll<HTMLElement>(".landing-rise");
+    expect(Array.from(heroElements, (element) => element.style.getPropertyValue("--landing-delay"))).toEqual(["0ms", "120ms", "240ms", "360ms"]);
+    expect(container.querySelectorAll(".landing-reveal")).toHaveLength(9);
+  });
+
+  it("keeps the landing wrapper from becoming a scroll container", () => {
+    const { container } = render(<LandingPage />);
+    const root = container.querySelector(".landing-page");
+    expect(root).toBeTruthy();
+    // Overflow classes other than overflow-x-clip make the wrapper the view() scroll container.
+    expect(Array.from(root!.classList).filter((name) => name.startsWith("overflow-") && name !== "overflow-x-clip")).toEqual([]);
+  });
+});
+
+describe("NavAuth", () => {
+  it("reserves space without auth links while loading", () => {
+    const { container } = render(<NavAuth />);
+    expect(container.querySelector('[aria-hidden="true"].h-9.w-28')).toBeTruthy();
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  it("links authenticated students to the dashboard", () => {
     state.status = "authenticated";
-    rerender(<LandingPage />);
-    expect(screen.getByText("Open dashboard")).toBeTruthy();
+    render(<NavAuth />);
+    expect(screen.getByRole("link", { name: "Open dashboard" }).getAttribute("href")).toBe("/dashboard");
+    expect(screen.queryByRole("link", { name: "Login" })).toBeNull();
+  });
+
+  it("offers login and signup to unauthenticated students", () => {
     state.status = "unauthenticated";
-    rerender(<LandingPage />);
-    expect(screen.getByText("Login")).toBeTruthy();
-    expect(screen.getByText("Sign up")).toBeTruthy();
+    const { container } = render(<NavAuth />);
+    expect(screen.getByRole("link", { name: "Login" }).getAttribute("href")).toBe("/login");
+    expect(screen.getByRole("link", { name: "Sign up" }).getAttribute("href")).toBe("/register");
+    expect(container.querySelector("button")).toBeNull();
   });
 });

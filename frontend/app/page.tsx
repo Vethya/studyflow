@@ -1,10 +1,9 @@
-"use client";
-
+import type { CSSProperties } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { Calendar, BarChart3, Clock, Sparkles, Target, Check } from "@/components/icons";
-import { useSession } from "@/hooks/use-session";
 import { BrandIcon } from "@/components/brand-icon";
+import { NavAuth } from "@/components/landing/nav-auth";
 
 const PLANS = [
   {
@@ -47,11 +46,9 @@ const PLANS = [
 
 /* ─── Navigation (transparent over gradient) ─── */
 function Navigation() {
-  const { status } = useSession();
-
   return (
     <nav className="absolute top-0 left-0 right-0 z-50 w-full">
-      <div className="max-w-[1200px] mx-auto px-6 flex items-center justify-between h-16">
+      <div className="max-w-[1200px] mx-auto px-4 md:px-6 flex items-center justify-between h-16">
         {/* Logo */}
         <Link href="/" aria-label="StudyFlow home" className="flex items-center gap-2 rounded-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">
           <BrandIcon className="size-8 text-white" />
@@ -73,29 +70,7 @@ function Navigation() {
           </Link>
         </div>
 
-        {/* Right auth */}
-        <div className="flex items-center gap-4">
-          {status === "authenticated" ? (
-            <Link href="/dashboard">
-              <button className="px-5 py-2 rounded-full bg-white text-[#070709] text-[14px] font-medium tracking-[-0.01em] hover:bg-white/90 transition-colors shadow-[rgba(36,36,40,0.1)_0px_1px_2px_0px]">
-                Open dashboard
-              </button>
-            </Link>
-          ) : status === "loading" ? (
-            <div aria-hidden className="h-9 w-28" />
-          ) : (
-            <>
-              <Link href="/login" className="text-[14px] font-medium tracking-[-0.01em] text-white hover:text-white/80 transition-colors">
-                Login
-              </Link>
-              <Link href="/register">
-                <button className="px-5 py-2 rounded-full bg-white text-[#070709] text-[14px] font-medium tracking-[-0.01em] hover:bg-white/90 transition-colors shadow-[rgba(36,36,40,0.1)_0px_1px_2px_0px]">
-                  Sign up
-                </button>
-              </Link>
-            </>
-          )}
-        </div>
+        <NavAuth />
       </div>
     </nav>
   );
@@ -104,7 +79,7 @@ function Navigation() {
 /* ─── Main Page ─── */
 export default function LandingPage() {
   return (
-    <div className="landing-page min-h-screen overflow-x-hidden">
+    <div className="landing-page min-h-screen">
 
       {/* ═══════ HERO: Sky Gradient with outer padding ═══════ */}
       <div className="landing-surface p-2 md:p-3">
@@ -116,11 +91,11 @@ export default function LandingPage() {
 
         {/* Centered content */}
         <div className="relative z-10 text-center px-6 pt-20 pb-0 flex-1 flex flex-col items-center justify-center">
-          <h1 className="hero-headline font-[family-name:var(--font-display)] text-white font-bold text-[52px] md:text-[72px] lg:text-[80px] leading-[0.92] tracking-[-0.04em] mb-6 max-w-[700px]">
+          <h1 className="landing-rise font-[family-name:var(--font-display)] text-white font-bold text-[52px] md:text-[72px] lg:text-[80px] leading-[0.92] tracking-[-0.04em] mb-6 max-w-[700px]" style={{ "--landing-delay": "0ms" } as CSSProperties}>
             Does it all<br />actually fit?
           </h1>
 
-          <div className="hero-sub max-w-[520px] mx-auto mb-8">
+          <div className="landing-rise max-w-[520px] mx-auto mb-8" style={{ "--landing-delay": "120ms" } as CSSProperties}>
             <p className="font-[family-name:var(--font-display)] text-white/90 text-[16px] md:text-[17px] leading-[1.5] tracking-[-0.01em]">
 Add your coursework and the hours you are free.<br />
               StudyFlow weighs one against the other and tells you<br />
@@ -128,17 +103,15 @@ Add your coursework and the hours you are free.<br />
             </p>
           </div>
 
-          <div className="hero-cta">
-            <Link href="/register">
-              <button className="landing-ink-button px-8 py-3.5 rounded-full text-[15px] font-semibold tracking-[-0.01em] transition-all duration-300">
-                Sign up for free
-              </button>
+          <div className="landing-rise" style={{ "--landing-delay": "240ms" } as CSSProperties}>
+            <Link href="/register" className="landing-ink-button rounded-full px-8 py-3.5 text-[15px] font-semibold tracking-[-0.01em] transition-colors">
+              Sign up for free
             </Link>
           </div>
         </div>
 
         {/* Before/After cards emerging from bottom */}
-        <div className="hero-cards-wrapper relative z-10 w-full flex items-end justify-center mt-auto pb-0">
+        <div className="landing-rise relative z-10 w-full flex items-end justify-center mt-auto pb-0" style={{ "--landing-delay": "360ms" } as CSSProperties}>
           {/* White "envelope" shape behind the cards */}
           <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[500px] md:w-[700px] h-[250px]">
             <svg viewBox="0 0 700 250" fill="none" className="w-full h-full" preserveAspectRatio="none">
@@ -214,7 +187,7 @@ Add your coursework and the hours you are free.<br />
       {/* ═══════ Section Heading ═══════ */}
       <section className="landing-canvas pt-28 pb-8">
         <div className="max-w-[1200px] mx-auto px-6 text-center">
-          <h2 className="section-heading font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-[1.1]">
+          <h2 className="landing-reveal font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-[1.1]">
 Most students find out too late
           </h2>
         </div>
@@ -279,7 +252,7 @@ Each task carries an estimate, a priority and a due date. Add them up across the
     
       <section id="how-it-works" className="landing-canvas py-28">
         <div className="max-w-[1200px] mx-auto px-6">
-          <h2 className="section-heading font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-[1.1] text-center mb-16">
+          <h2 className="landing-reveal font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-[1.1] text-center mb-16">
             How StudyFlow works
           </h2>
 
@@ -304,7 +277,7 @@ Each task carries an estimate, a priority and a due date. Add them up across the
                 desc: "One figure: the hours you are short, or the hours you have spare. Change something while it still helps.",
               },
             ].map((item, i) => (
-              <div key={i} className="step-card landing-surface landing-card-shadow rounded-[18px] p-8 hover:-translate-y-1 transition-transform duration-300">
+              <div key={i} className="landing-reveal landing-surface landing-card-shadow rounded-[18px] p-8 hover:-translate-y-1 transition-transform duration-300">
                 <div className="flex items-center justify-between mb-6">
                   <div className="w-10 h-10 rounded-lg landing-canvas flex items-center justify-center">
                     <item.icon className="w-5 h-5 landing-accent" />
@@ -329,7 +302,7 @@ Each task carries an estimate, a priority and a due date. Add them up across the
       <section id="pricing" className="landing-surface py-28 scroll-mt-20">
         <div className="max-w-[960px] mx-auto px-6">
           <div className="text-center mb-14">
-            <h2 className="section-heading font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-[1.1] mb-4">
+            <h2 className="landing-reveal font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-[1.1] mb-4">
               Simple pricing for students
             </h2>
             <p className="text-[16px] md:text-[18px] landing-muted leading-[1.5] tracking-[-0.01em] max-w-[520px] mx-auto">
@@ -341,7 +314,7 @@ Each task carries an estimate, a priority and a due date. Add them up across the
             {PLANS.map((plan) => (
               <div
                 key={plan.name}
-                className={`relative flex flex-col landing-surface landing-card-shadow rounded-[18px] border p-8 md:p-10 ${
+                className={`landing-reveal relative flex flex-col landing-surface landing-card-shadow rounded-[18px] border p-8 md:p-10 ${
                   plan.highlighted ? "border-2 border-[var(--landing-accent)]" : "landing-border"
                 }`}
               >
@@ -402,7 +375,7 @@ Each task carries an estimate, a priority and a due date. Add them up across the
       </section>
 
       {/* ═══════ CTA Banner ═══════ */}
-      <section className="cta-section landing-surface py-28">
+      <section className="landing-reveal landing-surface py-28">
         <div className="max-w-[700px] mx-auto px-6 text-center">
           <h2 className="cta-heading font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-[1.1] mb-6">
 Know now, not in week nine.
@@ -411,10 +384,8 @@ Know now, not in week nine.
 It takes about five minutes to enter a term of coursework and the hours you have for it.
           </p>
           <div className="cta-btn flex items-center justify-center gap-4">
-            <Link href="/register">
-              <button className="landing-ink-button px-8 py-3.5 rounded-full text-[16px] font-semibold tracking-[-0.01em] transition-all duration-300">
-                Get started for free
-              </button>
+            <Link href="/register" className="landing-ink-button px-8 py-3.5 rounded-full text-[16px] font-semibold tracking-[-0.01em] transition-all duration-300">
+              Get started for free
             </Link>
           </div>
         </div>
