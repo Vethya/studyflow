@@ -60,6 +60,7 @@ import {
 import { describeError, useApi } from "@/hooks/use-api";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { TaskFormDialog } from "@/components/task-form-dialog";
+import { useConfirmDeleteTask } from "@/components/use-confirm-delete-task";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -105,6 +106,7 @@ export default function CalendarPage() {
 
   const [selectedSession, setSelectedSession] = useState<StudySession | null>(null);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<AcademicTask | null>(null);
   const [outcomeSession, setOutcomeSession] = useState<StudySession | null>(null);
 
   const [proposal, setProposal] = useState<ScheduleProposal | null>(null);
@@ -431,6 +433,8 @@ export default function CalendarPage() {
       onError: (cause) => describeError(cause),
     });
   }
+
+  const { requestDelete, dialog } = useConfirmDeleteTask(deleteTask);
 
   /** Picking a day from the week strip opens that day. */
   function openDay(key: string) {
@@ -810,7 +814,12 @@ export default function CalendarPage() {
         open={sessionDrawerOpen}
         onOpenChange={setSessionDrawerOpen}
         onOpenChangeComplete={(next) => {
-          if (!next) setSelectedSession(null);
+          if (next) return;
+          setSelectedSession(null);
+          if (pendingDelete) {
+            requestDelete(pendingDelete);
+            setPendingDelete(null);
+          }
         }}
         onEditTask={() => {
           setEditingTask(selectedTask);
@@ -818,14 +827,17 @@ export default function CalendarPage() {
           setDialogOpen(true);
         }}
         onDeleteTask={() => {
+          // Wait for the drawer's exit animation before opening confirmation.
+          setPendingDelete(selectedTask);
           setSessionDrawerOpen(false);
-          if (selectedTask) deleteTask(selectedTask);
         }}
         onRecordOutcome={() => {
           setOutcomeSession(selectedSession);
           setSessionDrawerOpen(false);
         }}
       />
+
+      {dialog}
 
       <RecordOutcomeDialog
         session={outcomeSession}

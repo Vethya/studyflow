@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("react", async (importOriginal) => {
@@ -61,7 +61,7 @@ vi.mock("@/components/task-form-dialog", () => ({ TaskFormDialog: ({ open, onSav
 vi.mock("@/components/record-outcome-dialog", () => ({ RecordOutcomeDialog: ({ open, onRecorded, onOpenChange }: any) => open ? <div role="dialog"><button onClick={() => { onRecorded({ session: { ...state.sessions[0], outcome: "Completed", actualDuration: 50 }, revision: { id: "revision-1" } }); onOpenChange(false); }}>Save outcome</button></div> : <button onClick={() => onRecorded({ session: { ...state.sessions[0], outcome: "Completed", actualDuration: 50 }, revision: null })}>Invoke outcome</button> }));
 vi.mock("@/components/schedule-preview", () => ({ SchedulePreview: ({ open, onAccepted, onRejected }: any) => open ? <div><button onClick={onAccepted}>Accept schedule</button><button onClick={onRejected}>Reject schedule</button></div> : null }));
 vi.mock("@/components/adaptive-estimate", () => ({ PersistedEstimateNote: () => <div>Adaptive estimate note</div> }));
-vi.mock("@/components/ui/confirm-dialog", () => ({ ConfirmDialog: ({ open, confirmLabel, onConfirm }: any) => open ? <button onClick={() => void onConfirm()}>{confirmLabel}</button> : null }));
+vi.mock("@/components/ui/confirm-dialog", () => ({ ConfirmDialog: ({ open, title, confirmLabel, onConfirm, onOpenChange }: any) => open ? <div role="dialog" aria-label={title}><button onClick={() => void onConfirm()}>{confirmLabel}</button><button onClick={() => onOpenChange(false)}>Cancel task dialog</button></div> : null }));
 
 import TaskDetailPage from "./(app)/tasks/[taskId]/page";
 import { flushPendingActions, resetUndoState } from "@/lib/undo";
@@ -95,6 +95,30 @@ afterEach(() => {
 const page = () => <TaskDetailPage params={Promise.resolve({ taskId: "task-1" })} />;
 
 describe("task detail page", () => {
+  it("stays on the task until deletion is confirmed", async () => {
+    render(page());
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByRole("dialog", { name: "Delete “Read algorithms”?" })).toBeTruthy();
+    expect(state.router.push).not.toHaveBeenCalled();
+    await commitPending();
+    expect(state.api.remove).not.toHaveBeenCalled();
+    expect(state.toast.success).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel task dialog" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(state.router.push).not.toHaveBeenCalled();
+    await commitPending();
+    expect(state.api.remove).not.toHaveBeenCalled();
+    expect(state.toast.success).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete task" }));
+    expect(state.router.push).toHaveBeenCalledExactlyOnceWith("/tasks");
+    expect(state.toast.success).toHaveBeenCalledWith("Task deleted", expect.objectContaining({ action: expect.objectContaining({ label: "Undo" }) }));
+    expect(state.api.remove).not.toHaveBeenCalled();
+    await commitPending();
+    expect(state.api.remove).toHaveBeenCalledExactlyOnceWith("task-1");
+  });
+
   it("covers loading, errors, task actions, session history, outcome, and deletion", async () => {
     state.detail = "loading";
     render(page());
@@ -129,6 +153,8 @@ describe("task detail page", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Reject schedule" })).toBeTruthy());
     screen.getByRole("button", { name: "Reject schedule" }).click();
     screen.getByRole("button", { name: "Delete" }).click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete task" })).toBeTruthy());
+    screen.getByRole("button", { name: "Delete task" }).click();
     await commitPending();
     await waitFor(() => expect(state.api.remove).toHaveBeenCalled());
   });
@@ -147,6 +173,8 @@ describe("task detail page", () => {
     await commitPending();
     await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("Start the task before marking it done."));
     screen.getByRole("button", { name: "Delete" }).click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete task" })).toBeTruthy());
+    screen.getByRole("button", { name: "Delete task" }).click();
     await commitPending();
     await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("delete failed"));
   });
@@ -193,6 +221,8 @@ describe("task detail page", () => {
     state.api.remove.mockResolvedValueOnce(undefined);
     render(page());
     screen.getByRole("button", { name: "Delete" }).click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete task" })).toBeTruthy());
+    screen.getByRole("button", { name: "Delete task" }).click();
     await commitPending();
     await waitFor(() => expect(state.api.remove).toHaveBeenCalled());
 
@@ -201,6 +231,8 @@ describe("task detail page", () => {
     state.api.remove.mockRejectedValueOnce(new Error("delete without schedule"));
     render(page());
     screen.getByRole("button", { name: "Delete" }).click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete task" })).toBeTruthy());
+    screen.getByRole("button", { name: "Delete task" }).click();
     await commitPending();
     await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("delete without schedule"));
 

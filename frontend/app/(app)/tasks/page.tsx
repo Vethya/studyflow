@@ -52,6 +52,7 @@ import { cn } from "@/lib/utils";
 import { ApiError, tasks as tasksApi } from "@/lib/api";
 import { describeError, useApi } from "@/hooks/use-api";
 import { TaskFormDialog } from "@/components/task-form-dialog";
+import { useConfirmDeleteTask } from "@/components/use-confirm-delete-task";
 import { localInputToIso } from "@/lib/datetime";
 import { applyTaskOverlays, scheduleUndoable, useTaskOverlayVersion } from "@/lib/undo";
 import { CATEGORIES, PRIORITIES } from "@/types/task";
@@ -338,6 +339,8 @@ function TasksContent() {
     });
   }
 
+  const { requestDelete, dialog } = useConfirmDeleteTask(deleteTask);
+
   return (
     <PageShell>
       <PageHeader
@@ -601,7 +604,7 @@ function TasksContent() {
                       }}
                       onStart={() => void startTask(task)}
                       onFinish={() => setConfirmFinish(task)}
-                      onDelete={() => deleteTask(task)}
+                      onDelete={() => requestDelete(task)}
                     />
                   ))}
                 </ul>
@@ -617,6 +620,8 @@ function TasksContent() {
         task={editing}
         onSaved={handleSaved}
       />
+
+      {dialog}
 
       {/* SPEC §7.5: finishing early zeroes remaining work and drops future
           sessions, but keeps the time already recorded. */}

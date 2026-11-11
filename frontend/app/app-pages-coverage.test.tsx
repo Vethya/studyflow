@@ -100,8 +100,8 @@ vi.mock("@/components/schedule-preview", () => ({
 vi.mock("@/components/record-outcome-dialog", () => ({ RecordOutcomeDialog: ({ open, onRecorded, onOpenChange }: any) => open ? <><button onClick={() => { onRecorded({ session: { ...session, outcome: "Completed", actualDuration: 60 }, revision: null }); onOpenChange(false); }}>Save outcome</button><button onClick={() => onOpenChange(false)}>Close outcome</button></> : <button onClick={() => onRecorded({ session: { ...session, outcome: "Completed", actualDuration: 60 }, revision: null })}>Invoke outcome without schedule</button> }));
 vi.mock("@/components/plan-generation-dialog", () => ({ PlanGenerationDialog: ({ open }: any) => open ? <div>Generating plan</div> : null }));
 vi.mock("@/components/task-form-dialog", () => ({ TaskFormDialog: ({ open, onSaved }: any) => open ? <button onClick={() => onSaved(task)}>Save task</button> : null }));
-vi.mock("@/components/session-drawer", () => ({ SessionDrawer: ({ open, onEditTask, onDeleteTask, onRecordOutcome, onOpenChange, onOpenChangeComplete }: any) => open ? <div><button onClick={onEditTask}>Edit session task</button><button onClick={onDeleteTask}>Delete session task</button><button onClick={onRecordOutcome}>Record session outcome</button><button onClick={() => { onOpenChangeComplete?.(false); onOpenChange?.(false); }}>Close session</button><button onClick={() => { onOpenChangeComplete?.(true); onOpenChange?.(true); }}>Open session event</button></div> : null }));
-vi.mock("@/components/ui/confirm-dialog", () => ({ ConfirmDialog: ({ open, onConfirm, onOpenChange, confirmLabel }: any) => open ? <><button onClick={() => void onConfirm()}>{confirmLabel ?? "Delete task"}</button><button onClick={() => onOpenChange?.(false)}>Cancel task</button></> : <button onClick={() => void onConfirm()}>Invoke {confirmLabel ?? "Delete task"} with no target</button> }));
+vi.mock("@/components/session-drawer", () => ({ SessionDrawer: ({ open, session, onEditTask, onDeleteTask, onRecordOutcome, onOpenChange, onOpenChangeComplete }: any) => open ? <div><button onClick={onEditTask}>Edit session task</button><button onClick={onDeleteTask}>Delete session task</button><button onClick={onRecordOutcome}>Record session outcome</button><button onClick={() => { onOpenChangeComplete?.(false); onOpenChange?.(false); }}>Close session</button><button onClick={() => { onOpenChangeComplete?.(true); onOpenChange?.(true); }}>Open session event</button></div> : session ? <button onClick={() => onOpenChangeComplete?.(false)}>Finish closing session</button> : null }));
+vi.mock("@/components/ui/confirm-dialog", () => ({ ConfirmDialog: ({ open, title, onConfirm, onOpenChange, confirmLabel }: any) => open ? <div role="dialog" aria-label={title}><button onClick={() => void onConfirm()}>{confirmLabel ?? "Delete task"}</button><button onClick={() => onOpenChange?.(false)}>Cancel task</button></div> : <button onClick={() => void onConfirm()}>Invoke {confirmLabel ?? "Delete task"} with no target</button> }));
 vi.mock("@/components/week-grid", () => ({
   GridLegend: () => <div>grid legend</div>,
   WeekGrid: ({ blocks, columns, renderLane, emptyContent, fit }: any) => <div data-testid="week-grid" data-fit={String(Boolean(fit))}>{blocks.map((block: any) => <button key={block.id} onClick={() => block.onSelect?.({ currentTarget: document.body })}>{block.title ?? block.label ?? block.id}</button>)}{columns.map((column: any) => <div key={column.key}>{renderLane?.(column)}</div>)}{emptyContent}</div>,
@@ -474,6 +474,10 @@ describe("calendar page", () => {
     screen.getAllByRole("button", { name: /Read algorithms ·/ })[0].click();
     await waitFor(() => expect(screen.getByRole("button", { name: "Delete session task" })).toBeTruthy());
     screen.getByRole("button", { name: "Delete session task" }).click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Finish closing session" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Finish closing session" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete task" })).toBeTruthy());
+    screen.getByRole("button", { name: "Delete task" }).click();
     await waitFor(() => expect(state.toast.success).toHaveBeenCalledWith("Task deleted", expect.objectContaining({ description: "Read algorithms" })));
   });
 
@@ -505,6 +509,9 @@ describe("calendar page", () => {
     state.resources["studyflow/tasks"].data = null;
     view.rerender(<CalendarPage />);
     screen.getByRole("button", { name: "Delete session task" }).click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Finish closing session" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Finish closing session" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
     await commitPending();
     expect(state.api.deleteTask).not.toHaveBeenCalled();
 
@@ -572,10 +579,35 @@ describe("calendar page", () => {
     screen.getAllByRole("button", { name: /Read algorithms ·/ })[0].click();
     await waitFor(() => expect(screen.getByRole("button", { name: "Delete session task" })).toBeTruthy());
     screen.getByRole("button", { name: "Delete session task" }).click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Finish closing session" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Finish closing session" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete task" })).toBeTruthy());
+    screen.getByRole("button", { name: "Delete task" }).click();
     await commitPending();
     await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("delete failed"));
     // A failed deletion brings the task's sessions back.
     expect(screen.getAllByRole("button", { name: /Read algorithms ·/ }).length).toBeGreaterThan(0);
+  });
+
+  it("closes the session drawer and keeps the task when deletion is cancelled", async () => {
+    render(<CalendarPage />);
+    fireEvent.click(screen.getAllByRole("button", { name: /Read algorithms ·/ })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete session task" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete session task" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Finish closing session" }));
+    expect(screen.queryByRole("button", { name: "Finish closing session" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Delete “Read algorithms”?" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /Read algorithms ·/ }).length).toBeGreaterThan(0);
+    await commitPending();
+    expect(state.api.deleteTask).not.toHaveBeenCalled();
+    expect(state.toast.success).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel task" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getAllByRole("button", { name: /Read algorithms ·/ }).length).toBeGreaterThan(0);
+    await commitPending();
+    expect(state.api.deleteTask).not.toHaveBeenCalled();
+    expect(state.toast.success).not.toHaveBeenCalled();
   });
 
   it("deletes a task from the session drawer, with a moment to undo", async () => {
@@ -584,8 +616,13 @@ describe("calendar page", () => {
     screen.getAllByRole("button", { name: /Read algorithms ·/ })[0].click();
     await waitFor(() => expect(screen.getByRole("button", { name: "Delete session task" })).toBeTruthy());
     screen.getByRole("button", { name: "Delete session task" }).click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Finish closing session" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Finish closing session" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete task" })).toBeTruthy());
+    screen.getByRole("button", { name: "Delete task" }).click();
     await waitFor(() => expect(state.toast.success).toHaveBeenCalledWith("Task deleted", expect.objectContaining({ description: "Read algorithms" })));
     // Its sessions leave the calendar straight away; the request waits.
+    expect(state.toast.success).toHaveBeenCalledWith("Task deleted", expect.objectContaining({ action: expect.objectContaining({ label: "Undo" }) }));
     expect(screen.queryAllByRole("button", { name: /Read algorithms ·/ })).toHaveLength(0);
     expect(state.api.deleteTask).not.toHaveBeenCalled();
     await commitPending();

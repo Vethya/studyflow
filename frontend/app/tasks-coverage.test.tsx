@@ -64,7 +64,7 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenuItem: ({ children, render, onClick }: any) => render ?? <button onClick={onClick}>{children}</button>,
   DropdownMenuSeparator: () => <hr />,
 }));
-vi.mock("@/components/ui/confirm-dialog", () => ({ ConfirmDialog: ({ open, confirmLabel, onConfirm, onOpenChange }: any) => open ? <><button onClick={() => void onConfirm()}>{confirmLabel}</button><button onClick={() => onOpenChange?.(false)}>Cancel task dialog</button></> : <button onClick={() => void onConfirm()}>Invoke {confirmLabel} with no target</button> }));
+vi.mock("@/components/ui/confirm-dialog", () => ({ ConfirmDialog: ({ open, title, confirmLabel, onConfirm, onOpenChange }: any) => open ? <div role="dialog" aria-label={title}><button onClick={() => void onConfirm()}>{confirmLabel}</button><button onClick={() => onOpenChange?.(false)}>Cancel task dialog</button></div> : <button onClick={() => void onConfirm()}>Invoke {confirmLabel} with no target</button> }));
 
 import { ApiError } from "@/lib/api";
 import TasksPage from "./(app)/tasks/page";
@@ -148,6 +148,8 @@ describe("tasks page", () => {
     screen.getAllByRole("button", { name: /Actions for Finished task/ })[0].click();
     const beforeDelete = Number(screen.getByText(/^\d+ tasks?$/).textContent?.split(" ")[0]);
     screen.getAllByRole("button", { name: "Delete" }).at(-1)!.click();
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Delete “Overdue task”?" })).toBeTruthy());
+    screen.getByRole("button", { name: "Delete task" }).click();
     // The mocked menus render every row's items, so the last Delete is the last row's.
     await waitFor(() => expect(screen.queryByText("Overdue task")).toBeNull());
     const afterDelete = beforeDelete - 1;
@@ -250,6 +252,8 @@ describe("tasks page", () => {
     render(<TasksPage />);
     screen.getByRole("button", { name: /Actions for Keep me/ }).click();
     screen.getAllByRole("button", { name: "Delete" }).at(-1)!.click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete task" })).toBeTruthy());
+    screen.getByRole("button", { name: "Delete task" }).click();
     await waitFor(() => expect(screen.queryByText("Keep me")).toBeNull());
 
     const options = state.toast.success.mock.calls.at(-1)![1] as { action: { onClick: () => void } };
@@ -280,8 +284,27 @@ describe("tasks page", () => {
 
     screen.getByRole("button", { name: /Actions for Far task/ }).click();
     screen.getAllByRole("button", { name: "Delete" }).at(-1)!.click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete task" })).toBeTruthy());
+    screen.getByRole("button", { name: "Delete task" }).click();
     await commitPending();
     await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("delete failed"));
+  });
+
+  it("keeps a task when deletion is cancelled", async () => {
+    state.tasks = [task({ title: "Keep me" })];
+    render(<TasksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByRole("dialog", { name: "Delete “Keep me”?" })).toBeTruthy();
+    expect(screen.getByText("Keep me")).toBeTruthy();
+    await commitPending();
+    expect(state.api.remove).not.toHaveBeenCalled();
+    expect(state.toast.success).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel task dialog" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText("Keep me")).toBeTruthy();
+    await commitPending();
+    expect(state.api.remove).not.toHaveBeenCalled();
+    expect(state.toast.success).not.toHaveBeenCalled();
   });
 
   it("restores optimistic state when the cache callback has no current list", async () => {

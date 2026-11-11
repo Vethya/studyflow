@@ -29,6 +29,7 @@ import { CategoryTag, PageShell, SectionCard } from "@/components/page-kit";
 import { DueChip, EffortBar, SectionLabel } from "@/components/study-kit";
 import { cn } from "@/lib/utils";
 import { TaskFormDialog } from "@/components/task-form-dialog";
+import { useConfirmDeleteTask } from "@/components/use-confirm-delete-task";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { RecordOutcomeDialog } from "@/components/record-outcome-dialog";
 import { SchedulePreview } from "@/components/schedule-preview";
@@ -135,6 +136,8 @@ export default function TaskDetailPage({
     });
     router.push("/tasks");
   }
+
+  const { requestDelete, dialog } = useConfirmDeleteTask(remove);
 
   if (error) {
     const missing = error instanceof ApiError && error.isNotFound;
@@ -254,7 +257,7 @@ export default function TaskDetailPage({
         <Button
           variant="ghost"
           className="ms-auto text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-          onClick={() => remove(task)}
+          onClick={() => requestDelete(task)}
           disabled={starting}
         >
           <Trash2 />
@@ -465,6 +468,9 @@ export default function TaskDetailPage({
         }}
         onRejected={() => setProposal(null)}
       />
+
+      {/* SPEC §7.8 */}
+      {dialog}
 
       {/* SPEC §7.5 */}
       <ConfirmDialog
