@@ -20,7 +20,7 @@ afterEach(cleanup);
 describe("landing page", () => {
   it("renders the current product sections, navigation and signup links", () => {
     const { container } = render(<LandingPage />);
-    expect(screen.getByRole("heading", { name: /Does it all/ })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Know if your week fits" })).toBeTruthy();
     expect(screen.getAllByText("Get started for free").length).toBeGreaterThan(0);
     expect(screen.getByText("Coming soon")).toBeTruthy();
     expect(screen.getByText("Your real hours, not an ideal week.")).toBeTruthy();
@@ -33,13 +33,26 @@ describe("landing page", () => {
       expect(container.querySelector(href)).toBeTruthy();
     }
     expect(container.querySelector("a button")).toBeNull();
-    expect(screen.getAllByRole("img")).toHaveLength(3);
+    expect(screen.getByRole("link", { name: "See how it works" }).getAttribute("href")).toBe("#features");
+    expect(container.querySelectorAll("img")).toHaveLength(3);
+  });
+
+  it("describes the hero product preview with inert visual content", () => {
+    const { container } = render(<LandingPage />);
+    const label = "This week: 18 hours of coursework, 14 hours available, 4 hours short. Start the essay on Tuesday to catch up.";
+    const preview = screen.getByRole("img", { name: label });
+    expect(container.querySelectorAll('[role="img"] > div[inert]')).toHaveLength(1);
+    expect(preview.hasAttribute("inert")).toBe(false);
+    expect(preview.firstElementChild?.hasAttribute("inert")).toBe(true);
+    expect(screen.getByText("18h")).toBeTruthy();
+    expect(screen.getByText("14h")).toBeTruthy();
+    expect(screen.getByText("4h short this week.")).toBeTruthy();
   });
 
   it("applies staggered hero motion and section reveals", () => {
     const { container } = render(<LandingPage />);
     const heroElements = container.querySelectorAll<HTMLElement>(".landing-rise");
-    expect(Array.from(heroElements, (element) => element.style.getPropertyValue("--landing-delay"))).toEqual(["0ms", "120ms", "240ms", "360ms"]);
+    expect(Array.from(heroElements, (element) => element.style.getPropertyValue("--landing-delay"))).toEqual(["", "120ms", "240ms", "360ms"]);
     expect(container.querySelectorAll(".landing-reveal")).toHaveLength(9);
   });
 

@@ -3,7 +3,10 @@ import Link from "next/link";
 import Image from "next/image";
 import { Calendar, BarChart3, Clock, Sparkles, Target, Check } from "@/components/icons";
 import { BrandIcon } from "@/components/brand-icon";
+import { CapacityBar } from "@/components/capacity-bar";
 import { NavAuth } from "@/components/landing/nav-auth";
+import { ProductPreview } from "@/components/landing/product-preview";
+import { demoCapacity } from "@/components/landing/demo-data";
 
 const PLANS = [
   {
@@ -80,109 +83,42 @@ function Navigation() {
 export default function LandingPage() {
   return (
     <div className="landing-page min-h-screen">
-
-      {/* ═══════ HERO: Sky Gradient with outer padding ═══════ */}
       <div className="landing-surface p-2 md:p-3">
         <section
-          className="hero-section relative w-full min-h-[calc(100vh-24px)] flex flex-col items-center justify-center overflow-hidden rounded-[20px] md:rounded-[28px]"
+          className="relative flex min-h-[720px] flex-col items-center overflow-hidden rounded-[20px] md:min-h-[800px] md:rounded-[28px]"
           style={{ background: "var(--landing-hero)" }}
         >
           <Navigation />
-
-        {/* Centered content */}
-        <div className="relative z-10 text-center px-6 pt-20 pb-0 flex-1 flex flex-col items-center justify-center">
-          <h1 className="landing-rise font-[family-name:var(--font-display)] text-white font-bold text-[52px] md:text-[72px] lg:text-[80px] leading-[0.92] tracking-[-0.04em] mb-6 max-w-[700px]" style={{ "--landing-delay": "0ms" } as CSSProperties}>
-            Does it all<br />actually fit?
-          </h1>
-
-          <div className="landing-rise max-w-[520px] mx-auto mb-8" style={{ "--landing-delay": "120ms" } as CSSProperties}>
-            <p className="font-[family-name:var(--font-display)] text-white/90 text-[16px] md:text-[17px] leading-[1.5] tracking-[-0.01em]">
-Add your coursework and the hours you are free.<br />
-              StudyFlow weighs one against the other and tells you<br />
-              <strong className="text-white font-semibold">how many hours short you are</strong> — while you can still act on it.
+          <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-6 pb-12 pt-32 text-center md:pt-36">
+            <h1 className="landing-rise mb-6 max-w-[700px] text-balance font-[family-name:var(--font-display)] text-[52px] font-bold leading-[0.95] tracking-[-0.04em] text-white md:text-[72px] lg:text-[80px]">
+              Know if your week fits
+            </h1>
+            <p className="landing-rise mb-8 max-w-[600px] font-[family-name:var(--font-display)] text-[16px] leading-[1.5] tracking-[-0.01em] text-white/90 md:text-[18px]" style={{ "--landing-delay": "120ms" } as CSSProperties}>
+              Add your coursework and the hours you’re free. StudyFlow tells you how many hours short you are, weeks before anything is due.
             </p>
-          </div>
-
-          <div className="landing-rise" style={{ "--landing-delay": "240ms" } as CSSProperties}>
-            <Link href="/register" className="landing-ink-button rounded-full px-8 py-3.5 text-[15px] font-semibold tracking-[-0.01em] transition-colors">
-              Sign up for free
-            </Link>
-          </div>
-        </div>
-
-        {/* Before/After cards emerging from bottom */}
-        <div className="landing-rise relative z-10 w-full flex items-end justify-center mt-auto pb-0" style={{ "--landing-delay": "360ms" } as CSSProperties}>
-          {/* White "envelope" shape behind the cards */}
-          <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[500px] md:w-[700px] h-[250px]">
-            <svg viewBox="0 0 700 250" fill="none" className="w-full h-full" preserveAspectRatio="none">
-              <path d="M0 250 L100 60 L350 0 L600 60 L700 250 Z" fill="white" fillOpacity="0.15" />
-              <path d="M50 250 L150 80 L350 20 L550 80 L650 250 Z" fill="white" fillOpacity="0.25" />
-              <path d="M100 250 L200 100 L350 50 L500 100 L600 250 Z" fill="white" fillOpacity="0.5" />
-            </svg>
-          </div>
-
-          <div className="relative flex items-end justify-center gap-0 translate-y-[60px] md:translate-y-[80px]">
-            {/* "Before" card */}
-            <div className="before-card landing-surface landing-card-shadow relative z-10 rounded-t-[14px] p-5 w-[200px] md:w-[250px] -rotate-3 -mr-6">
-              <div className="flex items-center gap-1.5 mb-3">
-                <div className="px-2.5 py-0.5 rounded-full border landing-ink-border-soft text-[11px] font-medium tracking-[-0.01em] landing-ink flex items-center gap-1">
-                  <span className="landing-accent text-[10px]">✎</span> Before
-                </div>
-              </div>
-              <div className="space-y-2">
-                <div className="landing-canvas h-2.5 rounded-full w-full"></div>
-                <div className="landing-canvas h-2.5 rounded-full w-[85%]"></div>
-                <div className="bg-deficit-soft h-2.5 rounded-full w-[70%]"></div>
-                <div className="landing-canvas h-2.5 rounded-full w-full"></div>
-                <div className="bg-deficit-soft h-2.5 rounded-full w-[60%]"></div>
-              </div>
-            </div>
-
-            {/* "After" card (overlapping, slightly above) */}
-            <div className="after-card landing-surface landing-card-shadow relative z-20 rounded-t-[14px] p-5 w-[220px] md:w-[280px] rotate-1 -translate-y-4">
-              <div className="flex items-center gap-1.5 mb-3">
-                <div className="px-2.5 py-0.5 rounded-full border landing-ink-border-soft text-[11px] font-medium tracking-[-0.01em] landing-ink flex items-center gap-1">
-                  <span className="landing-accent text-[10px]">✓</span> After
-                </div>
-              </div>
-              <div className="space-y-1.5 text-[12px] landing-ink leading-[1.5] font-[family-name:var(--font-display)]">
-                <p className="landing-subtle text-[11px]">Your weekly plan,</p>
-                <p>Monday — Data Structures (2h)</p>
-                <p>Tuesday — Linear Algebra (1.5h)</p>
-                <p>Wednesday — Essay Draft (2h)</p>
-                <p className="landing-subtle">Thursday — Algorithms rev...</p>
-                <p className="landing-subtle">Friday — Physics lab pre...</p>
-              </div>
+            <div className="landing-rise flex flex-wrap items-center justify-center gap-x-6 gap-y-4" style={{ "--landing-delay": "240ms" } as CSSProperties}>
+              <Link href="/register" className="landing-ink-button rounded-full px-8 py-3.5 text-[15px] font-semibold tracking-[-0.01em] transition-colors">
+                Sign up for free
+              </Link>
+              <Link href="#features" className="rounded-md text-[15px] font-medium text-white underline-offset-4 hover:underline">
+                See how it works
+              </Link>
             </div>
           </div>
-        </div>
+          <div className="landing-rise landing-surface landing-card-shadow relative mx-4 w-[calc(100%-2rem)] max-w-[680px] rounded-t-[24px] p-3 pb-0" style={{ "--landing-delay": "360ms" } as CSSProperties}>
+            <ProductPreview label="This week: 18 hours of coursework, 14 hours available, 4 hours short. Start the essay on Tuesday to catch up.">
+              <div className="space-y-5 p-5 md:p-7">
+                <div className="flex items-baseline justify-between gap-3">
+                  <h2 className="text-sm font-semibold">This week</h2>
+                  <span className="text-xs text-muted-foreground">28 Sep to 4 Oct</span>
+                </div>
+                <CapacityBar {...demoCapacity} />
+                <p className="text-sm text-muted-foreground"><strong className="font-semibold text-deficit">4h short this week.</strong> Start the essay on Tuesday to catch up.</p>
+              </div>
+            </ProductPreview>
+          </div>
         </section>
       </div>
-
-      {/* ═══════ Stats Row ═══════ */}
-      <section className="stats-section landing-surface border-b landing-border">
-        <div className="max-w-[1200px] mx-auto px-6 py-20 flex flex-wrap items-center justify-center gap-16 md:gap-24">
-          {[
-            // Facts about the product, not unmeasured outcome claims.
-            { value: 0, prefix: "$", suffix: "", label: "To plan your whole term" },
-            { value: 3, prefix: "", suffix: "", label: "Steps to your first schedule" },
-            { value: 0, prefix: "", suffix: "", label: "Overlapping study sessions" },
-          ].map((stat, i) => (
-            <div key={i} className="stat-item text-center">
-              <div
-                className="stat-number font-[family-name:var(--font-display)] text-[48px] font-bold tracking-[-0.04em] landing-ink leading-[1.1]"
-                data-value={stat.value}
-                data-prefix={stat.prefix}
-                data-suffix={stat.suffix}
-              >
-                {/* Final value by default, so it stays correct when the count-up is skipped. */}
-                {stat.prefix}{stat.value}{stat.suffix}
-              </div>
-              <div className="text-[14px] landing-muted tracking-[-0.01em] mt-1 font-medium">{stat.label}</div>
-            </div>
-          ))}
-        </div>
-      </section>
 
       {/* ═══════ Section Heading ═══════ */}
       <section className="landing-canvas pt-28 pb-8">

@@ -10,7 +10,14 @@ describe("landing page server module", () => {
     expect(typeof window).toBe("undefined");
     const { default: LandingPage } = await import("./page");
     const html = renderToStaticMarkup(LandingPage());
-    expect(html).toContain("Does it all");
+    expect(html).toContain("Know if your week fits");
+    expect(html).toContain('role="img"');
+    expect(html).toContain('aria-label="This week: 18 hours of coursework, 14 hours available, 4 hours short. Start the essay on Tuesday to catch up."');
+    const preview = html.match(/<div[^>]*role="img"[^>]*>/)?.[0];
+    expect(preview).toBeDefined();
+    expect(preview).not.toContain(" inert");
+    expect(html).toContain(`${preview}<div inert="">`);
+    expect(html).toContain("4h short this week.");
     expect(html).toContain("Your real hours, not an ideal week.");
     expect(html).toContain("How StudyFlow works");
     expect(html).toContain("Simple pricing for students");
