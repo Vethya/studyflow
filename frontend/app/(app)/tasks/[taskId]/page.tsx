@@ -129,7 +129,7 @@ export default function TaskDetailPage({
     scheduleUndoable({
       key: `delete:${current.id}`,
       message: "Task deleted",
-      description: current.title,
+      description: `Returned to Tasks after removing “${current.title}”.`,
       overlay: { taskId: current.id, removed: true },
       commit: () => tasksApi.deleteTask(current.id),
       onError: (cause) => describeError(cause),
