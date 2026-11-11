@@ -1,14 +1,29 @@
 """Plain-text and HTML study reminder emails."""
 
 from datetime import UTC, datetime, tzinfo
-from email.message import EmailMessage
-from html import escape
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from markupsafe import Markup
+
 from studyflow.auth.email_delivery import EmailTransport
+from studyflow.mail.layout import (
+    LIGHT,
+    button,
+    heading,
+    outcome_row,
+    paragraph,
+    render_layout,
+    session_card,
+)
+from studyflow.mail.message import build_message
 from studyflow.reminders.service import ReminderCandidate
 
 MAX_SUBJECT_TITLE_LENGTH = 120
+OUTCOMES = (
+    ("Finished it", "The work for this session is done."),
+    ("Partly done", "I worked, but there is more left."),
+    ("Didn't study", "This session didn't happen."),
+)
 
 
 def _zone(timezone: str) -> tzinfo:
@@ -18,11 +33,10 @@ def _zone(timezone: str) -> tzinfo:
         return UTC
 
 
-def format_local_time(value: datetime, timezone: str) -> str:
-    """Render an instant in the account timezone, e.g. "14:30 on Monday 20 October"."""
+def to_local_time(value: datetime, timezone: str) -> datetime:
+    """Convert an instant to the account timezone; naive values are treated as UTC."""
     aware = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-    local = aware.astimezone(_zone(timezone))
-    return f"{local:%H:%M} on {local:%A} {local.day} {local:%B}"
+    return aware.astimezone(_zone(timezone))
 
 
 def _single_line(value: str, limit: int) -> str:
@@ -50,34 +64,29 @@ class SmtpReminderEmailSender:
 
     async def send_before_session(self, candidate: ReminderCandidate) -> None:
         title = _single_line(candidate.task_title, MAX_SUBJECT_TITLE_LENGTH)
-        starts = format_local_time(candidate.starts_at, candidate.timezone)
-        intro = (
-            f'Your study session for "{title}" starts at {starts} ({candidate.timezone}). '
-            f"It is planned for {_duration_minutes(candidate)} minutes."
-        )
         await self._send(
             candidate,
             subject=f"Starting soon: {title}",
-            paragraphs=(intro,),
-            link_label="Open your StudyFlow calendar",
+            title="Your next session starts soon",
+            preheader=f"{_duration_minutes(candidate)} minutes planned. "
+            "Open your calendar to see what's next.",
+            intro="here's what you planned.",
+            status="Starting soon",
+            link_label="Open calendar",
         )
 
     async def send_after_session(self, candidate: ReminderCandidate) -> None:
         title = _single_line(candidate.task_title, MAX_SUBJECT_TITLE_LENGTH)
-        ended = format_local_time(candidate.ends_at, candidate.timezone)
-        intro = (
-            f'Your study session for "{title}" ended at {ended} ({candidate.timezone}). '
-            "How did it go?"
-        )
-        follow_up = (
-            "Record whether you completed it, need more time, or missed it so StudyFlow "
-            "can keep your plan accurate."
-        )
         await self._send(
             candidate,
             subject=f"How did it go? {title}",
-            paragraphs=(intro, follow_up),
+            title="How did it go?",
+            preheader="Record how it went so the rest of your plan stays accurate.",
+            intro="your session just ended. Record how it went and StudyFlow will adjust "
+            "the rest of your plan.",
+            status="Ended",
             link_label="Record how it went",
+            outcomes=OUTCOMES,
         )
 
     async def _send(
@@ -85,36 +94,64 @@ class SmtpReminderEmailSender:
         candidate: ReminderCandidate,
         *,
         subject: str,
-        paragraphs: tuple[str, ...],
+        title: str,
+        preheader: str,
+        intro: str,
+        status: str,
         link_label: str,
+        outcomes: tuple[tuple[str, str], ...] = (),
     ) -> None:
         name = _single_line(candidate.name, 200) or "there"
-        footer = (
-            "You are receiving this because study reminders are turned on. "
-            "You can change or turn them off in StudyFlow settings:"
-        )
+        start = to_local_time(candidate.starts_at, candidate.timezone)
+        end = to_local_time(candidate.ends_at, candidate.timezone)
+        date = f"{start:%A} {start.day} {start:%B}"
+        minutes = _duration_minutes(candidate)
+        footer = "You get these because study reminders are on. Change or turn them off:"
         text_body = "\n\n".join(
             (
                 f"Hi {name},",
-                *paragraphs,
+                title,
+                intro[0].upper() + intro[1:],
+                f"{start:%H:%M}\u2013{end:%H:%M} ({minutes} min), {date}, {candidate.timezone}"
+                f"\n{candidate.task_title}",
+                *(f"{label}: {hint}" for label, hint in outcomes),
                 f"{link_label}:\n{self.calendar_url}",
                 f"{footer}\n{self.settings_url}",
             )
         )
-        html_paragraphs = "".join(f"<p>{escape(paragraph)}</p>" for paragraph in paragraphs)
-        html_body = (
-            "<!DOCTYPE html><html><body>"
-            f"<p>Hi {escape(name)},</p>"
-            f"{html_paragraphs}"
-            f'<p><a href="{escape(self.calendar_url)}">{escape(link_label)}</a></p>'
-            f'<p><small>{escape(footer)} <a href="{escape(self.settings_url)}">'
-            "StudyFlow settings</a></small></p>"
-            "</body></html>"
+        body = (
+            heading(title)
+            + paragraph(f"Hi {name}, {intro}", top=14)
+            + session_card(
+                start=f"{start:%H:%M}",
+                end=f"{end:%H:%M}",
+                minutes=minutes,
+                title=candidate.task_title,
+                date=date,
+                tz=candidate.timezone,
+                status=status,
+            )
         )
-        message = EmailMessage()
-        message["To"] = candidate.email
-        message["From"] = self._from_address
-        message["Subject"] = subject
-        message.set_content(text_body)
-        message.add_alternative(html_body, subtype="html")
+        if outcomes:
+            body += Markup(
+                '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+                'style="margin:24px 0 0;border-collapse:collapse;">{}</table>'
+            ).format(Markup("").join(outcome_row(*outcome) for outcome in outcomes))
+        reason = Markup(
+            'You get these because study reminders are on. <a class="sf-faint" href="{}" '
+            'style="color:{};">Change or turn off reminders</a>.'
+        ).format(self.settings_url, LIGHT["faint"])
+        message = build_message(
+            to=candidate.email,
+            from_address=self._from_address,
+            subject=subject,
+            text=text_body,
+            html=render_layout(
+                title=title,
+                preheader=preheader,
+                body=body + button(link_label, self.calendar_url),
+                reason=reason,
+                public_app_url=self._public_app_url,
+            ),
+        )
         await self._transport.send(message)

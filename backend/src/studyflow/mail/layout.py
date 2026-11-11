@@ -72,6 +72,45 @@ def fallback_link(url: str) -> Markup:
     ).format(url=url, c=LIGHT, sans=SANS, mono=MONO)
 
 
+def session_card(
+    *, start: str, end: str, minutes: int, title: str, date: str, tz: str, status: str
+) -> Markup:
+    return Markup("""<table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+class="sf-well" style="margin:24px 0 0;background:{c[well]};border:1px solid {c[line]};
+border-radius:12px;"><tr><td style="padding:20px 22px;">
+<p class="sf-faint" style="margin:0;font-family:{sans};font-size:12px;font-weight:600;
+letter-spacing:0.06em;text-transform:uppercase;color:{c[faint]};">{status}</p>
+<p class="sf-ink" style="margin:8px 0 0;font-family:{mono};font-size:30px;line-height:36px;
+font-weight:500;letter-spacing:-0.02em;color:{c[ink]};">{start}<span class="sf-faint"
+style="color:{c[faint]};">\u2013{end}</span></p>
+<p class="sf-ink" style="margin:10px 0 0;font-family:{display};font-size:19px;line-height:26px;
+font-weight:700;color:{c[ink]};">{title}</p>
+<p class="sf-muted" style="margin:4px 0 0;font-family:{sans};font-size:14px;line-height:20px;
+color:{c[muted]};">{date} · <span style="font-family:{mono};font-size:13px;">{minutes} min</span>
+· {tz}</p></td></tr></table>""").format(
+        start=start,
+        end=end,
+        minutes=minutes,
+        title=title,
+        date=date,
+        tz=tz,
+        status=status,
+        c=LIGHT,
+        sans=SANS,
+        mono=MONO,
+        display=DISPLAY,
+    )
+
+
+def outcome_row(name: str, hint: str) -> Markup:
+    return Markup("""<tr><td class="sf-line" style="padding:12px 0;
+border-top:1px solid {c[line]};">
+<p class="sf-ink" style="margin:0;font-family:{sans};font-size:15px;font-weight:600;
+color:{c[ink]};">{name}</p>
+<p class="sf-muted" style="margin:2px 0 0;font-family:{sans};font-size:14px;line-height:20px;
+color:{c[muted]};">{hint}</p></td></tr>""").format(name=name, hint=hint, c=LIGHT, sans=SANS)
+
+
 def render_layout(
     *, title: str, preheader: str, body: str, reason: str, public_app_url: str
 ) -> str:

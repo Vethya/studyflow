@@ -339,7 +339,7 @@ async def test_dispatch_sends_each_reminder_once_and_retries_failed_emails(
         "student@example.com",
         "bounce@example.com",
     ]
-    assert "15:20 on Tuesday 20 October (Asia/Phnom_Penh)" in (
+    assert "15:20\u201316:20 (60 min), Tuesday 20 October, Asia/Phnom_Penh" in (
         transport.messages[0].get_body(("plain",)).get_content()  # type: ignore[union-attr]
     )
     async with database.transaction() as session:

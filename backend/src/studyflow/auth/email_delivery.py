@@ -1,7 +1,6 @@
 """Replaceable delivery for authentication-only emails."""
 
 from email.message import EmailMessage
-from email.utils import formataddr
 from typing import Protocol
 from urllib.parse import urlencode
 
@@ -9,6 +8,7 @@ import aiosmtplib
 from markupsafe import Markup
 
 from studyflow.mail.layout import LIGHT, button, fallback_link, heading, paragraph, render_layout
+from studyflow.mail.message import build_message
 
 
 class EmailTransport(Protocol):
@@ -124,19 +124,17 @@ class SmtpAuthenticationEmailSender:
         text: str,
         reason: str,
     ) -> None:
-        message = EmailMessage()
-        message["To"] = email
-        message["From"] = formataddr(("StudyFlow", self._from_address))
-        message["Subject"] = subject
-        message.set_content(text)
-        message.add_alternative(
-            render_layout(
+        message = build_message(
+            to=email,
+            from_address=self._from_address,
+            subject=subject,
+            text=text,
+            html=render_layout(
                 title=title,
                 preheader=preheader,
                 body=body,
                 reason=reason,
                 public_app_url=self._public_app_url,
             ),
-            subtype="html",
         )
         await self._transport.send(message)

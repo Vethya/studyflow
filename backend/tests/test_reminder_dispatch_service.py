@@ -1,11 +1,12 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta, timezone
 from email.message import EmailMessage
+from html import unescape
 from uuid import UUID, uuid4
 
 import pytest
 
-from studyflow.reminders.email import SmtpReminderEmailSender, format_local_time
+from studyflow.reminders.email import SmtpReminderEmailSender, to_local_time
 from studyflow.reminders.service import (
     ReminderCandidate,
     ReminderDispatchService,
@@ -165,43 +166,122 @@ async def test_dispatch_normalizes_the_clock_to_utc_and_applies_the_batch_limit(
     ),
 )
 def test_times_are_rendered_in_the_account_timezone(timezone: str, expected: str) -> None:
-    assert format_local_time(NOW + timedelta(minutes=20), timezone) == expected
+    local = to_local_time(NOW + timedelta(minutes=20), timezone)
+    assert f"{local:%H:%M} on {local:%A} {local.day} {local:%B}" == expected
 
 
 def test_naive_times_are_treated_as_utc() -> None:
-    assert format_local_time(datetime(2026, 1, 5, 9, 5), "Europe/Paris") == (
-        "10:05 on Monday 5 January"
-    )
+    local = to_local_time(datetime(2026, 1, 5, 9, 5), "Europe/Paris")
+    assert (local.hour, local.minute, local.day, local.month) == (10, 5, 5, 1)
 
 
 @pytest.mark.anyio
-async def test_before_session_email_has_text_html_and_calendar_link() -> None:
+@pytest.mark.parametrize("kind", [ReminderKind.BEFORE, ReminderKind.AFTER])
+@pytest.mark.parametrize(
+    ("timezone", "start", "end", "date"),
+    [
+        ("UTC", "08:20", "09:20", "Tuesday 20 October"),
+        ("Asia/Phnom_Penh", "15:20", "16:20", "Tuesday 20 October"),
+        ("Pacific/Honolulu", "22:20", "23:20", "Monday 19 October"),
+        ("Not/A_Zone", "08:20", "09:20", "Tuesday 20 October"),
+    ],
+)
+async def test_reminder_email_layout_and_local_times(
+    kind: ReminderKind, timezone: str, start: str, end: str, date: str
+) -> None:
     transport = TransportStub()
     sender = SmtpReminderEmailSender(
         transport, "no-reply@studyflow.test", "https://studyflow.test/"
     )
-
-    await sender.send_before_session(
-        candidate(timezone="Asia/Phnom_Penh", title="Essay <draft>\nchapter 2", name="Dara")
-    )
+    title = "<b>Essay</b> & notes"
+    reminder = candidate(kind, timezone=timezone, title=title, name="<i>Dara</i> & friends")
+    if kind == ReminderKind.BEFORE:
+        await sender.send_before_session(reminder)
+    else:
+        await sender.send_after_session(reminder)
 
     [message] = transport.messages
     assert message["To"] == "student@example.com"
-    assert message["From"] == "no-reply@studyflow.test"
-    assert message["Subject"] == "Starting soon: Essay <draft> chapter 2"
-    plain = message.get_body(("plain",))
-    html = message.get_body(("html",))
-    assert plain is not None and html is not None
+    assert message["From"] == "StudyFlow <no-reply@studyflow.test>"
+    prefix = "Starting soon:" if kind == ReminderKind.BEFORE else "How did it go?"
+    assert message["Subject"] == f"{prefix} {title}"
+    assert message.get_content_type() == "multipart/alternative"
+    plain, html = list(message.iter_parts())
+    assert plain.get_content_type() == "text/plain"
+    assert html.get_content_type() == "text/html"
     text_content = plain.get_content()
     html_content = html.get_content()
-    assert "Hi Dara," in text_content
-    assert "starts at 15:20 on Tuesday 20 October (Asia/Phnom_Penh)" in text_content
-    assert "planned for 60 minutes" in text_content
-    assert "https://studyflow.test/calendar" in text_content
-    assert "https://studyflow.test/settings" in text_content
-    assert "Essay &lt;draft&gt; chapter 2" in html_content
-    assert "<draft>" not in html_content
-    assert '<a href="https://studyflow.test/calendar">' in html_content
+    assert "Hi <i>Dara</i> & friends," in text_content
+    assert title in text_content
+    assert f"{start}\u2013{end} (60 min), {date}, {timezone}" in text_content
+    for url in (sender.calendar_url, sender.settings_url):
+        assert url in text_content
+        assert f'href="{url}"' in html_content
+    assert "&lt;b&gt;Essay&lt;/b&gt; &amp; notes" in html_content
+    assert "Hi &lt;i&gt;Dara&lt;/i&gt; &amp; friends," in html_content
+    assert "<b>Essay</b>" not in html_content
+    assert "<i>Dara</i>" not in html_content
+    assert f'>{start}<span class="sf-faint"' in html_content
+    assert f"\u2013{end}</span>" in html_content
+    readable_html = unescape(html_content)
+    assert f"{date} · " in readable_html
+    assert "60 min</span>" in html_content
+    assert f"· {timezone}</p>" in html_content
+    assert "Today" not in html_content
+    assert "IBM Plex Mono" in readable_html
+    assert "@media (prefers-color-scheme:dark)" in html_content
+    assert 'src="https://studyflow.test/brand/email-mark.png"' in html_content
+    assert "Change or turn off reminders</a>" in html_content
+    if kind == ReminderKind.BEFORE:
+        assert "Your next session starts soon" in html_content
+        assert "Hi <i>Dara</i> & friends, here's what you planned." in readable_html
+        assert "60 minutes planned. Open your calendar to see what's next." in readable_html
+        assert ">Starting soon</p>" in html_content
+        assert ">Open calendar</a>" in html_content
+        assert ">Finished it</p>" not in html_content
+    else:
+        assert ">Ended</p>" in html_content
+        assert "Record how it went so the rest of your plan stays accurate." in readable_html
+        assert (
+            "your session just ended. Record how it went and StudyFlow will adjust "
+            in readable_html
+        )
+        assert ">Record how it went</a>" in html_content
+        for label, hint in (
+            ("Finished it", "The work for this session is done."),
+            ("Partly done", "I worked, but there is more left."),
+            ("Didn't study", "This session didn't happen."),
+        ):
+            assert f">{label}</p>" in readable_html
+            assert hint in readable_html
+            assert f"{label}: {hint}" in text_content
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("kind", [ReminderKind.BEFORE, ReminderKind.AFTER])
+async def test_reminder_links_are_escaped_and_naive_times_use_utc(kind: ReminderKind) -> None:
+    transport = TransportStub()
+    sender = SmtpReminderEmailSender(
+        transport, "no-reply@studyflow.test", 'https://studyflow.test/a"b&c/'
+    )
+    reminder = replace(
+        candidate(kind, timezone="Asia/Phnom_Penh", title="Essay\nchapter 2"),
+        starts_at=datetime(2026, 1, 5, 9, 5),
+        ends_at=datetime(2026, 1, 5, 10, 5),
+    )
+    if kind == ReminderKind.BEFORE:
+        await sender.send_before_session(reminder)
+    else:
+        await sender.send_after_session(reminder)
+
+    [message] = transport.messages
+    assert message["Subject"].endswith("Essay chapter 2")
+    plain, html = list(message.iter_parts())
+    assert "16:05\u201317:05 (60 min), Monday 5 January, Asia/Phnom_Penh" in plain.get_content()
+    for path in ("calendar", "settings"):
+        assert f'https://studyflow.test/a"b&c/{path}' in plain.get_content()
+        assert f'href="https://studyflow.test/a&#34;b&amp;c/{path}"' in html.get_content()
+        assert f'href="https://studyflow.test/a"b&c/{path}"' not in html.get_content()
 
 
 @pytest.mark.anyio
@@ -219,5 +299,5 @@ async def test_after_session_email_asks_how_it_went() -> None:
     assert plain is not None
     content = plain.get_content()
     assert "Hi there," in content
-    assert "ended at 09:20 on Tuesday 20 October (UTC)" in content
+    assert "08:20\u201309:20 (60 min), Tuesday 20 October, UTC" in content
     assert "Record how it went:\nhttps://studyflow.test/calendar" in content
