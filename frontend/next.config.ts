@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { staticSecurityHeaders } from "./lib/security/headers";
 
 /**
  * The browser always talks to the Next.js origin at `/api/v1/*`, and Next
@@ -11,6 +12,8 @@ import type { NextConfig } from "next";
 const backendOrigin = process.env.BACKEND_ORIGIN ?? "http://localhost:8000";
 
 const nextConfig: NextConfig = {
+  // Keep the development launcher clear of the sidebar account menu.
+  devIndicators: { position: "bottom-right" },
   async rewrites() {
     return [
       {
@@ -23,7 +26,8 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/:path*",
-        headers: [{ key: "Permissions-Policy", value: "tools=(self)" }],
+        // The nonce-based Content-Security-Policy is per request; see proxy.ts.
+        headers: staticSecurityHeaders(),
       },
     ];
   },

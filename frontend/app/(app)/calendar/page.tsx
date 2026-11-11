@@ -2,36 +2,57 @@
 
 import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { StudyAgenda } from "@/components/study-agenda";
 import { Callout } from "@/components/ui/callout";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Calendar as DatePicker } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
-  Clock3,
-  ListChecks,
+  Flag,
   Loader2,
+  CheckCircle2,
   Plus,
-  RefreshCw,
-} from "lucide-react";
+  Sparkles,
+} from "@/components/icons";
 import { cn } from "@/lib/utils";
 import { DAY_NAMES_SHORT, formatDuration, CATEGORY_CONFIG } from "@/lib/constants";
-import { describeDeadline, formatClock } from "@/lib/datetime";
+import {
+  addZonedDays,
+  describeDeadline,
+  formatClock,
+  formatDate,
+  inTimeZone,
+  minutesSinceMidnight,
+  zonedCalendarDate,
+} from "@/lib/datetime";
+import { applyRecordedOutcome } from "@/lib/outcome-ui";
+import { labelSessions } from "@/lib/session-labels";
 import {
   dayKey,
   expandUnavailablePeriods,
   expandWindows,
+  minutesByDay,
   startOfDay,
   subtractPeriods,
   totalMinutes,
 } from "@/lib/capacity";
 import {
+  applyTaskOverlays,
+  flushPendingActions,
+  isTaskRemoved,
+  scheduleUndoable,
+  useTaskOverlayVersion,
+} from "@/lib/undo";
+import {
   ScheduleTechnicalFailure,
+  ensureSentence,
   availability as availabilityApi,
   scheduling,
   tasks as tasksApi,
@@ -39,41 +60,54 @@ import {
 import { describeError, useApi } from "@/hooks/use-api";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { TaskFormDialog } from "@/components/task-form-dialog";
-import { PageHeader, PageShell, SectionHeader, StatTile } from "@/components/page-kit";
+import { useConfirmDeleteTask } from "@/components/use-confirm-delete-task";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  PageHeader,
+  PageShell,
+  SectionCard,
+  EmptyState,
+} from "@/components/page-kit";
+import { DateLeaf, DueChip } from "@/components/study-kit";
 import { GridLegend, WeekGrid, type GridBlock, type GridColumn } from "@/components/week-grid";
+import { WeekLoad, WeekLoadLegend, type DayLoad } from "@/components/week-load";
 import { SessionDrawer } from "@/components/session-drawer";
 import { RecordOutcomeDialog } from "@/components/record-outcome-dialog";
 import { PendingPlanBanner, SchedulePreview } from "@/components/schedule-preview";
+import { PlanGenerationDialog } from "@/components/plan-generation-dialog";
 import { UnscheduledWorkList } from "@/components/unscheduled-work-list";
 import type { AcademicTask } from "@/types/task";
 import type { StudySession } from "@/types/session";
 import type { ScheduleProposal } from "@/types/schedule";
+import { SWR_KEYS } from "@/lib/swr-keys";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
+import { useNow } from "@/hooks/use-now";
 
 const DEFAULT_RANGE = { start: 8, end: 22 };
 
-function weekStart(date: Date): Date {
-  const day = startOfDay(date);
+function weekStart(date: Date, timeZone: string): Date {
+  const day = startOfDay(date, timeZone);
   day.setDate(day.getDate() - ((day.getDay() + 6) % 7));
   return day;
 }
 
-function addCalendarDays(date: Date, days: number): Date {
-  const result = new Date(date);
-  result.setDate(result.getDate() + days);
-  return result;
-}
-
-const minutesSinceMidnight = (date: Date) => date.getHours() * 60 + date.getMinutes();
-
 export default function CalendarPage() {
+  const timeZone = useAccountTimezone();
+  const router = useRouter();
+  const now = useNow();
   const isMobile = useIsMobile();
-  const [anchor, setAnchor] = useState<Date>(() => new Date());
+  const [chosenView, setChosenView] = useState<"week" | "day" | "agenda" | null>(null);
+  const view = chosenView ?? (isMobile ? "agenda" : "week");
+  const singleDay = view === "day" || (view === "agenda" && isMobile);
+  const [anchor, setAnchor] = useState<Date>(() => startOfDay(new Date(), timeZone));
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<AcademicTask | null>(null);
 
   const [selectedSession, setSelectedSession] = useState<StudySession | null>(null);
+  const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<AcademicTask | null>(null);
   const [outcomeSession, setOutcomeSession] = useState<StudySession | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<AcademicTask | null>(null);
 
   const [proposal, setProposal] = useState<ScheduleProposal | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -83,46 +117,61 @@ export default function CalendarPage() {
   const loadTasks = useCallback((s: AbortSignal) => tasksApi.listTasks({}, s), []);
   const loadWindows = useCallback((s: AbortSignal) => availabilityApi.listWindows(s), []);
   const loadPeriods = useCallback((s: AbortSignal) => availabilityApi.listUnavailablePeriods(s), []);
-  const loadSchedule = useCallback((s: AbortSignal) => scheduling.getActiveSchedule(s), []);
   const loadRevision = useCallback((s: AbortSignal) => scheduling.getPendingRevision(s), []);
 
-  const tasks = useApi(loadTasks);
-  const windows = useApi(loadWindows);
-  const periods = useApi(loadPeriods);
-  const schedule = useApi(loadSchedule);
-  const revision = useApi(loadRevision);
+  const tasks = useApi(SWR_KEYS.tasks, loadTasks);
+  const loadSchedule = useCallback((s: AbortSignal) => scheduling.getActiveSchedule(s), []);
+  const windows = useApi(SWR_KEYS.availabilityWindows, loadWindows);
+  const periods = useApi(SWR_KEYS.unavailablePeriods, loadPeriods);
+  const schedule = useApi(SWR_KEYS.activeSchedule, loadSchedule);
+  const revision = useApi(SWR_KEYS.pendingRevision, loadRevision);
 
   const isLoading =
     tasks.isLoading || windows.isLoading || periods.isLoading || schedule.isLoading;
   const loadError = tasks.error ?? windows.error ?? periods.error ?? schedule.error;
 
-  const allTasks = useMemo(() => tasks.data ?? [], [tasks.data]);
+  // A deletion still inside its undo window already reads as gone, along
+  // with that task's sessions.
+  const overlayVersion = useTaskOverlayVersion();
+  const allTasks = useMemo(() => {
+    void overlayVersion;
+    return applyTaskOverlays(tasks.data ?? []);
+  }, [tasks.data, overlayVersion]);
   const allWindows = useMemo(() => windows.data ?? [], [windows.data]);
   const allPeriods = useMemo(() => periods.data ?? [], [periods.data]);
-  const sessions = useMemo(() => schedule.data?.sessions ?? [], [schedule.data]);
+  const sessions = useMemo(() => {
+    void overlayVersion;
+    return labelSessions(
+      (schedule.data?.sessions ?? []).filter((session) => !isTaskRemoved(session.taskId)),
+      allTasks,
+    );
+  }, [schedule.data, overlayVersion, allTasks]);
 
   /** A revision waits for review the moment it exists (SPEC §14.1). */
   const pendingPlan = revision.data ?? proposal;
 
-  const days = useMemo(() => {
-    if (isMobile) return [startOfDay(anchor)];
-    const start = weekStart(anchor);
-    return Array.from({ length: 7 }, (_, i) => addCalendarDays(start, i));
-  }, [anchor, isMobile]);
+  const weekDays = useMemo(() => {
+    const start = weekStart(anchor, timeZone);
+    return Array.from({ length: 7 }, (_, i) => addZonedDays(start, i, timeZone));
+  }, [anchor, timeZone]);
+  const days = useMemo(
+    () => (singleDay ? [startOfDay(anchor, timeZone)] : weekDays),
+    [anchor, singleDay, timeZone, weekDays],
+  );
 
   const rangeStart = days[0];
   const rangeEnd = useMemo(
-    () => addCalendarDays(days[days.length - 1], 1),
-    [days],
+    () => addZonedDays(days[days.length - 1], 1, timeZone),
+    [days, timeZone],
   );
 
   const freeIntervals = useMemo(
-    () => subtractPeriods(expandWindows(allWindows, rangeStart, rangeEnd), allPeriods),
-    [allWindows, allPeriods, rangeStart, rangeEnd],
+    () => subtractPeriods(expandWindows(allWindows, rangeStart, rangeEnd, timeZone), allPeriods),
+    [allWindows, allPeriods, rangeStart, rangeEnd, timeZone],
   );
   const blockedIntervals = useMemo(
-    () => expandUnavailablePeriods(allPeriods, rangeStart, rangeEnd),
-    [allPeriods, rangeStart, rangeEnd],
+    () => expandUnavailablePeriods(allPeriods, rangeStart, rangeEnd, timeZone),
+    [allPeriods, rangeStart, rangeEnd, timeZone],
   );
 
   // Use clipped periods so historical and far-future blocks cannot stretch
@@ -140,29 +189,30 @@ export default function CalendarPage() {
       max = Math.max(max, w.endTime.slice(3, 5) === "00" ? endHour : endHour + 1);
     }
     for (const session of sessions) {
-      min = Math.min(min, new Date(session.startTime).getHours());
-      max = Math.max(max, new Date(session.endTime).getHours() + 1);
+      min = Math.min(min, inTimeZone(session.startTime, timeZone).getHours());
+      max = Math.max(max, inTimeZone(session.endTime, timeZone).getHours() + 1);
     }
     for (const interval of blockedIntervals) {
-      min = Math.min(min, interval.start.getHours());
-      max = Math.max(max, interval.end.getHours() + 1);
+      min = Math.min(min, inTimeZone(interval.start, timeZone).getHours());
+      max = Math.max(max, inTimeZone(interval.end, timeZone).getHours() + 1);
     }
     if (min > max) return DEFAULT_RANGE;
     return { start: Math.max(0, min - 1), end: Math.min(24, Math.max(max + 1, min + 6)) };
-  }, [allWindows, blockedIntervals, sessions]);
+  }, [allWindows, blockedIntervals, sessions, timeZone]);
+  const todayKey = dayKey(now, timeZone);
   const columns: GridColumn[] = useMemo(() => {
-    const todayKey = dayKey(new Date());
     return days.map((day) => ({
-      key: dayKey(day),
-      label: DAY_NAMES_SHORT[day.getDay()],
-      sublabel: String(day.getDate()),
-      isToday: dayKey(day) === todayKey,
+      key: dayKey(day, timeZone),
+      label: DAY_NAMES_SHORT[inTimeZone(day, timeZone).getDay()],
+      sublabel: String(inTimeZone(day, timeZone).getDate()),
+      month: formatDate(day, timeZone, { month: "short" }),
+      isToday: dayKey(day, timeZone) === todayKey,
     }));
-  }, [days]);
+  }, [days, timeZone, todayKey]);
 
   const blocks: GridBlock[] = useMemo(() => {
     const out: GridBlock[] = [];
-    const visible = new Set(days.map(dayKey));
+    const visible = new Set(days.map((day) => dayKey(day, timeZone)));
 
     const pushCapacity = (
       intervals: { start: Date; end: Date }[],
@@ -171,16 +221,16 @@ export default function CalendarPage() {
     ) => {
       intervals.forEach((interval, index) => {
         for (const day of days) {
-          const dayStart = startOfDay(day);
-          const dayEnd = addCalendarDays(dayStart, 1);
+          const dayStart = startOfDay(day, timeZone);
+          const dayEnd = addZonedDays(dayStart, 1, timeZone);
           const start = interval.start < dayStart ? dayStart : interval.start;
           const end = interval.end > dayEnd ? dayEnd : interval.end;
           if (end <= start) continue;
           out.push({
-            id: `${prefix}-${index}-${dayKey(day)}`,
-            columnKey: dayKey(day),
-            start: minutesSinceMidnight(start),
-            end: minutesSinceMidnight(end) === 0 ? 1440 : minutesSinceMidnight(end),
+            id: `${prefix}-${index}-${dayKey(day, timeZone)}`,
+            columnKey: dayKey(day, timeZone),
+            start: minutesSinceMidnight(start, timeZone),
+            end: minutesSinceMidnight(end, timeZone) === 0 ? 1440 : minutesSinceMidnight(end, timeZone),
             variant,
             title: variant === "blocked" ? "Blocked time" : "Free to study",
           });
@@ -193,41 +243,46 @@ export default function CalendarPage() {
 
     for (const session of sessions) {
       const start = new Date(session.startTime);
-      const key = dayKey(start);
+      const key = dayKey(start, timeZone);
       if (!visible.has(key)) continue;
       out.push({
         id: session.id,
         columnKey: key,
-        start: minutesSinceMidnight(start),
-        end: minutesSinceMidnight(new Date(session.endTime)),
+        start: minutesSinceMidnight(start, timeZone),
+        end: minutesSinceMidnight(session.endTime, timeZone),
         variant: "session",
+        durationMinutes: session.plannedDuration,
         label: session.taskTitle,
-        meta: `${formatClock(session.startTime)}–${formatClock(session.endTime)}`,
-        title: `${session.taskTitle} · ${formatClock(session.startTime)}–${formatClock(session.endTime)}`,
+        dotClassName: CATEGORY_CONFIG[session.category]?.dot,
+        meta: `${formatClock(session.startTime, timeZone)}–${formatClock(session.endTime, timeZone)}`,
+        title: `${session.taskTitle} · ${formatClock(session.startTime, timeZone)}–${formatClock(session.endTime, timeZone)}`,
         settled: Boolean(session.outcome),
         attention: session.isAwaitingOutcome,
-        onSelect: () => setSelectedSession(session),
+        onSelect: () => {
+          setSelectedSession(session);
+          setSessionDrawerOpen(true);
+        },
       });
     }
 
     return out;
-  }, [freeIntervals, blockedIntervals, sessions, days]);
+  }, [freeIntervals, blockedIntervals, sessions, days, timeZone]);
 
   const deadlinesByDay = useMemo(() => {
     const map = new Map<string, AcademicTask[]>();
     for (const task of allTasks) {
       if (task.status === "Completed") continue;
-      const key = dayKey(new Date(task.deadline));
+      const key = dayKey(new Date(task.deadline), timeZone);
       const bucket = map.get(key);
       if (bucket) bucket.push(task);
       else map.set(key, [task]);
     }
     return map;
-  }, [allTasks]);
+  }, [allTasks, timeZone]);
 
   const agenda = useMemo(() => {
-    const from = startOfDay(new Date());
-    const to = addCalendarDays(from, 14);
+    const from = startOfDay(now, timeZone);
+    const to = addZonedDays(from, 14, timeZone);
     return allTasks
       .filter((task) => task.status !== "Completed")
       .filter((task) => {
@@ -235,7 +290,7 @@ export default function CalendarPage() {
         return due >= from && due < to;
       })
       .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
-  }, [allTasks]);
+  }, [allTasks, timeZone, now]);
 
   /** Task groups the sidebar shows (SPEC §17.3). */
   const grouped = useMemo(() => {
@@ -260,39 +315,93 @@ export default function CalendarPage() {
   const weekSummary = useMemo(() => {
     const free = totalMinutes(freeIntervals);
     const blocked = totalMinutes(blockedIntervals);
-    const visible = new Set(days.map(dayKey));
+    const visible = new Set(days.map((day) => dayKey(day, timeZone)));
     const scheduled = sessions
-      .filter((session) => visible.has(dayKey(new Date(session.startTime))))
+      .filter((session) => visible.has(dayKey(new Date(session.startTime), timeZone)))
       .reduce((sum, session) => sum + session.plannedDuration, 0);
-    const due = days.reduce((sum, day) => sum + (deadlinesByDay.get(dayKey(day))?.length ?? 0), 0);
+    const due = days.reduce((sum, day) => sum + (deadlinesByDay.get(dayKey(day, timeZone))?.length ?? 0), 0);
     return { free, blocked, scheduled, due };
-  }, [freeIntervals, blockedIntervals, sessions, days, deadlinesByDay]);
+  }, [freeIntervals, blockedIntervals, sessions, days, deadlinesByDay, timeZone]);
 
-  const now = new Date();
-  const nowMarker = days.some((day) => dayKey(day) === dayKey(now))
-    ? { columnKey: dayKey(now), minutes: minutesSinceMidnight(now) }
+  /** The whole week around the anchor, even when one day is on screen. */
+  const weekLoad: DayLoad[] = useMemo(() => {
+    const free = minutesByDay(
+      allWindows,
+      allPeriods,
+      weekDays[0],
+      addZonedDays(weekDays[6], 1, timeZone),
+      timeZone,
+    );
+    const planned = new Map<string, number>();
+    for (const session of sessions) {
+      const key = dayKey(new Date(session.startTime), timeZone);
+      planned.set(key, (planned.get(key) ?? 0) + session.plannedDuration);
+    }
+    return weekDays.map((day) => {
+      const key = dayKey(day, timeZone);
+      const zoned = inTimeZone(day, timeZone);
+      return {
+        key,
+        label: DAY_NAMES_SHORT[zoned.getDay()],
+        longLabel: formatDate(day, timeZone, { weekday: "long", day: "numeric", month: "long" }),
+        dayNumber: String(zoned.getDate()),
+        free: free.get(key) ?? 0,
+        planned: planned.get(key) ?? 0,
+        deadlines: deadlinesByDay.get(key)?.length ?? 0,
+        isToday: key === todayKey,
+      };
+    });
+  }, [allWindows, allPeriods, weekDays, sessions, deadlinesByDay, timeZone, todayKey]);
+
+  const nowMarker = days.some((day) => dayKey(day, timeZone) === dayKey(now, timeZone))
+    ? { columnKey: dayKey(now, timeZone), minutes: minutesSinceMidnight(now, timeZone) }
     : undefined;
 
-  const title = isMobile
-    ? anchor.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })
-    : `${days[0].toLocaleDateString(undefined, { day: "numeric", month: "short" })} – ${days[6].toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`;
+  const title = singleDay
+    ? formatDate(anchor, timeZone, { weekday: "long", day: "numeric", month: "long" })
+    : `${formatDate(days[0], timeZone, { day: "numeric", month: "short" })} – ${formatDate(days[6], timeZone, { day: "numeric", month: "short", year: "numeric" })}`;
 
   const shift = (direction: number) =>
-    setAnchor(addCalendarDays(anchor, direction * (isMobile ? 1 : 7)));
+    setAnchor(addZonedDays(anchor, direction * (singleDay ? 1 : 7), timeZone));
 
   /** Whether the view is already showing today (mobile) or this week. */
-  const isCurrentPeriod = isMobile
-    ? dayKey(anchor) === dayKey(now)
-    : dayKey(weekStart(anchor)) === dayKey(weekStart(now));
+  const isCurrentPeriod = singleDay
+    ? dayKey(anchor, timeZone) === dayKey(now, timeZone)
+    : dayKey(weekStart(anchor, timeZone), timeZone) === dayKey(weekStart(now, timeZone), timeZone);
 
   const selectedTask = selectedSession
     ? (allTasks.find((task) => task.id === selectedSession.taskId) ?? null)
     : null;
 
   async function generate() {
+    // Without hours or an open task there is nothing to plan; point at the
+    // missing step instead of letting the planner come back empty.
+    if (windows.data?.length === 0) {
+      toast.info("Set your study hours first", {
+        description: "StudyFlow plans study sessions inside the hours you are free each week.",
+        action: { label: "Set hours", onClick: () => router.push("/availability") },
+      });
+      return;
+    }
+    if (tasks.data && !allTasks.some((task) => task.status !== "Completed")) {
+      toast.info("Add a task first", {
+        description: "Plan my time needs at least one unfinished task to find time for.",
+        action: {
+          label: "Add task",
+          onClick: () => {
+            setEditingTask(null);
+            setDialogOpen(true);
+          },
+        },
+      });
+      return;
+    }
     setGenerating(true);
     setTechnicalFailure(null);
     try {
+      // A deletion still inside its undo window must land first, or the
+      // planner would find time for a task that is about to disappear.
+      await flushPendingActions();
       const next = await scheduling.generateProposal();
       setProposal(next);
       setPreviewOpen(true);
@@ -308,85 +417,52 @@ export default function CalendarPage() {
 
   function refreshAll() {
     tasks.reload();
+    windows.reload();
+    periods.reload();
     schedule.reload();
     revision.reload();
   }
 
+  function deleteTask(target: AcademicTask) {
+    scheduleUndoable({
+      key: `delete:${target.id}`,
+      message: "Task deleted",
+      description: target.title,
+      overlay: { taskId: target.id, removed: true },
+      commit: () => tasksApi.deleteTask(target.id),
+      onError: (cause) => describeError(cause),
+    });
+  }
+
+  const { requestDelete, dialog } = useConfirmDeleteTask(deleteTask);
+
+  /** Picking a day from the week strip opens that day. */
+  function openDay(key: string) {
+    const day = weekDays.find((candidate) => dayKey(candidate, timeZone) === key);
+    /* c8 ignore next -- the strip only offers days of the week on screen. */
+    if (!day) return;
+    setAnchor(day);
+    if (!singleDay) setChosenView("day");
+  }
+
+  const weekVerdict =
+    weekSummary.free === 0 && weekSummary.scheduled === 0
+      ? `No study time ${singleDay ? "this day" : "this week"}`
+      : weekSummary.scheduled === 0
+        ? `${formatDuration(weekSummary.free)} free, nothing planned yet`
+        : `${formatDuration(weekSummary.scheduled)} planned, ${formatDuration(Math.max(0, weekSummary.free - weekSummary.scheduled))} still free`;
+
   return (
     <PageShell>
       <PageHeader
-        title={title}
-        description="Your sessions and deadlines against the study time each day actually holds."
+        icon={CalendarDays}
+        eyebrow="Planning"
+        title="Calendar"
+        description="When you study, what is due, and whether the week fits."
         actions={
           <>
-            {/*
-              The middle button used to read "Today" and sat flush against the
-              next-week chevron, so a click near its edge landed on the arrow
-              and appeared to jump a week forward. It now says which period it
-              returns to, is wide enough to hit, and is disabled once you are
-              already there — a mis-click can no longer move anything.
-            */}
-            <div className="flex items-center rounded-lg border bg-card">
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="rounded-e-none"
-                onClick={() => shift(-1)}
-                aria-label={isMobile ? "Previous day" : "Previous week"}
-              >
-                <ChevronLeft />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="rounded-none border-x px-3.5 disabled:opacity-100 disabled:text-muted-foreground"
-                onClick={() => setAnchor(new Date())}
-                disabled={isCurrentPeriod}
-              >
-                {isMobile ? "Today" : "This week"}
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="rounded-s-none"
-                onClick={() => shift(1)}
-                aria-label={isMobile ? "Next day" : "Next week"}
-              >
-                <ChevronRight />
-              </Button>
-            </div>
-
-            <Popover>
-              <PopoverTrigger
-                render={
-                  <Button variant="outline" size="sm">
-                    <CalendarDays />
-                    Jump to
-                  </Button>
-                }
-              />
-              <PopoverContent className="w-auto p-0" align="end">
-                <DatePicker
-                  mode="single"
-                  selected={anchor}
-                  onSelect={(date) => date && setAnchor(date)}
-                  autoFocus
-                />
-              </PopoverContent>
-            </Popover>
-
             <Button
               variant="outline"
-              size="sm"
-              onClick={() => void generate()}
-              disabled={isGenerating}
-            >
-              {isGenerating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-              Plan my time
-            </Button>
-
-            <Button
-              size="sm"
               onClick={() => {
                 setEditingTask(null);
                 setDialogOpen(true);
@@ -395,9 +471,23 @@ export default function CalendarPage() {
               <Plus />
               Add task
             </Button>
+            <Button
+              onClick={() => void generate()}
+              disabled={isGenerating}
+              aria-busy={isGenerating}
+            >
+              {isGenerating ? <Loader2 className="animate-spin" /> : <Sparkles />}
+              Plan my time
+            </Button>
           </>
         }
       />
+
+      {!isLoading && !loadError && allWindows.length === 0 && (
+        <Callout title="Set your study hours first" icon={CalendarDays} className="frame-hatch rounded-xl border-primary/20" actions={<Button nativeButton={false} render={<Link href="/availability" />}>Set study hours</Button>}>
+          Choose when you are free each week. Then add your coursework and use Plan my time to build a schedule you can review.
+        </Callout>
+      )}
 
       {loadError && (
         <Callout
@@ -424,8 +514,8 @@ export default function CalendarPage() {
             </Button>
           }
         >
-          {technicalFailure} This is a problem on our side, not a sign that your work does
-          not fit. Your current plan has not changed.
+          {ensureSentence(technicalFailure)} This is a problem on our side, not a sign that
+          your work does not fit. Your current plan has not changed.
         </Callout>
       )}
 
@@ -439,43 +529,143 @@ export default function CalendarPage() {
         />
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile
-          icon={Clock3}
-          value={isLoading ? null : formatDuration(weekSummary.free)}
-          label={isMobile ? "Free this day" : "Free this week"}
-          tone="surplus"
-        />
-        <StatTile
-          icon={CalendarDays}
-          value={isLoading ? null : formatDuration(weekSummary.scheduled)}
-          label="Study planned"
-        />
-        <StatTile
-          icon={CalendarDays}
-          value={isLoading ? null : formatDuration(weekSummary.blocked)}
-          label="Blocked"
-          hint="By your exceptions"
-        />
-        <StatTile
-          icon={ListChecks}
-          value={isLoading ? null : String(weekSummary.due)}
-          label={weekSummary.due === 1 ? "Deadline here" : "Deadlines here"}
-          tone={weekSummary.due > 0 ? "deficit" : undefined}
-        />
-      </div>
+      {/* ── The week at a glance: one sentence, two side facts, seven days ── */}
+      <Card className="rise-in min-w-0">
+        <CardContent className="grid gap-4">
+          <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-3">
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground">{singleDay ? "This day" : "This week"}</p>
+              {isLoading ? (
+                <Skeleton className="mt-1.5 h-7 w-56" />
+              ) : (
+                <p className="mt-1 text-2xl leading-tight tabular-nums font-semibold tracking-tight">{weekVerdict}</p>
+              )}
+            </div>
+            <dl className="flex gap-6 text-sm">
+              <div title="Time your exceptions take out of your study hours">
+                <dt className="text-xs text-muted-foreground">Blocked</dt>
+                <dd className="mt-0.5 font-medium tabular-nums">
+                  {isLoading ? "–" : formatDuration(weekSummary.blocked)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">
+                  {weekSummary.due === 1 ? "Deadline here" : "Deadlines here"}
+                </dt>
+                <dd
+                  className={cn(
+                    "mt-0.5 font-medium tabular-nums",
+                    !isLoading && weekSummary.due > 0 && "text-deficit",
+                  )}
+                >
+                  {isLoading ? "–" : weekSummary.due}
+                </dd>
+              </div>
+            </dl>
+          </div>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_15rem]">
-        <div className="flex min-w-0 flex-col gap-3">
+          <WeekLoad
+            days={weekLoad}
+            loading={isLoading}
+            selectedKey={singleDay ? dayKey(anchor, timeZone) : undefined}
+            onSelect={openDay}
+          />
+          <WeekLoadLegend className="justify-center @2xl/dashboard:justify-start" />
+        </CardContent>
+      </Card>
+
+      <div className="grid min-w-0 gap-6 @5xl/dashboard:grid-cols-[minmax(0,1fr)_16rem]">
+        <Card className="min-w-0">
+          <Tabs className="flex-1 gap-0" value={view} onValueChange={(value) => {
+            if (value === "week" || value === "day" || value === "agenda") setChosenView(value);
+          }}>
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 px-1 pt-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-3">
+              {/*
+                The middle button used to read "Today" and sat flush against the
+                next-week chevron, so a click near its edge landed on the arrow
+                and appeared to jump a week forward. It says which period it
+                returns to, is wide enough to hit, and is disabled once you are
+                already there, so a mis-click can no longer move anything.
+              */}
+              <div className="flex items-center rounded-lg border bg-card shadow-xs">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="rounded-e-none"
+                  onClick={() => shift(-1)}
+                  aria-label={singleDay ? "Previous day" : "Previous week"}
+                >
+                  <ChevronLeft />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="rounded-none border-x px-3.5 disabled:opacity-100 disabled:text-muted-foreground"
+                  onClick={() => setAnchor(startOfDay(new Date(), timeZone))}
+                  disabled={isCurrentPeriod}
+                >
+                  {singleDay ? "Today" : "This week"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="rounded-s-none"
+                  onClick={() => shift(1)}
+                  aria-label={singleDay ? "Next day" : "Next week"}
+                >
+                  <ChevronRight />
+                </Button>
+              </div>
+              <CardTitle className="text-base tabular-nums">{title}</CardTitle>
+            </div>
+            <div className="flex items-center gap-2">
+              <Popover>
+                <PopoverTrigger
+                  render={
+                    <Button variant="ghost" size="sm">
+                      <CalendarDays />
+                      Jump to
+                    </Button>
+                  }
+                />
+                <PopoverContent className="w-auto p-0" align="end">
+                  <DatePicker
+                    mode="single"
+                    selected={anchor}
+                    onSelect={(date) => date && setAnchor(
+                      zonedCalendarDate(date.getFullYear(), date.getMonth(), date.getDate(), timeZone),
+                    )}
+                    autoFocus
+                  />
+                </PopoverContent>
+              </Popover>
+              <TabsList aria-label="Schedule view" className="h-9">
+                <TabsTrigger value="week" className="px-3">Week</TabsTrigger>
+                <TabsTrigger value="day" className="px-3">Day</TabsTrigger>
+                <TabsTrigger value="agenda" className="px-3">Agenda</TabsTrigger>
+              </TabsList>
+            </div>
+          </CardHeader>
+          {(["week", "day", "agenda"] as const).map((panelView) => (
+          <TabsContent key={panelView} value={panelView} keepMounted className="min-w-0">
+          {panelView === view && <>
+          <CardContent className="overflow-hidden p-0">
           {isLoading ? (
-            <Skeleton className="h-[30rem] w-full rounded-xl" />
+            <Skeleton className="m-(--card-spacing) h-[30rem] rounded-lg" />
+          ) : view === "agenda" ? (
+            <StudyAgenda columns={columns} blocks={blocks} deadlines={deadlinesByDay} timeZone={timeZone} emptyAction={allWindows.length === 0 ? <Button nativeButton={false} render={<Link href="/availability" />}>Set study hours</Button> : <Button onClick={() => void generate()} disabled={isGenerating}>Plan my time</Button>} />
           ) : (
             <WeekGrid
+              className="rounded-none border-0"
+              ariaLabel="Study calendar"
               columns={columns}
               blocks={blocks}
               hourStart={hourRange.start}
               hourEnd={hourRange.end}
               now={nowMarker}
+              fit
+              emptyContent={weekSummary.due === 0 ? <EmptyState icon={CalendarDays} title="No sessions planned" action={allWindows.length === 0 ? <Button nativeButton={false} render={<Link href="/availability" />}>Set study hours</Button> : <Button onClick={() => void generate()} disabled={isGenerating}>Plan my time</Button>}>Choose your study hours, add your tasks, then build a plan for this {singleDay ? "day" : "week"}.</EmptyState> : undefined}
               renderLane={(column) => {
                 const due = deadlinesByDay.get(column.key) ?? [];
                 if (due.length === 0) return null;
@@ -485,9 +675,10 @@ export default function CalendarPage() {
                       <Link
                         key={task.id}
                         href={`/tasks/${task.id}`}
-                        title={`${task.title} — due ${formatClock(task.deadline)}`}
-                        className="block rounded-sm bg-deficit-soft px-1.5 py-1 text-start text-[0.6875rem] leading-tight text-deficit transition-colors hover:bg-deficit/20"
+                        title={`${task.title} — due ${formatClock(task.deadline, timeZone)}`}
+                        className="flex gap-1 rounded-sm bg-deficit-soft px-1.5 py-1 text-start text-[0.6875rem] font-medium leading-tight text-foreground transition-colors duration-150 hover-fine:bg-deficit/20"
                       >
+                        <Flag className="mt-px size-2.5 shrink-0 text-deficit" aria-hidden />
                         <span className="line-clamp-2">{task.title}</span>
                       </Link>
                     ))}
@@ -501,135 +692,167 @@ export default function CalendarPage() {
               }}
             />
           )}
-          <GridLegend showDeadline showSession />
-        </div>
+          </CardContent>
+          {view !== "agenda" && blocks.length > 0 && <CardFooter><GridLegend showDeadline showSession /></CardFooter>}
+          </>}
+          </TabsContent>
+          ))}
+          </Tabs>
+        </Card>
 
         {/* ── Task sidebar (SPEC §17.3) ─────────────────────── */}
-        <aside className="min-w-0 space-y-5">
-          <TaskGroup title="Overdue" tasks={grouped.overdue} tone="deficit" />
-          <TaskGroup
-            title="No slot yet"
-            tasks={grouped.unscheduled}
-            tone="deficit"
-            empty="Everything has a slot."
-          />
-          <TaskGroup title="Scheduled" tasks={grouped.active} />
-          <TaskGroup title="Done" tasks={grouped.completed} muted />
-        </aside>
+        <Card className="min-w-0 self-start">
+          <CardHeader>
+            <CardTitle>Your tasks</CardTitle>
+            <p className="text-xs text-muted-foreground">Where each open task stands in the plan.</p>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-5">
+            {isLoading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-6 w-full" />
+                <Skeleton className="h-6 w-4/5" />
+              </div>
+            ) : allTasks.length === 0 ? (
+              <div className="flex flex-col items-start gap-3 py-1">
+                <p className="text-sm text-muted-foreground">
+                  No tasks yet. Add your coursework and StudyFlow will find time for it.
+                </p>
+                <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/tasks" />}>
+                  Go to tasks
+                </Button>
+              </div>
+            ) : (
+              <>
+                <TaskGroup title="Overdue" tasks={grouped.overdue} tone="deficit" />
+                <TaskGroup title="No slot yet" tasks={grouped.unscheduled} tone="warning" />
+                <TaskGroup title="Scheduled" tasks={grouped.active} tone="primary" />
+                <TaskGroup title="Done" tasks={grouped.completed} tone="surplus" muted />
+                {grouped.overdue.length + grouped.unscheduled.length === 0 && (
+                  <p className="flex items-center gap-2 rounded-lg bg-surplus/10 px-3 py-2 text-xs text-surplus">
+                    <CheckCircle2 className="size-3.5 shrink-0" aria-hidden />
+                    Everything has a slot.
+                  </p>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Unscheduled Work, with its explanation and remedies (SPEC §17.3). */}
       {pendingPlan && pendingPlan.unscheduledWork.length > 0 && (
-        <section>
-          <SectionHeader
-            title="Work with no slot"
-            meta={`${pendingPlan.unscheduledWork.length} to resolve`}
-            tone="deficit"
-          />
-          <div className="pt-3">
-            <UnscheduledWorkList items={pendingPlan.unscheduledWork} />
-          </div>
-        </section>
+        <SectionCard
+          title="Work with no slot"
+          description="Open work StudyFlow could not place in your study time."
+          action={<Badge variant="destructive">{pendingPlan.unscheduledWork.length}</Badge>}
+        >
+          <UnscheduledWorkList items={pendingPlan.unscheduledWork} />
+        </SectionCard>
       )}
 
-      <section>
-        <SectionHeader
-          title="Upcoming deadlines"
-          meta={`${agenda.length} in the next 14 days`}
-          action={{ href: "/tasks", label: "All tasks" }}
-        />
-
+      <SectionCard
+        title="Upcoming deadlines"
+        description={`${agenda.length} in the next 14 days.`}
+        action={
+          <Button variant="ghost" size="sm" nativeButton={false} render={<Link href="/tasks" />}>
+            All tasks
+          </Button>
+        }
+        flush
+      >
         {isLoading ? (
-          <div className="space-y-2 pt-3">
+          <div className="space-y-2 p-(--card-spacing)">
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
           </div>
         ) : agenda.length === 0 ? (
-          <p className="pt-4 text-sm text-muted-foreground">
+          <p className="p-(--card-spacing) text-sm text-muted-foreground">
             Nothing due in the next two weeks.
           </p>
         ) : (
           <ul className="divide-y">
             {agenda.map((task) => {
               const due = new Date(task.deadline);
-              const phrase = describeDeadline(task.deadline);
+              const phrase = describeDeadline(task.deadline, timeZone);
               return (
                 <li key={task.id}>
                   <Link
                     href={`/tasks/${task.id}`}
-                    className="flex flex-col gap-1 py-2.5 transition-colors hover:bg-muted/40 sm:grid sm:grid-cols-[9.5rem_minmax(0,1fr)_5.5rem_3.5rem_4.5rem] sm:items-center sm:gap-x-4"
+                    className="flex items-center gap-4 px-(--card-spacing) py-3 transition-colors duration-150 hover-fine:bg-muted/40 compact:py-2"
                   >
-                    <div className="flex items-baseline justify-between gap-3 sm:contents">
-                      <span className="min-w-0 truncate text-sm font-medium sm:order-2">
-                        {task.title}
+                    <DateLeaf date={due} urgent={phrase.urgent} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">{task.title}</span>
+                      <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                        <span
+                          aria-hidden
+                          className={cn("size-1.5 shrink-0 rounded-full", CATEGORY_CONFIG[task.category].dot)}
+                        />
+                        <span className="truncate">
+                          {CATEGORY_CONFIG[task.category].label} · {formatDate(due, timeZone, { weekday: "short" })}{" "}
+                          {formatClock(due, timeZone)}
+                        </span>
                       </span>
-                      <span
-                        className={cn(
-                          "shrink-0 text-xs font-medium tabular-nums sm:order-5 sm:text-end",
-                          phrase.urgent ? "text-deficit" : "text-muted-foreground",
-                        )}
-                      >
-                        {phrase.short}
+                    </span>
+                    <span className="flex shrink-0 flex-col items-end gap-1 text-xs tabular-nums">
+                      <DueChip deadline={task.deadline} />
+                      <span className="text-muted-foreground">
+                        {formatDuration(task.remainingDuration)} left
                       </span>
-                    </div>
-
-                    <div className="flex items-baseline gap-x-3 text-xs text-muted-foreground sm:contents">
-                      <span className="shrink-0 tabular-nums sm:order-1">
-                        {due.toLocaleDateString(undefined, {
-                          weekday: "short",
-                          day: "numeric",
-                          month: "short",
-                        })}
-                        {" · "}
-                        {formatClock(due)}
-                      </span>
-                      <span className="truncate sm:order-3">
-                        {CATEGORY_CONFIG[task.category].label}
-                      </span>
-                      <span className="shrink-0 tabular-nums sm:order-4 sm:text-end">
-                        {formatDuration(task.remainingDuration)}
-                      </span>
-                    </div>
+                    </span>
                   </Link>
                 </li>
               );
             })}
           </ul>
         )}
-      </section>
+      </SectionCard>
 
       <SessionDrawer
         session={selectedSession}
         task={selectedTask}
-        open={selectedSession !== null}
-        onOpenChange={(next) => !next && setSelectedSession(null)}
+        open={sessionDrawerOpen}
+        onOpenChange={setSessionDrawerOpen}
+        onOpenChangeComplete={(next) => {
+          if (next) return;
+          setSelectedSession(null);
+          if (pendingDelete) {
+            requestDelete(pendingDelete);
+            setPendingDelete(null);
+          }
+        }}
         onEditTask={() => {
           setEditingTask(selectedTask);
-          setSelectedSession(null);
+          setSessionDrawerOpen(false);
           setDialogOpen(true);
         }}
         onDeleteTask={() => {
-          setConfirmDelete(selectedTask);
-          setSelectedSession(null);
+          // Wait for the drawer's exit animation before opening confirmation.
+          setPendingDelete(selectedTask);
+          setSessionDrawerOpen(false);
         }}
         onRecordOutcome={() => {
           setOutcomeSession(selectedSession);
-          setSelectedSession(null);
+          setSessionDrawerOpen(false);
         }}
       />
+
+      {dialog}
 
       <RecordOutcomeDialog
         session={outcomeSession}
         open={outcomeSession !== null}
         onOpenChange={(next) => !next && setOutcomeSession(null)}
         onRecorded={(result) => {
-          schedule.reload();
-          tasks.reload();
-          if (result.revision) {
-            setProposal(result.revision);
-            setPreviewOpen(true);
+          if (schedule.data) {
+            schedule.setData({
+              ...schedule.data,
+              sessions: schedule.data.sessions.map((session) =>
+                session.id === result.session.id ? result.session : session,
+              ),
+            });
           }
-          revision.reload();
+          applyRecordedOutcome(result, { setProposal, setPreviewOpen });
         }}
       />
 
@@ -637,107 +860,87 @@ export default function CalendarPage() {
         proposal={proposal}
         availabilityWindows={allWindows}
         unavailablePeriods={allPeriods}
+        existingSessions={sessions}
         open={previewOpen}
         onOpenChange={setPreviewOpen}
         onAccepted={() => {
           setProposal(null);
-          refreshAll();
+          revision.setData(null);
         }}
         onRejected={() => {
           setProposal(null);
-          revision.reload();
+          revision.setData(null);
         }}
       />
+
+      <PlanGenerationDialog open={isGenerating} />
 
       <TaskFormDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         task={editingTask}
         onSaved={(task) => {
-          tasks.reload();
           setEditingTask(null);
           toast.success(editingTask ? "Task updated" : "Task added");
           void task;
-        }}
-      />
-
-      <ConfirmDialog
-        open={confirmDelete !== null}
-        onOpenChange={(next) => !next && setConfirmDelete(null)}
-        title={`Delete “${confirmDelete?.title ?? ""}”?`}
-        description="This also removes its study sessions and the record of time you have already put in. It cannot be undone."
-        confirmLabel="Delete task"
-        destructive
-        onConfirm={async () => {
-          if (!confirmDelete) return;
-          try {
-            await tasksApi.deleteTask(confirmDelete.id);
-            toast.success("Task deleted");
-            refreshAll();
-          } catch (cause) {
-            toast.error(describeError(cause));
-          } finally {
-            setConfirmDelete(null);
-          }
         }}
       />
     </PageShell>
   );
 }
 
+const GROUP_TONES = {
+  deficit: { dot: "bg-deficit", count: "text-deficit" },
+  warning: { dot: "bg-warning", count: "text-warning" },
+  primary: { dot: "bg-primary", count: "text-muted-foreground" },
+  surplus: { dot: "bg-surplus", count: "text-muted-foreground" },
+} as const;
+
+/** One status group in the task panel. Empty groups are left out entirely. */
 function TaskGroup({
   title,
   tasks,
   tone,
   muted,
-  empty = "None",
 }: {
   title: string;
   tasks: AcademicTask[];
-  tone?: "deficit";
+  tone: keyof typeof GROUP_TONES;
   muted?: boolean;
-  empty?: string;
 }) {
+  if (tasks.length === 0) return null;
+  const colors = GROUP_TONES[tone];
   return (
-    <div>
-      <div className="flex items-baseline justify-between border-b pb-1.5">
-        <h3
-          className={cn(
-            "text-xs font-medium",
-            tone === "deficit" && tasks.length > 0 ? "text-deficit" : "text-muted-foreground",
-          )}
-        >
-          {title}
-        </h3>
-        <span className="text-xs tabular-nums text-muted-foreground">{tasks.length}</span>
-      </div>
-      {tasks.length === 0 ? (
-        <p className="pt-2 text-xs text-muted-foreground">{empty}</p>
-      ) : (
-        <ul className="pt-1">
-          {tasks.slice(0, 6).map((task) => (
-            <li key={task.id}>
-              <Link
-                href={`/tasks/${task.id}`}
-                className={cn(
-                  "flex items-baseline justify-between gap-2 py-1.5 text-xs transition-colors hover:text-foreground",
-                  muted ? "text-muted-foreground line-through" : "text-foreground",
-                )}
-              >
-                <span className="min-w-0 truncate">{task.title}</span>
-                {!muted && (
-                  <span className="shrink-0 tabular-nums text-muted-foreground">
-                    {formatDuration(task.remainingDuration)}
-                  </span>
-                )}
-              </Link>
-            </li>
-          ))}
-          {tasks.length > 6 && (
-            <li className="pt-1 text-xs text-muted-foreground">+{tasks.length - 6} more</li>
-          )}
-        </ul>
-      )}
-    </div>
+    <section>
+      <h3 className="flex items-center gap-2 pb-1 text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        <span className={cn("size-1.5 rounded-full", colors.dot)} aria-hidden />
+        {title}
+        <span aria-hidden className="h-px flex-1 bg-border" />
+        <span className={cn("font-medium tabular-nums", colors.count)}>{tasks.length}</span>
+      </h3>
+      <ul className="flex flex-col">
+        {tasks.slice(0, 6).map((task) => (
+          <li key={task.id}>
+            <Link
+              href={`/tasks/${task.id}`}
+              className={cn(
+                "-mx-2 flex items-baseline justify-between gap-2 rounded-md px-2 py-1.5 text-[0.8125rem] transition-colors duration-150 hover-fine:bg-muted/50 hover-fine:text-foreground compact:py-1",
+                muted ? "text-muted-foreground line-through decoration-muted-foreground/40" : "text-foreground",
+              )}
+            >
+              <span className="min-w-0 truncate">{task.title}</span>
+              {!muted && (
+                <span className="shrink-0 tabular-nums text-muted-foreground">
+                  {formatDuration(task.remainingDuration)}
+                </span>
+              )}
+            </Link>
+          </li>
+        ))}
+        {tasks.length > 6 && (
+          <li className="pt-1 text-xs text-muted-foreground">+{tasks.length - 6} more</li>
+        )}
+      </ul>
+    </section>
   );
 }

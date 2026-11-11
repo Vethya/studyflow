@@ -49,13 +49,16 @@ class LoginRateLimitStub:
             raise self.error
         return "login_inflight:test"
 
-    async def record_failure(self, email: str, reservation_id: str) -> None:
+    async def record_failure(self, client_ip: str, email: str, reservation_id: str) -> None:
         self.failures.append(email)
 
-    async def reset_failures(self, email: str, reservation_id: str) -> None:
+    async def reset_failures(self, client_ip: str, email: str, reservation_id: str) -> None:
         self.resets.append(email)
 
-    async def release(self, email: str, reservation_id: str) -> None:
+    async def clear_failures(self, client_ip: str, email: str) -> None:
+        return None
+
+    async def release(self, client_ip: str, email: str, reservation_id: str) -> None:
         self.releases.append(email)
 
 
@@ -266,3 +269,84 @@ async def test_limiter_error_before_reservation_does_not_release_another_slot() 
                 json={"email": "student@example.com", "password": "password"},
             )
     assert rate_limit.releases == []
+
+
+@pytest.mark.anyio
+async def test_login_record_failure_rate_limit_exceeded_returns_429() -> None:
+    class FailingRecordRateLimitStub(LoginRateLimitStub):
+        async def record_failure(self, client_ip: str, email: str, reservation_id: str) -> None:
+            raise LoginRateLimitExceeded()
+
+    transport = ASGITransport(
+        app=create_app(
+            login=FailingLoginStub(InvalidCredentialsError()),
+            login_rate_limiter=FailingRecordRateLimitStub(),
+        )
+    )
+    async with AsyncClient(transport=transport, base_url="https://test") as client:
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "student@example.com", "password": "wrong-password"},
+        )
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "900"
+    assert response.json()["detail"] == "Too many login attempts"
+
+
+@pytest.mark.anyio
+async def test_login_missing_reservation_id_raises_runtime_error() -> None:
+    class NoneReservationRateLimitStub(LoginRateLimitStub):
+        async def check(self, client_ip: str, email: str) -> str:
+            return None  # type: ignore[return-value]
+
+    # 1. InvalidCredentialsError with missing reservation_id
+    transport1 = ASGITransport(
+        app=create_app(
+            login=FailingLoginStub(InvalidCredentialsError()),
+            login_rate_limiter=NoneReservationRateLimitStub(),
+        )
+    )
+    with pytest.raises(RuntimeError, match="Login reservation was not created"):
+        async with AsyncClient(transport=transport1, base_url="https://test") as client:
+            await client.post(
+                "/api/v1/auth/login",
+                json={"email": "student@example.com", "password": "wrong"},
+            )
+
+    # 2. EmailVerificationRequiredError with missing reservation_id
+    transport2 = ASGITransport(
+        app=create_app(
+            login=FailingLoginStub(EmailVerificationRequiredError()),
+            login_rate_limiter=NoneReservationRateLimitStub(),
+        )
+    )
+    with pytest.raises(RuntimeError, match="Login reservation was not created"):
+        async with AsyncClient(transport=transport2, base_url="https://test") as client:
+            await client.post(
+                "/api/v1/auth/login",
+                json={"email": "student@example.com", "password": "password"},
+            )
+
+    # 3. Successful login with missing reservation_id
+    account_id = UUID("5b15bfef-8c44-45d5-a70e-574beb999fb3")
+    success_login = LoginStub(
+        LoginResult(
+            account_id=account_id,
+            email="student@example.com",
+            name="Student",
+            session_token="token",
+            csrf_token="csrf",
+        )
+    )
+    transport3 = ASGITransport(
+        app=create_app(
+            login=success_login,
+            login_rate_limiter=NoneReservationRateLimitStub(),
+        )
+    )
+    with pytest.raises(RuntimeError, match="Login reservation was not created"):
+        async with AsyncClient(transport=transport3, base_url="https://test") as client:
+            await client.post(
+                "/api/v1/auth/login",
+                json={"email": "student@example.com", "password": "password"},
+            )

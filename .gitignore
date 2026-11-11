@@ -9,11 +9,23 @@ htmlcov/
 
 # Virtual environments
 .venv/
+.pnpm-store/
 
 # Local configuration
 .env
 .env.*
 !.env.example
+!.env.evaluation.example
+scripts/backup.env
+scripts/backup-config.ps1
+scripts/backup-recipients.txt
+scripts/restore.env
+scripts/restore-config.ps1
+studyflow-backup-private-key.txt
+studyflow-backup-private-key.age
+*.dump
+*.dump.age
+*.gpg
 
 # Editors and operating systems
 .DS_Store
@@ -26,3 +38,7 @@ htmlcov/
 
 # Machine-specific Compose overrides (see the header in the file itself)
 compose.override.yaml
+
+# Local dependency store and build output
+.pnpm-store/
+frontend/storybook-static/

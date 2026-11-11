@@ -1,0 +1,47 @@
+name: Storybook CI
+
+on:
+  pull_request:
+    paths: ["frontend/**", ".github/workflows/storybook-ci.yml"]
+  push:
+    paths: ["frontend/**", ".github/workflows/storybook-ci.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: storybook-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: frontend
+
+jobs:
+  stories:
+    name: Story coverage, build, and Playwright interactions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          version: 10.14.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm check:stories
+      - run: pnpm build-storybook --disable-telemetry
+      - run: pnpm test:storybook
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: storybook-preview
+          path: frontend/storybook-static
+          retention-days: 7

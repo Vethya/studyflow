@@ -23,6 +23,8 @@
     }
   },
   "include": [
+    ".storybook/**/*.ts",
+    ".storybook/**/*.tsx",
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",

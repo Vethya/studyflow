@@ -317,17 +317,18 @@ def _has_zero_break_capacity(
     return False
 
 
-def _minimum_break_capacities(
-    tasks: tuple[_TaskInput, ...],
+def _minimum_break_capacity(
+    task: _TaskInput,
     problem: FeasibilityProblem,
     solve_deadline: float,
-) -> dict[str, int]:
-    """Prove every task's break-adjusted capacity in one independent-component solve."""
+) -> int:
+    """Prove one task's break-adjusted capacity within the shared solve budget."""
 
     minimum_break = problem.minimum_break_minutes
+    tasks = (task,)
     capacities = {task.task_id: max(0, len(task.sessions) - 1) * minimum_break for task in tasks}
     if minimum_break == 0:
-        return capacities
+        return capacities[task.task_id]
 
     model = cp_model.CpModel()
     active_by_task: dict[str, cp_model.IntVar] = {}
@@ -416,6 +417,14 @@ def _minimum_break_capacities(
             if credited_endings:
                 model.add(sum(credited_endings) <= 1)
 
+        # Same-duration sessions share domains and credit options, so order them.
+        starts_by_duration: dict[int, list[tuple[str, cp_model.IntVar]]] = defaultdict(list)
+        for session, start in zip(task.sessions, starts, strict=True):
+            starts_by_duration[session.duration_minutes].append((session.session_id, start))
+        for group in starts_by_duration.values():
+            for (_, previous), (_, following) in pairwise(sorted(group, key=lambda item: item[0])):
+                model.add(previous < following).only_enforce_if(active)
+
         model.add_no_overlap(intervals)
         model.add(sum(final_session) == active)
         for index, is_final in enumerate(final_session):
@@ -429,7 +438,7 @@ def _minimum_break_capacities(
         objective_terms.append(active * (maximum_break_capacity + 1) + task_credit)
 
     if not active_by_task:
-        return capacities
+        return capacities[task.task_id]
 
     model.maximize(cp_model.LinearExpr.sum(objective_terms))
     validation_error = model.validate()
@@ -463,7 +472,17 @@ def _minimum_break_capacities(
             if solver.boolean_value(variable)
         )
         capacities[task_id] -= earned_credit
-    return capacities
+    return capacities[task.task_id]
+
+
+def _minimum_break_capacities(
+    tasks: tuple[_TaskInput, ...],
+    problem: FeasibilityProblem,
+    solve_deadline: float,
+) -> dict[str, int]:
+    """Prove disconnected task capacities separately within one shared deadline."""
+
+    return {task.task_id: _minimum_break_capacity(task, problem, solve_deadline) for task in tasks}
 
 
 def _task_demands(problem: FeasibilityProblem, solve_deadline: float) -> tuple[_TaskDemand, ...]:
@@ -1142,6 +1161,7 @@ def _solve_witness_day_placement(
     total_wall_time = 0.0
     total_conflicts = 0
     total_branches = 0
+    proven_optimal = True
     for component in components:
         if len(component) == 1:
             placement = component[0]
@@ -1206,14 +1226,16 @@ def _solve_witness_day_placement(
                 empty_diagnostics("EXCEPTION"),
                 str(error),
             )
-        if solver_status != cp_model.OPTIMAL:
+        # A feasible incumbent is a valid placement; only the refinement quality is unproven.
+        if solver_status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             return OverloadResult(
                 KernelStatus.TECHNICAL_FAILURE,
                 (),
                 (),
                 solver_diagnostics(solver, solver_status),
-                "The earliness placement objective was not proven optimal",
+                "The earliness placement objective could not be computed",
             )
+        proven_optimal = proven_optimal and solver_status == cp_model.OPTIMAL
 
         total_wall_time += solver.wall_time
         total_conflicts += solver.num_conflicts
@@ -1236,7 +1258,12 @@ def _solve_witness_day_placement(
         status,
         scheduled,
         _allocations(tasks, scheduled_ids, problem),
-        SolverDiagnostics("OPTIMAL", total_wall_time, total_conflicts, total_branches),
+        SolverDiagnostics(
+            "OPTIMAL" if proven_optimal else "FEASIBLE",
+            total_wall_time,
+            total_conflicts,
+            total_branches,
+        ),
         "Some work could not fit before its deadline" if status is KernelStatus.OVERLOAD else None,
     )
 
@@ -1317,6 +1344,7 @@ def _solve_uniform_spread_placement(
     policy_wall_time = 0.0
     policy_conflicts = 0
     policy_branches = 0
+    policy_proven_optimal = True
     if spread_variables_by_day_count:
         extra_day_weights = {
             day_count: maximum_candidate_days - day_count + 1
@@ -1387,14 +1415,16 @@ def _solve_uniform_spread_placement(
                 empty_diagnostics("EXCEPTION"),
                 str(error),
             )
-        if spread_status != cp_model.OPTIMAL:
+        # A feasible incumbent is a valid placement; only the refinement quality is unproven.
+        if spread_status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             return OverloadResult(
                 KernelStatus.TECHNICAL_FAILURE,
                 (),
                 (),
                 solver_diagnostics(spread_solver, spread_status),
-                "The spread placement objective was not proven optimal",
+                "The spread placement objective could not be computed",
             )
+        policy_proven_optimal = spread_status == cp_model.OPTIMAL
 
         policy_wall_time += spread_solver.wall_time
         policy_conflicts += spread_solver.num_conflicts
@@ -1434,14 +1464,16 @@ def _solve_uniform_spread_placement(
                     empty_diagnostics("EXCEPTION"),
                     str(error),
                 )
-            if earliness_status != cp_model.OPTIMAL:
+            # A feasible incumbent keeps the pinned spread; only earliness is unproven.
+            if earliness_status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
                 return OverloadResult(
                     KernelStatus.TECHNICAL_FAILURE,
                     (),
                     (),
                     solver_diagnostics(assignment_solver, earliness_status),
-                    "The earliness placement objective was not proven optimal",
+                    "The earliness placement objective could not be computed",
                 )
+            policy_proven_optimal = policy_proven_optimal and earliness_status == cp_model.OPTIMAL
             policy_wall_time += assignment_solver.wall_time
             policy_conflicts += assignment_solver.num_conflicts
             policy_branches += assignment_solver.num_branches
@@ -1489,7 +1521,9 @@ def _solve_uniform_spread_placement(
         placement.sessions,
         placement.allocations,
         SolverDiagnostics(
-            "OPTIMAL",
+            "OPTIMAL"
+            if policy_proven_optimal and placement.diagnostics.solver_status == "OPTIMAL"
+            else "FEASIBLE",
             policy_wall_time + placement.diagnostics.wall_time_seconds,
             policy_conflicts + placement.diagnostics.conflicts,
             policy_branches + placement.diagnostics.branches,
@@ -1988,7 +2022,7 @@ def solve_with_overload(problem: FeasibilityProblem) -> OverloadResult:
     placement_objectives: list[tuple[str, cp_model.LinearExpr]] = []
     if spread_objective is not None:
         placement_objectives.append(("spread", spread_objective))
-    if earliness_terms:
+    if earliness_terms:  # pragma: no branch - every spread variable has a session term
         placement_objectives.append(("earliness", cp_model.LinearExpr.sum(earliness_terms)))
 
     for objective_name, objective in placement_objectives:
@@ -2018,13 +2052,14 @@ def solve_with_overload(problem: FeasibilityProblem) -> OverloadResult:
                 str(error),
             )
 
-        if placement_status != cp_model.OPTIMAL:
+        # A feasible incumbent is a valid placement; only the refinement quality is unproven.
+        if placement_status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             return OverloadResult(
                 KernelStatus.TECHNICAL_FAILURE,
                 (),
                 (),
                 solver_diagnostics(placement_solver, placement_status),
-                f"The {objective_name} placement objective was not proven optimal",
+                f"The {objective_name} placement objective could not be computed",
             )
 
         solver = placement_solver

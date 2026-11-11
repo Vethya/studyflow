@@ -11,25 +11,25 @@
  *
  * DaisyUI ships opinionated, colourful, softly-shadowed defaults. Adopting
  * them wholesale would erase the thing that makes this product legible: the
- * interface is deliberately near-monochrome so that teal and orange can mean
+ * interface is deliberately near-monochrome so that green and red can mean
  * "you have room" and "you are over" — and nothing else. So every DaisyUI
- * colour role is mapped onto the existing ink palette, `--depth` and `--noise`
+ * colour role is mapped onto the slate palette, `--depth` and `--noise`
  * are switched off, and the radii match what the app already used.
  */
 @plugin "daisyui/theme" {
-  name: "studyflow";
+  name: "light";
   default: true;
   prefersdark: false;
   color-scheme: light;
 
   --color-base-100: oklch(1 0 0);
-  --color-base-200: oklch(0.977 0.003 250);
-  --color-base-300: oklch(0.94 0.005 250);
-  --color-base-content: oklch(0.205 0.019 262);
+  --color-base-200: oklch(0.977 0.002 265);
+  --color-base-300: oklch(0.922 0.004 265);
+  --color-base-content: oklch(0.21 0.015 265);
 
-  /* Primary is ink, not a hue: emphasis comes from weight, never colour. */
-  --color-primary: oklch(0.235 0.021 262);
-  --color-primary-content: oklch(0.985 0.002 250);
+  /* Matches the shadcn tokens: dark slate on cool neutral surfaces. */
+  --color-primary: oklch(0.28 0.03 262);
+  --color-primary-content: oklch(0.985 0 0);
   --color-secondary: oklch(0.955 0.004 250);
   --color-secondary-content: oklch(0.235 0.021 262);
   --color-accent: oklch(0.945 0.006 250);
@@ -42,7 +42,7 @@
   /* The only two saturated roles in the product. */
   --color-success: oklch(0.512 0.089 183);
   --color-success-content: oklch(0.985 0.002 250);
-  --color-warning: oklch(0.553 0.176 33);
+  --color-warning: oklch(0.53 0.15 65);
   --color-warning-content: oklch(0.985 0.002 250);
   --color-error: oklch(0.553 0.176 33);
   --color-error-content: oklch(0.985 0.002 250);
@@ -59,17 +59,17 @@
 }
 
 @plugin "daisyui/theme" {
-  name: "studyflow-dark";
+  name: "dark";
   prefersdark: true;
   color-scheme: dark;
 
-  --color-base-100: oklch(0.228 0.019 262);
-  --color-base-200: oklch(0.183 0.017 262);
-  --color-base-300: oklch(0.288 0.019 262);
-  --color-base-content: oklch(0.955 0.004 250);
+  --color-base-100: oklch(0.205 0.007 265);
+  --color-base-200: oklch(0.165 0.006 265);
+  --color-base-300: oklch(0.25 0.007 265);
+  --color-base-content: oklch(0.95 0.003 265);
 
-  --color-primary: oklch(0.925 0.006 250);
-  --color-primary-content: oklch(0.228 0.019 262);
+  --color-primary: oklch(0.93 0.006 265);
+  --color-primary-content: oklch(0.2 0.015 265);
   --color-secondary: oklch(0.288 0.019 262);
   --color-secondary-content: oklch(0.955 0.004 250);
   --color-accent: oklch(0.318 0.02 262);
@@ -81,8 +81,8 @@
   --color-info-content: oklch(0.228 0.019 262);
   --color-success: oklch(0.712 0.101 183);
   --color-success-content: oklch(0.228 0.019 262);
-  --color-warning: oklch(0.712 0.157 40);
-  --color-warning-content: oklch(0.228 0.019 262);
+  --color-warning: oklch(0.76 0.15 75);
+  --color-warning-content: oklch(0.205 0.019 262);
   --color-error: oklch(0.712 0.157 40);
   --color-error-content: oklch(0.228 0.019 262);
 
@@ -96,7 +96,69 @@
   --noise: 0;
 }
 
-@custom-variant dark (&:is(.dark *));
+@plugin "daisyui/theme" {
+  name: "amoled";
+  prefersdark: true;
+  color-scheme: dark;
+
+  --color-base-100: oklch(0 0 0);
+  --color-base-200: oklch(0.03 0.004 262);
+  --color-base-300: oklch(0.16 0.008 262);
+  --color-base-content: oklch(0.955 0.004 250);
+
+  --color-primary: oklch(0.93 0.006 265);
+  --color-primary-content: oklch(0.12 0.01 265);
+  --color-secondary: oklch(0.16 0.012 262);
+  --color-secondary-content: oklch(0.955 0.004 250);
+  --color-accent: oklch(0.19 0.014 262);
+  --color-accent-content: oklch(0.955 0.004 250);
+  --color-neutral: oklch(0.38 0.014 260);
+  --color-neutral-content: oklch(0.955 0.004 250);
+
+  --color-info: oklch(0.712 0.014 256);
+  --color-info-content: oklch(0.06 0.004 262);
+  --color-success: oklch(0.712 0.101 183);
+  --color-success-content: oklch(0.06 0.004 262);
+  --color-warning: oklch(0.76 0.15 75);
+  --color-warning-content: oklch(0.06 0.004 262);
+  --color-error: oklch(0.712 0.157 40);
+  --color-error-content: oklch(0.06 0.004 262);
+
+  --radius-selector: 0.5rem;
+  --radius-field: 0.625rem;
+  --radius-box: 0.75rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@custom-variant dark (&:is(.dark *, .amoled *));
+
+/* Settings → Appearance → Density. Set on <html> before first paint. */
+@custom-variant compact (&:where([data-density="compact"], [data-density="compact"] *));
+
+/* Pointer-capable hover only; touch devices fire hover on tap. */
+@custom-variant hover-fine {
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      @slot;
+    }
+  }
+}
+
+/*
+ * Motion vocabulary. Built-in CSS easings are too weak for UI: elements should
+ * start fast and settle, so `fluid` is the default for anything entering or
+ * responding to the pointer, `swift` for things moving across the screen, and
+ * `drawer` for sheets.
+ */
+@theme {
+  --ease-fluid: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-swift: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
 
 @theme inline {
   --color-background: var(--background);
@@ -148,91 +210,446 @@
   --color-surplus-soft: var(--surplus-soft);
   --color-deficit: var(--deficit);
   --color-deficit-soft: var(--deficit-soft);
+
+  /* Category highlighters: one hue per kind of coursework. */
+  --color-cat-assignment: var(--cat-assignment);
+  --color-cat-reading: var(--cat-reading);
+  --color-cat-exam: var(--cat-exam);
+  --color-cat-project: var(--cat-project);
+  --color-cat-research: var(--cat-research);
+  --color-cat-other: var(--cat-other);
+
+  /* The grey shell framed cards sit in. */
+  --color-frame: var(--frame);
 }
 
 :root {
-  /* Paper and ink. The interface is deliberately near-monochrome so that the
-     two capacity signals below carry all the colour meaning. */
-  --background: oklch(0.977 0.003 250);
-  --foreground: oklch(0.205 0.019 262);
+  /* Slate: cool neutral surfaces, one dark slate for actions, framed cards on
+     a faint hatch. Capacity keeps its own two signals (surplus/deficit) and
+     categories keep their highlighter hues. */
+  --background: oklch(0.995 0 0);
+  --foreground: oklch(0.21 0.015 265);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.205 0.019 262);
+  --card-foreground: oklch(0.21 0.015 265);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.205 0.019 262);
-  --primary: oklch(0.235 0.021 262);
-  --primary-foreground: oklch(0.985 0.002 250);
-  --secondary: oklch(0.955 0.004 250);
-  --secondary-foreground: oklch(0.235 0.021 262);
-  --muted: oklch(0.955 0.004 250);
-  --muted-foreground: oklch(0.518 0.018 258);
-  --accent: oklch(0.945 0.006 250);
-  --accent-foreground: oklch(0.235 0.021 262);
-  --destructive: oklch(0.553 0.176 33);
-  --border: oklch(0.903 0.006 250);
-  --input: oklch(0.903 0.006 250);
-  --ring: oklch(0.518 0.018 258);
+  --popover-foreground: oklch(0.21 0.015 265);
+  --primary: oklch(0.28 0.03 262);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.968 0.002 265);
+  --secondary-foreground: oklch(0.21 0.015 265);
+  --muted: oklch(0.968 0.002 265);
+  --muted-foreground: oklch(0.53 0.014 265);
+  --accent: oklch(0.96 0.003 265);
+  --accent-foreground: oklch(0.21 0.015 265);
+  --destructive: oklch(0.545 0.215 27);
+  --border: oklch(0.922 0.004 265);
+  --input: oklch(0.9 0.005 265);
+  --ring: oklch(0.55 0.02 262);
+  /* The grey shell a framed card's header sits on. */
+  --frame: oklch(0.972 0.002 265);
 
-  /* Time you have. */
-  --surplus: oklch(0.512 0.089 183);
-  --surplus-soft: oklch(0.947 0.028 183);
+  /* Time you have. Lightness stays at or under 4.5:1 on white and on the
+     12% tint used by capacity pills. */
+  --surplus: oklch(0.5 0.15 152);
+  --surplus-soft: oklch(0.96 0.04 152);
   /* Time you owe beyond it. */
-  --deficit: oklch(0.553 0.176 33);
-  --deficit-soft: oklch(0.955 0.032 45);
+  --deficit: oklch(0.54 0.2 25);
+  --deficit-soft: oklch(0.96 0.03 25);
 
-  --chart-1: oklch(0.205 0.019 262);
-  --chart-2: oklch(0.395 0.018 260);
-  --chart-3: oklch(0.518 0.018 258);
-  --chart-4: oklch(0.665 0.014 256);
-  --chart-5: oklch(0.803 0.009 252);
-  --radius: 0.75rem;
-  --sidebar: oklch(0.962 0.004 250);
-  --sidebar-foreground: oklch(0.205 0.019 262);
-  --sidebar-primary: oklch(0.235 0.021 262);
-  --sidebar-primary-foreground: oklch(0.985 0.002 250);
-  --sidebar-accent: oklch(0.925 0.007 250);
-  --sidebar-accent-foreground: oklch(0.235 0.021 262);
-  --sidebar-border: oklch(0.898 0.006 250);
-  --sidebar-ring: oklch(0.518 0.018 258);
+  /* Category highlighters. */
+  --cat-assignment: oklch(0.55 0.15 255);
+  --cat-reading: oklch(0.55 0.12 150);
+  --cat-exam: oklch(0.56 0.18 15);
+  --cat-project: oklch(0.53 0.17 300);
+  --cat-research: oklch(0.62 0.14 60);
+  --cat-other: oklch(0.55 0.015 265);
+
+  --chart-1: oklch(0.28 0.03 262);
+  --chart-2: oklch(0.6 0.15 152);
+  --chart-3: oklch(0.7 0.15 70);
+  --chart-4: oklch(0.55 0.2 290);
+  --chart-5: oklch(0.6 0.2 25);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.977 0.002 265);
+  --sidebar-foreground: oklch(0.35 0.015 265);
+  --sidebar-primary: oklch(0.28 0.03 262);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(1 0 0);
+  --sidebar-accent-foreground: oklch(0.21 0.015 265);
+  --sidebar-border: oklch(0.922 0.004 265);
+  --sidebar-ring: oklch(0.55 0.02 262);
 }
 
-.dark {
-  --background: oklch(0.183 0.017 262);
-  --foreground: oklch(0.955 0.004 250);
-  --card: oklch(0.228 0.019 262);
-  --card-foreground: oklch(0.955 0.004 250);
-  --popover: oklch(0.228 0.019 262);
-  --popover-foreground: oklch(0.955 0.004 250);
-  --primary: oklch(0.925 0.006 250);
-  --primary-foreground: oklch(0.228 0.019 262);
-  --secondary: oklch(0.288 0.019 262);
-  --secondary-foreground: oklch(0.955 0.004 250);
-  --muted: oklch(0.288 0.019 262);
-  --muted-foreground: oklch(0.712 0.014 256);
-  --accent: oklch(0.318 0.02 262);
-  --accent-foreground: oklch(0.955 0.004 250);
-  --destructive: oklch(0.685 0.163 38);
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 16%);
-  --ring: oklch(0.618 0.016 256);
+html.dark {
+  --background: oklch(0.165 0.006 265);
+  --foreground: oklch(0.95 0.003 265);
+  --card: oklch(0.205 0.007 265);
+  --card-foreground: oklch(0.95 0.003 265);
+  --popover: oklch(0.22 0.007 265);
+  --popover-foreground: oklch(0.95 0.003 265);
+  --primary: oklch(0.93 0.006 265);
+  --primary-foreground: oklch(0.2 0.015 265);
+  --secondary: oklch(0.25 0.007 265);
+  --secondary-foreground: oklch(0.95 0.003 265);
+  --muted: oklch(0.25 0.007 265);
+  --muted-foreground: oklch(0.7 0.01 265);
+  --accent: oklch(0.26 0.008 265);
+  --accent-foreground: oklch(0.95 0.003 265);
+  --destructive: oklch(0.7 0.19 22);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.7 0.01 265);
+  --frame: oklch(0.185 0.006 265);
 
-  --surplus: oklch(0.712 0.101 183);
-  --surplus-soft: oklch(0.318 0.045 183);
-  --deficit: oklch(0.712 0.157 40);
-  --deficit-soft: oklch(0.332 0.062 38);
+  --surplus: oklch(0.75 0.15 152);
+  --surplus-soft: oklch(0.3 0.05 152);
+  --deficit: oklch(0.72 0.17 25);
+  --deficit-soft: oklch(0.3 0.06 25);
 
-  --chart-1: oklch(0.955 0.004 250);
-  --chart-2: oklch(0.822 0.009 252);
-  --chart-3: oklch(0.712 0.014 256);
-  --chart-4: oklch(0.588 0.016 258);
-  --chart-5: oklch(0.448 0.018 260);
-  --sidebar: oklch(0.212 0.018 262);
-  --sidebar-foreground: oklch(0.955 0.004 250);
-  --sidebar-primary: oklch(0.925 0.006 250);
-  --sidebar-primary-foreground: oklch(0.228 0.019 262);
-  --sidebar-accent: oklch(0.298 0.019 262);
-  --sidebar-accent-foreground: oklch(0.955 0.004 250);
-  --sidebar-border: oklch(1 0 0 / 12%);
-  --sidebar-ring: oklch(0.618 0.016 256);
+  --cat-assignment: oklch(0.72 0.12 255);
+  --cat-reading: oklch(0.74 0.11 150);
+  --cat-exam: oklch(0.72 0.14 15);
+  --cat-project: oklch(0.72 0.13 300);
+  --cat-research: oklch(0.78 0.12 65);
+  --cat-other: oklch(0.7 0.01 265);
+
+  --chart-1: oklch(0.93 0.006 265);
+  --chart-2: oklch(0.75 0.15 152);
+  --chart-3: oklch(0.78 0.12 70);
+  --chart-4: oklch(0.72 0.15 290);
+  --chart-5: oklch(0.72 0.17 25);
+  --sidebar: oklch(0.18 0.006 265);
+  --sidebar-foreground: oklch(0.8 0.008 265);
+  --sidebar-primary: oklch(0.93 0.006 265);
+  --sidebar-primary-foreground: oklch(0.2 0.015 265);
+  --sidebar-accent: oklch(0.24 0.008 265);
+  --sidebar-accent-foreground: oklch(0.96 0.003 265);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.7 0.01 265);
+
+  --landing-page: oklch(0.183 0.017 262);
+  --landing-canvas: oklch(0.228 0.019 262);
+  --landing-card: oklch(0.265 0.019 262);
+  --landing-ink: oklch(0.955 0.004 250);
+  --landing-muted: oklch(0.712 0.014 256);
+  --landing-subtle: oklch(0.68 0.016 258);
+  --landing-border: oklch(1 0 0 / 12%);
+  --landing-accent: oklch(0.78 0.105 230);
+  --landing-shadow: 0 18px 40px 0 oklch(0.04 0.01 262 / 0.28);
+  --landing-shadow-hover: 0 22px 46px 0 oklch(0.04 0.01 262 / 0.38);
+  --landing-hero: linear-gradient(180deg, oklch(0.34 0.07 255) 0%, oklch(0.43 0.08 245) 48%, oklch(0.28 0.04 255) 100%);
+  --auth-sky: linear-gradient(180deg, oklch(0.34 0.07 255) 0%, oklch(0.43 0.08 245) 48%, oklch(0.28 0.04 255) 100%);
+  --auth-shadow: 0 10px 40px 0 oklch(0.04 0.01 262 / 0.35);
+}
+
+html.amoled {
+  color-scheme: dark;
+  --background: oklch(0 0 0);
+  --foreground: oklch(0.95 0.003 265);
+  --card: oklch(0.12 0.004 265);
+  --card-foreground: oklch(0.95 0.003 265);
+  --popover: oklch(0.15 0.005 265);
+  --popover-foreground: oklch(0.95 0.003 265);
+  --primary: oklch(0.93 0.006 265);
+  --primary-foreground: oklch(0.12 0.01 265);
+  --secondary: oklch(0.17 0.005 265);
+  --secondary-foreground: oklch(0.95 0.003 265);
+  --muted: oklch(0.17 0.005 265);
+  --muted-foreground: oklch(0.7 0.01 265);
+  --accent: oklch(0.18 0.006 265);
+  --accent-foreground: oklch(0.95 0.003 265);
+  --destructive: oklch(0.7 0.19 22);
+  --border: oklch(1 0 0 / 11%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.7 0.01 265);
+  --frame: oklch(0.07 0.003 265);
+
+  --surplus: oklch(0.75 0.15 152);
+  --surplus-soft: oklch(0.2 0.05 152);
+  --deficit: oklch(0.72 0.17 25);
+  --deficit-soft: oklch(0.2 0.06 25);
+
+  --cat-assignment: oklch(0.72 0.12 255);
+  --cat-reading: oklch(0.74 0.11 150);
+  --cat-exam: oklch(0.72 0.14 15);
+  --cat-project: oklch(0.72 0.13 300);
+  --cat-research: oklch(0.78 0.12 65);
+  --cat-other: oklch(0.7 0.01 265);
+
+  --chart-1: oklch(0.93 0.006 265);
+  --chart-2: oklch(0.75 0.15 152);
+  --chart-3: oklch(0.78 0.12 70);
+  --chart-4: oklch(0.72 0.15 290);
+  --chart-5: oklch(0.72 0.17 25);
+  --sidebar: oklch(0 0 0);
+  --sidebar-foreground: oklch(0.8 0.008 265);
+  --sidebar-primary: oklch(0.93 0.006 265);
+  --sidebar-primary-foreground: oklch(0.12 0.01 265);
+  --sidebar-accent: oklch(0.14 0.005 265);
+  --sidebar-accent-foreground: oklch(0.96 0.003 265);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.7 0.01 265);
+
+  /* The marketing page owns a separate visual system from the app shell. */
+  --landing-page: oklch(0 0 0);
+  --landing-canvas: oklch(0.02 0.004 262);
+  --landing-card: oklch(0.05 0.006 262);
+  --landing-ink: oklch(0.955 0.004 250);
+  --landing-muted: oklch(0.712 0.014 256);
+  --landing-subtle: oklch(0.68 0.016 258);
+  --landing-border: oklch(1 0 0 / 14%);
+  --landing-accent: oklch(0.78 0.105 230);
+  --landing-shadow: 0 18px 40px 0 oklch(0 0 0 / 0.7);
+  --landing-shadow-hover: 0 22px 46px 0 oklch(0 0 0 / 0.85);
+  --landing-hero: linear-gradient(180deg, oklch(0.13 0.03 255) 0%, oklch(0.07 0.015 255) 48%, oklch(0.01 0.004 262) 100%);
+  --auth-sky: linear-gradient(180deg, oklch(0.1 0.02 255) 0%, oklch(0.05 0.012 255) 48%, oklch(0 0 0) 100%);
+  --auth-shadow: 0 10px 40px 0 oklch(0 0 0 / 0.75);
+}
+
+:root {
+  --landing-page: oklch(1 0 0);
+  --landing-canvas: oklch(0.965 0.003 250);
+  --landing-card: oklch(1 0 0);
+  --landing-ink: oklch(0.205 0.019 262);
+  --landing-muted: oklch(0.518 0.018 258);
+  --landing-subtle: oklch(0.52 0.012 258);
+  --landing-border: oklch(0.92 0.005 250);
+  --landing-accent: oklch(0.62 0.13 230);
+  --landing-shadow: 0 17px 37px 0 oklch(0.2 0.02 262 / 0.06);
+  --landing-shadow-hover: 0 20px 40px 0 oklch(0.2 0.02 262 / 0.1);
+  --landing-hero: linear-gradient(180deg, #779bc1 0%, #9abfda 48%, #cbdcec 80%, #e4ecf3 100%);
+  --auth-sky: linear-gradient(180deg, #779bc1 0%, #9abfda 48%, #cbdcec 80%, #e4ecf3 100%);
+  --auth-shadow: 0 10px 40px 0 oklch(0.2 0.08 250 / 0.1);
+}
+
+@layer components {
+  .app-page [data-slot="page-header"] h1 {
+    font-weight: 600;
+    letter-spacing: -0.025em;
+  }
+
+  /* Dialogs and sheets title themselves like the pages they open over. */
+  [data-slot="dialog-content"] [data-slot="dialog-title"],
+  [data-slot="sheet-content"] [data-slot="sheet-title"] {
+    font-size: 1.125rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.25;
+  }
+
+  .app-page [data-slot="card-title"] {
+    font-size: 0.875rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .dashboard-capacity-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .dashboard-empty-state {
+    border: 1px dashed color-mix(in oklch, var(--primary) 30%, transparent);
+    border-radius: 0.75rem;
+    background: color-mix(in oklch, var(--primary) 5%, var(--card));
+  }
+
+  .space-dashboard .hgi * {
+    stroke-width: 1.75;
+  }
+
+  .space-dashboard [data-slot="sidebar-inner"] {
+    background: var(--sidebar);
+  }
+
+  .space-dashboard [data-slot="sidebar-menu-button"] {
+    gap: 0.625rem;
+  }
+
+  /* Faint diagonal hatching: the shell framed cards and empty states sit on. */
+  .frame-hatch {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      color-mix(in oklch, var(--foreground) var(--hatch-strength, 4.5%), transparent) 0 1px,
+      transparent 1px 7px
+    );
+  }
+
+  :is(.dark, .amoled) .frame-hatch {
+    --hatch-strength: 2.5%;
+  }
+
+  /*
+   * Entrance for content that appears once per visit (page sections, the
+   * first paint of a list). Set `--stagger` on siblings for a short cascade.
+   * Never used for anything the user triggers repeatedly.
+   */
+  .rise-in {
+    animation: sf-rise 420ms var(--ease-fluid) both;
+    animation-delay: calc(var(--stagger, 0) * 45ms);
+  }
+
+  /* Compact density: tighter cards, rows and page rhythm. */
+  [data-density="compact"] .space-dashboard [data-slot="card"] {
+    --card-spacing: 0.875rem;
+  }
+
+  [data-density="compact"] .app-page {
+    gap: 1rem;
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+  }
+
+  [data-density="compact"] .app-page [data-slot="page-header"] h1 {
+    font-size: 1.5rem;
+  }
+
+  .landing-page {
+    background: var(--landing-page);
+    color: var(--landing-ink);
+  }
+
+  .auth-surface {
+    background: var(--auth-sky);
+  }
+
+  .landing-canvas {
+    background: var(--landing-canvas);
+  }
+
+  .landing-canvas-text {
+    color: var(--landing-canvas);
+  }
+
+  .landing-surface {
+    background: var(--landing-card);
+  }
+
+  .landing-ink {
+    color: var(--landing-ink);
+  }
+
+  .landing-muted {
+    color: var(--landing-muted);
+  }
+
+  .landing-subtle {
+    color: var(--landing-subtle);
+  }
+
+  .landing-border {
+    border-color: var(--landing-border);
+  }
+
+  .landing-ink-border {
+    border-color: var(--landing-ink);
+  }
+
+  .landing-ink-border-soft {
+    border-color: color-mix(in oklch, var(--landing-ink) 15%, transparent);
+  }
+
+  .landing-accent {
+    color: var(--landing-accent);
+  }
+
+  .landing-accent-bg {
+    background: var(--landing-accent);
+  }
+
+  .landing-ink-button {
+    background: var(--landing-ink);
+    color: var(--landing-page);
+    box-shadow: var(--landing-shadow);
+  }
+
+  .landing-ink-button:hover {
+    background: color-mix(in oklch, var(--landing-ink) 88%, var(--landing-page));
+  }
+
+  .landing-card-shadow {
+    box-shadow: var(--landing-shadow);
+  }
+
+  .landing-card-shadow:hover {
+    box-shadow: var(--landing-shadow-hover);
+  }
+
+  /* Scale the complete timetable without measuring the app's main element. */
+  .landing-week-grid {
+    zoom: 0.75;
+  }
+
+  .landing-week-grid [role="region"] {
+    max-height: none;
+    overflow: clip;
+  }
+
+  .landing-week-grid [role="region"] > div {
+    min-width: 0 !important;
+  }
+
+  /* Content is visible by default, including when motion is unsupported. */
+  @media (prefers-reduced-motion: no-preference) {
+    @keyframes landing-rise {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .landing-rise {
+      animation: landing-rise 600ms ease-out var(--landing-delay, 0ms) both;
+    }
+
+    @supports (animation-timeline: view()) {
+      .landing-reveal {
+        animation: landing-rise 1ms linear both;
+        animation-timeline: view();
+        animation-range: entry 0% entry 40%;
+      }
+    }
+  }
+}
+
+.app-figure-grid > :last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
+/* Touch polish. Unlayered on purpose: it must beat the `text-sm` utility. */
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+a,
+button,
+[role="button"],
+[role="tab"],
+[role="option"],
+label {
+  touch-action: manipulation;
+}
+
+/* iOS zooms into any field under 16px on focus. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: max(16px, 1em);
+  }
+}
+
+@container dashboard (min-width: 48rem) {
+  .app-figure-grid > :last-child:nth-child(odd) {
+    grid-column: auto;
+  }
 }
 
 @layer base {
@@ -286,6 +703,72 @@
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
     }
+    ::view-transition-old(*),
+    ::view-transition-new(*),
+    ::view-transition-group(*) {
+      animation-duration: 0.01ms !important;
+      animation-delay: 0s !important;
+    }
+  }
+
+  /* Clicks during a page transition reach the live page instead of the overlay. */
+  ::view-transition {
+    pointer-events: none;
+  }
+
+  /* Page navigation: the old page steps back quickly, the new one settles in. */
+  ::view-transition-old(.page-exit) {
+    animation: 120ms ease-out both sf-page-out;
+  }
+
+  ::view-transition-new(.page-enter) {
+    animation: 240ms var(--ease-fluid) 40ms both sf-page-in;
+  }
+
+  @keyframes sf-page-out {
+    to {
+      opacity: 0;
+    }
+  }
+
+  @keyframes sf-page-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+
+  /* View Transition crossfade for theme changes */
+  ::view-transition-image-pair(root) {
+    isolation: isolate;
+  }
+
+  ::view-transition-old(root) {
+    /* Keep old snapshot stationary underneath without fading to translucent */
+    animation: none;
+    z-index: 1;
+  }
+
+  ::view-transition-new(root) {
+    /* Fade new snapshot cleanly on top of the old one */
+    animation: 250ms cubic-bezier(0.16, 1, 0.3, 1) both sf-theme-fade-in;
+    z-index: 2;
+  }
+
+  @keyframes sf-theme-fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes sf-rise {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
   }
 
   /* A visible focus ring everywhere, not just where a component remembered
@@ -297,17 +780,25 @@
 }
 
 @layer base {
-  /* Lucide ships a 2px stroke, which reads heavy at the 14–16px sizes this
-     interface uses. A lighter stroke keeps the icons legible without letting
-     them compete with the figures beside them. */
-  .lucide {
+  /* Hugeicons sets the stroke on each path rather than on the <svg>, so the
+     weight rules target the shapes. A light stroke keeps the icons legible at
+     14–16px without letting them compete with the figures beside them. */
+  .hgi * {
     stroke-width: 1.5;
   }
 
   /* Icons carrying real weight — a warning, the logo mark — keep more
      presence than the navigation glyphs around them. */
-  .icon-strong .lucide,
-  .lucide.icon-strong {
+  .icon-strong .hgi *,
+  .hgi.icon-strong * {
     stroke-width: 1.75;
+  }
+
+  /* Strip WebKit search decoration pseudoelements so search inputs do not have unwanted left margin */
+  input[type="search"]::-webkit-search-decoration,
+  input[type="search"]::-webkit-search-cancel-button,
+  input[type="search"]::-webkit-search-results-button,
+  input[type="search"]::-webkit-search-results-decoration {
+    -webkit-appearance: none;
   }
 }

@@ -4,6 +4,7 @@ import pytest
 
 import studyflow.auth.passwords as password_module
 from studyflow.auth.passwords import (
+    KNOWN_BREACH_MESSAGE,
     BreachedPasswordError,
     PasswordPolicyError,
     PasswordService,
@@ -54,8 +55,9 @@ async def test_password_rejects_more_than_128_characters() -> None:
 async def test_registration_rejects_a_known_breached_password() -> None:
     service = PasswordService(BreachedPasswordStub())
 
-    with pytest.raises(BreachedPasswordError, match="appears in a known breach"):
+    with pytest.raises(BreachedPasswordError, match="known data breach") as error:
         await service.hash_password("correct horse battery staple")
+    assert str(error.value) == KNOWN_BREACH_MESSAGE
 
 
 @pytest.mark.anyio

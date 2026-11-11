@@ -6,6 +6,7 @@ import { dayOfWeekToWireWeekday, toAvailabilityWindow, toUnavailablePeriod } fro
 import type { AvailabilityWindow, UnavailablePeriod } from "@/types/availability";
 import type {
   WireAvailabilityWindow,
+  WireAvailabilityWindowChange,
   WireUnavailablePeriod,
   WireUnavailablePeriodChange,
   WireStudyPreferences,
@@ -23,6 +24,11 @@ export interface WindowDraft {
   endTime: string;
 }
 
+export interface AvailabilityWindowChange {
+  windows: AvailabilityWindow[];
+  invalidatedFutureSessionIds: string[];
+}
+
 /**
  * Replaces the entire weekly schedule in one call — there is no per-window
  * create or delete. Overlapping windows on the same day are merged server-side,
@@ -31,8 +37,8 @@ export interface WindowDraft {
 export async function replaceWindows(
   windows: WindowDraft[],
   signal?: AbortSignal,
-): Promise<AvailabilityWindow[]> {
-  const wire = await apiJson<WireAvailabilityWindow[]>("/availability/windows", {
+): Promise<AvailabilityWindowChange> {
+  const wire = await apiJson<WireAvailabilityWindowChange>("/availability/windows", {
     method: "PUT",
     body: {
       windows: windows.map((window) => ({
@@ -43,7 +49,10 @@ export async function replaceWindows(
     },
     signal,
   });
-  return wire.map(toAvailabilityWindow);
+  return {
+    windows: wire.windows.map(toAvailabilityWindow),
+    invalidatedFutureSessionIds: wire.invalidated_future_session_ids,
+  };
 }
 
 /**

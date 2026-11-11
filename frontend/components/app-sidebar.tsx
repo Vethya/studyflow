@@ -1,16 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 import {
   LayoutGrid,
   CalendarDays,
   ListChecks,
   Clock3,
   ChartLine,
-  Settings,
-  GraduationCap,
-} from "lucide-react";
+} from "@/components/icons";
 import {
   Sidebar,
   SidebarContent,
@@ -19,18 +16,13 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
+  SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { NavUser } from "@/components/nav-user";
-import { cn } from "@/lib/utils";
+import { SidebarNav } from "@/components/ui/sidebar-nav";
 
-/**
- * Two labelled groups: where the work is, and where the account is.
- * Settings keeps no sub-menu — the settings screen carries its own section
- * nav, and duplicating it here meant two copies of the same navigation.
- */
+/** The sidebar is for work navigation; account actions live in the footer menu. */
 const MENU = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutGrid },
   { title: "Tasks", url: "/tasks", icon: ListChecks },
@@ -39,61 +31,24 @@ const MENU = [
   { title: "Progress", url: "/progress", icon: ChartLine },
 ];
 
-const GENERAL = [
-  { title: "Settings", url: "/settings", icon: Settings },
-];
-
 export function AppSidebar() {
-  const pathname = usePathname();
-
-  const isActive = (item: { url: string; match?: string }) =>
-    item.match
-      ? pathname.startsWith(item.match)
-      : pathname === item.url || pathname.startsWith(`${item.url}/`);
-
-  /*
-   * The collapsed overrides are repeated here on purpose.
-   *
-   * `SidebarMenuButton` already ships `group-data-[collapsible=icon]:size-8!`,
-   * but these classes are merged *after* it, and tailwind-merge resolves a
-   * later `h-10` against an earlier `size-8` by dropping the size — so the
-   * rail rendered 40px-tall buttons with 12px side padding inside a 48px
-   * column, pushing every icon off centre. Restating them last wins the merge.
-   *
-   * `gap-0` matters just as much. The label span collapses to zero width when
-   * folded but stays a flex item, and a flex gap is still drawn beside a
-   * zero-width child — so the icon sat 6px (half of `gap-3`) left of the
-   * highlight pill that is supposed to be centred on it.
-   */
-  const itemClass = (active: boolean) =>
-    cn(
-      "h-10 gap-3 rounded-lg px-3 text-sm transition-colors",
-      "group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:p-2!",
-      active
-        ? "bg-sidebar-primary font-medium text-sidebar-primary-foreground hover:bg-sidebar-primary hover:text-sidebar-primary-foreground"
-        : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-    );
+  const { isMobile, setOpenMobile } = useSidebar();
 
   return (
     <Sidebar variant="sidebar" collapsible="icon">
-      <SidebarHeader className="px-3 py-4 group-data-[collapsible=icon]:px-2">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              className="h-11 gap-2.5 hover:bg-transparent active:bg-transparent group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0!"
-              render={
-                <Link href="/dashboard">
-                  <span className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                    <GraduationCap className="size-4" />
-                  </span>
-                  <span className="truncate font-display text-lg font-bold tracking-tight group-data-[collapsible=icon]:hidden">
-                    StudyFlow
-                  </span>
-                </Link>
-              }
-            />
-          </SidebarMenuItem>
-        </SidebarMenu>
+      <SidebarHeader className="py-4 pl-6 pr-3 group-data-[collapsible=icon]:px-2">
+        <div className="flex h-11 items-center justify-between gap-2 group-data-[collapsible=icon]:h-8 group-data-[collapsible=icon]:justify-center">
+          <Link
+            href="/dashboard"
+            onClick={() => {
+              if (isMobile) setOpenMobile(false);
+            }}
+            className="min-w-0 flex-1 truncate font-display text-lg font-bold tracking-tight group-data-[collapsible=icon]:hidden"
+          >
+            StudyFlow
+          </Link>
+          <SidebarTrigger className="ml-auto shrink-0 group-data-[collapsible=icon]:ml-0 group-data-[collapsible=icon]:size-8" />
+        </div>
       </SidebarHeader>
 
       {/* Folded, SidebarGroup already supplies the 8px gutter; keeping this
@@ -101,56 +56,11 @@ export function AppSidebar() {
           edge of the rail. */}
       <SidebarContent className="px-2 group-data-[collapsible=icon]:px-0">
         <SidebarGroup className="py-1">
-          <SidebarGroupLabel className="px-2 text-xs font-medium text-muted-foreground/80">
+          <SidebarGroupLabel className="px-2 text-xs font-medium text-muted-foreground">
             Menu
           </SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu className="gap-1">
-              {MENU.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    isActive={isActive(item)}
-                    tooltip={item.title}
-                    className={itemClass(isActive(item))}
-                    render={
-                      <Link href={item.url}>
-                        <item.icon className="size-4" />
-                        <span className="group-data-[collapsible=icon]:hidden">
-                          {item.title}
-                        </span>
-                      </Link>
-                    }
-                  />
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup className="py-1">
-          <SidebarGroupLabel className="px-2 text-xs font-medium text-muted-foreground/80">
-            Account
-          </SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu className="gap-1">
-              {GENERAL.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    isActive={isActive(item)}
-                    tooltip={item.title}
-                    className={itemClass(isActive(item))}
-                    render={
-                      <Link href={item.url}>
-                        <item.icon className="size-4" />
-                        <span className="group-data-[collapsible=icon]:hidden">
-                          {item.title}
-                        </span>
-                      </Link>
-                    }
-                  />
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
+            <SidebarNav items={MENU} size="default" />
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>

@@ -2,8 +2,19 @@
 
 import * as React from "react";
 import Link from "next/link";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { CATEGORY_CONFIG } from "@/lib/constants";
 import { cn } from "@/lib/utils";
+import type { Category } from "@/types";
 
 /**
  * The structural vocabulary every screen is built from.
@@ -26,8 +37,8 @@ export function PageShell({
   return (
     <div
       className={cn(
-        "mx-auto flex w-full min-w-0 flex-col gap-8 px-4 py-6 sm:px-6 sm:py-8",
-        width === "wide" ? "max-w-6xl" : "max-w-4xl",
+        "app-page mx-auto flex w-full min-w-0 flex-col gap-6 px-4 py-6 @2xl/dashboard:px-6 @2xl/dashboard:py-7",
+        width === "wide" ? "max-w-7xl" : "max-w-4xl",
         className,
       )}
     >
@@ -37,30 +48,48 @@ export function PageShell({
 }
 
 /**
- * `min-w-0` on the text column and `flex-wrap` on the container are what stop
- * the actions being pushed off the right edge — the bug that clipped "Add
- * window" on Availability and the "Service" tab in Settings.
+ * The title and actions both need an explicit mobile width contract. Without
+ * it, a multi-button action group keeps its intrinsic width and can push page
+ * controls past the viewport.
  */
 export function PageHeader({
+  icon: Icon,
+  eyebrow,
   title,
   description,
   actions,
 }: {
+  icon?: React.ElementType;
+  /** A short line of context above the title, such as today's date. */
+  eyebrow?: React.ReactNode;
   title: React.ReactNode;
   description?: React.ReactNode;
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+    <div data-slot="page-header" className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
       <div className="min-w-0 flex-1 basis-64">
-        <h1 className="font-display text-2xl font-bold tracking-tight sm:text-[1.75rem]">
+        {(Icon || eyebrow) && (
+          <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            {Icon && <Icon className="size-3.5 text-primary" aria-hidden />}
+            {eyebrow}
+          </p>
+        )}
+        <h1 className="wrap-break-word text-2xl leading-tight font-semibold tracking-tight @2xl/dashboard:text-[1.625rem]">
           {title}
         </h1>
         {description && (
-          <p className="mt-1 max-w-prose text-sm text-muted-foreground">{description}</p>
+          <p className="mt-1.5 max-w-prose wrap-break-word text-sm text-muted-foreground">{description}</p>
         )}
       </div>
-      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+      {actions && (
+        <div
+          data-slot="page-header-actions"
+          className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-2 @2xl/dashboard:w-auto @2xl/dashboard:shrink-0"
+        >
+          {actions}
+        </div>
+      )}
     </div>
   );
 }
@@ -86,7 +115,7 @@ export function SectionHeader({
         className,
       )}
     >
-      <h2 className="font-display text-base font-semibold tracking-tight">{title}</h2>
+      <h2 className="text-base font-semibold tracking-tight">{title}</h2>
       <div className="flex items-baseline gap-3">
         {meta != null && (
           <span
@@ -112,46 +141,81 @@ export function SectionHeader({
 }
 
 /**
- * A single figure. `tone` is the only way colour enters a tile, and only ever
- * for a capacity signal — never for decoration.
+ * Every block of content on every screen: one card, one title, an optional
+ * description and one right-hand action. Pass `flush` for lists, tables and
+ * grids that should meet the card's edges.
  */
-export function StatTile({
-  icon: Icon,
-  value,
+export function SectionCard({
+  title,
+  description,
+  action,
+  footer,
+  flush = false,
+  className,
+  contentClassName,
+  children,
+}: {
+  title?: React.ReactNode;
+  description?: React.ReactNode;
+  action?: React.ReactNode;
+  footer?: React.ReactNode;
+  flush?: boolean;
+  className?: string;
+  contentClassName?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Card className={cn("min-w-0", className)}>
+      {(title || description || action) && (
+        <CardHeader>
+          {title && <CardTitle>{title}</CardTitle>}
+          {description && <CardDescription>{description}</CardDescription>}
+          {action && <CardAction>{action}</CardAction>}
+        </CardHeader>
+      )}
+      <CardContent className={cn(flush && "overflow-hidden p-0", contentClassName)}>{children}</CardContent>
+      {footer && <CardFooter>{footer}</CardFooter>}
+    </Card>
+  );
+}
+
+/**
+ * The page's headline figures, as one card of divided cells rather than a row
+ * of separate tiles — the figures belong to one question, so they read as one
+ * object. Stacks on small screens, where three columns would truncate.
+ */
+export function FigureRow({ children }: { children: React.ReactNode }) {
+  return (
+    <Card className="min-w-0">
+      <CardContent className="app-figure-grid grid grid-cols-2 divide-x divide-y overflow-hidden p-0 @3xl/dashboard:auto-cols-fr @3xl/dashboard:grid-flow-col @3xl/dashboard:grid-cols-none @3xl/dashboard:divide-y-0">
+        {children}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** One cell of a FigureRow. `tone` only ever carries a capacity signal. */
+export function Figure({
   label,
+  /** `null` renders the loading state. */
+  value,
   hint,
   tone,
 }: {
-  icon: React.ElementType;
-  /** `null` renders the loading state. */
-  value: string | null;
   label: string;
-  hint?: string;
+  value: string | null;
+  hint?: React.ReactNode;
   tone?: "deficit" | "surplus";
 }) {
   return (
-    <div className="min-w-0 rounded-xl border bg-card p-4">
-      <div className="flex items-center gap-2">
-        <Icon
-          className={cn(
-            "size-4 shrink-0",
-            tone === "deficit"
-              ? "text-deficit"
-              : tone === "surplus"
-                ? "text-surplus"
-                : "text-muted-foreground",
-          )}
-          aria-hidden
-        />
-        <p className="truncate text-xs font-medium text-muted-foreground">{label}</p>
-      </div>
-
+    <div className="min-w-0 px-4 py-3">
+      <p className="text-xs leading-5 text-muted-foreground">{label}</p>
       {value === null ? (
-        <Skeleton className="mt-2.5 h-8 w-24" />
+        <Skeleton className="mt-1.5 h-6 w-16" />
       ) : (
         <p
           className={cn(
-            "mt-2 font-display text-[1.75rem] font-bold leading-none tabular-nums",
+            "mt-1 text-2xl font-semibold leading-none tabular-nums",
             tone === "deficit" && "text-deficit",
             tone === "surplus" && "text-surplus",
           )}
@@ -159,9 +223,80 @@ export function StatTile({
           {value}
         </p>
       )}
-
-      {hint && <p className="mt-1.5 truncate text-xs text-muted-foreground">{hint}</p>}
+      {hint && <p className="mt-1 truncate text-xs text-muted-foreground">{hint}</p>}
     </div>
+  );
+}
+
+/** One headline figure in a framed card: the label rides on the frame. */
+export function StatCard({
+  icon: Icon,
+  label,
+  /** `null` renders the loading state. */
+  value,
+  hint,
+  tone,
+  children,
+  className,
+}: {
+  icon?: React.ElementType;
+  label: string;
+  value: React.ReactNode | null;
+  hint?: React.ReactNode;
+  tone?: "deficit" | "surplus";
+  children?: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <Card data-slot="stat-card" className={cn("min-w-0", className)}>
+      <CardHeader className="flex items-center gap-2">
+        {Icon && <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
+        {/* Wraps rather than truncates: two stat cards share a 360px row. */}
+        <p className="min-w-0 text-xs leading-tight font-medium text-pretty text-muted-foreground">{label}</p>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-1 px-4 py-3">
+        {value === null ? (
+          <Skeleton className="h-7 w-20" />
+        ) : (
+          <p
+            className={cn(
+              "text-[1.375rem] leading-tight font-semibold tracking-tight tabular-nums",
+              tone === "deficit" && "text-deficit",
+              tone === "surplus" && "text-surplus",
+            )}
+          >
+            {value}
+          </p>
+        )}
+        {hint && <p className="text-xs leading-snug text-pretty text-muted-foreground tabular-nums">{hint}</p>}
+        {children}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** A task's category, drawn as a highlighter tab. */
+export function CategoryTag({
+  category,
+  className,
+}: {
+  category: Category;
+  className?: string;
+}) {
+  const config = CATEGORY_CONFIG[category];
+  return (
+    <span
+      data-slot="category-tag"
+      className={cn(
+        "inline-flex h-5 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-xs font-medium",
+        config.bg,
+        config.color,
+        className,
+      )}
+    >
+      <span className={cn("size-1.5 rounded-full", config.dot)} aria-hidden />
+      {config.label}
+    </span>
   );
 }
 
@@ -182,15 +317,19 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-12 text-center",
+        "flex flex-col items-center gap-4 rounded-xl px-5 py-10 text-center",
         className,
       )}
     >
-      {Icon && <Icon className="size-6 text-muted-foreground/50" aria-hidden />}
+      {Icon && (
+        <span className="flex size-12 items-center justify-center rounded-xl border bg-frame text-foreground shadow-xs">
+          <Icon className="size-6" aria-hidden />
+        </span>
+      )}
       <div>
         <p className="text-sm font-medium">{title}</p>
         {children && (
-          <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">{children}</p>
+          <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted-foreground">{children}</p>
         )}
       </div>
       {action}

@@ -10,6 +10,8 @@ class AccountProfile:
     id: UUID
     email: str
     name: str
+    password_set: bool = False
+    avatar_url: str | None = None
 
 
 class AccountProfileRepository(Protocol):

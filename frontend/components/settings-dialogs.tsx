@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Globe, Loader2 } from "lucide-react";
+import { Globe, Loader2 } from "@/components/icons";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -22,10 +22,13 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Callout } from "@/components/ui/callout";
-import { account as accountApi } from "@/lib/api";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { ApiError, account as accountApi } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
+import { notifyStudyFlowSessionInvalidated } from "@/lib/data-events";
 import { formatOffset, withTimezone } from "@/lib/timezones";
 import type { WireAccountProfile, WireStudyPreferences } from "@/lib/api/wire";
 
@@ -37,6 +40,164 @@ import type { WireAccountProfile, WireStudyPreferences } from "@/lib/api/wire";
  * timezone change moves every displayed deadline — both deserve a deliberate
  * moment rather than a field that saves as you leave it.
  */
+export function AddPasswordDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [next, setNext] = React.useState("");
+  const [confirm, setConfirm] = React.useState("");
+  const [isSaving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [discardOpen, setDiscardOpen] = React.useState(false);
+
+  const [wasOpen, setWasOpen] = React.useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setNext("");
+      setConfirm("");
+      setError(null);
+      setDiscardOpen(false);
+    }
+  }
+
+  const isDirty = next !== "" || confirm !== "";
+
+  function resetForm() {
+    setNext("");
+    setConfirm("");
+    setError(null);
+  }
+
+  function requestClose() {
+    if (isSaving || discardOpen) return false;
+    if (isDirty) {
+      setDiscardOpen(true);
+      return false;
+    }
+    onOpenChange(false);
+    return true;
+  }
+
+  const tooShort = next.length > 0 && next.length < 12;
+  const mismatch = confirm.length > 0 && confirm !== next;
+  const canSave = next.length >= 12 && confirm === next && !isSaving;
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      await accountApi.setPassword(next);
+      toast.success("Password added. Please sign in again.");
+      notifyStudyFlowSessionInvalidated();
+      resetForm();
+      onOpenChange(false);
+    } catch (cause) {
+      setError(describeError(cause));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen, details) => {
+        if (nextOpen) onOpenChange(true);
+        else if (!requestClose()) details?.cancel?.();
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add a password</DialogTitle>
+          <DialogDescription>
+            You currently sign in with Google. Add a password so you can also sign in with your
+            email.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (canSave) void save();
+          }}
+          className="space-y-3"
+        >
+          {error && <Callout tone="danger">{error}</Callout>}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="add-password-new" className="eyebrow">
+              New password
+            </Label>
+            <PasswordInput
+              key={String(open)}
+              id="add-password-new"
+              autoComplete="new-password"
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+              aria-invalid={tooShort || undefined}
+            />
+            {tooShort && (
+              <p className="text-xs text-deficit">
+                {12 - next.length} more {12 - next.length === 1 ? "character" : "characters"} needed.
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="add-password-confirm" className="eyebrow">
+              Repeat new password
+            </Label>
+            <PasswordInput
+              key={String(open)}
+              id="add-password-confirm"
+              autoComplete="new-password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              aria-invalid={mismatch || undefined}
+            />
+            {mismatch && <p className="text-xs text-deficit">These do not match.</p>}
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={requestClose}
+              disabled={isSaving}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!canSave}>
+              {isSaving && <Loader2 className="animate-spin" />}
+              Add password
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+
+      <ConfirmDialog
+        open={open && discardOpen}
+        onOpenChange={setDiscardOpen}
+        title="Discard changes?"
+        description="Your unsaved changes will be lost."
+        cancelLabel="Keep editing"
+        confirmLabel="Discard changes"
+        destructive
+        focusCancel
+        onConfirm={() => {
+          setDiscardOpen(false);
+          resetForm();
+          onOpenChange(false);
+        }}
+      />
+    </Dialog>
+  );
+}
+
 export function ChangePasswordDialog({
   open,
   onOpenChange,
@@ -49,6 +210,7 @@ export function ChangePasswordDialog({
   const [confirm, setConfirm] = React.useState("");
   const [isSaving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [discardOpen, setDiscardOpen] = React.useState(false);
 
   const [wasOpen, setWasOpen] = React.useState(false);
   if (open !== wasOpen) {
@@ -58,7 +220,27 @@ export function ChangePasswordDialog({
       setNext("");
       setConfirm("");
       setError(null);
+      setDiscardOpen(false);
     }
+  }
+
+  const isDirty = current !== "" || next !== "" || confirm !== "";
+
+  function resetForm() {
+    setCurrent("");
+    setNext("");
+    setConfirm("");
+    setError(null);
+  }
+
+  function requestClose() {
+    if (isSaving || discardOpen) return false;
+    if (isDirty) {
+      setDiscardOpen(true);
+      return false;
+    }
+    onOpenChange(false);
+    return true;
   }
 
   const tooShort = next.length > 0 && next.length < 12;
@@ -70,7 +252,9 @@ export function ChangePasswordDialog({
     setError(null);
     try {
       await accountApi.changePassword(current, next);
-      toast.success("Password changed");
+      toast.success("Password changed. Please sign in again.");
+      notifyStudyFlowSessionInvalidated();
+      resetForm();
       onOpenChange(false);
     } catch (cause) {
       setError(describeError(cause));
@@ -80,7 +264,13 @@ export function ChangePasswordDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen, details) => {
+        if (nextOpen) onOpenChange(true);
+        else if (!requestClose()) details?.cancel?.();
+      }}
+    >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Change password</DialogTitle>
@@ -89,16 +279,22 @@ export function ChangePasswordDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (canSave) void save();
+          }}
+          className="space-y-3"
+        >
           {error && <Callout tone="danger">{error}</Callout>}
 
           <div className="space-y-1.5">
             <Label htmlFor="current-password" className="eyebrow">
               Current password
             </Label>
-            <Input
+            <PasswordInput
+              key={String(open)}
               id="current-password"
-              type="password"
               autoComplete="current-password"
               value={current}
               onChange={(e) => setCurrent(e.target.value)}
@@ -109,9 +305,9 @@ export function ChangePasswordDialog({
             <Label htmlFor="new-password" className="eyebrow">
               New password
             </Label>
-            <Input
+            <PasswordInput
+              key={String(open)}
               id="new-password"
-              type="password"
               autoComplete="new-password"
               value={next}
               onChange={(e) => setNext(e.target.value)}
@@ -129,9 +325,9 @@ export function ChangePasswordDialog({
             <Label htmlFor="confirm-password" className="eyebrow">
               Repeat new password
             </Label>
-            <Input
+            <PasswordInput
+              key={String(open)}
               id="confirm-password"
-              type="password"
               autoComplete="new-password"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
@@ -139,18 +335,39 @@ export function ChangePasswordDialog({
             />
             {mismatch && <p className="text-xs text-deficit">These do not match.</p>}
           </div>
-        </div>
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isSaving}>
-            Cancel
-          </Button>
-          <Button onClick={() => void save()} disabled={!canSave}>
-            {isSaving && <Loader2 className="animate-spin" />}
-            Change password
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={requestClose}
+              disabled={isSaving}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!canSave}>
+              {isSaving && <Loader2 className="animate-spin" />}
+              Change password
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
+
+      <ConfirmDialog
+        open={open && discardOpen}
+        onOpenChange={setDiscardOpen}
+        title="Discard changes?"
+        description="Your unsaved changes will be lost."
+        cancelLabel="Keep editing"
+        confirmLabel="Discard changes"
+        destructive
+        focusCancel
+        onConfirm={() => {
+          setDiscardOpen(false);
+          resetForm();
+          onOpenChange(false);
+        }}
+      />
     </Dialog>
   );
 }
@@ -179,6 +396,7 @@ export function ChangeTimezoneDialog({
   const isDirty = preferences !== null && selected !== "" && selected !== preferences.timezone;
 
   async function save() {
+    /* c8 ignore next -- the save button is disabled when preferences are absent. */
     if (!preferences) return;
     setSaving(true);
     try {
@@ -208,7 +426,13 @@ export function ChangeTimezoneDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (isDirty && !isSaving) void save();
+          }}
+          className="space-y-3"
+        >
           <Select value={selected} onValueChange={(next) => next && setSelected(next)}>
             <SelectTrigger className="h-10 w-full">
               <Globe className="text-muted-foreground" />
@@ -235,17 +459,22 @@ export function ChangeTimezoneDialog({
               they are still when you are free.
             </Callout>
           )}
-        </div>
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isSaving}>
-            Cancel
-          </Button>
-          <Button onClick={() => void save()} disabled={!isDirty || isSaving}>
-            {isSaving && <Loader2 className="animate-spin" />}
-            Save timezone
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+              disabled={isSaving}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!isDirty || isSaving}>
+              {isSaving && <Loader2 className="animate-spin" />}
+              Save timezone
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );
@@ -297,7 +526,13 @@ export function ChangeNameDialog({
           <DialogDescription>This is how StudyFlow greets you.</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-1.5">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (canSave) void save();
+          }}
+          className="space-y-1.5"
+        >
           <Label htmlFor="display-name" className="eyebrow">
             Name
           </Label>
@@ -307,21 +542,183 @@ export function ChangeNameDialog({
             maxLength={200}
             autoFocus
             onChange={(event) => setName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && canSave) void save();
-            }}
           />
-        </div>
 
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isSaving}>
-            Cancel
-          </Button>
-          <Button onClick={() => void save()} disabled={!canSave}>
-            {isSaving && <Loader2 className="animate-spin" />}
-            Save name
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+              disabled={isSaving}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!canSave}>
+              {isSaving && <Loader2 className="animate-spin" />}
+              Save name
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function AccountDeletionDialog({
+  open,
+  onOpenChange,
+  passwordSet,
+  googleReady,
+  onStartGoogle,
+  onGoogleChallengeExpired,
+  onDeleted,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  passwordSet: boolean | null;
+  googleReady: boolean;
+  onStartGoogle: () => Promise<void>;
+  onGoogleChallengeExpired: () => void;
+  onDeleted: () => void;
+}) {
+  const [currentPassword, setCurrentPassword] = React.useState("");
+  const [confirmation, setConfirmation] = React.useState("");
+  const [error, setError] = React.useState<string | null>(null);
+  const [isSubmitting, setSubmitting] = React.useState(false);
+
+  const [wasOpen, setWasOpen] = React.useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setCurrentPassword("");
+      setConfirmation("");
+      setError(null);
+    }
+  }
+
+  const canContinue = passwordSet !== null && confirmation === "DELETE" && !isSubmitting;
+
+  async function submit() {
+    if (!canContinue || (passwordSet && currentPassword.length === 0)) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      if (passwordSet) {
+        await accountApi.prepareDeletion(currentPassword);
+      }
+      await accountApi.confirmDeletion();
+      toast.success("Account deleted successfully. Please sign in again.");
+      onDeleted();
+    } catch (cause) {
+      if (!passwordSet && googleReady && cause instanceof ApiError && cause.status === 400) {
+        onGoogleChallengeExpired();
+      }
+      setError(describeError(cause));
+      setSubmitting(false);
+    }
+  }
+
+  async function startGoogle() {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onStartGoogle();
+    } catch (cause) {
+      setError(describeError(cause));
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete your account?</DialogTitle>
+          <DialogDescription>
+            This permanently deletes your profile, sign-in methods, tasks, schedules, sessions,
+            and progress. This cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!canContinue) return;
+            if (!passwordSet && !googleReady) void startGoogle();
+            else void submit();
+          }}
+          className="space-y-3"
+        >
+          {error && <Callout tone="danger">{error}</Callout>}
+
+          {passwordSet === null ? (
+            <Callout tone="warning">Loading your account details before deletion.</Callout>
+          ) : passwordSet ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="delete-account-password" className="eyebrow">
+                Current password
+              </Label>
+              <PasswordInput
+                key={String(open)}
+                id="delete-account-password"
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+                disabled={isSubmitting}
+                autoFocus
+              />
+            </div>
+          ) : googleReady ? (
+            <Callout tone="success">Google reauthentication complete.</Callout>
+          ) : (
+            <Callout tone="warning">
+              Reauthenticate with Google before deleting this account.
+            </Callout>
+          )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="delete-account-confirmation" className="eyebrow">
+              Type DELETE to confirm
+            </Label>
+            <Input
+              id="delete-account-confirmation"
+              value={confirmation}
+              onChange={(event) => setConfirmation(event.target.value)}
+              disabled={isSubmitting}
+              autoComplete="off"
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+              disabled={isSubmitting}
+            >
+              Cancel
+            </Button>
+            {passwordSet === null ? (
+              <Button type="button" variant="destructive" disabled>
+                Loading account details
+              </Button>
+            ) : !passwordSet && !googleReady ? (
+              <Button variant="destructive" type="submit" disabled={!canContinue}>
+                {isSubmitting && <Loader2 className="animate-spin" />}
+                Continue with Google
+              </Button>
+            ) : (
+              <Button
+                variant="destructive"
+                type="submit"
+                disabled={!canContinue || (passwordSet && currentPassword.length === 0)}
+              >
+                {isSubmitting && <Loader2 className="animate-spin" />}
+                Delete account
+              </Button>
+            )}
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

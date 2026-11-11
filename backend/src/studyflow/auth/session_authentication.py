@@ -12,6 +12,7 @@ class SessionPrincipal:
     account_id: UUID
     email: str
     name: str
+    avatar_url: str | None = None
 
 
 class SessionAuthentication(Protocol):
@@ -27,6 +28,7 @@ class PersistedSessionPrincipal:
     account_id: UUID
     email: str
     name: str
+    avatar_url: str | None = None
 
 
 class SessionAuthenticationRepository(Protocol):
@@ -68,7 +70,21 @@ class SessionAuthenticationService:
         )
         if persisted is None:
             return None
-        return SessionPrincipal(persisted.account_id, persisted.email, persisted.name)
+        return SessionPrincipal(
+            persisted.account_id, persisted.email, persisted.name, persisted.avatar_url
+        )
+
+    async def authenticate_read_only(self, session_token: str) -> SessionPrincipal | None:
+        now = self._clock()
+        authenticate_read_only = getattr(self._repository, "authenticate_read_only", None)
+        if authenticate_read_only is None:
+            return await self.authenticate(session_token)
+        persisted = await authenticate_read_only(hash_browser_token(session_token), now)
+        if persisted is None:
+            return None
+        return SessionPrincipal(
+            persisted.account_id, persisted.email, persisted.name, persisted.avatar_url
+        )
 
     async def revoke(self, session_token: str, csrf_token: str) -> bool:
         return await self._repository.revoke(

@@ -65,9 +65,32 @@ async def test_google_link_challenge_resolves_stable_account_for_rate_limiting()
 
     assert first_account_id == replacement_account_id == ACCOUNT_ID
 
-
-@pytest.mark.anyio
-async def test_google_link_challenge_rejects_wrong_password_generically() -> None:
     service = OIDCAccountLinkService(RepositoryStub(), PasswordsStub())
     with pytest.raises(InvalidLinkChallengeError):
         await service.link("challenge-token", "wrong password")
+
+
+@pytest.mark.anyio
+async def test_google_link_challenge_rejects_when_account_creation_fails() -> None:
+    class FailingRepo(RepositoryStub):
+        async def link_identity_and_create_session(
+            self,
+            challenge_id: UUID,
+            expected_password_hash: str,
+            pending_session: PendingSession,
+            now: datetime,
+        ) -> OIDCAccount | None:
+            return None
+
+    service = OIDCAccountLinkService(FailingRepo(), PasswordsStub())
+    with pytest.raises(InvalidLinkChallengeError):
+        await service.link("challenge-token", "correct password")
+
+
+@pytest.mark.anyio
+async def test_google_oidc_link_service_list_identities() -> None:
+    service = OIDCAccountLinkService(RepositoryStub(), PasswordsStub())
+    identities = await service.list_identities(ACCOUNT_ID)
+    assert len(identities) == 1
+    assert identities[0].provider == "google"
+    assert identities[0].email == "student@example.com"

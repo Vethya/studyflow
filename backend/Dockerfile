@@ -1,4 +1,4 @@
-FROM python:3.13-slim@sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91
+FROM python:3.13-slim-trixie@sha256:57b29a7c050c4e679e4bea572e14b3965cf4b5839de2da49d55e49ffc4024f39
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.32@sha256:df4cae8f3a96d175e2e5f992e597550000edbe78fdc2594d5cd8de1a217f504c /uv /uvx /bin/
 
@@ -23,4 +23,4 @@ USER studyflow
 
 EXPOSE 8000
 
-CMD ["/bin/bash", "-c", ".venv/bin/alembic upgrade head && exec .venv/bin/uvicorn studyflow.app:app --host 0.0.0.0 --port 8000"]
+CMD ["/bin/bash", "-c", ".venv/bin/python -m studyflow.cli.release boot && exec .venv/bin/uvicorn studyflow.app:app --host 0.0.0.0 --port 8000 --no-proxy-headers"]

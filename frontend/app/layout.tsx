@@ -1,8 +1,13 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Bricolage_Grotesque, IBM_Plex_Mono, Inter } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { SessionProvider } from "@/hooks/use-session";
+import { ThemeProvider } from "@/components/theme-provider";
+import { StudyFlowSWRProvider } from "@/components/swr-provider";
+import { DENSITY_BOOT_SCRIPT } from "@/lib/density-script";
+import { NONCE_HEADER } from "@/lib/security/headers";
 import "./globals.css";
 
 const inter = Inter({
@@ -28,32 +33,38 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "StudyFlow — Know if your coursework fits",
+  title: "Know if your coursework fits | StudyFlow",
   description:
-    "StudyFlow weighs the coursework you owe against the study time you actually have, so you find out you are overcommitted while there is still time to do something about it.",
+    "StudyFlow compares your coursework with the hours you’re free and tells you how many hours short you are, weeks before anything is due.",
   keywords: ["study planner", "academic workload", "student productivity", "deadline tracking"],
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Reading request headers also makes every page render per request, which a
+  // nonce-based CSP requires: a prerendered page would carry no nonce.
+  const nonce = (await headers()).get(NONCE_HEADER) ?? undefined;
   return (
     <html
       lang="en"
-      // DaisyUI resolves its colour roles from the active theme; without this
-      // attribute `.btn-primary` and friends fall back to the base surface.
-      data-theme="studyflow"
+      suppressHydrationWarning
       className={`${inter.variable} ${bricolage.variable} ${plexMono.variable} h-full`}
     >
       <body className="min-h-full font-sans antialiased">
-        <SessionProvider>
-          <TooltipProvider>
-            {children}
-            <Toaster position="bottom-right" richColors />
-          </TooltipProvider>
-        </SessionProvider>
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: DENSITY_BOOT_SCRIPT }} />
+        <ThemeProvider nonce={nonce}>
+          <StudyFlowSWRProvider>
+            <SessionProvider>
+              <TooltipProvider>
+                {children}
+                <Toaster position="bottom-right" richColors />
+              </TooltipProvider>
+            </SessionProvider>
+          </StudyFlowSWRProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

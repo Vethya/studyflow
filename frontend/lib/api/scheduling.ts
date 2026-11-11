@@ -4,42 +4,36 @@
  * Backed by the real API as of the `dev` merge:
  *   GET    /study-sessions                      accepted sessions
  *   GET    /study-sessions/{id}
- *   POST   /study-sessions/{id}/outcomes        currently "missed" only
+ *   POST   /study-sessions/{id}/outcomes        records completed, delayed, or missed
  *   POST   /schedule-proposals                  generate (inactive proposal)
  *   GET    /schedule-proposals/current          pending proposal, or 404
  *   POST   /schedule-proposals/{id}/accept
  *   POST   /schedule-proposals/{id}/reject
- *
- * Two things the backend does not expose yet, handled here rather than in the
- * screens so the seam stays in one place:
- *
- *  - **Effort progress has no endpoint.** `listEffortProgress` derives its
- *    figures from tasks plus accepted sessions. The arithmetic is SPEC §13's,
- *    but it runs in the browser.
- *  - **Adaptive estimation has no endpoint.** `getAdaptiveEstimate` returns
- *    null, so the §15.6 explanation and the §15.4 acknowledgement stay hidden
- *    until the model ships. Returning null rather than a guess keeps the UI
- *    honest — it simply does not claim to know anything about your history.
+ *   GET    /progress                            server-calculated effort progress
  */
 
 import { apiJson, apiVoid, ApiError, buildQuery } from "./client";
-import { listTasks } from "./tasks";
-import {
-  toEffortProgress,
-  toScheduleProposal,
-  toStudySession,
-} from "./mappers";
+import { toWireOutcome } from "./outcome-contract";
+import { toAdaptiveEstimate } from "./adaptive-contract";
+import { toScheduleProposal, toStudySession, toWireCategory, type SessionTask } from "./mappers";
 import type {
   WireScheduleProposal,
   WireScheduleScenario,
+  WireAdaptiveEstimatePreview,
+  WireSessionOutcomeRecordingResponse,
   WireScheduleSimulation,
   WireStudySession,
 } from "./wire";
 import type { ScenarioOverrides, SimulatePlanResult } from "@/lib/webmcp/contracts";
 import type { OutcomeFormData, StudySession } from "@/types/session";
 import type { Schedule, ScheduleProposal, ScheduleRevision } from "@/types/schedule";
-import type { AdaptiveEstimate, EffortProgress } from "@/types/progress";
-import type { AcademicTask, Category } from "@/types/task";
+import type { AdaptiveEstimate } from "@/types/progress";
+import type { Category } from "@/types/task";
+
+/** Keep the following sentence from running into a detail that has no stop. */
+export function ensureSentence(detail: string): string {
+  return /[.!?]$/.test(detail) ? detail : `${detail}.`;
+}
 
 /**
  * CP-SAT timed out or could not prove its objective (SPEC §10.7), surfaced by
@@ -56,46 +50,40 @@ export class ScheduleTechnicalFailure extends Error {
   }
 }
 
-/** Recording Completed or Delayed is not reachable through the API yet. */
-export class OutcomeNotSupportedError extends Error {
-  constructor(readonly outcome: string) {
-    super(
-      `Recording “${outcome}” is not available yet — the API accepts only missed sessions.`,
-    );
-    this.name = "OutcomeNotSupportedError";
-  }
-}
-
 export interface OutcomeResult {
   session: StudySession;
   /** Present when the outcome produced a revision (SPEC §14.1). */
   revision: ScheduleRevision | null;
 }
 
-/** Titles for the session list, which the API returns without them. */
-async function taskTitles(signal?: AbortSignal): Promise<Map<string, string>> {
-  const tasks = await listTasks({}, signal);
-  return new Map(tasks.map((task) => [task.id, task.title]));
+export interface SessionFilters {
+  /** Offset-aware ISO timestamps; a session matches when it overlaps [from, to). */
+  from?: string;
+  to?: string;
+  /** Omit for every session; true for finished sessions without an outcome. */
+  awaitingOutcome?: boolean;
 }
 
 // ─── Sessions ───────────────────────────────────────────────────
-export async function listSessions(signal?: AbortSignal): Promise<StudySession[]> {
-  const [wire, titles] = await Promise.all([
-    apiJson<WireStudySession[]>(`/study-sessions${buildQuery({})}`, { signal }),
-    taskTitles(signal),
-  ]);
-  return wire.map((session) => toStudySession(session, titles));
+export async function listSessions(
+  signal?: AbortSignal,
+  filters: SessionFilters = {},
+): Promise<StudySession[]> {
+  const query = buildQuery({
+    from: filters.from,
+    to: filters.to,
+    awaiting_outcome: filters.awaitingOutcome,
+  });
+  const wire = await apiJson<WireStudySession[]>(`/study-sessions${query}`, { signal });
+  return wire.map((session) => toStudySession(session));
 }
 
 export async function getSession(
   sessionId: string,
   signal?: AbortSignal,
 ): Promise<StudySession> {
-  const [wire, titles] = await Promise.all([
-    apiJson<WireStudySession>(`/study-sessions/${sessionId}`, { signal }),
-    taskTitles(signal),
-  ]);
-  return toStudySession(wire, titles);
+  const wire = await apiJson<WireStudySession>(`/study-sessions/${sessionId}`, { signal });
+  return toStudySession(wire);
 }
 
 // ─── Active schedule ────────────────────────────────────────────
@@ -163,6 +151,7 @@ export async function simulatePlan(
       method: "POST",
       body: { scenario },
       signal,
+      notifyDataChanged: false,
     });
     return {
       scenario: wire.proposal.scenario ? toScenario(wire.proposal.scenario) : scenario,
@@ -181,9 +170,12 @@ export async function getPendingRevision(
   signal?: AbortSignal,
 ): Promise<ScheduleRevision | null> {
   try {
-    const wire = await apiJson<WireScheduleProposal>("/schedule-proposals/current", {
+    // 404 is "no proposal". A same-origin proxy may also answer 200 `null` so
+    // the browser does not log that expected 404.
+    const wire = await apiJson<WireScheduleProposal | null>("/schedule-proposals/current", {
       signal,
     });
+    if (wire === null) return null;
     const proposal = toScheduleProposal(wire);
     return { ...proposal, reason: proposal.reason ?? "" };
   } catch (cause) {
@@ -195,11 +187,15 @@ export async function getPendingRevision(
 export async function acceptProposal(
   proposalId: string,
   signal?: AbortSignal,
+  refreshActiveSchedule = true,
 ): Promise<Schedule> {
   await apiVoid(`/schedule-proposals/${proposalId}/accept`, { method: "POST", signal });
+  if (!refreshActiveSchedule) {
+    return { id: "active", sessions: [], createdAt: new Date().toISOString(), isActive: true };
+  }
   // The accept response carries only the sessions it just activated; re-read
   // so the caller gets the full accepted set with outcomes attached.
-  return (await getActiveSchedule()) ?? {
+  return (await getActiveSchedule(signal)) ?? {
     id: "active",
     sessions: [],
     createdAt: new Date().toISOString(),
@@ -213,63 +209,66 @@ export function rejectProposal(proposalId: string, signal?: AbortSignal): Promis
 
 // ─── Outcomes ───────────────────────────────────────────────────
 /**
- * Records what happened in a past session.
+ * Records what happened in a past session. `task` labels the returned
+ * session only if the response arrives without its task title and category.
  *
- * `RecordSessionOutcomeRequest` currently accepts `outcome: "missed"` only.
- * Completed and Delayed exist in the domain enum but have no route, so they
- * are rejected here with a clear error rather than sent and 422'd.
+ * The backend returns the recorded outcome, its updated accepted session, and
+ * an optional revision for student review.
  */
 export async function recordOutcome(
   sessionId: string,
   data: OutcomeFormData,
   signal?: AbortSignal,
+  task?: SessionTask,
 ): Promise<OutcomeResult> {
-  if (data.outcome !== "Missed") {
-    throw new OutcomeNotSupportedError(data.outcome);
-  }
+  try {
+    const response = await apiJson<WireSessionOutcomeRecordingResponse>(
+      `/study-sessions/${sessionId}/outcomes`,
+      {
+        method: "POST",
+        body: toWireOutcome(data, data.largeActualConfirmed ?? false),
+        signal,
+      },
+    );
 
-  const recovery = await apiJson<{
-    session: WireStudySession;
-    revision: WireScheduleProposal | null;
-  }>(`/study-sessions/${sessionId}/outcomes`, {
+    const revision = response.revision ? toScheduleProposal(response.revision) : null;
+    return {
+      session: toStudySession(response.session, task),
+      revision: revision ? { ...revision, reason: revision.reason ?? "" } : null,
+    };
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 503) {
+      throw new ScheduleTechnicalFailure(cause.message);
+    }
+    throw cause;
+  }
+}
+
+// ─── Progress ───────────────────────────────────────────────────
+/** `GET /progress`; kept here so existing `scheduling.listEffortProgress` callers work. */
+export { listEffortProgress } from "./progress";
+
+
+// ─── Adaptive estimation ────────────────────────────────────────
+export async function getAdaptiveEstimate(
+  category: Category,
+  originalEstimate: number,
+  signal?: AbortSignal,
+): Promise<AdaptiveEstimate | null> {
+  const wire = await apiJson<WireAdaptiveEstimatePreview>(
+    `/adaptive-estimates/preview${buildQuery({
+      category: toWireCategory(category),
+      original_minutes: originalEstimate,
+    })}`,
+    { signal },
+  );
+  return toAdaptiveEstimate(wire);
+}
+
+export function acknowledgeAdjustment(category: Category, signal?: AbortSignal): Promise<void> {
+  return apiVoid("/adaptive-estimates/acknowledgments", {
     method: "POST",
-    body: { outcome: "missed" },
+    body: { category: toWireCategory(category) },
     signal,
   });
-
-  const titles = await taskTitles(signal);
-  const revision = recovery.revision ? toScheduleProposal(recovery.revision) : null;
-  return {
-    session: toStudySession(recovery.session, titles),
-    revision: revision ? { ...revision, reason: revision.reason ?? "" } : null,
-  };
 }
-
-// ─── Progress (derived — no endpoint yet) ───────────────────────
-export async function listEffortProgress(
-  signal?: AbortSignal,
-): Promise<EffortProgress[]> {
-  const [tasks, sessions] = await Promise.all([
-    listTasks({}, signal),
-    listSessions(signal),
-  ]);
-  return toEffortProgress(tasks as AcademicTask[], sessions);
-}
-
-
-// ─── Adaptive estimation (not implemented server-side) ──────────
-// The parameters are kept so the signature matches what the real endpoint
-// will need; nothing reads them until it exists.
-/* eslint-disable @typescript-eslint/no-unused-vars */
-export async function getAdaptiveEstimate(
-  _category: Category,
-  _originalEstimate: number,
-  _signal?: AbortSignal,
-): Promise<AdaptiveEstimate | null> {
-  return null;
-}
-
-export async function acknowledgeAdjustment(_category: Category): Promise<void> {
-  // No-op until the estimation model ships.
-}
-/* eslint-enable @typescript-eslint/no-unused-vars */

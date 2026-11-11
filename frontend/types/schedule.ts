@@ -22,6 +22,17 @@ export interface UnscheduledWork {
   reason: string;
 }
 
+/** A one-off Unavailable Period that reduced time before a task's deadline. */
+export interface RelevantUnavailablePeriod {
+  id: string;
+  startsAt: string;
+  endsAt: string;
+  reason?: string;
+}
+
+/** A student-controlled remedy the backend offers for Overload (SPEC §10.5). */
+export type OverloadRemedy = "extend_deadline" | "add_availability";
+
 /** Every field SPEC §10.5 requires of an Overload explanation. */
 export interface OverloadWarning {
   taskId: string;
@@ -30,7 +41,8 @@ export interface OverloadWarning {
   requiredMinutes: number;
   availableMinutes: number;
   shortfallMinutes: number;
-  relevantUnavailablePeriods: string[];
+  relevantUnavailablePeriods: RelevantUnavailablePeriod[];
+  remedies: OverloadRemedy[];
 }
 
 export interface ScheduleScenario {

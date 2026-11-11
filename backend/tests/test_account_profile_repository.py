@@ -33,7 +33,7 @@ async def test_profile_repository_cannot_read_or_update_another_account() -> Non
                         id=second_id,
                         email="second@example.com",
                         name="Second Student",
-                        password_hash="$argon2id$second",
+                        password_hash=None,
                         email_verified_at=datetime.now(UTC),
                         timezone="UTC",
                     ),
@@ -42,9 +42,14 @@ async def test_profile_repository_cannot_read_or_update_another_account() -> Non
         repository = SqlAlchemyAccountProfileRepository(database)
 
         updated = await repository.update_name(first_id, "Updated First")
+        first = await repository.get(first_id)
+        second = await repository.get(second_id)
 
         assert updated is not None and updated.name == "Updated First"
-        assert (await repository.get(second_id)).name == "Second Student"  # type: ignore[union-attr]
+        assert first is not None and first.password_set is True
+        assert second is not None and second.name == "Second Student"
+        assert second.password_set is False
         assert await repository.get(uuid4()) is None
+        assert await repository.update_name(uuid4(), "Missing") is None
     finally:
         await database.stop()

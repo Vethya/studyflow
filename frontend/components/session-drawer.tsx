@@ -2,16 +2,17 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { CalendarClock, CheckCircle2, Clock, Pencil, Trash2, XCircle } from "lucide-react";
+import { CalendarClock, CheckCircle2, Clock, Pencil, Trash2, XCircle } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Callout } from "@/components/ui/callout";
 import { DetailDrawer } from "@/components/detail-drawer";
-import { formatDuration, CATEGORY_CONFIG } from "@/lib/constants";
-import { describeDeadline, formatClock } from "@/lib/datetime";
+import { formatDuration, CATEGORY_CONFIG, STATUS_CONFIG } from "@/lib/constants";
+import { describeDeadline, formatClock, formatDate } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import type { StudySession } from "@/types/session";
 import type { AcademicTask } from "@/types/task";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
 
 const OUTCOME_STYLE = {
   Completed: { label: "Finished", icon: CheckCircle2, tone: "text-surplus" },
@@ -32,6 +33,7 @@ export function SessionDrawer({
   task,
   open,
   onOpenChange,
+  onOpenChangeComplete,
   onEditTask,
   onDeleteTask,
   onRecordOutcome,
@@ -40,50 +42,66 @@ export function SessionDrawer({
   task: AcademicTask | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   onEditTask: () => void;
   onDeleteTask: () => void;
   onRecordOutcome: () => void;
 }) {
-  if (!session) return null;
+  const timeZone = useAccountTimezone();
+  // Keep the dialog root mounted before the first session is selected. If the
+  // root mounts only when open=true, Base UI has no opening transition phase.
+  if (!session) {
+    return (
+      <DetailDrawer open={false} onOpenChange={onOpenChange} title="Session details">
+        {null}
+      </DetailDrawer>
+    );
+  }
 
   const start = new Date(session.startTime);
   const end = new Date(session.endTime);
   const isPast = end < new Date();
   const outcome = session.outcome ? OUTCOME_STYLE[session.outcome] : null;
-  const due = task ? describeDeadline(task.deadline) : null;
+  const due = task ? describeDeadline(task.deadline, timeZone) : null;
 
   return (
     <DetailDrawer
       open={open}
       onOpenChange={onOpenChange}
+      onOpenChangeComplete={onOpenChangeComplete}
       title={session.taskTitle}
       description={
         <>
-          {start.toLocaleDateString(undefined, {
+          {formatDate(start, timeZone, {
             weekday: "long",
             day: "numeric",
             month: "long",
           })}
           {" · "}
-          {formatClock(start)}–{formatClock(end)}
+          {formatClock(start, timeZone)}–{formatClock(end, timeZone)}
         </>
       }
       footer={
         <>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-destructive"
-            onClick={onDeleteTask}
-          >
-            <Trash2 />
-            Delete task
-          </Button>
-          <Button variant="outline" size="sm" onClick={onEditTask}>
-            <Pencil />
-            Edit task
-          </Button>
-          {isPast && !session.outcome && (
+          {task && (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-destructive"
+                onClick={onDeleteTask}
+              >
+                <Trash2 />
+                Delete task
+              </Button>
+              <Button variant="outline" size="sm" onClick={onEditTask}>
+                <Pencil />
+                Edit task
+              </Button>
+            </>
+          )}
+          {/* The waiting callout already carries this action. */}
+          {isPast && !session.outcome && !session.isAwaitingOutcome && (
             <Button size="sm" onClick={onRecordOutcome}>
               Record what happened
             </Button>
@@ -119,6 +137,13 @@ export function SessionDrawer({
           </div>
         )}
 
+        {task && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary">{STATUS_CONFIG[task.status].label}</Badge>
+            {task.priority === "High" && <Badge variant="outline">High priority</Badge>}
+          </div>
+        )}
+
         <dl className="grid grid-cols-2 gap-x-4 gap-y-3 border-y py-4 text-sm">
           <Fact label="Planned" value={formatDuration(session.plannedDuration)} />
           <Fact label="Category" value={CATEGORY_CONFIG[session.category].label} />
@@ -126,7 +151,7 @@ export function SessionDrawer({
           {task && due && (
             <Fact
               label="Task deadline"
-              value={new Date(task.deadline).toLocaleDateString(undefined, {
+              value={formatDate(task.deadline, timeZone, {
                 day: "numeric",
                 month: "short",
               })}
@@ -136,20 +161,18 @@ export function SessionDrawer({
         </dl>
 
         {task && (
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline">{task.status}</Badge>
-              {task.priority === "High" && <Badge variant="outline">High priority</Badge>}
-            </div>
+          <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
               {formatDuration(task.remainingDuration)} of this task is still to do.
             </p>
-            <Link
-              href={`/tasks/${session.taskId}`}
-              className="inline-block text-sm font-medium underline-offset-4 hover:underline"
+            <Button
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={<Link href={`/tasks/${session.taskId}`} />}
             >
-              Open the full task →
-            </Link>
+              Open task
+            </Button>
           </div>
         )}
       </div>

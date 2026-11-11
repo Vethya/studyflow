@@ -11,10 +11,15 @@ from studyflow.scheduling import (
     KernelStatus,
     MinuteWindow,
     PlanningDay,
+    SchedulingInputError,
     SchedulingInputTooLargeError,
     TaskPriority,
     assemble_schedule_problem,
     solve_with_overload,
+)
+from studyflow.scheduling.scenarios import (
+    ScenarioAvailabilityWindow,
+    ScenarioBlockedPeriod,
 )
 from studyflow.tasks.service import (
     AcademicTaskRecord,
@@ -208,4 +213,136 @@ def test_rejects_too_many_sessions_before_calendar_expansion() -> None:
             [],
             StudyPreferences("UTC", 10, 10, False),
             planning_start=planning_start,
+        )
+
+
+def test_assembly_validates_timezone_awareness() -> None:
+    naive_planning_start = datetime(2026, 1, 5, 8, 0)
+    with pytest.raises(SchedulingInputError, match="timezone-aware"):
+        assemble_schedule_problem(
+            [_task(TASK_A_ID, datetime(2026, 1, 6, tzinfo=UTC), 60)],
+            [],
+            [],
+            _preferences(),
+            planning_start=naive_planning_start,
+        )
+
+    planning_start = datetime(2026, 1, 5, 8, 0, tzinfo=UTC)
+    naive_task = _task(TASK_A_ID, datetime(2026, 1, 6, 8, 0), 60)
+    with pytest.raises(SchedulingInputError, match="Task deadlines must be timezone-aware"):
+        assemble_schedule_problem(
+            [naive_task],
+            [],
+            [],
+            _preferences(),
+            planning_start=planning_start,
+        )
+
+
+def test_assembly_applies_scenario_availability_and_blocked_periods() -> None:
+    planning_start = datetime(2026, 1, 5, 8, 0, tzinfo=UTC)
+    deadline = planning_start + timedelta(days=1)
+    task = _task(TASK_A_ID, deadline, 60)
+
+    # Base window: Mon 09:00 - 12:00
+    base_window = AvailabilityWindowDraft(0, time(9), time(12))
+
+    # Scenario availability: Mon 13:00 - 15:00, plus an out-of-bounds period
+    temp_window = ScenarioAvailabilityWindow(
+        starts_at=datetime(2026, 1, 5, 13, 0, tzinfo=UTC),
+        ends_at=datetime(2026, 1, 5, 15, 0, tzinfo=UTC),
+    )
+    temp_window_out_of_bounds = ScenarioAvailabilityWindow(
+        starts_at=datetime(2026, 1, 1, 10, 0, tzinfo=UTC),
+        ends_at=datetime(2026, 1, 1, 11, 0, tzinfo=UTC),
+    )
+
+    # Temporary blocked period: cuts base window into 09:00-10:00 and 11:00-12:00
+    # plus an out-of-bounds period (before planning start)
+    temp_blocked = ScenarioBlockedPeriod(
+        starts_at=datetime(2026, 1, 5, 10, 0, tzinfo=UTC),
+        ends_at=datetime(2026, 1, 5, 11, 0, tzinfo=UTC),
+    )
+    temp_blocked_out_of_bounds = ScenarioBlockedPeriod(
+        starts_at=datetime(2026, 1, 1, 15, 0, tzinfo=UTC),
+        ends_at=datetime(2026, 1, 1, 16, 0, tzinfo=UTC),
+    )
+
+    problem = assemble_schedule_problem(
+        [task],
+        [base_window],
+        [],
+        _preferences(),
+        planning_start=planning_start,
+        temporary_availability=[temp_window, temp_window_out_of_bounds],
+        temporary_blocked_periods=[temp_blocked, temp_blocked_out_of_bounds],
+    )
+
+    assert len(problem.sessions) == 1
+    session = problem.sessions[0]
+    # Allowed windows should have: 09:00-10:00, 11:00-12:00, 13:00-15:00
+    assert len(session.allowed_windows) == 3
+    w0, w1, w2 = session.allowed_windows
+    assert w0.start == _minute(datetime(2026, 1, 5, 9, 0, tzinfo=UTC))
+    assert w0.end == _minute(datetime(2026, 1, 5, 10, 0, tzinfo=UTC))
+    assert w1.start == _minute(datetime(2026, 1, 5, 11, 0, tzinfo=UTC))
+    assert w1.end == _minute(datetime(2026, 1, 5, 12, 0, tzinfo=UTC))
+    assert w2.start == _minute(datetime(2026, 1, 5, 13, 0, tzinfo=UTC))
+    assert w2.end == _minute(datetime(2026, 1, 5, 15, 0, tzinfo=UTC))
+
+
+def test_assembly_interval_helpers_direct() -> None:
+    from studyflow.scheduling import assembly
+
+    # _merge_intervals with empty, inverted, overlapping intervals
+    intervals = [(10, 5), (1, 5), (4, 8), (12, 15)]
+    merged = assembly._merge_intervals(intervals)
+    assert merged == [(1, 8), (12, 15)]
+
+    # _subtract with before, after, exact start match, partial overlap
+    available = [(10, 20), (30, 40)]
+    blocked = [
+        (5, 8),  # completely before (10, 20)
+        (10, 12),  # exact start match: branches 72->74
+        (15, 18),  # splits remaining (12, 20) into (12, 15) and (18, 20)
+        (35, 45),  # overlaps end of (30, 40) -> leaves (30, 35)
+        (50, 60),  # completely after
+    ]
+
+    subtracted = assembly._subtract(available, blocked)
+    assert subtracted == [(12, 15), (18, 20), (30, 35)]
+
+
+def test_assembly_rejects_too_many_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    from studyflow.scheduling import assembly
+
+    planning_start = datetime(2026, 1, 5, 8, 0, tzinfo=UTC)
+    deadline = planning_start + timedelta(days=2)
+    task = _task(TASK_A_ID, deadline, 60)
+    window = AvailabilityWindowDraft(0, time(9), time(12))
+
+    monkeypatch.setattr(assembly, "MAX_ASSEMBLED_WINDOWS", 0)
+    # 1. Rejection from base calendar windows
+    with pytest.raises(SchedulingInputTooLargeError, match="availability windows"):
+        assemble_schedule_problem(
+            [task],
+            [window],
+            [],
+            _preferences(),
+            planning_start=planning_start,
+        )
+
+    # 2. Rejection from scenario availability when base windows is 0
+    temp_window = ScenarioAvailabilityWindow(
+        starts_at=datetime(2026, 1, 5, 9, 0, tzinfo=UTC),
+        ends_at=datetime(2026, 1, 5, 10, 0, tzinfo=UTC),
+    )
+    with pytest.raises(SchedulingInputTooLargeError, match="availability windows"):
+        assemble_schedule_problem(
+            [task],
+            [],
+            [],
+            _preferences(),
+            planning_start=planning_start,
+            temporary_availability=[temp_window],
         )

@@ -52,8 +52,8 @@ The agent helps a student recover a realistic study plan:
 
 The agent can configure the student's study-time inputs through one grouped
 tool. It can confirm the detected timezone, replace the complete recurring
-weekly availability pattern, and add, update, or explicitly confirm removal of
-one-off blocked periods. These changes never generate or activate a schedule;
+weekly availability pattern, and add, update, or remove one-off blocked
+periods. Removing blocked periods asks the student to confirm in the page. These changes never generate or activate a schedule;
 if existing future sessions are invalidated, the tool reports that the agent
 should draft a replacement plan for review.
 
@@ -122,8 +122,9 @@ student did not ask to change.
 
 Recurring availability uses weekday names and local `HH:mm` times. Supplying
 `recurring_availability` always replaces the full weekly pattern, including
-with an empty `windows` array. Blocked-period removals require
-`confirmed: true` for every period.
+with an empty `windows` array. Any blocked-period removal opens an in-page
+confirmation for the student; if they decline, the call fails and nothing in
+the request is saved.
 
 Example:
 
@@ -164,7 +165,9 @@ If blocked-period changes invalidate future sessions, the result includes
 
 Manages an existing task through one explicit operation. The tool supports
 editing all fields, starting a task, finishing a started task early, and
-deleting a task. Deletion and finishing early require `confirmed: true`.
+deleting a task. Deletion and finishing early open an in-page confirmation that
+names the task from StudyFlow's own data; if the student declines, the call
+fails and the task is unchanged.
 
 Edit example:
 
@@ -196,8 +199,7 @@ Finish-early example:
 ```json
 {
   "operation": "finish_early",
-  "task_id": "00000000-0000-0000-0000-000000000000",
-  "confirmed": true
+  "task_id": "00000000-0000-0000-0000-000000000000"
 }
 ```
 
@@ -206,8 +208,7 @@ Delete example:
 ```json
 {
   "operation": "delete",
-  "task_id": "00000000-0000-0000-0000-000000000000",
-  "confirmed": true
+  "task_id": "00000000-0000-0000-0000-000000000000"
 }
 ```
 
@@ -283,7 +284,9 @@ Result metadata:
 ```
 
 The agent should call this only after the student explicitly approves the
-proposal.
+proposal. The tool also asks the student to approve activation in the page
+before it calls the backend, so an agent following injected instructions cannot
+activate a plan on its own.
 
 ### `studyflow_reject_plan`
 
@@ -329,6 +332,30 @@ Draft the safest plan, but wait for my approval before activating it.
 I missed yesterday's session. Recover the plan without changing my recurring availability.
 ```
 
+## In-page confirmation
+
+Task titles and notes, and imported Classroom and Calendar text, are untrusted
+(`untrustedContentHint`). An agent that reads them can be steered by instructions
+hidden inside, so an input flag such as `confirmed: true` proves nothing about
+the student's intent. These actions always ask the student directly in the page
+before calling the backend:
+
+| Tool | Action |
+| --- | --- |
+| `studyflow_update_task` | `delete`, `finish_early` |
+| `studyflow_update_study_time` | any `blocked_periods.remove` |
+| `studyflow_accept_plan` | every call |
+
+The prompt is the browser's own modal dialog (`frontend/lib/webmcp/confirm.ts`),
+which neither page scripts nor WebMCP agents can answer. When the WebMCP client
+provides `requestUserInteraction`, the page asks inside that callback so the agent
+waits. Approval is that callback's result. A hook that returns true without asking
+does not count. A declined prompt fails the tool call with "The student did not
+approve" and changes nothing. A `confirmed` field is still accepted so older agents
+stay schema-valid, and it is ignored. Task titles and blocked-period labels in the
+prompt are reduced to one short line. A removal names the account's periods by
+date and reason.
+
 ## Acceptance checklist
 
 - The tool names and input fields in `frontend/lib/webmcp/contracts.ts` remain
@@ -340,5 +367,7 @@ I missed yesterday's session. Recover the plan without changing my recurring ava
 - A stale proposal returns a clear error and leaves the active schedule intact.
 - A missing availability setup returns `needs_availability` instead of an
   opaque scheduler error.
+- Deleting or finishing a task early, removing a blocked period, and accepting a
+  plan each require an in-page confirmation by the student.
 - No WebMCP tool handles login, passwords, profile security, or raw account
   tokens.

@@ -1,12 +1,17 @@
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
 
 from studyflow.auth.repositories import (
+    SqlAlchemyLoginRepository,
     SqlAlchemySessionAuthenticationRepository,
     SqlAlchemySessionRepository,
+    SqlAlchemyVerificationResendRepository,
 )
 from studyflow.auth.session_authentication import (
     SessionAuthenticationService,
@@ -14,7 +19,11 @@ from studyflow.auth.session_authentication import (
 )
 from studyflow.auth.sessions import PendingSession
 from studyflow.database import Base, Database
-from studyflow.database.models import AuthenticationSession, StudentAccount
+from studyflow.database.models import (
+    AuthenticationRegistration,
+    AuthenticationSession,
+    StudentAccount,
+)
 
 
 @pytest.mark.anyio
@@ -271,5 +280,147 @@ async def test_idle_expiry_refresh_is_monotonic_and_absolute_capped() -> None:
         async with database.transaction() as session:
             stored = (await session.scalars(select(AuthenticationSession))).one()
         assert stored.idle_expires_at.replace(tzinfo=UTC) == now + timedelta(hours=10)
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_session_auth_repository_revoke_and_timezone_edge_cases() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    now = datetime.now(UTC)
+    account_id = uuid4()
+    token_hash = hash_browser_token("session-for-revoke")
+    csrf_hash = hash_browser_token("csrf-for-revoke")
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            session.add(
+                StudentAccount(
+                    id=account_id,
+                    email="student@example.com",
+                    name="Student",
+                    password_hash="$argon2id$hash",
+                    email_verified_at=now,
+                    timezone="UTC",
+                )
+            )
+            session.add(
+                AuthenticationSession(
+                    account_id=account_id,
+                    token_hash=token_hash,
+                    csrf_token_hash=csrf_hash,
+                    idle_expires_at=now + timedelta(hours=1),
+                    absolute_expires_at=now + timedelta(hours=10),
+                )
+            )
+
+        repository = SqlAlchemySessionAuthenticationRepository(database)
+
+        # 1. Revoke non-existent session returns False (line 351)
+        assert await repository.revoke("nonexistent", "csrf", now) is False
+
+        # 2. Authenticate with naive refreshed_idle_expiry (line 330)
+        naive_expiry = datetime(2026, 7, 28, 15, 0, 0)
+        principal = await repository.authenticate(token_hash, now, naive_expiry)
+        assert principal is not None
+        assert principal.account_id == account_id
+
+        # 3. Successful revoke returns True
+        assert await repository.revoke(token_hash, csrf_hash, now) is True
+
+        # 4. Authenticate already revoked session returns None
+        assert await repository.authenticate(token_hash, now, now + timedelta(hours=1)) is None
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_session_auth_repository_accepts_aware_expiry_values_from_storage() -> None:
+    now = datetime(2026, 7, 28, 12, tzinfo=UTC)
+    account_id = uuid4()
+    authentication_session = SimpleNamespace(
+        absolute_expires_at=now + timedelta(hours=4),
+        idle_expires_at=now + timedelta(hours=1),
+    )
+    account = SimpleNamespace(id=account_id, email="student@example.com", name="Student")
+    result = MagicMock()
+    result.one_or_none.return_value = (authentication_session, account)
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=result)
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=session)
+    transaction.__aexit__ = AsyncMock(return_value=False)
+    database = MagicMock()
+    database.transaction.return_value = transaction
+
+    repository = SqlAlchemySessionAuthenticationRepository(cast(Any, database))
+    principal = await repository.authenticate(
+        "token-hash",
+        now,
+        now + timedelta(hours=2),
+    )
+
+    assert principal is not None
+    assert principal.account_id == account_id
+    assert authentication_session.idle_expires_at == now + timedelta(hours=2)
+
+
+@pytest.mark.anyio
+async def test_verification_resend_repository_and_login_repo_find_by_email() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    now = datetime.now(UTC)
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            # Add verified registration (token hashes must be 64 characters)
+            session.add(
+                AuthenticationRegistration(
+                    email="already-verified@example.com",
+                    verification_token_hash="a" * 64,
+                    verification_expires_at=now + timedelta(hours=8),
+                    verified_at=now,
+                )
+            )
+            # Add pending unverified registration
+            session.add(
+                AuthenticationRegistration(
+                    email="pending@example.com",
+                    verification_token_hash="b" * 64,
+                    verification_expires_at=now + timedelta(hours=8),
+                    verified_at=None,
+                )
+            )
+
+        resend_repo = SqlAlchemyVerificationResendRepository(database)
+
+        # 1. Non-existent email returns False (line 368)
+        assert not await resend_repo.rotate(
+            "missing@example.com", "c" * 64, now + timedelta(hours=8)
+        )
+
+        # 2. Already verified email returns False (line 368)
+        assert not await resend_repo.rotate(
+            "already-verified@example.com", "c" * 64, now + timedelta(hours=8)
+        )
+
+        # 3. Pending unverified email rotates token and returns True (lines 369-371)
+        assert await resend_repo.rotate("pending@example.com", "c" * 64, now + timedelta(hours=8))
+        async with database.transaction() as session:
+            pending_row = await session.scalar(
+                select(AuthenticationRegistration).where(
+                    AuthenticationRegistration.email == "pending@example.com"
+                )
+            )
+        assert pending_row is not None and pending_row.verification_token_hash == "c" * 64
+
+        # 4. SqlAlchemyLoginRepository find_by_email returns None when account missing (line 282)
+        login_repo = SqlAlchemyLoginRepository(database)
+        assert await login_repo.find_by_email("nonexistent@example.com") is None
     finally:
         await database.stop()

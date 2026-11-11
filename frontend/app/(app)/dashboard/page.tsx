@@ -1,46 +1,50 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ElementType, type ReactNode } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Callout } from "@/components/ui/callout";
+import { Kbd } from "@/components/ui/kbd";
 import {
   AlertTriangle,
+  ArrowRight,
   CalendarClock,
-  CalendarDays,
   CalendarOff,
-  Clock3,
+  ChartLine,
+  Clock,
   ListChecks,
-} from "lucide-react";
+  ListTodo,
+  Plus,
+} from "@/components/icons";
+import { DashboardFocus } from "@/components/dashboard-focus";
+import { DayTimeline } from "@/components/day-timeline";
 import { CapacityBar } from "@/components/capacity-bar";
-import { ShortfallCard } from "@/components/shortfall-card";
 import { RecordOutcomeDialog } from "@/components/record-outcome-dialog";
-import { PendingPlanBanner, SchedulePreview } from "@/components/schedule-preview";
-import { UnscheduledWorkList } from "@/components/unscheduled-work-list";
-import { formatClock } from "@/lib/datetime";
-import { EmptyState, PageHeader, PageShell, SectionHeader, StatTile } from "@/components/page-kit";
-import { formatDuration, CATEGORY_CONFIG } from "@/lib/constants";
-import { describeDeadline } from "@/lib/datetime";
+import { SchedulePreview } from "@/components/schedule-preview";
+import { useCommandMenu } from "@/components/command-menu";
+import { EffortBar, TaskLine, VerdictBadge } from "@/components/study-kit";
+import { addZonedDays, formatDate } from "@/lib/datetime";
+import { applyRecordedOutcome } from "@/lib/outcome-ui";
+import { PageHeader, PageShell, StatCard } from "@/components/page-kit";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { formatDuration } from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import {
-  analyseFeasibility,
-  assessCapacity,
-  availableMinutes,
-  startOfDay,
-  weeklyPatternMinutes,
-} from "@/lib/capacity";
-import {
-  account as accountApi,
-  availability as availabilityApi,
-  scheduling,
-  tasks as tasksApi,
-} from "@/lib/api";
+import { analyseFeasibility, assessCapacity, startOfDay } from "@/lib/capacity";
+import { labelSessions } from "@/lib/session-labels";
+import { availability as availabilityApi, scheduling, tasks as tasksApi } from "@/lib/api";
 import { describeError, useApi } from "@/hooks/use-api";
 import { useSession } from "@/hooks/use-session";
 import { useNow } from "@/hooks/use-now";
-import type { AcademicTask } from "@/types/task";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
+import { SWR_KEYS } from "@/lib/swr-keys";
 import type { StudySession } from "@/types/session";
 import type { ScheduleProposal } from "@/types/schedule";
 
@@ -50,8 +54,12 @@ const HORIZONS = [
   { days: 30, label: "30 days" },
 ];
 
+const OVERLOAD_LIMIT = 3;
+
 export default function DashboardPage() {
+  const timeZone = useAccountTimezone();
   const { account } = useSession();
+  const { openNewTask } = useCommandMenu();
   const now = useNow();
   const [horizon, setHorizon] = useState(7);
   const [outcomeSession, setOutcomeSession] = useState<StudySession | null>(null);
@@ -61,19 +69,18 @@ export default function DashboardPage() {
   const loadTasks = useCallback((s: AbortSignal) => tasksApi.listTasks({}, s), []);
   const loadWindows = useCallback((s: AbortSignal) => availabilityApi.listWindows(s), []);
   const loadPeriods = useCallback((s: AbortSignal) => availabilityApi.listUnavailablePeriods(s), []);
-  const loadPreferences = useCallback((s: AbortSignal) => accountApi.getPreferences(s), []);
-  const loadSchedule = useCallback((s: AbortSignal) => scheduling.getActiveSchedule(s), []);
   const loadRevision = useCallback((s: AbortSignal) => scheduling.getPendingRevision(s), []);
 
-  const tasks = useApi(loadTasks);
-  const windows = useApi(loadWindows);
-  const periods = useApi(loadPeriods);
-  const preferences = useApi(loadPreferences);
-  const schedule = useApi(loadSchedule);
-  const revision = useApi(loadRevision);
+  const tasks = useApi(SWR_KEYS.tasks, loadTasks);
+  const loadSchedule = useCallback((s: AbortSignal) => scheduling.getActiveSchedule(s), []);
+  const windows = useApi(SWR_KEYS.availabilityWindows, loadWindows);
+  const periods = useApi(SWR_KEYS.unavailablePeriods, loadPeriods);
+  const schedule = useApi(SWR_KEYS.activeSchedule, loadSchedule);
+  const revision = useApi(SWR_KEYS.pendingRevision, loadRevision);
 
   const isLoading = tasks.isLoading || windows.isLoading || periods.isLoading;
-  const loadError = tasks.error ?? windows.error ?? periods.error ?? preferences.error;
+  const sessionsLoading = isLoading || schedule.isLoading;
+  const loadError = tasks.error ?? windows.error ?? periods.error ?? schedule.error ?? revision.error;
 
   const allTasks = useMemo(() => tasks.data ?? [], [tasks.data]);
   const allWindows = useMemo(() => windows.data ?? [], [windows.data]);
@@ -81,30 +88,21 @@ export default function DashboardPage() {
   const hasWindows = allWindows.length > 0;
 
   const verdict = useMemo(
-    () => assessCapacity(allTasks, allWindows, allPeriods, horizon),
-    [allTasks, allWindows, allPeriods, horizon],
+    () => assessCapacity(allTasks, allWindows, allPeriods, horizon, timeZone),
+    [allTasks, allWindows, allPeriods, horizon, timeZone],
   );
 
-  // An overload explanation is per task, not one global figure — a student can
-  // be comfortably under capacity overall and still have one task that cannot
-  // fit before its own deadline.
-  const feasibility = useMemo(
-    () => analyseFeasibility(allTasks, allWindows, allPeriods),
-    [allTasks, allWindows, allPeriods],
-  );
-  const overloaded = useMemo(() => feasibility.filter((f) => f.isOverloaded), [feasibility]);
-
-  const todayRemaining = useMemo(() => {
-    const endOfDay = new Date(startOfDay(now).getTime() + 24 * 60 * 60_000);
-    return availableMinutes(allWindows, allPeriods, now, endOfDay);
-  }, [allWindows, allPeriods, now]);
-
-  const openWork = useMemo(
-    () => feasibility.reduce((sum, f) => sum + f.requiredMinutes, 0),
-    [feasibility],
+  // An overload is per task, not one global figure — a student can be under
+  // capacity overall and still have one task that cannot fit before its deadline.
+  const overloaded = useMemo(
+    () => analyseFeasibility(allTasks, allWindows, allPeriods, timeZone).filter((f) => f.isOverloaded),
+    [allTasks, allWindows, allPeriods, timeZone],
   );
 
-  const sessions = useMemo(() => schedule.data?.sessions ?? [], [schedule.data]);
+  const sessions = useMemo(
+    () => labelSessions(schedule.data?.sessions ?? [], tasks.data),
+    [schedule.data, tasks.data],
+  );
   const pendingPlan = revision.data ?? proposal;
 
   /** The next session that has not started yet (SPEC §17.2). */
@@ -113,9 +111,7 @@ export default function DashboardPage() {
     return (
       sessions
         .filter((session) => !session.outcome && new Date(session.startTime).getTime() > from)
-        .sort(
-          (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime(),
-        )[0] ?? null
+        .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())[0] ?? null
     );
   }, [sessions, now]);
 
@@ -130,23 +126,20 @@ export default function DashboardPage() {
 
   /** Study minutes still scheduled between now and midnight (SPEC §17.2). */
   const workloadToday = useMemo(() => {
-    const endOfDay = new Date(startOfDay(now).getTime() + 24 * 60 * 60_000);
+    const endOfDay = addZonedDays(startOfDay(now, timeZone), 1, timeZone);
     return sessions
       .filter((session) => {
         const start = new Date(session.startTime);
         return !session.outcome && start >= now && start < endOfDay;
       })
       .reduce((sum, session) => sum + session.plannedDuration, 0);
-  }, [sessions, now]);
+  }, [sessions, now, timeZone]);
 
-  /**
-   * Weekly effort progress: minutes worked this week against minutes planned
-   * for it. Effort, not content completion (SPEC §13).
-   */
+  /** Minutes worked this week against minutes planned for it — effort, not completion (SPEC §13). */
   const weeklyEffort = useMemo(() => {
-    const start = startOfDay(now);
+    const start = startOfDay(now, timeZone);
     start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
-    const end = new Date(start.getTime() + 7 * 24 * 60 * 60_000);
+    const end = addZonedDays(start, 7, timeZone);
     const week = sessions.filter((session) => {
       const at = new Date(session.startTime);
       return at >= start && at < end;
@@ -154,36 +147,32 @@ export default function DashboardPage() {
     const planned = week.reduce((sum, session) => sum + session.plannedDuration, 0);
     const worked = week.reduce((sum, session) => sum + (session.actualDuration ?? 0), 0);
     return { planned, worked, percent: planned > 0 ? Math.round((worked / planned) * 100) : 0 };
-  }, [sessions, now]);
+  }, [sessions, now, timeZone]);
 
-  /**
-   * Unscheduled Work in the SPEC §5.4 sense: open work with no valid session.
-   * Distinct from "work still to do", which counts everything remaining.
-   */
+  /** Unscheduled Work (SPEC §5.4): open work with no valid session. */
   const unscheduled = useMemo(() => {
     if (pendingPlan) return pendingPlan.unscheduledWork;
     const scheduled = new Set(
       sessions.filter((session) => !session.outcome).map((session) => session.taskId),
     );
     return allTasks
-      .filter(
-        (task) =>
-          task.status !== "Completed" &&
-          task.remainingDuration > 0 &&
-          !scheduled.has(task.id),
-      )
-      .map((task) => ({
-        taskId: task.id,
-        taskTitle: task.title,
-        remainingMinutes: task.remainingDuration,
-        reason:
-          sessions.length === 0
-            ? "You have not made a plan yet."
-            : "It has no study session booked.",
-      }));
+      .filter((task) => task.status !== "Completed" && task.remainingDuration > 0 && !scheduled.has(task.id))
+      .map((task) => ({ taskId: task.id, remainingMinutes: task.remainingDuration }));
   }, [pendingPlan, sessions, allTasks]);
 
+  const unplannedMinutes = unscheduled.reduce((sum, item) => sum + item.remainingMinutes, 0);
+  const openTasks = allTasks.filter((task) => task.status !== "Completed").length;
   const firstName = account?.name.trim().split(/\s+/)[0] ?? "";
+  const showOverloaded = hasWindows && overloaded.length > 0;
+  // The focus card already asks for outcomes unless a pending plan outranks them.
+  const focusAsksForOutcomes = hasWindows && openTasks > 0 && pendingPlan === null;
+  const showAwaiting = awaitingOutcome.length > 0 && !focusAsksForOutcomes;
+  const needsAttention = showAwaiting || showOverloaded || unscheduled.length > 0;
+  const showAttention = !isLoading && !loadError && needsAttention;
+  const dueSoon = allTasks.filter((task) => {
+    const due = new Date(task.deadline).getTime() - now.getTime();
+    return task.status !== "Completed" && due >= 0 && due < 7 * 24 * 60 * 60 * 1000;
+  }).length;
 
   function reloadAll() {
     tasks.reload();
@@ -193,11 +182,24 @@ export default function DashboardPage() {
     revision.reload();
   }
 
+  function openPendingPlan() {
+    /* c8 ignore next -- the review action only shows while a plan is pending. */
+    if (!pendingPlan) return;
+    setProposal(pendingPlan);
+    setPreviewOpen(true);
+  }
+
   return (
-    <PageShell>
+    <PageShell className="dashboard-page gap-4 @4xl/dashboard:h-full @4xl/dashboard:min-h-[40rem] @4xl/dashboard:py-5">
       <PageHeader
-        title={firstName ? `Hello, ${firstName}` : "Dashboard"}
-        description="Whether your coursework fits the time you have."
+        eyebrow={formatDate(now, timeZone, { weekday: "long", day: "numeric", month: "long" })}
+        title={firstName ? `${greetingFor(now, timeZone)}, ${firstName}` : "Dashboard"}
+        actions={
+          <Button onClick={openNewTask} aria-keyshortcuts="N">
+            <Plus className="size-4" aria-hidden /> Add a task
+            <Kbd aria-hidden className="ms-1 hidden border-primary-foreground/25 bg-primary-foreground/10 text-primary-foreground @2xl/dashboard:inline-flex">N</Kbd>
+          </Button>
+        }
       />
 
       {loadError && (
@@ -214,257 +216,238 @@ export default function DashboardPage() {
         </Callout>
       )}
 
-      {pendingPlan && (
-        <PendingPlanBanner
-          proposal={pendingPlan}
-          onReview={() => {
-            setProposal(pendingPlan);
-            setPreviewOpen(true);
-          }}
-        />
-      )}
-
-      {/* SPEC §12.1: prompt for outcomes rather than guessing them. */}
-      {awaitingOutcome.length > 0 && (
-        <Callout
-          tone="warning"
-          icon={CalendarClock}
-          title={`${awaitingOutcome.length} ${
-            awaitingOutcome.length === 1 ? "session is" : "sessions are"
-          } waiting on you`}
-          actions={
-            <Button size="sm" onClick={() => setOutcomeSession(awaitingOutcome[0])}>
-              Record what happened
-            </Button>
-          }
-        >
-          Until you say how {awaitingOutcome.length === 1 ? "it" : "they"} went, that work
-          still counts as remaining.
-        </Callout>
-      )}
-
-
-      {/* ── What happens next (SPEC §17.2) ─────────────────── */}
-      <NextSession
-        session={nextSession}
-        isLoading={schedule.isLoading}
-        workloadToday={workloadToday}
-        hasSessions={sessions.length > 0}
-      />
-
-      {/* ── The verdict: the one loud thing on the page ─────── */}
-      <section className="flex flex-col gap-4 rounded-xl border bg-card p-5 sm:p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-sm font-medium text-muted-foreground">
-            Capacity over the next
-          </h2>
-          <div
-            className="flex items-center gap-0.5 rounded-lg bg-muted p-0.5"
-            role="group"
-            aria-label="Time range"
+      {!loadError && (
+        <div className="rise-in grid min-w-0 shrink-0 grid-cols-2 gap-4 @4xl/dashboard:grid-cols-4">
+          <StatCard
+            icon={Clock}
+            label="Left today"
+            value={sessionsLoading ? null : workloadToday > 0 ? formatDuration(workloadToday) : "None"}
+            hint={workloadToday > 0 ? "Booked for later today" : "Nothing booked"}
+          />
+          <StatCard
+            icon={ListChecks}
+            label="Open tasks"
+            value={isLoading ? null : openTasks}
+            hint={`${dueSoon} due this week`}
+          />
+          <StatCard
+            icon={ChartLine}
+            label="Studied this week"
+            value={sessionsLoading ? null : formatDuration(weeklyEffort.worked)}
+            hint={
+              weeklyEffort.planned > 0
+                ? `${weeklyEffort.percent}% of ${formatDuration(weeklyEffort.planned)} planned`
+                : "Nothing planned yet"
+            }
           >
-            {HORIZONS.map((option) => (
-              <button
-                key={option.days}
-                onClick={() => setHorizon(option.days)}
-                aria-pressed={horizon === option.days}
-                className={cn(
-                  "rounded-[0.4rem] px-2.5 py-1 text-xs font-medium transition-colors",
-                  horizon === option.days
-                    ? "bg-card text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
+            {weeklyEffort.planned > 0 && (
+              <EffortBar
+                label="Weekly effort"
+                worked={Math.min(weeklyEffort.worked, weeklyEffort.planned)}
+                remaining={Math.max(0, weeklyEffort.planned - weeklyEffort.worked)}
+              />
+            )}
+          </StatCard>
+          <StatCard
+            icon={CalendarClock}
+            label="To record"
+            value={sessionsLoading ? null : awaitingOutcome.length}
+            tone={awaitingOutcome.length > 0 ? "deficit" : undefined}
+            hint={awaitingOutcome.length > 0 ? "Past sessions waiting" : "All caught up"}
+          />
+        </div>
+      )}
+
+      {/*
+        On a laptop the dashboard is one screen: this grid takes the height that
+        is left and each list scrolls inside its own card instead of the page.
+      */}
+      <div className="grid min-w-0 gap-4 @4xl/dashboard:min-h-0 @4xl/dashboard:flex-1 @4xl/dashboard:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <div className="flex min-w-0 flex-col gap-4 @4xl/dashboard:min-h-0">
+          {!loadError && (
+            <div className="rise-in shrink-0">
+              <DashboardFocus
+                ready={!sessionsLoading && !revision.isLoading}
+                hasWindows={hasWindows}
+                openTasks={openTasks}
+                pendingPlan={pendingPlan !== null}
+                awaitingOutcome={awaitingOutcome.length}
+                nextSession={nextSession}
+                onReview={openPendingPlan}
+                onRecord={() => setOutcomeSession(awaitingOutcome[0])}
+                now={now}
+              />
+            </div>
+          )}
+
+          <Card className="min-w-0 @4xl/dashboard:min-h-0 @4xl/dashboard:flex-1">
+            <Tabs
+              value={horizon}
+              onValueChange={(val) => {
+                if (val != null) setHorizon(Number(val));
+              }}
+              className="flex min-h-0 flex-1 flex-col gap-0"
+            >
+              <CardHeader>
+                <CardTitle>Coming up</CardTitle>
+                <CardAction>
+                  <TabsList className="h-7" aria-label="Time range">
+                    {HORIZONS.map((option) => (
+                      <TabsTrigger key={option.days} value={option.days} className="px-2 text-xs">
+                        {option.label}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </CardAction>
+              </CardHeader>
+
+              <TabsContent
+                value={horizon}
+                className="flex min-h-0 flex-1 flex-col focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid focus-visible:outline-ring"
               >
-                {option.label}
-              </button>
-            ))}
-          </div>
+                <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden p-0">
+                  {isLoading ? (
+                    <div className="space-y-2 p-4">
+                      {Array.from({ length: 3 }).map((_, i) => (
+                        <Skeleton key={i} className="h-11 w-full" />
+                      ))}
+                    </div>
+                  ) : (
+                    <>
+                      {!hasWindows ? (
+                        <NoStudyTime />
+                      ) : (
+                        verdict.tasks.length > 0 && (
+                          <div className="flex shrink-0 flex-col gap-2.5 border-b px-4 py-3">
+                            <Verdict
+                              balance={verdict.balance}
+                              count={verdict.tasks.length}
+                              committed={verdict.committed}
+                              available={verdict.available}
+                            />
+                            <CapacityBar size="sm" available={verdict.available} committed={verdict.committed} />
+                          </div>
+                        )
+                      )}
+                      {verdict.tasks.length === 0 ? (
+                        <p className="p-4 text-sm text-muted-foreground">Nothing due in the next {horizon} days.</p>
+                      ) : (
+                        <ul aria-label="Tasks coming up" className="min-h-0 flex-1 divide-y @4xl/dashboard:overflow-y-auto">
+                          {verdict.tasks.map((task) => (
+                            <TaskLine key={task.id} task={task} className="[--card-spacing:--spacing(4)]" />
+                          ))}
+                        </ul>
+                      )}
+                    </>
+                  )}
+                </CardContent>
+              </TabsContent>
+            </Tabs>
+          </Card>
         </div>
 
-        {isLoading ? (
-          <div className="space-y-4">
-            <Skeleton className="h-14 w-72" />
-            <Skeleton className="h-10 w-full" />
-          </div>
-        ) : !hasWindows ? (
-          <EmptyState
-            icon={CalendarOff}
-            title="No study time set yet"
-            action={
-              <Button size="sm" nativeButton={false} render={<Link href="/availability" />}>
-                Set your availability
-              </Button>
-            }
-          >
-            StudyFlow weighs your coursework against the hours you are actually free.
-            Add your weekly hours and this becomes a real answer.
-          </EmptyState>
-        ) : (
-          <>
-            <Verdict balance={verdict.balance} count={verdict.tasks.length} days={horizon} />
-            <CapacityBar available={verdict.available} committed={verdict.committed} />
-            <p className="border-t pt-3 text-xs text-muted-foreground">
-              Times shown in {preferences.data?.timezone ?? "your timezone"}.{" "}
-              <Link
-                href="/availability"
-                className="font-medium underline underline-offset-2 hover:text-foreground"
-              >
-                Change your hours
-              </Link>
-            </p>
-          </>
-        )}
-      </section>
+        <div className="flex min-w-0 flex-col gap-4 @4xl/dashboard:min-h-0">
+          <Card className={cn("rise-in min-w-0 @4xl/dashboard:min-h-0 @4xl/dashboard:flex-1", loadError && "@4xl/dashboard:col-span-2")} style={{ "--stagger": 1 } as React.CSSProperties}>
+            <CardHeader>
+              <CardTitle>Today</CardTitle>
+              <CardAction>
+                <Button variant="ghost" size="xs" nativeButton={false} render={<Link href="/calendar" />}>
+                  Calendar <ArrowRight aria-hidden />
+                </Button>
+              </CardAction>
+            </CardHeader>
+            <CardContent className="min-h-0 px-0 py-3 [--card-spacing:--spacing(3)] @4xl/dashboard:overflow-y-auto">
+              <DayTimeline
+                sessions={sessions}
+                now={now}
+                timeZone={timeZone}
+                isLoading={sessionsLoading}
+                hasPlan={sessions.length > 0}
+                onRecord={setOutcomeSession}
+              />
+            </CardContent>
+          </Card>
 
-      {/* ── Glanceable figures ─────────────────────────────── */}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile
-          icon={Clock3}
-          value={isLoading ? null : formatDuration(todayRemaining)}
-          label="Free today"
-        />
-        <StatTile
-          icon={CalendarDays}
-          value={isLoading ? null : formatDuration(weeklyPatternMinutes(allWindows))}
-          label="Study time each week"
-        />
-        <StatTile
-          icon={ListChecks}
-          value={isLoading ? null : formatDuration(openWork)}
-          label="Work still to do"
-          hint={
-            unscheduled.length > 0
-              ? `${formatDuration(
-                  unscheduled.reduce((sum, item) => sum + item.remainingMinutes, 0),
-                )} unplanned`
-              : undefined
-          }
-        />
-        <StatTile
-          icon={AlertTriangle}
-          value={isLoading ? null : String(overloaded.length)}
-          label="Tasks that don't fit"
-          tone={overloaded.length > 0 ? "deficit" : undefined}
-        />
-      </div>
-
-      {/* ── Weekly effort progress (SPEC §17.2, §13) ───────── */}
-      {sessions.length > 0 && (
-        <section className="rounded-xl border bg-card p-4">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-            <h2 className="text-sm font-medium">This week&rsquo;s effort</h2>
-            <p className="text-xs text-muted-foreground">
-              <span className="font-medium tabular-nums text-foreground">
-                {formatDuration(weeklyEffort.worked)}
-              </span>{" "}
-              worked of {formatDuration(weeklyEffort.planned)} planned
-            </p>
-          </div>
-          <div className="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full bg-foreground/70 transition-[width]"
-              style={{ width: `${Math.min(100, weeklyEffort.percent)}%` }}
-            />
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground">
-            Effort means time put in, not how much of the work is finished.
-          </p>
-        </section>
-      )}
-
-      {/* ── Working area ───────────────────────────────────── */}
-      <div className="grid gap-8 lg:grid-cols-[1.35fr_1fr]">
-        <section className="min-w-0">
-          <SectionHeader
-            title="Upcoming deadlines"
-            meta={`next ${horizon} days`}
-            action={{ href: "/tasks", label: "All tasks" }}
-          />
-          {isLoading ? (
-            <div className="space-y-2 pt-3">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-11 w-full" />
-              ))}
-            </div>
-          ) : verdict.tasks.length === 0 ? (
-            <p className="pt-4 text-sm text-muted-foreground">
-              Nothing due in this window. Widen the range above, or add a task.
-            </p>
-          ) : (
-            <ul className="divide-y">
-              {verdict.tasks.slice(0, 7).map((task) => (
-                <TaskRow key={task.id} task={task} />
-              ))}
-            </ul>
+          {showAttention && (
+            <Card className="min-w-0 shrink-0 @4xl/dashboard:max-h-[55%]">
+              <CardHeader>
+                <CardTitle>Needs attention</CardTitle>
+              </CardHeader>
+              <CardContent className="min-h-0 p-0 @4xl/dashboard:overflow-y-auto">
+                <ul className="divide-y">
+                  {showAwaiting && (
+                    <AttentionRow
+                      icon={CalendarClock}
+                      title="Record your past sessions"
+                      detail={`${awaitingOutcome.length} waiting`}
+                      action={
+                        <Button size="xs" variant="outline" onClick={() => setOutcomeSession(awaitingOutcome[0])}>
+                          Record what happened
+                        </Button>
+                      }
+                    />
+                  )}
+                  {showOverloaded &&
+                    overloaded.slice(0, OVERLOAD_LIMIT).map((item) => (
+                      <AttentionRow
+                        key={item.task.id}
+                        icon={AlertTriangle}
+                        title={
+                          <Link href={`/tasks/${item.task.id}`} className="underline-offset-4 hover:underline">
+                            {item.task.title}
+                          </Link>
+                        }
+                        detail={`${formatDuration(item.shortfallMinutes)} short · due ${formatDate(item.task.deadline, timeZone, { day: "numeric", month: "short" })}`}
+                        action={
+                          <Button size="xs" variant="outline" nativeButton={false} render={<Link href={`/tasks/${item.task.id}`} />}>
+                            Fix
+                          </Button>
+                        }
+                      />
+                    ))}
+                  {showOverloaded && overloaded.length > OVERLOAD_LIMIT && (
+                    <li className="px-4 py-2">
+                      <Link
+                        href="/tasks"
+                        className="text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                      >
+                        {overloaded.length - OVERLOAD_LIMIT} more
+                      </Link>
+                    </li>
+                  )}
+                  {unscheduled.length > 0 && (
+                    <AttentionRow
+                      icon={ListTodo}
+                      title={`${unscheduled.length} ${unscheduled.length === 1 ? "task has" : "tasks have"} no session yet`}
+                      detail={`${formatDuration(unplannedMinutes)} to plan`}
+                      action={
+                        <Button size="xs" variant="outline" nativeButton={false} render={<Link href="/calendar" />}>
+                          Plan my time
+                        </Button>
+                      }
+                    />
+                  )}
+                </ul>
+              </CardContent>
+            </Card>
           )}
-        </section>
-
-        <section className="min-w-0">
-          <SectionHeader
-            title="Tasks that don't fit"
-            meta={
-              !hasWindows
-                ? "needs your hours"
-                : overloaded.length === 0
-                  ? "none"
-                  : `${overloaded.length} of ${feasibility.length}`
-            }
-            tone={overloaded.length > 0 ? "deficit" : undefined}
-          />
-          <div className="space-y-3 pt-3">
-            {isLoading ? (
-              <Skeleton className="h-32 w-full rounded-lg" />
-            ) : !hasWindows ? (
-              <p className="text-sm text-muted-foreground">
-                Set your weekly hours and StudyFlow will flag anything that cannot fit.
-              </p>
-            ) : overloaded.length === 0 ? (
-              <Callout tone="success" title="Everything fits">
-                Every open task has enough free time before its deadline.
-              </Callout>
-            ) : (
-              overloaded
-                .slice(0, 3)
-                .map((item) => <ShortfallCard key={item.task.id} item={item} />)
-            )}
-            {overloaded.length > 3 && (
-              <Link
-                href="/tasks"
-                className="block text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-              >
-                {overloaded.length - 3}
-                {" more don’t fit →"}
-              </Link>
-            )}
-          </div>
-        </section>
+        </div>
       </div>
-      {/* ── Unscheduled Work (SPEC §17.2, §5.4) ────────────── */}
-      {unscheduled.length > 0 && (
-        <section>
-          <SectionHeader
-            title="Work with no slot"
-            meta={`${unscheduled.length} to resolve`}
-            tone="deficit"
-          />
-          <div className="pt-3">
-            <UnscheduledWorkList items={unscheduled.slice(0, 4)} />
-          </div>
-        </section>
-      )}
 
       <RecordOutcomeDialog
         session={outcomeSession}
         open={outcomeSession !== null}
         onOpenChange={(next) => !next && setOutcomeSession(null)}
         onRecorded={(result) => {
-          schedule.reload();
-          tasks.reload();
-          if (result.revision) {
-            setProposal(result.revision);
-            setPreviewOpen(true);
+          if (schedule.data) {
+            schedule.setData({
+              ...schedule.data,
+              sessions: schedule.data.sessions.map((session) =>
+                session.id === result.session.id ? result.session : session,
+              ),
+            });
           }
-          revision.reload();
+          applyRecordedOutcome(result, { setProposal, setPreviewOpen });
         }}
       />
 
@@ -472,172 +455,98 @@ export default function DashboardPage() {
         proposal={proposal}
         availabilityWindows={allWindows}
         unavailablePeriods={allPeriods}
+        existingSessions={sessions}
         open={previewOpen}
         onOpenChange={setPreviewOpen}
         onAccepted={() => {
           setProposal(null);
-          reloadAll();
+          revision.setData(null);
         }}
         onRejected={() => {
           setProposal(null);
-          revision.reload();
+          revision.setData(null);
         }}
       />
     </PageShell>
   );
 }
 
-/**
- * "What happens next?" — the first thing SPEC §17.2 asks the Dashboard to
- * answer, paired with how much study is still booked for today.
- */
-function NextSession({
-  session,
-  isLoading,
-  workloadToday,
-  hasSessions,
+function greetingFor(now: Date, timeZone: string) {
+  const hour = Number(
+    new Intl.DateTimeFormat("en-GB", { hour: "numeric", hourCycle: "h23", timeZone }).format(now),
+  );
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+/** One thing that needs a decision, as a single row with its fix beside it. */
+function AttentionRow({
+  icon: Icon,
+  title,
+  detail,
+  action,
 }: {
-  session: StudySession | null;
-  isLoading: boolean;
-  workloadToday: number;
-  hasSessions: boolean;
+  icon: ElementType;
+  title: ReactNode;
+  detail: string;
+  action: ReactNode;
 }) {
-  if (isLoading) return <Skeleton className="h-24 w-full rounded-xl" />;
-
-  if (!session) {
-    return (
-      <Callout
-        tone="info"
-        icon={CalendarClock}
-        title={hasSessions ? "No sessions coming up" : "You have no plan yet"}
-        actions={
-          <Button size="sm" nativeButton={false} render={<Link href="/calendar" />}>
-            {hasSessions ? "Open the calendar" : "Plan my time"}
-          </Button>
-        }
-      >
-        {hasSessions
-          ? "Everything scheduled is behind you. Generate a new plan when you add more work."
-          : "Let StudyFlow work out when to fit your tasks around the hours you are free."}
-      </Callout>
-    );
-  }
-
-  const start = new Date(session.startTime);
-  const today = start.toDateString() === new Date().toDateString();
-  const when = today
-    ? `Today at ${formatClock(start)}`
-    : `${start.toLocaleDateString(undefined, {
-        weekday: "long",
-        day: "numeric",
-        month: "short",
-      })} at ${formatClock(start)}`;
-
   return (
-    <section className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-xl border bg-card p-4 sm:p-5">
-      <div className="min-w-0">
-        <p className="text-xs font-medium text-muted-foreground">Up next</p>
-        <p className="mt-1 truncate font-display text-lg font-bold tracking-tight">
-          {session.taskTitle}
-        </p>
-        <p className="mt-0.5 text-sm text-muted-foreground">
-          {when} · {formatDuration(session.plannedDuration)}
-        </p>
+    <li className="flex items-center gap-3 px-4 py-3">
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-deficit/12 text-deficit" aria-hidden>
+        <Icon className="size-3.5" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{title}</p>
+        <p className="truncate text-xs text-muted-foreground tabular-nums">{detail}</p>
       </div>
-
-      <div className="flex items-center gap-6">
-        <div className="text-end">
-          <p className="text-xs font-medium text-muted-foreground">Left to study today</p>
-          <p className="mt-1 font-display text-xl font-bold tabular-nums">
-            {formatDuration(workloadToday)}
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          nativeButton={false}
-          render={<Link href="/calendar" />}
-        >
-          Calendar
-        </Button>
-      </div>
-    </section>
+      <div className="shrink-0">{action}</div>
+    </li>
   );
 }
 
-function Verdict({ balance, count, days }: { balance: number; count: number; days: number }) {
-  if (count === 0) {
-    return (
-      <div>
-        <p className="font-display text-4xl font-bold tracking-tighter sm:text-5xl">Nothing due</p>
-        <p className="mt-2 text-sm text-muted-foreground">
-          No open work falls in the next {days} days.
-        </p>
-      </div>
-    );
-  }
-
-  const over = balance < 0;
+function NoStudyTime() {
   return (
-    <div>
-      <p
-        className={cn(
-          "font-display text-4xl font-bold tracking-tighter sm:text-5xl",
-          over ? "text-deficit" : "text-surplus",
-        )}
-      >
-        {over ? `${formatDuration(-balance)} short` : `${formatDuration(balance)} spare`}
-      </p>
-      <p className="mt-2 max-w-lg text-sm text-muted-foreground">
-        {over
-          ? `${count} ${count === 1 ? "task does" : "tasks do"} not fit in the study time you have over the next ${days} days.`
-          : `${count} ${count === 1 ? "task fits" : "tasks fit"} in the next ${days} days, with time to spare.`}
-      </p>
+    <div className="flex shrink-0 flex-wrap items-center gap-3 border-b px-4 py-3.5">
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-frame" aria-hidden>
+        <CalendarOff className="size-4" />
+      </span>
+      <div className="min-w-0 flex-1 basis-48">
+        <p className="text-sm font-medium">No study time set yet</p>
+        <p className="text-xs text-muted-foreground">Add your weekly hours to see if your work fits.</p>
+      </div>
+      <Button size="sm" nativeButton={false} render={<Link href="/availability" />}>
+        Set my study hours
+      </Button>
     </div>
   );
 }
 
-function TaskRow({ task }: { task: AcademicTask }) {
-  const due = describeDeadline(task.deadline);
-  const category = CATEGORY_CONFIG[task.category];
-
+function Verdict({
+  balance,
+  count,
+  committed,
+  available,
+}: {
+  balance: number;
+  count: number;
+  committed: number;
+  available: number;
+}) {
+  const over = balance < 0;
   return (
-    <li>
-      <Link
-        href={`/tasks/${task.id}`}
-        className="flex flex-col gap-1 py-2.5 transition-colors hover:bg-muted/40 sm:flex-row sm:items-center sm:gap-3"
-      >
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{task.title}</p>
-          <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-muted-foreground">
-            {task.priority === "High" && (
-              <Badge variant="outline" className="px-1 py-0 text-[0.625rem]">
-                High
-              </Badge>
-            )}
-            <span className="truncate">
-              {category.label}
-              {task.course ? ` · ${task.course}` : ""}
-            </span>
-          </p>
-        </div>
-
-        <span className="flex shrink-0 items-center gap-3 text-xs sm:contents">
-          <span className="tabular-nums text-muted-foreground sm:w-16 sm:text-end">
-            {formatDuration(task.remainingDuration)}
-          </span>
-          <span
-            className={cn(
-              "flex items-center gap-1 font-medium tabular-nums sm:w-20 sm:justify-end",
-              due.urgent ? "text-deficit" : "text-muted-foreground",
-            )}
-          >
-            {/* An icon carries the warning too, so urgency is never colour alone. */}
-            {due.overdue && <AlertTriangle className="size-3 shrink-0" aria-hidden />}
-            {due.short}
-          </span>
-        </span>
-      </Link>
-    </li>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <VerdictBadge tone={over ? "over" : "fits"}>{over ? "Doesn’t fit yet" : "On track"}</VerdictBadge>
+      <p className={cn("text-xl font-semibold tracking-tight tabular-nums", over ? "text-deficit" : "text-surplus")}>
+        {over ? `${formatDuration(-balance)} short` : `${formatDuration(balance)} spare`}
+      </p>
+      <p className="text-sm text-muted-foreground tabular-nums">
+        {over
+          ? `${count} ${count === 1 ? "task does" : "tasks do"} not fit`
+          : `${count} ${count === 1 ? "task" : "tasks"} due`}
+        {` · ${formatDuration(committed)} of work, ${formatDuration(available)} of study time`}
+      </p>
+    </div>
   );
 }

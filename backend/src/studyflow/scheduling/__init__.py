@@ -1,6 +1,7 @@
 """Pure scheduling domain and Google OR-Tools kernel."""
 
 from studyflow.scheduling.acceptance import (
+    DEFAULT_ACCEPTANCE_GRACE_PERIOD,
     ScheduleAcceptance,
     ScheduleAcceptanceService,
     StaleScheduleProposalError,
@@ -29,6 +30,8 @@ from studyflow.scheduling.kernel import solve_feasibility
 from studyflow.scheduling.outcomes import (
     DuplicateSessionOutcomeError,
     FutureSessionOutcomeError,
+    InvalidSessionOutcomeError,
+    LargeActualDurationConfirmationRequired,
     ProposedSessionOutcomeError,
     SessionOutcomeKind,
     StudySessionDetails,
@@ -72,6 +75,7 @@ from studyflow.scheduling.scenarios import (
     ScheduleScenario,
 )
 from studyflow.scheduling.service import (
+    DEFAULT_PLANNING_LEAD_TIME,
     ScheduleGeneration,
     ScheduleGenerationFailedError,
     ScheduleGenerationService,
@@ -85,6 +89,8 @@ from studyflow.scheduling.splitting import (
 )
 
 __all__ = [
+    "DEFAULT_ACCEPTANCE_GRACE_PERIOD",
+    "DEFAULT_PLANNING_LEAD_TIME",
     "MISSED_REVISION_REASON",
     "AvailabilityTimezoneConfirmationRequiredError",
     "DuplicateSessionOutcomeError",
@@ -93,7 +99,9 @@ __all__ = [
     "FeasibilityResult",
     "FutureSessionOutcomeError",
     "InvalidRecoveryTriggerError",
+    "InvalidSessionOutcomeError",
     "KernelStatus",
+    "LargeActualDurationConfirmationRequired",
     "MinuteWindow",
     "NewProposedSession",
     "NewScheduleProposal",

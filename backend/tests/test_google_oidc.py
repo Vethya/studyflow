@@ -10,8 +10,10 @@ from studyflow.auth.oidc import (
     InvalidOIDCResponseError,
     OIDCAccount,
     OIDCLoginService,
+    OIDCNotConfiguredError,
     OIDCProviderUnavailableError,
     OIDCStateRecord,
+    UnconfiguredOIDCLogin,
 )
 from studyflow.auth.sessions import SessionCredentials
 
@@ -28,17 +30,23 @@ class RepositoryStub:
         self.restored = 0
 
     async def store_state(
-        self, state_hash: str, nonce_hash: str, timezone: str, expires_at: datetime
+        self,
+        state_hash: str,
+        nonce_hash: str,
+        timezone: str,
+        expires_at: datetime,
+        link_account_id: UUID | None = None,
     ) -> None:
         self.state_hash, self.nonce_hash = state_hash, nonce_hash
         self.timezone = timezone
+        self.link_account_id = link_account_id
         self.consumed = False
 
     async def consume_state(self, state_hash: str, now: datetime) -> OIDCStateRecord | None:
         if state_hash != self.state_hash or self.consumed:
             return None
         self.consumed = True
-        return OIDCStateRecord(self.nonce_hash, self.timezone)
+        return OIDCStateRecord(self.nonce_hash, self.timezone, self.link_account_id)
 
     async def restore_state(self, state_hash: str, consumed_at: datetime, now: datetime) -> bool:
         if state_hash != self.state_hash or not self.consumed or not self.can_restore:
@@ -57,6 +65,9 @@ class RepositoryStub:
     ) -> bool:
         self.link_token_hash = token_hash
         return True
+
+    async def link_identity(self, account_id: UUID, claims: GoogleClaims) -> OIDCAccount | None:
+        return OIDCAccount(account_id, claims.email, claims.name)
 
 
 class ProviderStub:
@@ -171,3 +182,96 @@ async def test_google_oidc_marks_outage_nonretryable_when_state_cannot_be_restor
 
     assert raised.value.retry_same_callback is False
     assert repository.restored == 0
+
+
+@pytest.mark.anyio
+async def test_google_oidc_nonretryable_outage_does_not_restore_state() -> None:
+    class NonRetryableProviderStub(ProviderStub):
+        async def exchange(self, code: str, expected_nonce_hash: str) -> GoogleClaims:
+            raise OIDCProviderUnavailableError(retry_same_callback=False)
+
+    repository = RepositoryStub()
+    service = OIDCLoginService(
+        repository,
+        NonRetryableProviderStub(),
+        SessionsStub(),
+        client_id="client-id",
+        redirect_uri="https://studyflow.example/api/v1/auth/google/callback",
+        token_factory=iter(["state-secret", "nonce-secret"]).__next__,
+    )
+    started = await service.start("Asia/Phnom_Penh")
+
+    with pytest.raises(OIDCProviderUnavailableError) as raised:
+        await service.complete("authorization-code", started.state, started.state)
+
+    assert raised.value.retry_same_callback is False
+    assert repository.restored == 0
+
+
+@pytest.mark.anyio
+async def test_unconfigured_oidc_login_raises_error() -> None:
+    service = UnconfiguredOIDCLogin()
+    with pytest.raises(OIDCNotConfiguredError):
+        await service.start("UTC")
+    with pytest.raises(OIDCNotConfiguredError):
+        await service.complete("code", "state", "cookie")
+
+
+@pytest.mark.anyio
+async def test_google_oidc_complete_rejects_missing_state_record() -> None:
+    repository = RepositoryStub()
+    service = OIDCLoginService(
+        repository,
+        ProviderStub(),
+        SessionsStub(),
+        client_id="client-id",
+        redirect_uri="https://studyflow.example/api/v1/auth/google/callback",
+    )
+    with pytest.raises(InvalidOIDCResponseError):
+        await service.complete("authorization-code", "unknown-state", "unknown-state")
+
+
+@pytest.mark.anyio
+async def test_google_oidc_complete_rejects_link_challenge_creation_failure() -> None:
+    class FailingLinkRepo(RepositoryStub):
+        async def create_link_challenge(
+            self, claims: GoogleClaims, token_hash: str, expires_at: datetime
+        ) -> bool:
+            return False
+
+    repository = FailingLinkRepo(link_required=True)
+    service = OIDCLoginService(
+        repository,
+        ProviderStub(),
+        SessionsStub(),
+        client_id="client-id",
+        redirect_uri="https://studyflow.example/api/v1/auth/google/callback",
+        token_factory=iter(["state-secret", "nonce-secret", "link-challenge"]).__next__,
+    )
+    started = await service.start("Asia/Phnom_Penh")
+
+    with pytest.raises(InvalidOIDCResponseError):
+        await service.complete("authorization-code", started.state, started.state)
+
+
+@pytest.mark.anyio
+async def test_google_oidc_complete_rejects_session_creation_failure() -> None:
+    class FailingSessionsStub:
+        async def create(
+            self, account_id: UUID, expected_password_hash: str | None = None
+        ) -> SessionCredentials | None:
+            return None
+
+    repository = RepositoryStub()
+    service = OIDCLoginService(
+        repository,
+        ProviderStub(),
+        FailingSessionsStub(),
+        client_id="client-id",
+        redirect_uri="https://studyflow.example/api/v1/auth/google/callback",
+        token_factory=iter(["state-secret", "nonce-secret"]).__next__,
+    )
+    started = await service.start("Asia/Phnom_Penh")
+
+    with pytest.raises(InvalidOIDCResponseError):
+        await service.complete("authorization-code", started.state, started.state)

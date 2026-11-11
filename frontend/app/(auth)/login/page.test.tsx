@@ -1,0 +1,206 @@
+// @vitest-environment jsdom
+import React from "react";
+import { afterEach, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+
+const {
+  loginMock,
+  googleMock,
+  refreshMock,
+  replaceMock,
+  searchParamsMock,
+} = vi.hoisted(() => ({
+  loginMock: vi.fn(),
+  googleMock: vi.fn(),
+  refreshMock: vi.fn(),
+  replaceMock: vi.fn(),
+  searchParamsMock: {
+    get: vi.fn(),
+    has: vi.fn(),
+  },
+}));
+const ApiErrorMock = vi.hoisted(() => class extends Error {
+  isRateLimited = false;
+  retryAfterSeconds?: number;
+});
+
+vi.mock("@/lib/api", () => {
+  return {
+    ApiError: ApiErrorMock,
+    auth: {
+      login: loginMock,
+      startGoogleSignIn: googleMock,
+    },
+  };
+});
+
+vi.mock("@/hooks/use-api", () => ({
+  describeError: () => "Invalid email or password",
+}));
+
+vi.mock("@/hooks/use-session", () => ({
+  useSession: () => ({ refresh: refreshMock }),
+}));
+
+vi.mock("@/components/auth/guest-only", () => ({
+  GuestOnly: ({ children }: { children: React.ReactNode }) => children,
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: replaceMock }),
+  useSearchParams: () => searchParamsMock,
+}));
+
+vi.mock("@/lib/timezones", () => ({ detectTimezone: () => "UTC" }));
+
+import LoginPage from "./page";
+
+afterEach(() => {
+  cleanup();
+  loginMock.mockReset();
+  googleMock.mockReset();
+  refreshMock.mockReset();
+  replaceMock.mockReset();
+  searchParamsMock.get.mockReset();
+  searchParamsMock.has.mockReset();
+});
+
+it("logs in, refreshes the session, and returns to a safe requested page", async () => {
+  loginMock.mockResolvedValue(undefined);
+  refreshMock.mockResolvedValue(undefined);
+  searchParamsMock.get.mockReturnValue("/calendar?view=week");
+  searchParamsMock.has.mockReturnValue(false);
+
+  render(<LoginPage />);
+  fireEvent.change(screen.getByLabelText("Email"), {
+    target: { value: "student@example.com" },
+  });
+  fireEvent.change(screen.getByLabelText("Password"), {
+    target: { value: "correct-password" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+  await waitFor(() => expect(loginMock).toHaveBeenCalledWith("student@example.com", "correct-password"));
+  expect(refreshMock).toHaveBeenCalledOnce();
+  expect(replaceMock).toHaveBeenCalledWith("/calendar?view=week");
+});
+
+it("shows a login error and does not redirect when authentication fails", async () => {
+  loginMock.mockRejectedValue(new Error("bad credentials"));
+  searchParamsMock.get.mockReturnValue(null);
+  searchParamsMock.has.mockReturnValue(false);
+
+  render(<LoginPage />);
+  fireEvent.change(screen.getByLabelText("Email"), {
+    target: { value: "student@example.com" },
+  });
+  fireEvent.change(screen.getByLabelText("Password"), {
+    target: { value: "wrong-password" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+  expect(await screen.findByText("Invalid email or password")).toBeTruthy();
+  expect(refreshMock).not.toHaveBeenCalled();
+  expect(replaceMock).not.toHaveBeenCalled();
+});
+
+it("confirms that the account was deleted", () => {
+  searchParamsMock.get.mockReturnValue(null);
+  searchParamsMock.has.mockImplementation((name: string) => name === "deleted");
+  render(<LoginPage />);
+  expect(screen.getByText("Your account has been deleted.")).toBeTruthy();
+});
+
+it("shows the registration confirmation message", () => {
+  searchParamsMock.get.mockReturnValue(null);
+  searchParamsMock.has.mockImplementation((name: string) => name === "registered");
+
+  render(<LoginPage />);
+
+  expect(screen.getByText(/account is ready/i)).toBeTruthy();
+  expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("");
+});
+
+it("fills in the address just registered and forgets it after signing in", async () => {
+  window.localStorage.setItem("studyflow:signup-email", JSON.stringify({ email: "new@example.com", savedAt: Date.now() }));
+  loginMock.mockResolvedValue(undefined);
+  refreshMock.mockResolvedValue(undefined);
+  searchParamsMock.get.mockReturnValue(null);
+  searchParamsMock.has.mockImplementation((name: string) => name === "registered");
+
+  render(<LoginPage />);
+  expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("new@example.com");
+  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  await waitFor(() => expect(loginMock).toHaveBeenCalledWith("new@example.com", "secret"));
+  expect(window.localStorage.getItem("studyflow:signup-email")).toBeNull();
+});
+
+it("explains a missing or malformed email and a missing password next to the fields", async () => {
+  searchParamsMock.get.mockReturnValue(null);
+  searchParamsMock.has.mockReturnValue(false);
+  render(<LoginPage />);
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  expect(await screen.findByText("Enter your email address.")).toBeTruthy();
+  expect(screen.getByText("Enter your password.")).toBeTruthy();
+  expect(screen.getByLabelText("Email").getAttribute("aria-invalid")).toBe("true");
+
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "not-an-email" } });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  expect(await screen.findByText(/Enter a valid email address/)).toBeTruthy();
+  expect(loginMock).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["student@example.com", 900, "in 15 minutes"],
+  ["unknown@example.com", 61, "in 2 minutes"],
+  ["student@example.com", undefined, "later"],
+])("offers a wait or password reset after a login 429 for %s (%s s)", async (email, retryAfterSeconds, wait) => {
+  searchParamsMock.get.mockReturnValue(null);
+  searchParamsMock.has.mockReturnValue(false);
+  loginMock.mockRejectedValueOnce(Object.assign(new ApiErrorMock(), { isRateLimited: true, retryAfterSeconds }));
+  render(<LoginPage />);
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: email } });
+  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "wrong" } });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toBe(`Too many attempts. Try again ${wait}, or reset your password to sign in now.`);
+  expect(within(alert).getByRole("link", { name: "reset your password" }).getAttribute("href")).toBe("/forgot-password");
+  expect(refreshMock).not.toHaveBeenCalled();
+  expect(replaceMock).not.toHaveBeenCalled();
+});
+
+it("covers reset messaging, unsafe next paths, and Google errors", async () => {
+  searchParamsMock.get.mockReturnValue("//evil.example");
+  searchParamsMock.has.mockImplementation((name: string) => name === "reset");
+  render(<LoginPage />);
+  expect(screen.getByText(/password has been reset/i)).toBeTruthy();
+  cleanup();
+
+  searchParamsMock.get.mockReturnValue("/login");
+  searchParamsMock.has.mockReturnValue(false);
+  render(<LoginPage />);
+
+  googleMock.mockRejectedValueOnce(new Error("google unavailable"));
+  fireEvent.click(screen.getByRole("button", { name: "Continue with Google" }));
+  expect(await screen.findByText("Invalid email or password")).toBeTruthy();
+
+  cleanup();
+  searchParamsMock.get.mockReturnValue("/%zz");
+  searchParamsMock.has.mockReturnValue(false);
+  googleMock.mockResolvedValueOnce({ authorization_url: "/oauth" });
+  render(<LoginPage />);
+  fireEvent.click(screen.getByRole("button", { name: "Continue with Google" }));
+  await waitFor(() => expect(googleMock).toHaveBeenCalledWith("UTC"));
+});
+
+it("falls back when the requested path cannot be parsed", () => {
+  const NativeURL = globalThis.URL;
+  vi.stubGlobal("URL", class { constructor() { throw new Error("invalid URL"); } } as unknown as typeof URL);
+  searchParamsMock.get.mockReturnValue("/calendar");
+  searchParamsMock.has.mockReturnValue(false);
+  render(<LoginPage />);
+  expect(screen.getByRole("heading", { name: "Welcome back" })).toBeTruthy();
+  vi.stubGlobal("URL", NativeURL);
+});

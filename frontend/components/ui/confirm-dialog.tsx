@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2 } from "@/components/icons";
 import {
   Dialog,
   DialogContent,
@@ -31,6 +31,7 @@ export function ConfirmDialog({
   confirmLabel,
   cancelLabel = "Cancel",
   destructive,
+  focusCancel = false,
   onConfirm,
   children,
 }: {
@@ -41,13 +42,18 @@ export function ConfirmDialog({
   confirmLabel: string;
   cancelLabel?: string;
   destructive?: boolean;
+  /** Focus the safe action even when opened by touch. */
+  focusCancel?: boolean;
   /** May be async; the dialog shows a pending state and closes on success. */
   onConfirm: () => void | Promise<void>;
   children?: React.ReactNode;
 }) {
   const [isPending, setPending] = React.useState(false);
+  const confirmButtonRef = React.useRef<HTMLButtonElement>(null);
+  const cancelRef = React.useRef<HTMLButtonElement>(null);
 
   async function handleConfirm() {
+    if (isPending) return;
     setPending(true);
     try {
       await onConfirm();
@@ -59,31 +65,45 @@ export function ConfirmDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        initialFocus={focusCancel ? cancelRef : confirmButtonRef}
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}
         </DialogHeader>
 
-        {children}
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void handleConfirm();
+          }}
+        >
+          {children}
 
-        <DialogFooter>
-          <Button
-            variant="ghost"
-            onClick={() => onOpenChange(false)}
-            disabled={isPending}
-          >
-            {cancelLabel}
-          </Button>
-          <Button
-            variant={destructive ? "destructive" : "default"}
-            onClick={() => void handleConfirm()}
-            disabled={isPending}
-          >
-            {isPending && <Loader2 className="animate-spin" />}
-            {confirmLabel}
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button
+              ref={cancelRef}
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+              disabled={isPending}
+            >
+              {cancelLabel}
+            </Button>
+            <Button
+              ref={confirmButtonRef}
+              type="submit"
+              variant={destructive ? "destructive" : "default"}
+              disabled={isPending}
+            >
+              {isPending && <Loader2 className="animate-spin" />}
+              {confirmLabel}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

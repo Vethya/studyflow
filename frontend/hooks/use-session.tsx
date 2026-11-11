@@ -1,13 +1,22 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import useSWR, { useSWRConfig } from "swr";
 import { ApiError, auth } from "@/lib/api";
+import {
+  notifyStudyFlowSessionInvalidated,
+  subscribeToStudyFlowSessionInvalidation,
+} from "@/lib/data-events";
+import { SWR_KEYS } from "@/lib/swr-keys";
+import { cancelPendingActions, flushPendingActions } from "@/lib/undo";
+import { clearPerUserStorage } from "@/lib/user-storage";
 
 export interface SessionAccount {
   id: string;
   email: string;
   name: string;
+  avatarUrl?: string;
 }
 
 type SessionStatus = "loading" | "authenticated" | "unauthenticated";
@@ -26,61 +35,71 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const [status, setStatus] = useState<SessionStatus>("loading");
-  const [account, setAccountState] = useState<SessionAccount | null>(null);
-
-  // Read the session once on mount. State is only written from the promise
-  // callbacks, and `active` drops results that land after unmount — React
-  // Strict Mode mounts effects twice in development.
-  useEffect(() => {
-    let active = true;
-    auth
-      .getSession()
-      .then(({ account: current }) => {
-        if (!active) return;
-        setAccountState(current);
-        setStatus("authenticated");
-      })
-      .catch(() => {
-        // 401 is the normal signed-out answer, not a failure worth surfacing.
-        if (!active) return;
-        setAccountState(null);
-        setStatus("unauthenticated");
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  /** Called from event handlers — never synchronously from an effect. */
-  const refresh = useCallback(async () => {
+  const { mutate: mutateAll } = useSWRConfig();
+  const loadSession = useCallback(async (): Promise<SessionAccount | null> => {
     try {
       const { account: current } = await auth.getSession();
-      setAccountState(current);
-      setStatus("authenticated");
+      return { ...current, avatarUrl: current.avatar_url };
     } catch (error) {
-      if (error instanceof ApiError && error.isUnauthenticated) {
-        setAccountState(null);
-        setStatus("unauthenticated");
-        return;
-      }
+      // A missing or expired session is the normal signed-out answer.
+      if (error instanceof ApiError && error.isUnauthenticated) return null;
       throw error;
     }
   }, []);
+  const { data, isLoading, mutate } = useSWR<SessionAccount | null>(SWR_KEYS.session, loadSession, {
+    revalidateOnFocus: false,
+    shouldRetryOnError: false,
+  });
+
+  useEffect(() => {
+    const invalidate = () => {
+      cancelPendingActions();
+      void mutate(null, { revalidate: false });
+      void mutateAll(
+        (key) => key !== SWR_KEYS.session,
+        undefined,
+        { revalidate: false },
+      );
+    };
+    return subscribeToStudyFlowSessionInvalidation(invalidate);
+  }, [mutate, mutateAll]);
+
+  /** Called from event handlers — never synchronously from an effect. */
+  const refresh = useCallback(async () => {
+    await mutate();
+  }, [mutate]);
 
   const signOut = useCallback(async () => {
+    // What the student asked for inside an undo window still happens, but on
+    // this account: after logout the next sign-in would receive it.
+    await flushPendingActions();
     try {
       await auth.logout();
     } finally {
-      setAccountState(null);
-      setStatus("unauthenticated");
+      clearPerUserStorage();
+      notifyStudyFlowSessionInvalidated();
       router.replace("/login");
     }
   }, [router]);
 
+  const account = data ?? null;
+  const status: SessionStatus = isLoading
+    ? "loading"
+    : account
+      ? "authenticated"
+      : "unauthenticated";
+
   const value = useMemo<SessionContextValue>(
-    () => ({ status, account, refresh, setAccount: setAccountState, signOut }),
-    [status, account, refresh, signOut],
+    () => ({
+      status,
+      account,
+      refresh,
+      setAccount: (next: SessionAccount) => {
+        void mutate(next, { revalidate: false });
+      },
+      signOut,
+    }),
+    [account, mutate, refresh, signOut, status],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

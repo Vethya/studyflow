@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -16,11 +17,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { AlertCircle, ArrowLeft, Loader2, Mail, RotateCcw } from "lucide-react";
+import { AlertCircle, ArrowLeft, Loader2, Mail, RotateCcw } from "@/components/icons";
 import { ApiError, auth } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
 import { cn } from "@/lib/utils";
 import { detectTimezone, withTimezone } from "@/lib/timezones";
+import { FieldError } from "@/components/ui/field-error";
+import {
+  registrationFieldErrorsFrom,
+  validateRegistration,
+  type RegistrationFieldErrors,
+} from "@/lib/registration-validation";
+import { notifyStudyFlowSessionInvalidated } from "@/lib/data-events";
+import { useSession } from "@/hooks/use-session";
 
 function getPasswordStrength(pw: string): { level: number; label: string; color: string } {
   if (pw.length === 0) return { level: 0, label: "", color: "" };
@@ -68,10 +77,40 @@ function VerifyEmailFlow() {
 }
 
 function AwaitingEmail() {
+  const { signOut, status } = useSession();
   const [email, setEmail] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
+
+  if (status !== "unauthenticated") {
+    if (status === "authenticated") {
+      return (
+        <div className="space-y-6">
+          <div className="space-y-1">
+            <h1 className="text-2xl font-bold tracking-tight">You’re already signed in</h1>
+            <p className="text-sm text-muted-foreground">
+              Sign out before using an email verification link for another account.
+            </p>
+          </div>
+          <Button className="w-full" onClick={() => void signOut()}>
+            Sign out
+          </Button>
+          <Link
+            href="/dashboard"
+            className="flex items-center justify-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Go to dashboard
+          </Link>
+        </div>
+      );
+    }
+    return (
+      <div className="flex justify-center py-16">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   async function handleResend(event: React.FormEvent) {
     event.preventDefault();
@@ -183,6 +222,7 @@ function CompleteRegistration({ token }: { token: string }) {
   const [confirm, setConfirm] = useState("");
   const [timezone, setTimezone] = useState(detectTimezone);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<RegistrationFieldErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Verification tokens are single use, so the exchange must not be repeated —
@@ -201,21 +241,24 @@ function CompleteRegistration({ token }: { token: string }) {
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+    /* c8 ignore next -- the form is rendered only after the exchange returns a signup token. */
     if (!signupToken) return;
 
-    if (password !== confirm) {
-      setError("Passwords do not match.");
-      return;
-    }
-
     setError(null);
+    const invalid = validateRegistration({ name, password, confirm });
+    setFieldErrors(invalid);
+    if (Object.keys(invalid).length > 0) return;
+
     setIsSubmitting(true);
     try {
       await auth.completeRegistration({ signupToken, name, password, timezone });
       // Completing registration does not sign the student in.
+      notifyStudyFlowSessionInvalidated();
       router.replace("/login?registered=1");
     } catch (cause) {
-      setError(describeError(cause));
+      const byField = registrationFieldErrorsFrom(cause);
+      if (byField) setFieldErrors(byField);
+      else setError(describeError(cause));
       setIsSubmitting(false);
     }
   }
@@ -269,9 +312,10 @@ function CompleteRegistration({ token }: { token: string }) {
         </Alert>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      {/* noValidate: our own messages sit under each field (FR-01-AC02). */}
+      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
         <div className="space-y-1.5">
-          <Label htmlFor="name" className="text-xs font-medium">Full Name</Label>
+          <Label htmlFor="name" className="text-xs font-medium">Full name</Label>
           <Input
             id="name"
             placeholder="Your full name"
@@ -280,22 +324,27 @@ function CompleteRegistration({ token }: { token: string }) {
             onChange={(e) => setName(e.target.value)}
             disabled={isSubmitting}
             required
+            aria-invalid={fieldErrors.name ? true : undefined}
+            aria-describedby={fieldErrors.name ? "name-error" : undefined}
           />
+          <FieldError id="name-error" message={fieldErrors.name} />
         </div>
 
         <div className="space-y-1.5">
           <Label htmlFor="password" className="text-xs font-medium">Password</Label>
-          <Input
+          <PasswordInput
             id="password"
-            type="password"
             autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             disabled={isSubmitting}
             minLength={12}
             required
+            aria-invalid={fieldErrors.password ? true : undefined}
+            aria-describedby={fieldErrors.password ? "password-error password-hint" : "password-hint"}
           />
-          <p className="text-[11px] text-muted-foreground">
+          <FieldError id="password-error" message={fieldErrors.password} />
+          <p id="password-hint" className="text-[11px] text-muted-foreground">
             At least 12 characters. Passwords found in known breaches are rejected.
           </p>
           {password.length > 0 && (
@@ -319,16 +368,18 @@ function CompleteRegistration({ token }: { token: string }) {
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="confirm" className="text-xs font-medium">Confirm Password</Label>
-          <Input
+          <Label htmlFor="confirm" className="text-xs font-medium">Confirm password</Label>
+          <PasswordInput
             id="confirm"
-            type="password"
             autoComplete="new-password"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             disabled={isSubmitting}
             required
+            aria-invalid={fieldErrors.confirm ? true : undefined}
+            aria-describedby={fieldErrors.confirm ? "confirm-error" : undefined}
           />
+          <FieldError id="confirm-error" message={fieldErrors.confirm} />
         </div>
 
         <div className="space-y-1.5">
@@ -350,6 +401,7 @@ function CompleteRegistration({ token }: { token: string }) {
               ))}
             </SelectContent>
           </Select>
+          <FieldError id="timezone-error" message={fieldErrors.timezone} />
           <p className="text-[11px] text-muted-foreground">
             Used to interpret your deadlines and place study sessions.
           </p>
@@ -357,7 +409,7 @@ function CompleteRegistration({ token }: { token: string }) {
 
         <Button type="submit" className="w-full font-medium" disabled={isSubmitting}>
           {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Create Account
+          Create account
         </Button>
       </form>
     </div>

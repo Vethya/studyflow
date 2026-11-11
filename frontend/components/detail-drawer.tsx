@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 export function DetailDrawer({
   open,
   onOpenChange,
+  onOpenChangeComplete,
   title,
   description,
   footer,
@@ -32,6 +33,7 @@ export function DetailDrawer({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onOpenChangeComplete?: (open: boolean) => void;
   title: React.ReactNode;
   description?: React.ReactNode;
   footer?: React.ReactNode;
@@ -42,7 +44,11 @@ export function DetailDrawer({
   const isMobile = useIsMobile();
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet
+      open={open}
+      onOpenChange={onOpenChange}
+      onOpenChangeComplete={onOpenChangeComplete}
+    >
       <SheetContent
         side={isMobile ? "bottom" : "right"}
         size={size}
@@ -60,7 +66,7 @@ export function DetailDrawer({
         )}
 
         <SheetHeader className="gap-1 border-b px-5 pb-4 pe-14 pt-4">
-          <SheetTitle className="font-display text-base font-semibold tracking-tight">
+          <SheetTitle className="text-xl leading-snug font-semibold tracking-tight">
             {title}
           </SheetTitle>
           {description && (
@@ -68,7 +74,7 @@ export function DetailDrawer({
           )}
         </SheetHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto wrap-break-word px-5 py-4">{children}</div>
 
         {footer && (
           <SheetFooter className="flex-row flex-wrap justify-end gap-2 border-t px-5 py-3">

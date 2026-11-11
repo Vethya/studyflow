@@ -48,6 +48,21 @@ class PreferencesStub:
         )
 
 
+@dataclass
+class MissingPreferencesStub(PreferencesStub):
+    async def get(self, account_id: UUID) -> StudyPreferences | None:
+        return None
+
+    async def update(
+        self,
+        account_id: UUID,
+        timezone: str,
+        preferred_session_length_minutes: int,
+        minimum_break_minutes: int,
+    ) -> StudyPreferences | None:
+        return None
+
+
 @pytest.mark.anyio
 async def test_study_preferences_read_and_timezone_update_contract() -> None:
     account_id = UUID("5b15bfef-8c44-45d5-a70e-574beb999fb3")
@@ -161,3 +176,45 @@ async def test_study_preferences_require_authentication_and_csrf() -> None:
     assert unauthenticated.status_code == 401
     assert missing_csrf.status_code == 403
     assert preferences.updates == []
+
+
+@pytest.mark.anyio
+async def test_study_preferences_return_401_when_repository_returns_no_preferences() -> None:
+    account_id = UUID("5b15bfef-8c44-45d5-a70e-574beb999fb3")
+    preferences = MissingPreferencesStub(StudyPreferences("UTC", 60, 10, False))
+    app = create_app(
+        session_authentication=SessionAuthenticationStub(
+            SessionPrincipal(account_id, "student@example.com", "Student")
+        ),
+        account_preferences=preferences,
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="https://test",
+        cookies={"studyflow_session": "session-token"},
+    ) as client:
+        current = await client.get("/api/v1/account/preferences")
+        updated = await client.patch(
+            "/api/v1/account/preferences",
+            headers={"X-CSRF-Token": "csrf-token"},
+            json={
+                "timezone": "UTC",
+                "preferred_session_length_minutes": 60,
+                "minimum_break_minutes": 10,
+            },
+        )
+
+    assert current.status_code == 401
+    assert updated.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_study_preferences_service_delegation() -> None:
+    from studyflow.accounts.preferences import StudyPreferencesService
+
+    stub = PreferencesStub(StudyPreferences("UTC", 60, 10, False))
+    service = StudyPreferencesService(stub)
+    account_id = UUID("5b15bfef-8c44-45d5-a70e-574beb999fb3")
+    assert await service.get(account_id) == stub.preferences
+    assert await service.update(account_id, "UTC", 45, 15) == StudyPreferences("UTC", 45, 15, False)
+    assert stub.updates == [(account_id, "UTC", 45, 15)]

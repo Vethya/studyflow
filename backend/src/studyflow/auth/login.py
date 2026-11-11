@@ -34,6 +34,7 @@ class LoginResult:
     name: str
     session_token: str
     csrf_token: str
+    avatar_url: str | None = None
 
 
 class Login(Protocol):
@@ -47,6 +48,7 @@ class LoginAccount:
     name: str
     password_hash: str | None
     email_verified: bool
+    avatar_url: str | None = None
 
 
 class LoginRepository(Protocol):
@@ -95,4 +97,5 @@ class LoginService:
             name=account.name,
             session_token=credentials.session_token,
             csrf_token=credentials.csrf_token,
+            avatar_url=account.avatar_url,
         )

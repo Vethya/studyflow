@@ -2,14 +2,15 @@
 
 import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
-import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
+import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "@/components/icons"
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
+  const { resolvedTheme } = useTheme()
+  const sonnerTheme = resolvedTheme === "light" ? "light" : "dark"
 
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme={sonnerTheme}
       className="toaster group"
       icons={{
         success: (
@@ -33,6 +34,18 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-bg": "var(--popover)",
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
+          "--success-bg": "var(--surplus-soft)",
+          "--success-text": "var(--surplus)",
+          "--success-border": "var(--surplus)",
+          "--info-bg": "var(--muted)",
+          "--info-text": "var(--foreground)",
+          "--info-border": "var(--border)",
+          "--warning-bg": "var(--deficit-soft)",
+          "--warning-text": "var(--deficit)",
+          "--warning-border": "var(--deficit)",
+          "--error-bg": "var(--deficit-soft)",
+          "--error-text": "var(--deficit)",
+          "--error-border": "var(--deficit)",
           "--border-radius": "var(--radius)",
         } as React.CSSProperties
       }

@@ -58,3 +58,22 @@ async def test_resend_rotates_an_eight_hour_token_and_defers_email() -> None:
     assert deferred.calls == [
         (sender.send_verification, ("student@example.com", "replacement-verification-token"))
     ]
+
+
+@pytest.mark.anyio
+async def test_resend_when_ineligible_does_not_defer_email() -> None:
+    now = datetime(2026, 7, 29, 12, tzinfo=UTC)
+    repository = ResendRepositoryStub(False)
+    sender = EmailSenderStub()
+    deferred = DeferredTasksStub()
+    service = VerificationResendService(
+        repository,
+        sender,
+        token_factory=lambda: "replacement-verification-token",
+        clock=lambda: now,
+    )
+
+    await service.resend("noteligible@example.com", deferred)
+
+    assert len(repository.calls) == 1
+    assert deferred.calls == []

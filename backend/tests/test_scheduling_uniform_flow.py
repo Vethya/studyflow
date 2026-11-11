@@ -53,6 +53,45 @@ def _policy_score(
     return spread_score, sum(session.start_minute for session in sessions)
 
 
+def test_disconnected_break_capacity_proofs_complete_within_shared_budget() -> None:
+    windows = (
+        MinuteWindow(0, 5),
+        MinuteWindow(10, 12),
+        MinuteWindow(20, 23),
+        MinuteWindow(30, 33),
+    )
+    task_specs = (
+        ("task-0", 40, 5, TaskPriority.LOW),
+        ("task-1", 20, 3, TaskPriority.MEDIUM),
+        ("task-2", 10, 4, TaskPriority.HIGH),
+        ("task-3", 30, 5, TaskPriority.LOW),
+        ("task-4", 20, 5, TaskPriority.MEDIUM),
+        ("task-5", 30, 4, TaskPriority.HIGH),
+    )
+    problem = FeasibilityProblem(
+        tuple(
+            SessionDemand(
+                f"{task_id}-session-{session_index}",
+                task_id,
+                1,
+                deadline,
+                windows,
+                priority,
+            )
+            for task_id, deadline, session_count, priority in task_specs
+            for session_index in range(session_count)
+        ),
+        planning_start_minute=0,
+        minimum_break_minutes=1,
+        planning_days=tuple(PlanningDay(day, day * 10, (day + 1) * 10) for day in range(4)),
+    )
+
+    result = solve_with_overload(problem)
+
+    assert result.status is KernelStatus.OVERLOAD
+    assert result.diagnostics.solver_status == "OPTIMAL"
+
+
 def test_uniform_flow_matches_cp_sat_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     random = Random(20260823)  # noqa: S311 - deterministic generated cases
     for case_index in range(80):

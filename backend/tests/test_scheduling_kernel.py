@@ -287,3 +287,41 @@ def test_solver_exception_becomes_a_typed_technical_failure(
     assert result.status is KernelStatus.TECHNICAL_FAILURE
     assert result.diagnostics.solver_status == "EXCEPTION"
     assert result.detail == "injected solver failure"
+
+
+def test_session_demand_requires_nonempty_task_id() -> None:
+    with pytest.raises(ValueError, match="task_id must not be empty"):
+        SessionDemand("s1", "", 30, 100, (MinuteWindow(0, 100),))
+
+
+def test_kernel_model_validation_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "studyflow.scheduling.kernel.cp_model.CpModel.validate",
+        lambda _self: "Injected model validation error",
+    )
+    result = solve_feasibility(
+        FeasibilityProblem((demand("s1", 1, (0, 2)),), planning_start_minute=0)
+    )
+    assert result.status is KernelStatus.TECHNICAL_FAILURE
+    assert result.diagnostics.solver_status == "MODEL_INVALID"
+    assert result.detail == "Injected model validation error"
+
+
+def test_kernel_unknown_status_becomes_technical_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    from ortools.sat.python import cp_model
+
+    from studyflow.scheduling.contracts import SolverDiagnostics
+
+    monkeypatch.setattr(
+        "studyflow.scheduling.kernel.cp_model.CpSolver.solve",
+        lambda _self, _m: cp_model.UNKNOWN,
+    )
+    monkeypatch.setattr(
+        "studyflow.scheduling.kernel.solver_diagnostics",
+        lambda _s, _st: SolverDiagnostics("UNKNOWN", 0.0, 0, 0),
+    )
+    result = solve_feasibility(
+        FeasibilityProblem((demand("s1", 1, (0, 2)),), planning_start_minute=0)
+    )
+    assert result.status is KernelStatus.TECHNICAL_FAILURE
+    assert result.detail == "The solver stopped without a usable schedule"

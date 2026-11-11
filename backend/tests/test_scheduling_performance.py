@@ -9,6 +9,9 @@ from studyflow.scheduling._performance import (
     representative_performance_problem,
 )
 
+# Performance assertions must run without coverage instrumentation.
+pytestmark = pytest.mark.no_cover
+
 
 @pytest.mark.parametrize(
     ("scenario", "expected_status", "expected_session_count"),

@@ -20,11 +20,14 @@ export type WireTaskPriority = "low" | "medium" | "high";
 
 export type WireTaskStatus = "not_started" | "in_progress" | "completed" | "overdue";
 
+export type WirePlannedSource = "original" | "adaptive";
+
 // ─── Authentication (api/auth.py) ────────────────────────────────
 export interface WireAuthenticatedAccount {
   id: string;
   email: string;
   name: string;
+  avatar_url?: string;
 }
 
 export interface WireLoginResponse {
@@ -53,6 +56,8 @@ export interface WireAccountProfile {
   id: string;
   email: string;
   name: string;
+  password_set: boolean;
+  avatar_url?: string;
 }
 
 export interface WireStudyPreferences {
@@ -78,10 +83,34 @@ export interface WireAcademicTask {
   notes: string | null;
   deadline_at: string;
   original_estimate_minutes: number;
+  adaptive_estimate_minutes: number | null;
+  planned_source: WirePlannedSource;
   planned_duration_minutes: number;
+  estimate_frozen?: boolean;
   created_at: string;
   updated_at: string;
   status: WireTaskStatus;
+}
+
+// ─── Effort progress (api/progress.py) ───────────────────────────
+export interface WireEffortProgress {
+  task_id: string;
+  task_title: string;
+  actual_duration_minutes: number;
+  estimated_remaining_minutes: number;
+  effort_percent: number;
+  sessions_completed: number;
+  sessions_upcoming: number;
+  status: WireTaskStatus;
+  estimation_accuracy?: WireEstimationAccuracy | null;
+}
+
+export interface WireEstimationAccuracy {
+  sample_size: number;
+  original_mean_absolute_error_minutes: number;
+  adaptive_mean_absolute_error_minutes: number;
+  improvement_percent: number | null;
+  adaptive_qualified: boolean;
 }
 
 export interface WireAcademicTaskRequest {
@@ -92,6 +121,35 @@ export interface WireAcademicTaskRequest {
   notes: string | null;
   deadline_at: string;
   original_estimate_minutes: number;
+  planned_source?: WirePlannedSource;
+}
+
+// ─── Adaptive estimates (api/adaptive_estimates.py) ─────────────
+export interface WireAdaptiveEstimatePreview {
+  category: WireTaskCategory;
+  original_minutes: number;
+  adaptive_minutes: number | null;
+  planned_minutes: number;
+  /** FastAPI serializes Decimal response values as JSON strings. */
+  correction_factor: string | null;
+  history_scope: "overall" | "category" | null;
+  history_count: number | null;
+  available: boolean;
+  planned_source: WirePlannedSource;
+  acknowledgment_required: boolean;
+  low_minutes?: number | null;
+  high_minutes?: number | null;
+  sample_size?: number | null;
+  basis?: WireAdaptiveEstimateBasis | null;
+}
+
+export interface WireAdaptiveEstimateBasis {
+  scope: "category" | "size" | "overall";
+  size_bucket: "small" | "medium" | "large";
+  completed_records: number;
+  provisional_records: number;
+  category_records: number;
+  size_records: number;
 }
 
 // ─── Availability (api/availability.py) ──────────────────────────
@@ -107,6 +165,11 @@ export interface WireAvailabilityWindowRequest {
   weekday: number;
   start_time: string;
   end_time: string;
+}
+
+export interface WireAvailabilityWindowChange {
+  windows: WireAvailabilityWindow[];
+  invalidated_future_session_ids: string[];
 }
 
 export interface WireUnavailablePeriod {
@@ -146,13 +209,12 @@ export interface WireSessionOutcome {
   rescheduled_at: string | null;
 }
 
-/**
- * An accepted session. Note there is no `task_title` here — unlike the
- * proposal's session shape — so callers join titles from the task list.
- */
+/** An accepted session, labelled with its task's title and category. */
 export interface WireStudySession {
   id: string;
   task_id: string;
+  task_title: string | null;
+  task_category: WireTaskCategory | null;
   starts_at: string;
   ends_at: string;
   planned_duration_minutes: number;
@@ -246,4 +308,10 @@ export interface WireMissedSessionRecovery {
   session: WireStudySession;
   outcome: WireSessionOutcome;
   revision: WireScheduleProposal;
+}
+
+export interface WireSessionOutcomeRecordingResponse {
+  session: WireStudySession;
+  outcome: WireSessionOutcome;
+  revision: WireScheduleProposal | null;
 }

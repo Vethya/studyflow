@@ -1,52 +1,58 @@
 "use client";
 
 import * as React from "react";
-import { CalendarClock, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import { CalendarClock, ChevronLeft, ChevronRight, Loader2 } from "@/components/icons";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { DetailDrawer } from "@/components/detail-drawer";
+import { OverloadWarningList } from "@/components/overload-warning-list";
 import { UnscheduledWorkList } from "@/components/unscheduled-work-list";
 import { DAY_NAMES_SHORT, formatDuration } from "@/lib/constants";
-import { formatClock } from "@/lib/datetime";
+import {
+  addZonedDays,
+  dayKey,
+  formatClock,
+  formatDate,
+  inTimeZone,
+  minutesSinceMidnight,
+  startOfZonedDay,
+} from "@/lib/datetime";
 import { scheduling } from "@/lib/api";
 import { expandUnavailablePeriods, expandWindows, subtractPeriods } from "@/lib/capacity";
-import { describeError } from "@/hooks/use-api";
+import { describeError, useApi } from "@/hooks/use-api";
+import { SWR_KEYS } from "@/lib/swr-keys";
 import { GridLegend, WeekGrid, type GridBlock, type GridColumn } from "@/components/week-grid";
 import type { AvailabilityWindow, UnavailablePeriod } from "@/types/availability";
 import type { ScheduleProposal, ScheduleScenario } from "@/types/schedule";
-import type { StudySession } from "@/types/session";
+import type { SessionOutcome, StudySession } from "@/types/session";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
 
 const DEFAULT_RANGE = { start: 8, end: 22 };
 
-function dayKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+/**
+ * Whether accepting failed only because the plan is out of date, so a fresh
+ * one should replace it. The API answers 409 for that ("has expired",
+ * "…changed; generate a new proposal") and also for plans that can never be
+ * accepted (not feasible, overlapping work in progress). It sends no error
+ * code, so the message decides; regenerating on the second kind would loop.
+ */
+function isOutdatedPlan(cause: unknown): boolean {
+  if (typeof cause !== "object" || cause === null) return false;
+  const { status, message } = cause as { status?: unknown; message?: unknown };
+  return status === 409 && typeof message === "string" && /expired|generate a new proposal/i.test(message);
 }
 
-function startOfWeek(date: Date): Date {
-  const start = new Date(date);
-  start.setHours(0, 0, 0, 0);
+function startOfWeek(date: Date, timeZone: string): Date {
+  const start = startOfZonedDay(date, timeZone);
   start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
   return start;
 }
 
-function addCalendarDays(date: Date, days: number): Date {
-  const result = new Date(date);
-  result.setDate(result.getDate() + days);
-  return result;
-}
-
-function minutesSinceMidnight(date: Date): number {
-  return date.getHours() * 60 + date.getMinutes();
-}
-
-function formatWeekRange(start: Date): string {
-  const end = addCalendarDays(start, 6);
-  const startLabel = start.toLocaleDateString(undefined, { day: "numeric", month: "short" });
-  const endLabel = end.toLocaleDateString(undefined, {
+function formatWeekRange(start: Date, timeZone: string): string {
+  const end = addZonedDays(start, 6, timeZone);
+  const startLabel = formatDate(start, timeZone, { day: "numeric", month: "short" });
+  const endLabel = formatDate(end, timeZone, {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -78,13 +84,14 @@ function describeScenario(scenario: ScheduleScenario): string | null {
  * controls that would have to be taken away again.
  */
 export function SchedulePreview({
-  proposal,
+  proposal: proposalProp,
   open,
   onOpenChange,
   onAccepted,
   onRejected,
   availabilityWindows,
   unavailablePeriods,
+  existingSessions: existingSessionsProp,
 }: {
   proposal: ScheduleProposal | null;
   open: boolean;
@@ -93,10 +100,45 @@ export function SchedulePreview({
   onRejected: () => void;
   availabilityWindows?: AvailabilityWindow[];
   unavailablePeriods?: UnavailablePeriod[];
+  existingSessions?: StudySession[];
 }) {
+  const timeZone = useAccountTimezone();
   const [busy, setBusy] = React.useState<"accept" | "reject" | null>(null);
+  // A plan whose first session has already started can no longer be used; the
+  // API answers 409 and the preview swaps in a freshly generated one.
+  const [replacement, setReplacement] = React.useState<{
+    forId: string;
+    proposal: ScheduleProposal;
+  } | null>(null);
+  const proposal =
+    proposalProp && replacement?.forId === proposalProp.id ? replacement.proposal : proposalProp;
 
-  if (!proposal) return null;
+  // Same key and loader as every other schedule reader: the cached value is a
+  // Schedule, so a sessions-only loader here would corrupt it for the others.
+  const loadActiveSchedule = React.useCallback(
+    (s: AbortSignal) => scheduling.getActiveSchedule(s),
+    [],
+  );
+  const activeScheduleQuery = useApi(
+    open && !existingSessionsProp ? SWR_KEYS.activeSchedule : null,
+    loadActiveSchedule,
+  );
+  const existingSessions = existingSessionsProp ?? activeScheduleQuery.data?.sessions ?? [];
+
+  // Keep the dialog root mounted before the first proposal is available. This
+  // gives Base UI a closed-to-open transition instead of mounting open.
+  if (!proposal) {
+    return (
+      <DetailDrawer
+        open={false}
+        onOpenChange={onOpenChange}
+        size="wide"
+        title="Your proposed plan"
+      >
+        {null}
+      </DetailDrawer>
+    );
+  }
 
   const upcoming = proposal.proposedSessions
     .filter((session) => !session.outcome && new Date(session.endTime) > new Date())
@@ -104,12 +146,29 @@ export function SchedulePreview({
 
   const totalMinutes = upcoming.reduce((sum, session) => sum + session.plannedDuration, 0);
   const scenarioDescription = proposal.scenario ? describeScenario(proposal.scenario) : null;
+  // Overloaded tasks already show their unplaced work with the full explanation.
+  const overloadedTaskIds = new Set(proposal.overloadWarnings.map((warning) => warning.taskId));
+  const unexplainedUnscheduled = proposal.unscheduledWork.filter(
+    (item) => !overloadedTaskIds.has(item.taskId),
+  );
+
+  const now = new Date();
+  const recordedSessions = existingSessions.filter(
+    (s) => s.outcome === "Missed" || s.outcome === "Delayed",
+  );
+  const activeUpcoming = existingSessions.filter(
+    (s) => !s.outcome && new Date(s.startTime) > now,
+  );
+  const missedCount = recordedSessions.filter((s) => s.outcome === "Missed").length;
+  const delayedCount = recordedSessions.filter((s) => s.outcome === "Delayed").length;
 
   async function run(action: "accept" | "reject") {
     setBusy(action);
     try {
       if (action === "accept") {
-        await scheduling.acceptProposal(proposal!.id);
+        // The SWR schedule cache is revalidated by the successful mutation;
+        // this UI already reloads its mounted schedule after the callback.
+        await scheduling.acceptProposal(proposal!.id, undefined, false);
         toast.success("Plan accepted");
         onAccepted();
       } else {
@@ -119,9 +178,25 @@ export function SchedulePreview({
       }
       onOpenChange(false);
     } catch (cause) {
-      toast.error(describeError(cause));
+      if (action === "accept" && isOutdatedPlan(cause)) {
+        await replaceExpired();
+      } else {
+        toast.error(describeError(cause));
+      }
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function replaceExpired() {
+    try {
+      const fresh = await scheduling.generateProposal();
+      setReplacement({ forId: proposalProp!.id, proposal: fresh });
+      toast.info("That plan was out of date, so StudyFlow made a fresh one. Check it, then use it.");
+    } catch (cause) {
+      toast.error(`That plan was out of date. ${describeError(cause)}`);
+      onRejected();
+      onOpenChange(false);
     }
   }
 
@@ -134,7 +209,9 @@ export function SchedulePreview({
       description={
         proposal.reason
           ? undefined
-          : `${upcoming.length} sessions · ${formatDuration(totalMinutes)} of study`
+          : `${upcoming.length} ${upcoming.length === 1 ? "session" : "sessions"} · ${formatDuration(
+              totalMinutes,
+            )} of study`
       }
       footer={
         <>
@@ -167,22 +244,84 @@ export function SchedulePreview({
           </Callout>
         )}
 
-        {proposal.overloadWarnings.length > 0 && (
-          <Callout
-            tone="warning"
-            title={`${proposal.overloadWarnings.length} ${
-              proposal.overloadWarnings.length === 1 ? "task still doesn’t" : "tasks still don’t"
-            } fit`}
-          >
-            Using this plan is still an improvement, but you will need to move a deadline or
-            add study time to fit everything.
+        {/* Replacement and adjustment summary banner */}
+        {proposal.reason && (
+          <Callout tone="info" title="Schedule adjustment summary">
+            {activeUpcoming.length > 0 ? (
+              <div className="space-y-2">
+                <p>
+                  Using this plan will replace{" "}
+                  <strong className="font-semibold text-foreground">
+                    {activeUpcoming.length} upcoming {activeUpcoming.length === 1 ? "session" : "sessions"}
+                  </strong>{" "}
+                  with{" "}
+                  <strong className="font-semibold text-foreground">
+                    {upcoming.length} newly proposed recovery {upcoming.length === 1 ? "session" : "sessions"}
+                  </strong>
+                  . Recorded sessions ({[
+                    missedCount > 0 ? `${missedCount} missed` : null,
+                    delayedCount > 0 ? `${delayedCount} partly done` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(", ") || "historical sessions"}
+                  ) remain unchanged in your history.
+                </p>
+                <div className="rounded-md border border-border/60 bg-muted/40 p-2.5 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">Upcoming sessions being replaced:</span>
+                  <ul className="mt-1 space-y-1 pl-3 list-disc">
+                    {activeUpcoming.slice(0, 5).map((s) => {
+                      const start = inTimeZone(s.startTime, timeZone);
+                      const dateStr = `${DAY_NAMES_SHORT[start.getDay()]} ${start.getDate()} ${formatDate(start, timeZone, { month: "short" })}`;
+                      return (
+                        <li key={s.id}>
+                          <span className="font-medium text-foreground">{s.taskTitle ?? "Scheduled study"}</span>
+                          {" — "}
+                          <span>
+                            {dateStr}, {formatClock(start, timeZone)} ({formatDuration(s.plannedDuration)})
+                          </span>
+                        </li>
+                      );
+                    })}
+                    {activeUpcoming.length > 5 && (
+                      <li className="list-none pt-0.5 text-muted-foreground italic">
+                        ...and {activeUpcoming.length - 5} more upcoming {activeUpcoming.length - 5 === 1 ? "session" : "sessions"}
+                      </li>
+                    )}
+                  </ul>
+                </div>
+              </div>
+            ) : (
+              <p>
+                Using this plan will add{" "}
+                <strong className="font-semibold text-foreground">
+                  {upcoming.length} newly proposed recovery {upcoming.length === 1 ? "session" : "sessions"}
+                </strong>{" "}
+                to recover your study time. Recorded sessions remain unchanged in your history.
+              </p>
+            )}
           </Callout>
         )}
 
-        {proposal.unscheduledWork.length > 0 && (
+        {/* SPEC §10.5 / §11.2: the full Overload explanation for each affected task. */}
+        {proposal.overloadWarnings.length > 0 && (
+          <section className="space-y-2">
+            <Callout
+              tone="warning"
+              title={`${proposal.overloadWarnings.length} ${
+                proposal.overloadWarnings.length === 1 ? "task still doesn’t" : "tasks still don’t"
+              } fit`}
+            >
+              Using this plan still places everything that fits. To fit the rest, move a deadline
+              or add study time.
+            </Callout>
+            <OverloadWarningList warnings={proposal.overloadWarnings} />
+          </section>
+        )}
+
+        {unexplainedUnscheduled.length > 0 && (
           <section>
             <h3 className="mb-2 text-sm font-medium">Work with no slot</h3>
-            <UnscheduledWorkList items={proposal.unscheduledWork} />
+            <UnscheduledWorkList items={unexplainedUnscheduled} />
           </section>
         )}
 
@@ -198,7 +337,9 @@ export function SchedulePreview({
           ) : (
             <ProposalCalendar
               key={proposal.id}
-              sessions={upcoming}
+              isRecoveryProposal={Boolean(proposal.reason)}
+              proposedSessions={upcoming}
+              recordedSessions={recordedSessions}
               availabilityWindows={availabilityWindows}
               unavailablePeriods={unavailablePeriods}
             />
@@ -214,50 +355,153 @@ export function SchedulePreview({
   );
 }
 
-function ProposalCalendar({
-  sessions,
+interface CalendarSessionItem {
+  id: string;
+  taskId: string;
+  taskTitle: string;
+  startTime: string;
+  endTime: string;
+  plannedDuration: number;
+  actualDuration?: number;
+  outcome?: SessionOutcome;
+  tone: "default" | "proposed" | "missed" | "delayed" | "completed";
+  badge?: string;
+}
+
+export function ProposalCalendar({
+  isRecoveryProposal,
+  proposedSessions,
+  recordedSessions,
   availabilityWindows,
   unavailablePeriods,
 }: {
-  sessions: StudySession[];
+  isRecoveryProposal: boolean;
+  proposedSessions: StudySession[];
+  recordedSessions: StudySession[];
   availabilityWindows?: AvailabilityWindow[];
   unavailablePeriods?: UnavailablePeriod[];
 }) {
-  const firstWeek = React.useMemo(
-    () => startOfWeek(new Date(sessions[0].startTime)),
-    [sessions],
-  );
-  const lastWeek = React.useMemo(
-    () => startOfWeek(new Date(sessions[sessions.length - 1].startTime)),
-    [sessions],
-  );
-  const [anchor, setAnchor] = React.useState(firstWeek);
+  const timeZone = useAccountTimezone();
+  const allSessions: CalendarSessionItem[] = React.useMemo(() => {
+    const list: CalendarSessionItem[] = [];
+
+    for (const session of proposedSessions) {
+      list.push({
+        id: session.id,
+        taskId: session.taskId,
+        taskTitle: session.taskTitle,
+        startTime: session.startTime,
+        endTime: session.endTime,
+        plannedDuration: session.plannedDuration,
+        actualDuration: session.actualDuration,
+        outcome: session.outcome,
+        tone: isRecoveryProposal ? "proposed" : "default",
+        badge: isRecoveryProposal ? "Proposed" : undefined,
+      });
+    }
+
+    for (const session of recordedSessions) {
+      const outcome = session.outcome;
+      list.push({
+        id: session.id,
+        taskId: session.taskId,
+        taskTitle: session.taskTitle,
+        startTime: session.startTime,
+        endTime: session.endTime,
+        plannedDuration: session.plannedDuration,
+        actualDuration: session.actualDuration,
+        outcome,
+        tone:
+          outcome === "Missed"
+            ? "missed"
+            : outcome === "Delayed"
+              ? "delayed"
+              : "completed",
+        badge:
+          outcome === "Missed"
+            ? "Missed"
+            : outcome === "Delayed"
+              ? "Partly done"
+              : "Completed",
+      });
+    }
+
+    return list.sort(
+      (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime(),
+    );
+  }, [isRecoveryProposal, proposedSessions, recordedSessions]);
+
+  const earliestWeek = React.useMemo(() => {
+    if (allSessions.length === 0) return startOfWeek(new Date(), timeZone);
+    const earliestSessionWeek = startOfWeek(new Date(allSessions[0].startTime), timeZone);
+    const currentWeek = startOfWeek(new Date(), timeZone);
+    return earliestSessionWeek.getTime() < currentWeek.getTime()
+      ? earliestSessionWeek
+      : currentWeek;
+  }, [allSessions, timeZone]);
+
+  const defaultAnchor = React.useMemo(() => {
+    if (allSessions.length === 0) return startOfWeek(new Date(), timeZone);
+    const currentWeek = startOfWeek(new Date(), timeZone);
+    const hasCurrentWeek = allSessions.some(
+      (s) => startOfWeek(new Date(s.startTime), timeZone).getTime() === currentWeek.getTime(),
+    );
+    if (hasCurrentWeek) return currentWeek;
+    if (proposedSessions.length > 0) {
+      return startOfWeek(new Date(proposedSessions[0].startTime), timeZone);
+    }
+    return currentWeek;
+  }, [allSessions, proposedSessions, timeZone]);
+
+  const lastWeek = React.useMemo(() => {
+    if (allSessions.length === 0) return startOfWeek(new Date(), timeZone);
+    const latestSessionWeek = startOfWeek(
+      new Date(allSessions[allSessions.length - 1].startTime),
+      timeZone,
+    );
+    const currentWeek = startOfWeek(new Date(), timeZone);
+    return latestSessionWeek.getTime() > currentWeek.getTime()
+      ? latestSessionWeek
+      : currentWeek;
+  }, [allSessions, timeZone]);
+
+  const [anchor, setAnchor] = React.useState(defaultAnchor);
 
   const days = React.useMemo(
-    () => Array.from({ length: 7 }, (_, index) => addCalendarDays(anchor, index)),
-    [anchor],
+    () => Array.from({ length: 7 }, (_, index) => addZonedDays(anchor, index, timeZone)),
+    [anchor, timeZone],
   );
   const rangeEnd = React.useMemo(
-    () => addCalendarDays(anchor, 7),
-    [anchor],
+    () => addZonedDays(anchor, 7, timeZone),
+    [anchor, timeZone],
   );
-  const visibleDays = React.useMemo(() => new Set(days.map(dayKey)), [days]);
+  const visibleDays = React.useMemo(() => new Set(days.map((day) => dayKey(day, timeZone))), [days, timeZone]);
   const visibleSessions = React.useMemo(
     () =>
-      sessions.filter((session) => visibleDays.has(dayKey(new Date(session.startTime)))),
-    [sessions, visibleDays],
+      allSessions.filter((session) => visibleDays.has(dayKey(new Date(session.startTime), timeZone))),
+    [allSessions, visibleDays, timeZone],
   );
+  const visibleProposalStates = React.useMemo(() => {
+    const states = new Set<"proposed" | "missed" | "delayed" | "completed">();
+    for (const session of visibleSessions) {
+      if (session.outcome === "Missed") states.add("missed");
+      else if (session.outcome === "Delayed") states.add("delayed");
+      else if (session.outcome === "Completed") states.add("completed");
+      else if (isRecoveryProposal) states.add("proposed");
+    }
+    return [...states];
+  }, [visibleSessions, isRecoveryProposal]);
   const freeIntervals = React.useMemo(
     () =>
       subtractPeriods(
-        expandWindows(availabilityWindows ?? [], anchor, rangeEnd),
+        expandWindows(availabilityWindows ?? [], anchor, rangeEnd, timeZone),
         unavailablePeriods ?? [],
       ),
-    [availabilityWindows, unavailablePeriods, anchor, rangeEnd],
+    [availabilityWindows, unavailablePeriods, anchor, rangeEnd, timeZone],
   );
   const blockedIntervals = React.useMemo(
-    () => expandUnavailablePeriods(unavailablePeriods ?? [], anchor, rangeEnd),
-    [unavailablePeriods, anchor, rangeEnd],
+    () => expandUnavailablePeriods(unavailablePeriods ?? [], anchor, rangeEnd, timeZone),
+    [unavailablePeriods, anchor, rangeEnd, timeZone],
   );
   const hourRange = React.useMemo(() => {
     const intervals = [
@@ -273,8 +517,8 @@ function ProposalCalendar({
     let min = 24;
     let max = 0;
     for (const interval of intervals) {
-      const start = interval.start;
-      const end = interval.end;
+      const start = inTimeZone(interval.start, timeZone);
+      const end = inTimeZone(interval.end, timeZone);
       min = Math.min(min, start.getHours());
       max = Math.max(max, end.getHours() + 1);
     }
@@ -282,16 +526,16 @@ function ProposalCalendar({
       start: Math.max(0, min - 1),
       end: Math.min(24, Math.max(max + 1, min + 6)),
     };
-  }, [visibleSessions, freeIntervals, blockedIntervals]);
+  }, [visibleSessions, freeIntervals, blockedIntervals, timeZone]);
   const columns: GridColumn[] = React.useMemo(() => {
-    const today = dayKey(new Date());
+    const today = dayKey(new Date(), timeZone);
     return days.map((day) => ({
-      key: dayKey(day),
-      label: DAY_NAMES_SHORT[day.getDay()],
-      sublabel: String(day.getDate()),
-      isToday: dayKey(day) === today,
+      key: dayKey(day, timeZone),
+      label: DAY_NAMES_SHORT[inTimeZone(day, timeZone).getDay()],
+      sublabel: String(inTimeZone(day, timeZone).getDate()),
+      isToday: dayKey(day, timeZone) === today,
     }));
-  }, [days]);
+  }, [days, timeZone]);
   const blocks: GridBlock[] = React.useMemo(
     () => {
       const out: GridBlock[] = [];
@@ -303,16 +547,16 @@ function ProposalCalendar({
       ) => {
         intervals.forEach((interval, index) => {
           for (const day of days) {
-            const dayStart = new Date(day);
-            const dayEnd = addCalendarDays(dayStart, 1);
+            const dayStart = startOfZonedDay(day, timeZone);
+            const dayEnd = addZonedDays(dayStart, 1, timeZone);
             const start = interval.start < dayStart ? dayStart : interval.start;
             const end = interval.end > dayEnd ? dayEnd : interval.end;
             if (end <= start) continue;
             out.push({
-              id: `${prefix}-${index}-${dayKey(day)}`,
-              columnKey: dayKey(day),
-              start: minutesSinceMidnight(start),
-              end: minutesSinceMidnight(end) || 1440,
+              id: `${prefix}-${index}-${dayKey(day, timeZone)}`,
+              columnKey: dayKey(day, timeZone),
+              start: minutesSinceMidnight(start, timeZone),
+              end: minutesSinceMidnight(end, timeZone) || 1440,
               variant,
               title: variant === "blocked" ? "Blocked time" : "Free to study",
             });
@@ -326,41 +570,55 @@ function ProposalCalendar({
       for (const session of visibleSessions) {
         const start = new Date(session.startTime);
         const end = new Date(session.endTime);
+        const outcomeDetail =
+          session.outcome === "Missed"
+            ? " · Missed"
+            : session.outcome === "Delayed"
+              ? ` · Partly done (${formatDuration(session.actualDuration ?? 0)} recorded)`
+              : session.outcome === "Completed"
+                ? " · Completed"
+                : isRecoveryProposal
+                  ? " · Proposed"
+                  : "";
+
         out.push({
           id: session.id,
-          columnKey: dayKey(start),
-          start: minutesSinceMidnight(start),
-          end: minutesSinceMidnight(end) || 1440,
+          columnKey: dayKey(start, timeZone),
+          start: minutesSinceMidnight(start, timeZone),
+          end: minutesSinceMidnight(end, timeZone) || 1440,
           variant: "session",
           label: session.taskTitle,
-          meta: `${formatClock(start)}–${formatClock(end)}`,
-          title: `${session.taskTitle} · ${formatClock(start)}–${formatClock(end)} · ${formatDuration(session.plannedDuration)}`,
+          badge: session.badge,
+          tone: session.tone,
+          settled: session.outcome === "Completed",
+          meta: `${formatClock(start, timeZone)}–${formatClock(end, timeZone)}`,
+          title: `${session.taskTitle}${outcomeDetail} · ${formatClock(start, timeZone)}–${formatClock(end, timeZone)} · ${formatDuration(session.plannedDuration)}`,
         });
       }
 
       return out;
     },
-    [visibleSessions, freeIntervals, blockedIntervals, days],
+    [visibleSessions, freeIntervals, blockedIntervals, days, isRecoveryProposal, timeZone],
   );
   const now = new Date();
-  const nowMarker = visibleDays.has(dayKey(now))
-    ? { columnKey: dayKey(now), minutes: minutesSinceMidnight(now) }
+  const nowMarker = visibleDays.has(dayKey(now, timeZone))
+    ? { columnKey: dayKey(now, timeZone), minutes: minutesSinceMidnight(now, timeZone) }
     : undefined;
-  const canGoBack = anchor.getTime() > firstWeek.getTime();
+  const canGoBack = anchor.getTime() > earliestWeek.getTime();
   const canGoForward = anchor.getTime() < lastWeek.getTime();
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3">
         <span className="text-xs tabular-nums text-muted-foreground">
-          {formatWeekRange(anchor)}
+          {formatWeekRange(anchor, timeZone)}
         </span>
         <div className="flex items-center rounded-lg border bg-card">
           <Button
             variant="ghost"
             size="icon-sm"
             className="rounded-e-none"
-            onClick={() => setAnchor(addCalendarDays(anchor, -7))}
+            onClick={() => setAnchor(addZonedDays(anchor, -7, timeZone))}
             disabled={!canGoBack}
             aria-label="Previous week"
           >
@@ -370,7 +628,7 @@ function ProposalCalendar({
             variant="ghost"
             size="icon-sm"
             className="rounded-s-none"
-            onClick={() => setAnchor(addCalendarDays(anchor, 7))}
+            onClick={() => setAnchor(addZonedDays(anchor, 7, timeZone))}
             disabled={!canGoForward}
             aria-label="Next week"
           >
@@ -380,15 +638,17 @@ function ProposalCalendar({
       </div>
 
       <WeekGrid
+        ariaLabel="Proposed sessions"
         columns={columns}
         blocks={blocks}
         hourStart={hourRange.start}
         hourEnd={hourRange.end}
         now={nowMarker}
       />
-      {(availabilityWindows !== undefined || unavailablePeriods !== undefined) && (
-        <GridLegend showSession />
-      )}
+      <GridLegend
+        proposalStates={visibleProposalStates}
+        showSession={!isRecoveryProposal}
+      />
     </div>
   );
 }

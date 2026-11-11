@@ -1,15 +1,18 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Card, CardContent } from "@/components/ui/card";
+import { useSearchParams } from "next/navigation";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Callout } from "@/components/ui/callout";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Kbd } from "@/components/ui/kbd";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -25,28 +28,41 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  AlertTriangle,
   ArrowUpDown,
+  Check,
   ListTodo,
   SlidersHorizontal,
   Loader2,
   MoreHorizontal,
+  Play,
   Plus,
   Search,
   X,
-} from "lucide-react";
+} from "@/components/icons";
 import { toast } from "sonner";
-import { formatDuration, CATEGORY_CONFIG, STATUS_CONFIG } from "@/lib/constants";
-import { describeDeadline } from "@/lib/datetime";
-import { EmptyState, PageHeader, PageShell } from "@/components/page-kit";
+import { formatDuration } from "@/lib/constants";
+import { CategoryTag, EmptyState, PageHeader, PageShell } from "@/components/page-kit";
+import { DueChip, EffortBar } from "@/components/study-kit";
+import {
+  GoogleImportButton,
+  GoogleImportReminder,
+} from "@/components/google-import-button";
 import { cn } from "@/lib/utils";
 import { ApiError, tasks as tasksApi } from "@/lib/api";
 import { describeError, useApi } from "@/hooks/use-api";
 import { TaskFormDialog } from "@/components/task-form-dialog";
+import { useConfirmDeleteTask } from "@/components/use-confirm-delete-task";
 import { localInputToIso } from "@/lib/datetime";
-import { CATEGORIES, PRIORITIES, TASK_STATUSES } from "@/types/task";
+import { applyTaskOverlays, scheduleUndoable, useTaskOverlayVersion } from "@/lib/undo";
+import { CATEGORIES, PRIORITIES } from "@/types/task";
 import type { AcademicTask, Category, Priority, TaskStatus } from "@/types/task";
+import { taskListKey } from "@/lib/swr-keys";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
+import { useNow } from "@/hooks/use-now";
 
 const ANY = "any";
+const ALL = "all";
 
 type SortKey = "deadline" | "deadline-desc" | "priority" | "remaining" | "title";
 
@@ -58,49 +74,139 @@ const SORT_LABELS: Record<SortKey, string> = {
   title: "Name (A–Z)",
 };
 
-export default function TasksPage() {
+const STATUS_TABS: { value: TaskStatus | typeof ALL; label: string }[] = [
+  { value: ALL, label: "All" },
+  { value: "Not Started", label: "To do" },
+  { value: "In Progress", label: "In progress" },
+  { value: "Overdue", label: "Overdue" },
+  { value: "Completed", label: "Done" },
+];
+
+/** Readable URL values, so a filtered list can be bookmarked or shared. */
+const STATUS_SLUGS: Record<TaskStatus, string> = {
+  "Not Started": "todo",
+  "In Progress": "in-progress",
+  Overdue: "overdue",
+  Completed: "done",
+};
+const slugify = (value: string) => value.toLowerCase().replace(/\s+/g, "-");
+
+function fromParam<T extends string>(value: string | null, options: readonly T[], slug: (option: T) => string = slugify): T | null {
+  return options.find((option) => slug(option) === value) ?? null;
+}
+
+/** The list's filters and order as the address bar states them. Key order matters: it is compared as JSON. */
+function parseListParams(params: URLSearchParams) {
+  return {
+    status: fromParam(params.get("status"), Object.keys(STATUS_SLUGS) as TaskStatus[], (s) => STATUS_SLUGS[s]),
+    category: fromParam(params.get("category"), CATEGORIES),
+    priority: fromParam(params.get("priority"), PRIORITIES),
+    course: params.get("course") ?? "",
+    due: params.get("due") ?? "",
+    sort: fromParam(params.get("sort"), Object.keys(SORT_LABELS) as SortKey[], (key) => key) ?? ("deadline" as SortKey),
+  };
+}
+
+type GroupId = "overdue" | "week" | "later" | "done";
+const GROUP_LABELS: Record<GroupId, string> = {
+  overdue: "Overdue",
+  week: "Due in the next 7 days",
+  later: "Later",
+  done: "Done",
+};
+
+function TasksContent() {
+  const timeZone = useAccountTimezone();
+  const searchParams = useSearchParams();
+  const fromUrl = parseListParams(searchParams);
   // Everything except the title search is a real backend query parameter.
-  const [status, setStatus] = useState<TaskStatus | null>(null);
-  const [category, setCategory] = useState<Category | null>(null);
-  const [priority, setPriority] = useState<Priority | null>(null);
-  const [course, setCourse] = useState("");
-  const [appliedCourse, setAppliedCourse] = useState("");
-  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<TaskStatus | null>(fromUrl.status);
+  const [category, setCategory] = useState<Category | null>(fromUrl.category);
+  const [priority, setPriority] = useState<Priority | null>(fromUrl.priority);
+  const [course, setCourse] = useState(fromUrl.course);
+  const [appliedCourse, setAppliedCourse] = useState(fromUrl.course);
+  const [search, setSearch] = useState(
+    () => searchParams.get("search") ?? searchParams.get("q") ?? "",
+  );
   // The API takes RFC 3339 bounds for the deadline filter.
-  const [dueBefore, setDueBefore] = useState("");
-  const [sort, setSort] = useState<SortKey>("deadline");
+  const [dueBefore, setDueBefore] = useState(fromUrl.due);
+  const [sort, setSort] = useState<SortKey>(fromUrl.sort);
+
+  // A link to `/tasks?status=…` opened while already here changes the URL
+  // without remounting the page, so the filters follow it. Our own
+  // replaceState below writes what the state already says, which is skipped.
+  const urlKey = JSON.stringify(fromUrl);
+  const [seenUrlKey, setSeenUrlKey] = useState(urlKey);
+  if (urlKey !== seenUrlKey) {
+    setSeenUrlKey(urlKey);
+    const stateKey = JSON.stringify({ status, category, priority, course: appliedCourse, due: dueBefore, sort });
+    if (urlKey !== stateKey) {
+      setStatus(fromUrl.status);
+      setCategory(fromUrl.category);
+      setPriority(fromUrl.priority);
+      setCourse(fromUrl.course);
+      setAppliedCourse(fromUrl.course);
+      setDueBefore(fromUrl.due);
+      setSort(fromUrl.sort);
+    }
+  }
+
+  // Keep the tab, filters and order in the address bar without a navigation,
+  // so reloading or sharing the page shows the same list. The title search
+  // is left out: it remounts the page when it changes.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const put = (key: string, value: string | null) => (value ? params.set(key, value) : params.delete(key));
+    put("status", status && STATUS_SLUGS[status]);
+    put("category", category && slugify(category));
+    put("priority", priority && slugify(priority));
+    put("course", appliedCourse);
+    put("due", dueBefore);
+    put("sort", sort === "deadline" ? null : sort);
+    const query = params.toString();
+    const next = `${window.location.pathname}${query ? `?${query}` : ""}`;
+    if (next !== `${window.location.pathname}${window.location.search}`) {
+      window.history.replaceState(null, "", next);
+    }
+  }, [status, category, priority, appliedCourse, dueBefore, sort]);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<AcademicTask | null>(null);
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
-  // SPEC §7.8 and §7.5: both of these destroy work, so both confirm first.
-  const [confirmDelete, setConfirmDelete] = useState<AcademicTask | null>(null);
+  // SPEC §7.5: finishing early drops future sessions, so it confirms first.
+  // Deleting relies on the undo toast instead.
   const [confirmFinish, setConfirmFinish] = useState<AcademicTask | null>(null);
 
-  const load = useCallback(
-    (signal: AbortSignal) =>
-      tasksApi.listTasks(
-        {
-          status: status ?? undefined,
-          category: category ?? undefined,
-          priority: priority ?? undefined,
-          course: appliedCourse || undefined,
-          deadlineTo: dueBefore ? localInputToIso(dueBefore) : undefined,
-        },
-        signal,
-      ),
-    [status, category, priority, appliedCourse, dueBefore],
+  const filters = useMemo(
+    () => ({
+      status: status ?? undefined,
+      category: category ?? undefined,
+      priority: priority ?? undefined,
+      course: appliedCourse || undefined,
+      deadlineTo: dueBefore ? localInputToIso(dueBefore, timeZone) : undefined,
+    }),
+    [status, category, priority, appliedCourse, dueBefore, timeZone],
   );
-  const { data, error, isLoading, reload, setData } = useApi(load);
+  const load = useCallback(
+    (signal: AbortSignal) => tasksApi.listTasks(filters, signal),
+    [filters],
+  );
+  const { data, error, isLoading, reload, setData } = useApi(taskListKey(filters), load);
+  const overlayVersion = useTaskOverlayVersion();
 
   const tasks = useMemo(() => data ?? [], [data]);
 
-  // The API has no text search, so title filtering happens here in the browser.
+  // Pending finishes and deletions show immediately; a finished task leaves a
+  // list that is filtered to another status.
   const visible = useMemo(() => {
+    void overlayVersion;
     const q = search.trim().toLowerCase();
-    if (!q) return tasks;
-    return tasks.filter((task) => task.title.toLowerCase().includes(q));
-  }, [tasks, search]);
+    return applyTaskOverlays(tasks).filter(
+      (task) =>
+        (!status || task.status === status) &&
+        (!q || task.title.toLowerCase().includes(q) || (task.course ?? "").toLowerCase().includes(q)),
+    );
+  }, [tasks, search, status, overlayVersion]);
 
   const visibleSorted = useMemo(() => {
     const rows = [...visible];
@@ -127,12 +233,32 @@ export default function TasksPage() {
     }
   }, [visible, sort]);
 
+  // Grouped by when it is due, but only in the default order: grouping a list
+  // sorted by name or effort would scatter it.
+  const nowMs = useNow().getTime();
+  const groups = useMemo(() => {
+    if (sort !== "deadline") return [{ id: null, tasks: visibleSorted }];
+    const now = nowMs;
+    const weekEnd = now + 7 * 86_400_000;
+    const buckets: Record<GroupId, AcademicTask[]> = { overdue: [], week: [], later: [], done: [] };
+    for (const task of visibleSorted) {
+      const due = new Date(task.deadline).getTime();
+      if (task.status === "Completed") buckets.done.push(task);
+      else if (due < now) buckets.overdue.push(task);
+      else if (due <= weekEnd) buckets.week.push(task);
+      else buckets.later.push(task);
+    }
+    return (Object.keys(buckets) as GroupId[])
+      .filter((id) => buckets[id].length > 0)
+      .map((id) => ({ id, tasks: buckets[id] }));
+  }, [visibleSorted, sort, nowMs]);
+
   const filterCount =
-    (status ? 1 : 0) +
     (category ? 1 : 0) +
     (priority ? 1 : 0) +
     (appliedCourse ? 1 : 0) +
     (dueBefore ? 1 : 0);
+  const narrowed = filterCount > 0 || search !== "" || status !== null;
 
   function clearFilters() {
     setStatus(null);
@@ -142,6 +268,11 @@ export default function TasksPage() {
     setAppliedCourse("");
     setDueBefore("");
     setSearch("");
+  }
+
+  function openNew() {
+    setEditing(null);
+    setDialogOpen(true);
   }
 
   function handleSaved(saved: AcademicTask) {
@@ -154,38 +285,78 @@ export default function TasksPage() {
     setEditing(null);
   }
 
-  async function runAction(taskId: string, action: () => Promise<void>, message: string) {
-    setBusyTaskId(taskId);
+  async function startTask(task: AcademicTask) {
+    if (busyTaskId !== null) return;
+    const previousIndex = tasks.findIndex((t) => t.id === task.id);
+    setData((current) =>
+      (current ?? []).map((t) => (t.id === task.id ? { ...t, status: "In Progress" } : t)),
+    );
+    setBusyTaskId(task.id);
     try {
-      await action();
-      toast.success(message);
-      reload();
+      await tasksApi.startTask(task.id);
+      toast.success("Task started");
     } catch (cause) {
-      if (cause instanceof ApiError && cause.status === 409) {
-        toast.error("Start the task before finishing it early.");
-      } else {
-        toast.error(describeError(cause));
-      }
+      setData((current) => {
+        const list = current ?? [];
+        return list.some((t) => t.id === task.id)
+          ? list.map((t) => (t.id === task.id ? task : t))
+          : [...list.slice(0, previousIndex), task, ...list.slice(previousIndex)];
+      });
+      reload();
+      toast.error(describeError(cause));
     } finally {
       setBusyTaskId(null);
     }
   }
 
+  function finishTask(target: AcademicTask) {
+    scheduleUndoable({
+      key: `finish:${target.id}`,
+      message: "Task finished",
+      description: target.title,
+      overlay: { taskId: target.id, patch: { status: "Completed", remainingDuration: 0 } },
+      commit: () => tasksApi.finishTaskEarly(target.id),
+      onError: (cause) => {
+        reload();
+        return cause instanceof ApiError && cause.status === 409
+          ? "Start the task before marking it done."
+          : describeError(cause);
+      },
+    });
+  }
+
+  function deleteTask(target: AcademicTask) {
+    scheduleUndoable({
+      key: `delete:${target.id}`,
+      message: "Task deleted",
+      description: target.title,
+      overlay: { taskId: target.id, removed: true },
+      commit: () => tasksApi.deleteTask(target.id),
+      onError: (cause) => {
+        reload();
+        return describeError(cause);
+      },
+    });
+  }
+
+  const { requestDelete, dialog } = useConfirmDeleteTask(deleteTask);
+
   return (
     <PageShell>
       <PageHeader
+        icon={ListTodo}
+        eyebrow="Coursework"
         title="Tasks"
-        description="Everything you owe, with deadlines and estimates."
+        description="Keep your coursework, deadlines, and study estimates in one place."
         actions={
-          <Button
-            onClick={() => {
-              setEditing(null);
-              setDialogOpen(true);
-            }}
-          >
-            <Plus />
-            Add task
-          </Button>
+          <>
+            <GoogleImportButton source="google_classroom" />
+            <Button onClick={openNew} aria-keyshortcuts="N">
+              <Plus />
+              Add task
+              <Kbd aria-hidden className="ms-1 hidden border-primary-foreground/25 bg-primary-foreground/10 text-primary-foreground @2xl/dashboard:inline-flex">N</Kbd>
+            </Button>
+          </>
         }
       />
 
@@ -203,220 +374,242 @@ export default function TasksPage() {
         </Callout>
       )}
 
-      {/* ── Toolbar ────────────────────────────── */}
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Search leads, because it is what a long list is actually used
-              with. It used to be the fifth control in a wrapped row of seven. */}
-          <div className="relative min-w-56 flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Search tasks"
-              aria-label="Search tasks by title"
-              className="h-10 w-full ps-9 pe-9"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            {search && (
-              <button
-                onClick={() => setSearch("")}
-                aria-label="Clear search"
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-              >
-                <X className="size-4" />
-              </button>
-            )}
-          </div>
+      <GoogleImportReminder source="google_classroom" />
 
-          <Select value={sort} onValueChange={(next) => next && setSort(next as SortKey)}>
-            <SelectTrigger className="h-10" aria-label="Sort tasks">
-              <ArrowUpDown className="text-muted-foreground" />
-              <SelectValue>
-                {(selected) => SORT_LABELS[selected as SortKey] ?? "Sort"}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
-                <SelectItem key={key} value={key}>
-                  {SORT_LABELS[key]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          {/* The five filters live behind one control instead of spilling
-              across two wrapped rows of half-labelled inputs. */}
-          <Popover>
-            <PopoverTrigger
-              render={
-                <Button variant="outline" className="h-10">
-                  <SlidersHorizontal />
-                  Filters
-                  {filterCount > 0 && (
-                    <span className="ms-0.5 flex size-5 items-center justify-center rounded-full bg-foreground text-[0.6875rem] font-semibold text-background">
-                      {filterCount}
-                    </span>
-                  )}
-                </Button>
-              }
-            />
-            <PopoverContent align="end" className="w-80 p-4">
-              <div className="space-y-3">
-                <FilterField label="Status">
-                  <FilterSelect
-                    value={status}
-                    onChange={setStatus}
-                    options={TASK_STATUSES}
-                    placeholder="Any status"
-                  />
-                </FilterField>
-                <FilterField label="Category">
-                  <FilterSelect
-                    value={category}
-                    onChange={setCategory}
-                    options={CATEGORIES}
-                    placeholder="Any category"
-                  />
-                </FilterField>
-                <FilterField label="Priority">
-                  <FilterSelect
-                    value={priority}
-                    onChange={setPriority}
-                    options={PRIORITIES}
-                    placeholder="Any priority"
-                  />
-                </FilterField>
-                <FilterField label="Course">
-                  <Input
-                    placeholder="Any course"
-                    className="h-9 w-full"
-                    value={course}
-                    onChange={(e) => setCourse(e.target.value)}
-                    onBlur={() => setAppliedCourse(course.trim())}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") setAppliedCourse(course.trim());
-                    }}
-                  />
-                </FilterField>
-                <FilterField label="Due before">
-                  <Input
-                    type="datetime-local"
-                    className="h-9 w-full"
-                    value={dueBefore}
-                    onChange={(e) => setDueBefore(e.target.value)}
-                    aria-label="Show tasks due before"
-                  />
-                </FilterField>
-
-                {filterCount > 0 && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-full"
-                    onClick={clearFilters}
-                  >
-                    Clear all filters
-                  </Button>
-                )}
-              </div>
-            </PopoverContent>
-          </Popover>
-        </div>
-
-        {/* Active filters stay visible outside the popover, each removable on
-            its own — otherwise a filtered list looks like an empty one. */}
-        {(filterCount > 0 || search !== "") && (
+      {/* ── Ledger: the controls and the list are one object ── */}
+      <Card>
+        <CardHeader className="flex flex-col items-stretch gap-3 px-1 pt-1 pb-2.5">
           <div className="flex flex-wrap items-center gap-2">
-            {search && <Chip label={`“${search}”`} onClear={() => setSearch("")} />}
-            {status && <Chip label={status} onClear={() => setStatus(null)} />}
-            {category && <Chip label={category} onClear={() => setCategory(null)} />}
-            {priority && <Chip label={`${priority} priority`} onClear={() => setPriority(null)} />}
-            {appliedCourse && (
-              <Chip
-                label={appliedCourse}
-                onClear={() => {
-                  setCourse("");
-                  setAppliedCourse("");
+            {/* Search leads, because it is what a long list is actually used with. */}
+            <div className="relative min-w-0 flex-1 basis-full @2xl/dashboard:basis-64">
+              <Search className="pointer-events-none absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="search"
+                placeholder="Search tasks"
+                aria-label="Search tasks by title or course"
+                className="h-9 w-full ps-9 pe-9 [&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-decoration]:appearance-none"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    setSearch("");
+                  }
                 }}
               />
-            )}
-            {dueBefore && (
-              <Chip label="Due before set" onClear={() => setDueBefore("")} />
-            )}
-            <button
-              onClick={clearFilters}
-              className="text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-            >
-              Clear all
-            </button>
-            <span className="ms-auto text-xs text-muted-foreground">
-              {isLoading ? "…" : `${visibleSorted.length} of ${tasks.length}`}
+              {search && (
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => setSearch("")}
+                  aria-label="Clear search"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+                >
+                  <X className="size-4" />
+                </Button>
+              )}
+            </div>
+
+            <Select value={sort} onValueChange={(next) => next && setSort(next as SortKey)}>
+              <SelectTrigger className="h-9" aria-label="Sort tasks">
+                <ArrowUpDown className="text-muted-foreground" />
+                <SelectValue>
+                  {(selected) => SORT_LABELS[selected as SortKey] ?? "Sort"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+                  <SelectItem key={key} value={key}>
+                    {SORT_LABELS[key]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* The secondary filters live behind one control instead of
+                spilling across two wrapped rows of half-labelled inputs. */}
+            <Popover>
+              <PopoverTrigger
+                render={
+                  <Button variant="outline" className="h-9">
+                    <SlidersHorizontal />
+                    Filters
+                    {filterCount > 0 && (
+                      <span className="ms-0.5 flex size-5 items-center justify-center rounded-full bg-primary text-[0.6875rem] font-semibold text-primary-foreground">
+                        {filterCount}
+                      </span>
+                    )}
+                  </Button>
+                }
+              />
+              <PopoverContent align="end" className="study-shell w-80 max-w-[calc(100vw-2rem)] p-4">
+                <div className="space-y-3">
+                  <FilterField label="Category">
+                    <FilterSelect
+                      value={category}
+                      onChange={setCategory}
+                      options={CATEGORIES}
+                      placeholder="Any category"
+                    />
+                  </FilterField>
+                  <FilterField label="Priority">
+                    <FilterSelect
+                      value={priority}
+                      onChange={setPriority}
+                      options={PRIORITIES}
+                      placeholder="Any priority"
+                    />
+                  </FilterField>
+                  <FilterField label="Course">
+                    <Input
+                      placeholder="Any course"
+                      className="h-9 w-full"
+                      value={course}
+                      onChange={(e) => setCourse(e.target.value)}
+                      onBlur={() => setAppliedCourse(course.trim())}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") setAppliedCourse(course.trim());
+                      }}
+                    />
+                  </FilterField>
+                  <FilterField label="Due before">
+                    <Input
+                      type="datetime-local"
+                      className="h-9 w-full"
+                      value={dueBefore}
+                      onChange={(e) => setDueBefore(e.target.value)}
+                      aria-label="Show tasks due before"
+                    />
+                  </FilterField>
+
+                  {filterCount > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full"
+                      onClick={clearFilters}
+                    >
+                      Clear all filters
+                    </Button>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          {/* Active filters stay visible outside the popover, each removable on
+              its own — otherwise a filtered list looks like an empty one. */}
+          {(filterCount > 0 || search !== "") && (
+            <div className="flex flex-wrap items-center gap-2">
+              {search && <Chip label={`“${search}”`} onClear={() => setSearch("")} />}
+              {category && <Chip label={category} onClear={() => setCategory(null)} />}
+              {priority && <Chip label={`${priority} priority`} onClear={() => setPriority(null)} />}
+              {appliedCourse && (
+                <Chip
+                  label={appliedCourse}
+                  onClear={() => {
+                    setCourse("");
+                    setAppliedCourse("");
+                  }}
+                />
+              )}
+              {dueBefore && (
+                <Chip label="Due before set" onClear={() => setDueBefore("")} />
+              )}
+              <Button
+                variant="link"
+                size="xs"
+                onClick={clearFilters}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                Clear all
+              </Button>
+            </div>
+          )}
+
+          {/* Tabs scroll on their own so the count stays visible at 390px. */}
+          <div className="flex items-center gap-3">
+            <div className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <Tabs
+                value={status ?? ALL}
+                onValueChange={(next) => setStatus(next === ALL || next == null ? null : (next as TaskStatus))}
+              >
+                <TabsList aria-label="Filter by status">
+                  {STATUS_TABS.map((tab) => (
+                    <TabsTrigger key={tab.value} value={tab.value} className="flex-none px-2.5 text-[0.8125rem]">
+                      {tab.label}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
+            </div>
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+              {isLoading
+                ? "Loading…"
+                : narrowed
+                  ? `${visibleSorted.length} ${visibleSorted.length === 1 ? "task matches" : "tasks match"}`
+                  : `${visible.length} ${visible.length === 1 ? "task" : "tasks"}`}
             </span>
           </div>
-        )}
-      </div>
-
-      {/* ── Ledger ─────────────────────────────── */}
-      {/* `py-0`: Card applies `py-(--card-spacing)` by default, which left a
-          band of empty space above the first row and below the last. */}
-      <Card className="overflow-hidden py-0">
-        <CardContent className="p-0">
+        </CardHeader>
+        <CardContent className="overflow-hidden p-0">
           {isLoading ? (
             <div className="space-y-2 p-6">
               {Array.from({ length: 5 }).map((_, index) => (
-                <Skeleton key={index} className="h-10 w-full" />
+                <Skeleton key={index} className="h-11 w-full" />
               ))}
             </div>
           ) : visible.length === 0 ? (
             <EmptyState
               icon={ListTodo}
-              title={
-                filterCount > 0 || search !== ""
-                  ? "No tasks match these filters"
-                  : "No tasks yet"
-              }
+              title={narrowed ? "No tasks match these filters" : "No tasks yet"}
               className="border-0"
               action={
-                filterCount > 0 || search !== "" ? (
+                narrowed ? (
                   <Button size="sm" variant="outline" onClick={clearFilters}>
                     Clear filters
                   </Button>
-                ) : undefined
+                ) : (
+                  <Button onClick={openNew}><Plus className="size-4" />Add your first task</Button>
+                )
               }
             >
-              {filterCount > 0 || search !== ""
+              {narrowed
                 ? "Try widening the filters above."
                 : "Add your first task to see how it fits your week."}
             </EmptyState>
           ) : (
-            <>
-              <div className="hidden grid-cols-[minmax(0,1fr)_7rem_6rem_7rem_2.5rem] gap-4 border-b bg-muted/40 px-6 py-2 lg:grid">
-                <span className="text-xs font-medium text-muted-foreground">Task</span>
-                <span className="text-xs font-medium text-muted-foreground">Due</span>
-                <span className="text-end text-xs font-medium text-muted-foreground">Left</span>
-                <span className="text-xs font-medium text-muted-foreground">Status</span>
-                <span />
-              </div>
-
-              <ul className="divide-y">
-                {visibleSorted.map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    busy={busyTaskId === task.id}
-                    onEdit={() => {
-                      setEditing(task);
-                      setDialogOpen(true);
-                    }}
-                    onStart={() =>
-                      void runAction(task.id, () => tasksApi.startTask(task.id), "Task started")
-                    }
-                    onFinish={() => setConfirmFinish(task)}
-                    onDelete={() => setConfirmDelete(task)}
-                  />
-                ))}
-              </ul>
-            </>
+            groups.map((group) => (
+              <section key={group.id ?? "all"} aria-label={group.id ? GROUP_LABELS[group.id] : "Tasks"}>
+                {group.id && (
+                  <h2
+                    className={cn(
+                      "flex items-center gap-2 border-b bg-muted/35 px-4 py-2 text-[0.6875rem] font-semibold uppercase tracking-[0.08em] @2xl/dashboard:px-6",
+                      group.id === "overdue" ? "text-deficit" : "text-muted-foreground",
+                    )}
+                  >
+                    {GROUP_LABELS[group.id]}
+                    <span className="font-medium tabular-nums opacity-70">{group.tasks.length}</span>
+                  </h2>
+                )}
+                <ul className="divide-y border-b last:border-b-0">
+                  {group.tasks.map((task) => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      busy={busyTaskId === task.id}
+                      disabled={busyTaskId !== null}
+                      onEdit={() => {
+                        setEditing(task);
+                        setDialogOpen(true);
+                      }}
+                      onStart={() => void startTask(task)}
+                      onFinish={() => setConfirmFinish(task)}
+                      onDelete={() => requestDelete(task)}
+                    />
+                  ))}
+                </ul>
+              </section>
+            ))
           )}
         </CardContent>
       </Card>
@@ -428,22 +621,7 @@ export default function TasksPage() {
         onSaved={handleSaved}
       />
 
-      {/* SPEC §7.8: deletion also removes sessions and behaviour history, so
-          the dialog names what goes rather than asking "are you sure?". */}
-      <ConfirmDialog
-        open={confirmDelete !== null}
-        onOpenChange={(next) => !next && setConfirmDelete(null)}
-        title={`Delete “${confirmDelete?.title ?? ""}”?`}
-        description="This also removes its study sessions and the record of time you have already put in. It cannot be undone."
-        confirmLabel="Delete task"
-        destructive
-        onConfirm={async () => {
-          const target = confirmDelete;
-          if (!target) return;
-          await runAction(target.id, () => tasksApi.deleteTask(target.id), "Task deleted");
-          setConfirmDelete(null);
-        }}
-      />
+      {dialog}
 
       {/* SPEC §7.5: finishing early zeroes remaining work and drops future
           sessions, but keeps the time already recorded. */}
@@ -453,11 +631,11 @@ export default function TasksPage() {
         title={`Finish “${confirmFinish?.title ?? ""}” now?`}
         description="StudyFlow will treat this task as done, drop its upcoming sessions, and keep the time you have already logged."
         confirmLabel="Mark it finished"
-        onConfirm={async () => {
+        onConfirm={() => {
           const target = confirmFinish;
           if (!target) return;
-          await runAction(target.id, () => tasksApi.finishTaskEarly(target.id), "Task finished");
           setConfirmFinish(null);
+          finishTask(target);
         }}
       />
     </PageShell>
@@ -482,16 +660,18 @@ function FilterField({
 /** A removable summary of one active filter. */
 function Chip({ label, onClear }: { label: string; onClear: () => void }) {
   return (
-    <span className="flex items-center gap-1 rounded-full border bg-card py-1 ps-2.5 pe-1 text-xs">
+    <Badge variant="outline" className="h-6 gap-1 rounded-md bg-card ps-2 pe-0.5 font-normal">
       <span className="max-w-40 truncate">{label}</span>
-      <button
+      <Button
+        variant="ghost"
+        size="icon-xs"
         onClick={onClear}
         aria-label={`Remove ${label} filter`}
-        className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="size-5 rounded-sm text-muted-foreground"
       >
         <X className="size-3" />
-      </button>
-    </span>
+      </Button>
+    </Badge>
   );
 }
 
@@ -526,9 +706,80 @@ function FilterSelect<T extends string>({
   );
 }
 
+/**
+ * The status circle at the start of each row: empty to start a task, half
+ * full to finish one early. It is the same control as the menu items, one
+ * click closer.
+ */
+function StatusToggle({
+  task,
+  busy,
+  disabled,
+  onStart,
+  onFinish,
+}: {
+  task: AcademicTask;
+  busy: boolean;
+  disabled: boolean;
+  onStart: () => void;
+  onFinish: () => void;
+}) {
+  const base =
+    "relative flex size-5 shrink-0 items-center justify-center rounded-full border-[1.5px] transition-[transform,border-color,background-color] duration-150 ease-fluid";
+
+  if (task.status === "Completed") {
+    return (
+      <span className={cn(base, "border-transparent bg-surplus text-background")} aria-label="Completed" role="img">
+        <Check className="size-3" strokeWidth={3} />
+      </span>
+    );
+  }
+  if (task.status === "Overdue") {
+    return (
+      <span className={cn(base, "border-deficit text-deficit")} aria-label="Overdue" role="img">
+        <AlertTriangle className="size-2.5" strokeWidth={2.5} />
+      </span>
+    );
+  }
+
+  const inProgress = task.status === "In Progress";
+  return (
+    <button
+      type="button"
+      onClick={inProgress ? onFinish : onStart}
+      disabled={disabled}
+      aria-label={inProgress ? `Mark “${task.title}” done` : `Start “${task.title}”`}
+      title={inProgress ? "Mark done" : "Start"}
+      className={cn(
+        base,
+        "group/toggle cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-90 disabled:cursor-default disabled:opacity-60",
+        inProgress
+          ? "border-primary hover-fine:bg-primary/10"
+          : "border-muted-foreground/45 hover-fine:border-primary",
+      )}
+    >
+      {busy ? (
+        <Loader2 className="size-3 animate-spin text-primary" aria-hidden />
+      ) : inProgress ? (
+        <>
+          <span
+            aria-hidden
+            className="size-2.5 rounded-full transition-opacity duration-150 group-hover/toggle:opacity-0"
+            style={{ background: "conic-gradient(var(--primary) 0 50%, transparent 50% 100%)" }}
+          />
+          <Check aria-hidden className="absolute size-3 text-primary opacity-0 transition-opacity duration-150 group-hover/toggle:opacity-100" strokeWidth={3} />
+        </>
+      ) : (
+        <Play aria-hidden className="size-2.5 translate-x-px fill-primary text-primary opacity-0 transition-opacity duration-150 group-hover/toggle:opacity-100" />
+      )}
+    </button>
+  );
+}
+
 function TaskRow({
   task,
   busy,
+  disabled = false,
   onEdit,
   onStart,
   onFinish,
@@ -536,99 +787,108 @@ function TaskRow({
 }: {
   task: AcademicTask;
   busy: boolean;
+  disabled?: boolean;
   onEdit: () => void;
   onStart: () => void;
   onFinish: () => void;
   onDelete: () => void;
 }) {
-  const category = CATEGORY_CONFIG[task.category];
-  const statusConfig = STATUS_CONFIG[task.status];
-  const due = describeDeadline(task.deadline);
+  const completed = task.status === "Completed";
 
   return (
-    <li className="group relative py-3 pl-6 pr-14 transition-colors hover:bg-muted/40 lg:pr-6">
-      <div className="flex flex-col gap-2 lg:grid lg:grid-cols-[minmax(0,1fr)_7rem_6rem_7rem_2.5rem] lg:items-center lg:gap-4">
-        <div className="min-w-0">
-          <Link
-            href={`/tasks/${task.id}`}
-            className="block truncate text-sm font-medium underline-offset-4 hover:underline"
-          >
-            {task.title}
-          </Link>
-          {/* Category and course are attributes, not signals, so they stay in
-              ink. Only High priority earns a chip — Medium is the default and
-              Low is not worth the reader's attention. */}
-          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            {task.priority === "High" && (
-              <Badge variant="outline" className="px-1.5 text-[0.6875rem]">
-                High
-              </Badge>
-            )}
-            <span className="truncate text-xs text-muted-foreground">
-              {category.label}
-              {task.course ? ` · ${task.course}` : ""}
-            </span>
-          </div>
-        </div>
+    <li className="group relative flex items-center gap-3 py-3 pl-4 pr-2 transition-colors duration-150 hover-fine:bg-muted/40 compact:py-2 @2xl/dashboard:pl-6 @2xl/dashboard:pr-3">
+      <StatusToggle task={task} busy={busy} disabled={busy || disabled} onStart={onStart} onFinish={onFinish} />
 
-        {/* `lg:contents` dissolves this wrapper once the grid takes over, so
-            the three figures become real columns instead of a nested row. */}
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 lg:contents">
-          <span
-            className={cn(
-              "min-w-0 text-xs font-medium tabular-nums",
-              due.urgent ? "text-deficit" : "text-muted-foreground",
-            )}
-          >
-            {due.short}
-          </span>
-
-          <span className="min-w-0 text-xs tabular-nums text-muted-foreground lg:text-end">
-            {formatDuration(task.remainingDuration)}
-          </span>
-
-          <span className="flex min-w-0 items-center gap-1.5 text-xs">
-            <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", statusConfig.dotColor)} />
-            <span className="truncate text-muted-foreground">{statusConfig.label}</span>
+      <div className="min-w-0 flex-1">
+        <Link
+          href={`/tasks/${task.id}`}
+          className={cn(
+            "line-clamp-2 text-sm font-medium break-words underline-offset-4 hover:underline",
+            completed && "text-muted-foreground line-through decoration-muted-foreground/40",
+          )}
+        >
+          {task.title}
+        </Link>
+        {/* Only High priority earns a mark: Medium is the default and Low is
+            not worth the reader's attention. */}
+        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <CategoryTag category={task.category} />
+          {task.priority === "High" && !completed && (
+            <span className="text-[0.6875rem] font-semibold uppercase tracking-wide text-deficit">High</span>
+          )}
+          {task.course && (
+            <span className="truncate text-xs text-muted-foreground">{task.course}</span>
+          )}
+          <span className="text-xs tabular-nums text-muted-foreground @3xl/dashboard:hidden">
+            · {formatDuration(task.remainingDuration)} left
           </span>
         </div>
-
-        {/* Pinned to the row corner while stacked; a real grid cell once the
-            columns take over. */}
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon"
-                className="absolute right-4 top-2.5 h-8 w-8 lg:static lg:opacity-0 lg:transition-opacity lg:group-hover:opacity-100"
-                disabled={busy}
-                aria-label={`Actions for ${task.title}`}
-              >
-                {busy ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <MoreHorizontal className="h-4 w-4" />
-                )}
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuItem render={<Link href={`/tasks/${task.id}`}>Open</Link>} />
-            <DropdownMenuItem onClick={onEdit}>Edit</DropdownMenuItem>
-            {task.status === "Not Started" && (
-              <DropdownMenuItem onClick={onStart}>Start</DropdownMenuItem>
-            )}
-            {task.status === "In Progress" && (
-              <DropdownMenuItem onClick={onFinish}>Finish early</DropdownMenuItem>
-            )}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive" onClick={onDelete}>
-              Delete
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
       </div>
+
+      {/* SPEC §17.4: actual duration alongside estimated remaining. */}
+      <div className="hidden w-40 shrink-0 flex-col gap-1.5 @3xl/dashboard:flex">
+        <span className="flex justify-between gap-2 text-xs tabular-nums text-muted-foreground">
+          <span>
+            <span className="sr-only">Worked </span>
+            {formatDuration(task.actualDuration)}
+          </span>
+          <span>
+            <span className="sr-only">Left </span>
+            {formatDuration(task.remainingDuration)} left
+          </span>
+        </span>
+        <EffortBar worked={task.actualDuration} remaining={task.remainingDuration} />
+      </div>
+
+      <DueChip deadline={task.deadline} completed={completed} className="w-20 justify-end" />
+
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground"
+              disabled={busy || disabled}
+              aria-label={`Actions for ${task.title}`}
+            >
+              {busy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <MoreHorizontal className="h-4 w-4" />
+              )}
+            </Button>
+          }
+        />
+        <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuItem render={<Link href={`/tasks/${task.id}`}>Open</Link>} />
+          <DropdownMenuItem onClick={onEdit}>Edit</DropdownMenuItem>
+          {task.status === "Not Started" && (
+            <DropdownMenuItem onClick={onStart}>Start</DropdownMenuItem>
+          )}
+          {task.status === "In Progress" && (
+            <DropdownMenuItem onClick={onFinish}>Mark done</DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem className="text-destructive" onClick={onDelete}>
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </li>
+  );
+}
+
+function TasksPageWrapper() {
+  const searchParams = useSearchParams();
+  const searchKey = searchParams.get("search") ?? searchParams.get("q") ?? "";
+  return <TasksContent key={searchKey} />;
+}
+
+export default function TasksPage() {
+  return (
+    <Suspense fallback={null}>
+      <TasksPageWrapper />
+    </Suspense>
   );
 }

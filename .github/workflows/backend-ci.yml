@@ -4,21 +4,28 @@ on:
   pull_request:
     paths:
       - ".github/workflows/backend-ci.yml"
+      - ".github/workflows/frontend-ci.yml"
       - ".env.example"
       - "backend/**"
       - "compose.yaml"
       - "render.yaml"
       - "postman/**"
   push:
+    # dev is the integration branch: every merged or restacked tip must be verified,
+    # not only the individual pull requests that built it.
     branches:
       - master
+      - dev
     paths:
       - ".github/workflows/backend-ci.yml"
+      - ".github/workflows/frontend-ci.yml"
       - ".env.example"
       - "backend/**"
       - "compose.yaml"
       - "render.yaml"
       - "postman/**"
+  # Re-run the gates on any branch tip on demand, e.g. the exact dev commit before a release.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -86,6 +93,7 @@ jobs:
         run: |
           uv run alembic upgrade head
           uv run alembic check
+          uv run python -m studyflow.cli.release check-schema
 
       - name: Validate Compose configuration
         run: docker compose config --quiet

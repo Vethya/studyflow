@@ -23,6 +23,16 @@ def test_settings_read_studyflow_prefixed_environment_variables(
     assert settings.log_level == "DEBUG"
 
 
+def test_settings_supports_evaluation_environment(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("STUDYFLOW_ENVIRONMENT", "evaluation")
+    settings = Settings()
+    assert settings.environment is Environment.EVALUATION
+
+
 def test_app_factory_uses_explicit_settings() -> None:
     settings = Settings(environment=Environment.TEST, debug=True)
 
@@ -30,6 +40,59 @@ def test_app_factory_uses_explicit_settings() -> None:
 
     assert app.debug is True
     assert app.state.settings is settings
+
+
+def test_settings_trust_no_proxy_hops_by_default() -> None:
+    assert Settings().trusted_proxy_hops == 0
+
+
+def test_settings_do_not_migrate_on_start_by_default() -> None:
+    assert Settings().migrate_on_start is False
+
+
+def test_settings_split_accepted_newer_schema_revisions(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("STUDYFLOW_ACCEPTED_NEWER_SCHEMA_REVISIONS", " 20991231_99 , ")
+
+    assert Settings().accepted_newer_schema_revisions == ["20991231_99"]
+
+
+def test_settings_read_trusted_proxy_hops(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("STUDYFLOW_TRUSTED_PROXY_HOPS", "2")
+
+    assert Settings().trusted_proxy_hops == 2
+
+
+@mark.parametrize("hops", [-1, 6])
+def test_settings_reject_out_of_range_trusted_proxy_hops(hops: int) -> None:
+    with raises(ValidationError, match="trusted_proxy_hops"):
+        Settings(trusted_proxy_hops=hops)
+
+
+def test_frontend_proxy_secret_is_optional_secret_and_blank_means_unset(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert Settings().frontend_proxy_secret is None
+
+    monkeypatch.setenv("STUDYFLOW_FRONTEND_PROXY_SECRET", "")
+    assert Settings().frontend_proxy_secret is None
+
+    secret = "p" * 32
+    monkeypatch.setenv("STUDYFLOW_FRONTEND_PROXY_SECRET", secret)
+    settings = Settings()
+    assert settings.frontend_proxy_secret is not None
+    assert settings.frontend_proxy_secret.get_secret_value() == secret
+    assert secret not in repr(settings)
+
+
+def test_settings_reject_a_short_frontend_proxy_secret() -> None:
+    with raises(ValidationError, match="Frontend proxy secret must be at least 32 characters"):
+        Settings(frontend_proxy_secret=SecretStr("p" * 31))
 
 
 def test_production_rejects_debug_mode() -> None:
@@ -103,6 +166,30 @@ def test_google_oidc_configuration_is_secret_and_all_or_nothing() -> None:
     assert "google-secret" not in repr(settings)
     with raises(ValidationError, match="must be configured together"):
         Settings(google_oidc_client_id="google-client")
+
+
+def test_blank_google_oidc_settings_are_normalized_to_none() -> None:
+    settings = Settings(google_oidc_client_id="", google_oidc_client_secret=SecretStr(""))
+
+    assert settings.google_oidc_client_id is None
+    assert settings.google_oidc_client_secret is None
+
+
+def test_google_oidc_redirect_uri_requires_http_or_https() -> None:
+    with raises(ValidationError, match="Google OIDC redirect URI must use HTTP or HTTPS"):
+        Settings(google_oidc_redirect_uri="javascript:alert(1)")
+
+
+@mark.parametrize(
+    "redirect_uri",
+    ["https://studyflow.example/callback?tenant=1", "https://studyflow.example/callback#fragment"],
+)
+def test_google_oidc_redirect_uri_rejects_query_or_fragment(redirect_uri: str) -> None:
+    with raises(
+        ValidationError,
+        match="Google OIDC redirect URI must not include a query or fragment",
+    ):
+        Settings(google_oidc_redirect_uri=redirect_uri)
 
 
 def test_settings_reject_an_unsafe_public_app_url() -> None:
@@ -196,3 +283,114 @@ def test_production_requires_tls_for_authentication_email() -> None:
             public_app_url="https://studyflow.example.com",
             smtp_start_tls=False,
         )
+
+
+def test_production_requires_https_for_google_oidc_redirect_uri() -> None:
+    database_url = SecretStr(
+        "postgresql+psycopg://studyflow:secret@database/studyflow?sslmode=require"
+    )
+
+    with raises(ValidationError, match="Production Google OIDC redirect URI must use HTTPS"):
+        Settings(
+            environment=Environment.PRODUCTION,
+            database_url=database_url,
+            public_app_url="https://studyflow.example.com",
+            smtp_start_tls=True,
+            google_oidc_client_id="google-client",
+            google_oidc_client_secret=SecretStr("google-secret"),
+            google_oidc_redirect_uri="http://studyflow.example.com/callback",
+        )
+
+
+def test_google_import_redirect_uri_requires_google_oidc_credentials() -> None:
+    with raises(ValidationError, match="Google import requires the Google OIDC client ID"):
+        Settings(
+            google_import_redirect_uri="https://studyflow.example/api/v1/integrations/google/callback"
+        )
+
+    settings = Settings(
+        google_oidc_client_id="google-client",
+        google_oidc_client_secret=SecretStr("google-secret"),
+        google_oidc_redirect_uri="https://studyflow.example/api/v1/auth/google/callback",
+        google_import_redirect_uri="",
+    )
+    assert settings.google_import_redirect_uri is None
+
+
+@mark.parametrize(
+    ("redirect_uri", "message"),
+    [
+        ("javascript:alert(1)", "Google import redirect URI must use HTTP or HTTPS"),
+        ("https://studyflow.example/callback?x=1", "must not include a query or fragment"),
+    ],
+)
+def test_google_import_redirect_uri_is_validated(redirect_uri: str, message: str) -> None:
+    with raises(ValidationError, match=message):
+        Settings(google_import_redirect_uri=redirect_uri)
+
+
+def test_production_requires_https_for_google_import_redirect_uri() -> None:
+    database_url = SecretStr(
+        "postgresql+psycopg://studyflow:secret@database/studyflow?sslmode=require"
+    )
+
+    with raises(ValidationError, match="Production Google import redirect URI must use HTTPS"):
+        Settings(
+            environment=Environment.PRODUCTION,
+            database_url=database_url,
+            public_app_url="https://studyflow.example.com",
+            smtp_start_tls=True,
+            google_oidc_client_id="google-client",
+            google_oidc_client_secret=SecretStr("google-secret"),
+            google_oidc_redirect_uri="https://studyflow.example.com/api/v1/auth/google/callback",
+            google_import_redirect_uri="http://studyflow.example.com/import-callback",
+        )
+
+
+def test_reminder_dispatch_token_is_optional_secret_and_blank_disables_it(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    assert Settings(environment=Environment.TEST).reminder_dispatch_token is None
+    assert Settings(reminder_dispatch_token=SecretStr("")).reminder_dispatch_token is None
+    monkeypatch.setenv("STUDYFLOW_REMINDER_DISPATCH_TOKEN", "")
+    assert Settings().reminder_dispatch_token is None
+
+    token = "r" * 64
+    monkeypatch.setenv("STUDYFLOW_REMINDER_DISPATCH_TOKEN", token)
+    settings = Settings()
+
+    assert isinstance(settings.reminder_dispatch_token, SecretStr)
+    assert settings.reminder_dispatch_token.get_secret_value() == token
+    assert token not in repr(settings)
+
+
+def test_reminder_dispatch_token_must_be_long_enough() -> None:
+    with raises(ValidationError, match="at least 32 characters"):
+        Settings(reminder_dispatch_token=SecretStr("short-token"))
+
+
+def test_reminder_dispatch_token_strips_surrounding_whitespace(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    token = "t" * 32
+    settings = Settings(reminder_dispatch_token=SecretStr(f"\n{token} \t"))
+    assert settings.reminder_dispatch_token is not None
+    assert settings.reminder_dispatch_token.get_secret_value() == token
+
+    monkeypatch.setenv("STUDYFLOW_REMINDER_DISPATCH_TOKEN", f"{token}\n")
+    from_env = Settings()
+    assert from_env.reminder_dispatch_token is not None
+    assert from_env.reminder_dispatch_token.get_secret_value() == token
+
+    assert Settings(reminder_dispatch_token=SecretStr(" \n\t")).reminder_dispatch_token is None
+    with raises(ValidationError, match="at least 32 characters"):
+        Settings(reminder_dispatch_token=SecretStr(f"{'s' * 31}\n"))
+
+
+def test_reminder_dispatch_token_is_hidden_in_validation_errors() -> None:
+    token = "short-token"
+    with raises(ValidationError) as caught:
+        Settings(reminder_dispatch_token=SecretStr(token))
+
+    assert token not in str(caught.value)
+    assert all(error.get("input") != token for error in caught.value.errors())

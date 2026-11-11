@@ -36,6 +36,7 @@ def test_backend_ci_runs_every_quality_and_infrastructure_gate() -> None:
     assert "uv run pytest --cov=studyflow --cov-branch" in commands
     assert "uv run alembic upgrade head" in commands
     assert "uv run alembic check" in commands
+    assert "uv run python -m studyflow.cli.release check-schema" in commands
     assert "docker compose config --quiet" in commands
     assert "docker build" in commands
 
@@ -63,3 +64,18 @@ def test_backend_ci_pins_actions_and_postgres_by_sha() -> None:
     for step in backend_job["steps"]:
         if action := step.get("uses"):
             assert re.fullmatch(r"[^@]+@[0-9a-f]{40}", action)
+
+
+def workflow_triggers(workflow: dict[str, Any]) -> dict[str, Any]:
+    # YAML 1.1 reads the bare `on` key as boolean True.
+    raw_workflow = cast(dict[object, Any], workflow)
+    return cast(dict[str, Any], raw_workflow.get("on", raw_workflow.get(True)))
+
+
+def test_backend_ci_verifies_every_integrated_branch_tip() -> None:
+    triggers = workflow_triggers(load_workflow())
+
+    assert triggers["push"]["branches"] == ["master", "dev"]
+    assert "branches" not in triggers["pull_request"]
+    assert triggers["push"]["paths"] == triggers["pull_request"]["paths"]
+    assert "workflow_dispatch" in triggers

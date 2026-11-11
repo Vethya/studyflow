@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import useSWR from "swr";
 import {
   Dialog,
   DialogContent,
@@ -14,6 +15,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { FieldError } from "@/components/ui/field-error";
 import {
   Select,
   SelectContent,
@@ -21,14 +24,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, Loader2 } from "@/components/icons";
 import { CATEGORIES, PRIORITIES } from "@/types/task";
 import type { AcademicTask, Category, Priority, TaskFormData } from "@/types/task";
-import { isoToLocalInput, localInputToIso, nowLocalInput } from "@/lib/datetime";
+import { addZonedDays, dayKey, isoToLocalInput, localInputToIso, nowLocalInput } from "@/lib/datetime";
 import { ApiError, tasks as tasksApi, scheduling } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
-import { AdaptiveEstimateNote, LargeAdjustmentDialog } from "@/components/adaptive-estimate";
+import { AdaptiveEstimateNote, LargeAdjustmentDialog, PersistedEstimateNote } from "@/components/adaptive-estimate";
+import {
+  resolveEstimateChoiceAction,
+  resolveEstimateSelection,
+  resolvePreviewSelection,
+} from "@/lib/api/adaptive-contract";
 import type { AdaptiveEstimate } from "@/types/progress";
+import { adaptiveEstimateKey } from "@/lib/swr-keys";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
 
 interface TaskFormDialogProps {
   open: boolean;
@@ -38,33 +48,62 @@ interface TaskFormDialogProps {
   onSaved: (task: AcademicTask) => void;
 }
 
-const EMPTY = {
-  title: "",
-  category: "Assignment" as Category,
-  priority: "Medium" as Priority,
-  deadline: "",
-  originalEstimate: 60,
-  course: "",
-  notes: "",
+type TaskFormState = Omit<TaskFormData, "course" | "notes" | "plannedSource"> & {
+  course: string;
+  notes: string;
+  /** This form always makes an explicit source selection. */
+  plannedSource: "Original" | "Adaptive";
 };
 
+/** A new task starts due at the end of the day a week from now, a common hand-in gap. */
+function emptyForm(timeZone: string): TaskFormState {
+  return {
+    title: "",
+    category: "Assignment" as Category,
+    priority: "Medium" as Priority,
+    deadline: `${dayKey(addZonedDays(new Date(), 7, timeZone), timeZone)}T23:59`,
+    originalEstimate: 60,
+    plannedSource: "Original",
+    course: "",
+    notes: "",
+  };
+}
+
+type FieldErrors = Partial<Record<"title" | "deadline" | "estimate", string>>;
+
+function validate(form: TaskFormState): FieldErrors {
+  const errors: FieldErrors = {};
+  if (!form.title.trim()) errors.title = "Give the task a name.";
+  if (!form.deadline) errors.deadline = "Pick when the task is due.";
+  if (!(Number(form.originalEstimate) >= 1)) errors.estimate = "Add how long the whole task will take.";
+  return errors;
+}
+
+/** Reads a number field, treating a cleared box as zero. */
+function wholeNumber(value: string): number {
+  const parsed = Math.floor(Number(value));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
 export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDialogProps) {
-  const [form, setForm] = useState(EMPTY);
+  const timeZone = useAccountTimezone();
+  const [form, setForm] = useState(() => emptyForm(timeZone));
+  const [initialForm, setInitialForm] = useState(form);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [discardOpen, setDiscardOpen] = useState(false);
   /**
    * SPEC §15.4 / §15.6: the student's own history may suggest a very different
    * duration. The explanation is always shown; the acknowledgment dialog only
    * blocks the first time a category swings beyond 2× or below 0.5×.
    */
-  const [estimate, setEstimate] = useState<AdaptiveEstimate | null>(null);
-  const [useAdaptive, setUseAdaptive] = useState(false);
+  /** Whether the current category/original pair may adopt a preview default. */
+  const [applyPreviewDefault, setApplyPreviewDefault] = useState(true);
   const [ackOpen, setAckOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   const isEditing = Boolean(task);
-  // The backend freezes the original estimate once work has started, so the
-  // field is locked rather than letting the save fail with a 409.
-  const estimateFrozen = isEditing && task?.status !== "Not Started";
+  const estimateFrozen = task?.estimateFrozen === true;
 
   // Reset the fields whenever the dialog opens, or the task being edited
   // changes while it is open. Adjusting during render rather than in an effect
@@ -75,62 +114,116 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
   if (open && (session.open !== open || session.task !== task)) {
     setSession({ open, task });
     setError(null);
-    setForm(
-      task
+    setFieldErrors({});
+    setAckOpen(false);
+    setDiscardOpen(false);
+    setApplyPreviewDefault(!task);
+    const initial = task
         ? {
             title: task.title,
             category: task.category,
             priority: task.priority,
-            deadline: isoToLocalInput(task.deadline),
+            deadline: isoToLocalInput(task.deadline, timeZone),
             originalEstimate: task.originalEstimate,
+            plannedSource: task.plannedSource,
             course: task.course ?? "",
             notes: task.notes ?? "",
           }
-        : EMPTY,
-    );
+        : emptyForm(timeZone);
+    setForm(initial);
+    setInitialForm(initial);
   } else if (!open && session.open) {
     setSession({ open: false });
   }
 
-  useEffect(() => {
-    if (!open) return;
-    const controller = new AbortController();
-    const minutes = Number(form.originalEstimate);
+  const previewMinutes = Number(form.originalEstimate);
+  const previewKey =
+    open && !estimateFrozen && previewMinutes > 0
+      ? adaptiveEstimateKey(form.category, previewMinutes)
+      : null;
+  const previewFetcher = useCallback(() => {
+    return scheduling.getAdaptiveEstimate(form.category, previewMinutes);
+  }, [form.category, previewMinutes]);
+  const {
+    data: preview,
+    error: previewError,
+    mutate: mutatePreview,
+  } = useSWR<AdaptiveEstimate | null>(
+    previewKey,
+    previewFetcher,
+    {
+      dedupingInterval: 0,
+      revalidateOnFocus: false,
+      shouldRetryOnError: false,
+      onSuccess: (next) => {
+        if (!open || estimateFrozen) return;
+        // Existing tasks keep their explicit source. A fresh or deliberately
+        // changed category/original pair may adopt the safe preview default.
+        setForm((current) => ({
+          ...current,
+          ...resolvePreviewSelection(
+            current.originalEstimate,
+            next,
+            current.plannedSource,
+            applyPreviewDefault,
+          ),
+        }));
+        // Preview defaults are not student edits. Keep the new-task baseline
+        // in sync only when the preview describes its original inputs.
+        if (!task && applyPreviewDefault) {
+          setInitialForm((initial) =>
+            initial.category === form.category &&
+            initial.originalEstimate === previewMinutes
+              ? { ...initial, ...resolvePreviewSelection(initial.originalEstimate, next, initial.plannedSource, true) }
+              : initial,
+          );
+        }
+      },
+    },
+  );
+  const estimate = previewError ? null : preview ?? null;
+  const isDirty = (Object.keys(initialForm) as (keyof TaskFormState)[]).some(
+    (key) => form[key] !== initialForm[key],
+  );
 
-    // Resolved rather than branched, so no state is set synchronously here —
-    // doing that inside an effect body causes cascading renders.
-    const request =
-      minutes > 0
-        ? scheduling.getAdaptiveEstimate(form.category, minutes, controller.signal)
-        : Promise.resolve(null);
+  function requestClose() {
+    if (isSaving || ackOpen || discardOpen) return false;
+    if (isDirty) {
+      setDiscardOpen(true);
+      return false;
+    }
+    onOpenChange(false);
+    return true;
+  }
 
-    request
-      .then((next) => {
-        if (controller.signal.aborted) return;
-        setEstimate(next);
-        // Default to the suggestion once qualified, unless it still needs
-        // acknowledging — SPEC §15.1 makes it the default, not a silent swap.
-        setUseAdaptive(next !== null && !next.needsAcknowledgment);
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setEstimate(null);
-      });
+  function chooseEstimate(which: "original" | "adaptive") {
+    const action = resolveEstimateChoiceAction(form.originalEstimate, estimate, which);
+    if (action.type === "acknowledge") {
+      setAckOpen(true);
+      return;
+    }
 
-    return () => controller.abort();
-  }, [open, form.category, form.originalEstimate]);
-
-  /** The duration actually sent for scheduling (SPEC §15.1). */
-  function plannedMinutes(): number {
-    const original = Number(form.originalEstimate);
-    return estimate && useAdaptive ? estimate.adaptiveEstimate : original;
+    setApplyPreviewDefault(false);
+    setForm((current) => ({ ...current, ...action.selection }));
   }
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+    const problems = validate(form);
+    setFieldErrors(problems);
+    if (Object.keys(problems).length > 0) return;
 
     // Ask before using a first-time large adjustment (SPEC §15.4).
-    if (estimate?.needsAcknowledgment) {
+    const adaptivePreviewMatchesForm =
+      estimate?.category === form.category &&
+      estimate.originalEstimate === Number(form.originalEstimate);
+    if (!estimateFrozen && form.plannedSource === "Adaptive" && !adaptivePreviewMatchesForm) {
+      setError("Adaptive planning is still being checked. Try again in a moment.");
+      return;
+    }
+
+    if (!estimateFrozen && form.plannedSource === "Adaptive" && estimate?.needsAcknowledgment) {
       setAckOpen(true);
       return;
     }
@@ -141,8 +234,11 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
       title: form.title,
       category: form.category,
       priority: form.priority,
-      deadline: localInputToIso(form.deadline),
-      originalEstimate: plannedMinutes(),
+      deadline: localInputToIso(form.deadline, timeZone),
+      // The selected source tells the backend whether its adaptive snapshot
+      // should drive planning. Original remains the student's entered value.
+      originalEstimate: Number(form.originalEstimate),
+      plannedSource: form.plannedSource,
       course: form.course || undefined,
       notes: form.notes || undefined,
     };
@@ -154,8 +250,14 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
       onSaved(saved);
       onOpenChange(false);
     } catch (cause) {
-      if (cause instanceof ApiError && cause.status === 409) {
-        setError("This task has already been started, so its estimate can no longer change.");
+      if (cause instanceof ApiError && cause.status === 409 && cause.code === "adaptive_estimate_conflict") {
+        setError(cause.detail);
+        setAckOpen(false);
+        setApplyPreviewDefault(false);
+        setForm((current) => ({ ...current, plannedSource: "Original" }));
+        void mutatePreview(undefined, { revalidate: true });
+      } else if (cause instanceof ApiError && cause.status === 409) {
+        setError(cause.detail);
       } else {
         setError(describeError(cause));
       }
@@ -165,16 +267,23 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen, details) => {
+        if (nextOpen) onOpenChange(true);
+        else if (!requestClose()) details?.cancel?.();
+      }}
+    >
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-x-hidden overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit task" : "Add task"}</DialogTitle>
           <DialogDescription>
-            Deadlines are stored as absolute moments, interpreted in your timezone.
+            Tell StudyFlow what is due and roughly how long it takes, and it will find study time for it. Times
+            use your time zone ({timeZone}).
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} noValidate className="min-w-0 space-y-4">
           {error && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
@@ -191,17 +300,24 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
               maxLength={200}
               disabled={isSaving}
               required
+              aria-invalid={fieldErrors.title ? true : undefined}
+              aria-describedby={fieldErrors.title ? "task-title-error" : undefined}
             />
+            <FieldError id="task-title-error" message={fieldErrors.title} />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Category</Label>
+              <Label htmlFor="task-category" className="text-xs font-medium">Category</Label>
               <Select
                 value={form.category}
-                onValueChange={(v) => v && setForm({ ...form, category: v as Category })}
+                onValueChange={(v) => {
+                  if (!v) return;
+                  setApplyPreviewDefault(true);
+                  setForm({ ...form, category: v as Category, plannedSource: estimateFrozen ? form.plannedSource : "Original" });
+                }}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger id="task-category" aria-label="Category" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -213,12 +329,12 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Priority</Label>
+              <Label htmlFor="task-priority" className="text-xs font-medium">Priority</Label>
               <Select
                 value={form.priority}
                 onValueChange={(v) => v && setForm({ ...form, priority: v as Priority })}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger id="task-priority" aria-label="Priority" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -237,34 +353,73 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
                 id="task-deadline"
                 type="datetime-local"
                 value={form.deadline}
-                min={nowLocalInput()}
+                min={nowLocalInput(timeZone)}
                 onChange={(e) => setForm({ ...form, deadline: e.target.value })}
                 disabled={isSaving}
                 required
+                aria-invalid={fieldErrors.deadline ? true : undefined}
+                aria-describedby={fieldErrors.deadline ? "task-deadline-error" : undefined}
               />
+              <FieldError id="task-deadline-error" message={fieldErrors.deadline} />
             </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="task-estimate" className="text-xs font-medium">
-                Estimate (minutes)
-              </Label>
-              <Input
-                id="task-estimate"
-                type="number"
-                min={1}
-                value={form.originalEstimate}
-                onChange={(e) =>
-                  setForm({ ...form, originalEstimate: Number(e.target.value) })
-                }
-                disabled={isSaving || estimateFrozen}
-                required
-              />
-              {estimateFrozen && (
+            <fieldset className="min-w-0 space-y-1.5">
+              <legend className="mb-1.5 text-xs font-medium">How long it takes</legend>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="task-estimate-hours"
+                  aria-label="Estimate hours"
+                  type="number"
+                  inputMode="numeric"
+                  disabled={isSaving || estimateFrozen}
+                  min={0}
+                  value={Math.floor(form.originalEstimate / 60)}
+                  onChange={(e) => {
+                    setApplyPreviewDefault(true);
+                    setForm({
+                      ...form,
+                      originalEstimate: wholeNumber(e.target.value) * 60 + (form.originalEstimate % 60),
+                      plannedSource: "Original",
+                    });
+                  }}
+                  aria-invalid={fieldErrors.estimate ? true : undefined}
+                  aria-describedby={fieldErrors.estimate ? "task-estimate-error" : undefined}
+                />
+                <span aria-hidden className="text-xs text-muted-foreground">h</span>
+                <Input
+                  id="task-estimate"
+                  aria-label="Estimate minutes"
+                  type="number"
+                  inputMode="numeric"
+                  disabled={isSaving || estimateFrozen}
+                  min={0}
+                  max={59}
+                  step={5}
+                  value={form.originalEstimate % 60}
+                  onChange={(e) => {
+                    setApplyPreviewDefault(true);
+                    setForm({
+                      ...form,
+                      originalEstimate: Math.floor(form.originalEstimate / 60) * 60 + wholeNumber(e.target.value),
+                      plannedSource: "Original",
+                    });
+                  }}
+                  aria-invalid={fieldErrors.estimate ? true : undefined}
+                  aria-describedby={fieldErrors.estimate ? "task-estimate-error" : undefined}
+                />
+                <span aria-hidden className="text-xs text-muted-foreground">m</span>
+              </div>
+              <FieldError id="task-estimate-error" message={fieldErrors.estimate} />
+              {estimateFrozen ? (
                 <p className="text-[11px] text-muted-foreground">
-                  Frozen — this task has already been started.
+                  Frozen — this task has already been scheduled or started.
+                </p>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  The whole task, not one sitting.
                 </p>
               )}
-            </div>
+            </fieldset>
           </div>
 
           <div className="space-y-1.5">
@@ -278,7 +433,7 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
             />
           </div>
 
-          <div className="space-y-1.5">
+          <div className="min-w-0 space-y-1.5">
             <Label htmlFor="task-notes" className="text-xs font-medium">Notes (optional)</Label>
             <Textarea
               id="task-notes"
@@ -290,14 +445,25 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
             />
           </div>
 
-          {estimate && (
+          {estimateFrozen && task?.adaptiveEstimate !== undefined && (
+            <PersistedEstimateNote
+              originalEstimate={task.originalEstimate}
+              adaptiveEstimate={task.adaptiveEstimate}
+              plannedDuration={task.plannedDuration}
+              plannedSource={task.plannedSource}
+            />
+          )}
+          {!estimateFrozen && estimate && (
             <AdaptiveEstimateNote
-              estimate={{ ...estimate, plannedDuration: plannedMinutes() }}
-              onChoose={
-                estimate.needsAcknowledgment
-                  ? undefined
-                  : (which) => setUseAdaptive(which === "adaptive")
-              }
+              estimate={{
+                ...estimate,
+                plannedDuration:
+                  form.plannedSource === "Adaptive"
+                    ? estimate.adaptiveEstimate
+                    : Number(form.originalEstimate),
+                plannedSource: form.plannedSource,
+              }}
+              onChoose={chooseEstimate}
             />
           )}
 
@@ -305,7 +471,7 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={requestClose}
               disabled={isSaving}
             >
               Cancel
@@ -318,15 +484,35 @@ export function TaskFormDialog({ open, onOpenChange, task, onSaved }: TaskFormDi
         </form>
       </DialogContent>
 
+      <ConfirmDialog
+        open={open && discardOpen}
+        onOpenChange={setDiscardOpen}
+        title="Discard changes?"
+        description="Your unsaved changes will be lost."
+        cancelLabel="Keep editing"
+        confirmLabel="Discard changes"
+        destructive
+        focusCancel
+        onConfirm={() => {
+          setDiscardOpen(false);
+          onOpenChange(false);
+        }}
+      />
+
       <LargeAdjustmentDialog
         estimate={estimate}
         open={ackOpen}
         onOpenChange={setAckOpen}
         onDecided={(which) => {
-          setUseAdaptive(which === "adaptive");
-          setEstimate((current) =>
-            current ? { ...current, needsAcknowledgment: false } : current,
+          setApplyPreviewDefault(false);
+          void mutatePreview(
+            (current) => (current ? { ...current, needsAcknowledgment: false } : current),
+            { revalidate: false },
           );
+          setForm((current) => ({
+            ...current,
+            ...resolveEstimateSelection(current.originalEstimate, estimate, which),
+          }));
         }}
       />
     </Dialog>

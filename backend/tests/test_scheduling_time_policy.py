@@ -339,7 +339,7 @@ def test_schedules_without_optional_local_day_metadata() -> None:
     assert [(session.start_minute, session.end_minute) for session in result.sessions] == [(0, 2)]
 
 
-def test_unproven_constructive_earliness_is_a_technical_failure(
+def test_unproven_constructive_earliness_uses_the_feasible_incumbent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     original_solve = cp_model.CpSolver.solve
@@ -369,13 +369,12 @@ def test_unproven_constructive_earliness_is_a_technical_failure(
         )
     )
 
-    assert result.status is KernelStatus.TECHNICAL_FAILURE
-    assert result.sessions == ()
-    assert result.allocations == ()
-    assert result.detail == "The earliness placement objective was not proven optimal"
+    assert result.status is KernelStatus.FEASIBLE
+    assert len(result.sessions) == 2
+    assert result.allocations != ()
 
 
-def test_unproven_global_spread_is_a_technical_failure(
+def test_unproven_global_spread_uses_the_feasible_incumbent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     original_solve = cp_model.CpSolver.solve
@@ -412,10 +411,9 @@ def test_unproven_global_spread_is_a_technical_failure(
         )
     )
 
-    assert result.status is KernelStatus.TECHNICAL_FAILURE
-    assert result.sessions == ()
-    assert result.allocations == ()
-    assert result.detail == "The spread placement objective was not proven optimal"
+    assert result.status is KernelStatus.FEASIBLE
+    assert len(result.sessions) == 6
+    assert result.allocations != ()
 
 
 @pytest.mark.parametrize(

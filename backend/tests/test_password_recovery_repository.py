@@ -1,11 +1,18 @@
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
 
+from studyflow.auth.oidc import GoogleClaims
 from studyflow.auth.registration import hash_verification_token
-from studyflow.auth.repositories import SqlAlchemyPasswordRecoveryRepository
+from studyflow.auth.repositories import (
+    SqlAlchemyLoginRepository,
+    SqlAlchemyOIDCRepository,
+    SqlAlchemyPasswordRecoveryRepository,
+)
 from studyflow.database import Base, Database
 from studyflow.database.models import (
     AuthenticationEmailToken,
@@ -33,7 +40,7 @@ async def test_password_reset_is_single_use_and_revokes_all_sessions() -> None:
                     name="Student Name",
                     password_hash="$argon2id$old-hash",
                     email_verified_at=now,
-                    timezone="UTC",
+                    timezone="Asia/Phnom_Penh",
                 )
             )
             session.add(
@@ -46,15 +53,24 @@ async def test_password_reset_is_single_use_and_revokes_all_sessions() -> None:
                 )
             )
         repository = SqlAlchemyPasswordRecoveryRepository(database)
-        assert await repository.create_reset_token(
-            "student@example.com", hash_verification_token(token), now + timedelta(hours=1)
+        assert (
+            await repository.create_reset_token(
+                "student@example.com", hash_verification_token(token), now + timedelta(hours=1)
+            )
+            == "Asia/Phnom_Penh"
         )
 
-        assert await repository.reset_password(
-            hash_verification_token(token), "$argon2id$new-hash", now
+        assert (
+            await repository.reset_password(
+                hash_verification_token(token), "$argon2id$new-hash", now
+            )
+            == "student@example.com"
         )
-        assert not await repository.reset_password(
-            hash_verification_token(token), "$argon2id$reused-hash", now
+        assert (
+            await repository.reset_password(
+                hash_verification_token(token), "$argon2id$reused-hash", now
+            )
+            is None
         )
 
         async with database.transaction() as session:
@@ -89,12 +105,59 @@ async def test_password_reset_request_ignores_ineligible_accounts() -> None:
             )
         repository = SqlAlchemyPasswordRecoveryRepository(database)
 
-        assert not await repository.create_reset_token(
-            "student@example.com", "a" * 64, now + timedelta(hours=1)
+        assert (
+            await repository.create_reset_token(
+                "student@example.com", "a" * 64, now + timedelta(hours=1)
+            )
+            is None
         )
-        assert not await repository.create_reset_token(
-            "missing@example.com", "b" * 64, now + timedelta(hours=1)
+        assert (
+            await repository.create_reset_token(
+                "missing@example.com", "b" * 64, now + timedelta(hours=1)
+            )
+            is None
         )
+        async with database.transaction() as session:
+            assert list(await session.scalars(select(AuthenticationEmailToken))) == []
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_password_reset_can_set_password_for_google_only_account() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    now = datetime.now(UTC)
+    token = "google-only-password-setup-token"
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+        account = await SqlAlchemyOIDCRepository(database).resolve_identity(
+            GoogleClaims("google-subject", "student@example.com", "Google Student"), "UTC"
+        )
+        assert account is not None
+
+        repository = SqlAlchemyPasswordRecoveryRepository(database)
+        assert (
+            await repository.create_reset_token(
+                "student@example.com", hash_verification_token(token), now + timedelta(hours=1)
+            )
+            == "UTC"
+        )
+        assert (
+            await repository.reset_password(
+                hash_verification_token(token), "$argon2id$new-hash", now
+            )
+            == "student@example.com"
+        )
+
+        login_account = await SqlAlchemyLoginRepository(database).find_by_email(
+            "student@example.com"
+        )
+        assert login_account is not None
+        assert login_account.password_hash == "$argon2id$new-hash"
     finally:
         await database.stop()
 
@@ -121,16 +184,77 @@ async def test_password_reset_tokens_expire_and_replacement_invalidates_prior_to
                 )
             )
         repository = SqlAlchemyPasswordRecoveryRepository(database)
-        assert await repository.create_reset_token(
-            "student@example.com", first_token_hash, now + timedelta(hours=1)
+        assert (
+            await repository.create_reset_token(
+                "student@example.com", first_token_hash, now + timedelta(hours=1)
+            )
+            == "UTC"
         )
-        assert await repository.create_reset_token(
-            "student@example.com", replacement_token_hash, now + timedelta(hours=1)
+        assert (
+            await repository.create_reset_token(
+                "student@example.com", replacement_token_hash, now + timedelta(hours=1)
+            )
+            == "UTC"
         )
 
-        assert not await repository.reset_password(first_token_hash, "$argon2id$first-hash", now)
-        assert not await repository.reset_password(
-            replacement_token_hash, "$argon2id$expired-hash", now + timedelta(hours=1)
+        assert (
+            await repository.reset_password(first_token_hash, "$argon2id$first-hash", now) is None
+        )
+        assert (
+            await repository.reset_password(
+                replacement_token_hash, "$argon2id$expired-hash", now + timedelta(hours=1)
+            )
+            is None
         )
     finally:
         await database.stop()
+
+
+@pytest.mark.anyio
+async def test_password_reset_orphaned_token_returns_none() -> None:
+    database = Database("sqlite+aiosqlite:///:memory:")
+    await database.start()
+    now = datetime.now(UTC)
+    missing_account_id = uuid4()
+    token_hash = hash_verification_token("orphaned-reset-token")
+    try:
+        async with database.transaction() as session:
+            await session.run_sync(
+                lambda sync_session: Base.metadata.create_all(sync_session.connection())
+            )
+            session.add(
+                AuthenticationEmailToken(
+                    account_id=missing_account_id,
+                    purpose="password_reset",
+                    token_hash=token_hash,
+                    expires_at=now + timedelta(hours=1),
+                )
+            )
+        repository = SqlAlchemyPasswordRecoveryRepository(database)
+        assert await repository.reset_password(token_hash, "$argon2id$new-hash", now) is None
+    finally:
+        await database.stop()
+
+
+@pytest.mark.anyio
+async def test_password_reset_returns_none_when_token_disappears_after_account_lock() -> None:
+    account_id = uuid4()
+    session = MagicMock()
+    session.scalar = AsyncMock(side_effect=[account_id, None])
+    session.get = AsyncMock(return_value=object())
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=session)
+    transaction.__aexit__ = AsyncMock(return_value=False)
+    database = MagicMock()
+    database.transaction.return_value = transaction
+
+    repository = SqlAlchemyPasswordRecoveryRepository(cast(Any, database))
+
+    assert (
+        await repository.reset_password(
+            "a" * 64,
+            "$argon2id$new-hash",
+            datetime(2026, 7, 28, 12, tzinfo=UTC),
+        )
+        is None
+    )

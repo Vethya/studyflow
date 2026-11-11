@@ -161,7 +161,9 @@ async def test_feasible_workflow_stays_inactive_until_acceptance_and_respects_co
 
         ordered = sorted(accepted, key=lambda item: item.starts_at)
         task_by_id = {first.id: first, second.id: second}
-        persisted_windows = [(item.weekday, item.start_time, item.end_time) for item in windows]
+        persisted_windows = [
+            (item.weekday, item.start_time, item.end_time) for item in windows.windows
+        ]
         for session in ordered:
             task = task_by_id[session.task_id]
             assert session.ends_at <= task.deadline_at

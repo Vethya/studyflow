@@ -1,10 +1,11 @@
 """Academic Task create/read application boundary."""
 
+import builtins
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 
@@ -23,6 +24,11 @@ class TaskPriority(StrEnum):
     HIGH = "high"
 
 
+class PlannedDurationSource(StrEnum):
+    ORIGINAL = "original"
+    ADAPTIVE = "adaptive"
+
+
 class InvalidTaskDeadlineError(ValueError):
     """Raised when a task deadline is not a future absolute instant."""
 
@@ -33,6 +39,10 @@ class EstimateFrozenError(ValueError):
 
 class TaskMustBeStartedError(ValueError):
     """Raised when an unstarted task is finished early."""
+
+
+class DuplicateExternalTaskError(ValueError):
+    """Raised when an imported task already exists for the same external item."""
 
 
 class TaskStatus(StrEnum):
@@ -51,6 +61,10 @@ class NewAcademicTask:
     notes: str | None
     deadline_at: datetime
     original_estimate_minutes: int
+    planned_source: PlannedDurationSource | None = None
+    # Identifies the Google Classroom item a task was imported from. Ignored on update.
+    external_source: str | None = None
+    external_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +75,9 @@ class TaskFilters:
     deadline_from: datetime | None = None
     deadline_to: datetime | None = None
     status: TaskStatus | None = None
+    query: str | None = None
+    limit: int | None = None
+    offset: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +95,9 @@ class AcademicTaskRecord:
     created_at: datetime
     updated_at: datetime
     status: TaskStatus = TaskStatus.NOT_STARTED
+    adaptive_estimate_minutes: int | None = None
+    planned_source: PlannedDurationSource = PlannedDurationSource.ORIGINAL
+    estimate_frozen: bool = False
 
 
 class AcademicTaskRepository(Protocol):
@@ -108,6 +128,43 @@ class AcademicTasks(Protocol):
     async def mark_started(self, account_id: UUID, task_id: UUID) -> bool: ...
 
 
+@dataclass(frozen=True, slots=True)
+class AcademicTaskPage:
+    items: list[AcademicTaskRecord]
+    total: int
+
+
+@runtime_checkable
+class AcademicTaskPages(Protocol):
+    async def list_page(
+        self, account_id: UUID, filters: TaskFilters | None = None
+    ) -> AcademicTaskPage: ...
+
+
+@runtime_checkable
+class AcademicTaskRepositorySnapshots(Protocol):
+    async def list_snapshot(
+        self, account_id: UUID, filters: TaskFilters | None = None
+    ) -> builtins.list[AcademicTaskRecord]: ...
+
+
+@runtime_checkable
+class AcademicTaskSnapshots(Protocol):
+    async def list_snapshot(
+        self, account_id: UUID, filters: TaskFilters | None = None
+    ) -> list[AcademicTaskRecord]: ...
+
+
+async def list_task_snapshot(
+    tasks: AcademicTasks,
+    account_id: UUID,
+    filters: TaskFilters | None = None,
+) -> list[AcademicTaskRecord]:
+    if isinstance(tasks, AcademicTaskSnapshots):
+        return await tasks.list_snapshot(account_id, filters)
+    return await tasks.list(account_id, filters)
+
+
 class AcademicTaskService:
     def __init__(
         self,
@@ -128,6 +185,32 @@ class AcademicTaskService:
         self, account_id: UUID, filters: TaskFilters | None = None
     ) -> list[AcademicTaskRecord]:
         return await self._repository.list(account_id, filters or TaskFilters())
+
+    async def list_page(
+        self, account_id: UUID, filters: TaskFilters | None = None
+    ) -> AcademicTaskPage:
+        resolved_filters = filters or TaskFilters()
+        if isinstance(self._repository, AcademicTaskPages):
+            return await self._repository.list_page(account_id, resolved_filters)
+        everything = await self._repository.list(
+            account_id, replace(resolved_filters, limit=None, offset=0)
+        )
+        end = (
+            None
+            if resolved_filters.limit is None
+            else resolved_filters.offset + resolved_filters.limit
+        )
+        return AcademicTaskPage(
+            items=everything[resolved_filters.offset : end], total=len(everything)
+        )
+
+    async def list_snapshot(
+        self, account_id: UUID, filters: TaskFilters | None = None
+    ) -> builtins.list[AcademicTaskRecord]:
+        resolved_filters = filters or TaskFilters()
+        if isinstance(self._repository, AcademicTaskRepositorySnapshots):
+            return await self._repository.list_snapshot(account_id, resolved_filters)
+        return await self._repository.list(account_id, resolved_filters)
 
     async def get(self, account_id: UUID, task_id: UUID) -> AcademicTaskRecord | None:
         return await self._repository.get(account_id, task_id)

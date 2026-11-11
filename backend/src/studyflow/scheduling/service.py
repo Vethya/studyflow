@@ -13,7 +13,13 @@ from studyflow.accounts.preferences import AccountPreferences, StudyPreferences
 from studyflow.availability.unavailable import UnavailablePeriod, UnavailablePeriods
 from studyflow.availability.windows import AvailabilityWindow, AvailabilityWindows
 from studyflow.scheduling.assembly import assemble_schedule_problem
-from studyflow.scheduling.contracts import FeasibilityProblem, KernelStatus, OverloadResult
+from studyflow.scheduling.contracts import (
+    FeasibilityProblem,
+    KernelStatus,
+    OverloadResult,
+    TaskAllocation,
+)
+from studyflow.scheduling.outcomes import StudySessions, read_task_schedule_adjustments
 from studyflow.scheduling.overload import solve_with_overload
 from studyflow.scheduling.proposals import (
     NewProposedSession,
@@ -27,7 +33,12 @@ from studyflow.scheduling.proposals import (
     TaskAllocationRecord,
 )
 from studyflow.scheduling.scenarios import ScenarioValidationError, ScheduleScenario
-from studyflow.tasks.service import AcademicTaskRecord, AcademicTasks
+from studyflow.tasks.service import (
+    AcademicTaskRecord,
+    AcademicTasks,
+    TaskStatus,
+    list_task_snapshot,
+)
 
 _UTC_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
@@ -111,6 +122,29 @@ def _minute_datetime(value: int) -> datetime:
     return _UTC_EPOCH + timedelta(minutes=value)
 
 
+async def tasks_for_schedule(
+    account_id: UUID,
+    tasks: Sequence[AcademicTaskRecord],
+    study_sessions: StudySessions,
+    *,
+    read_only: bool = False,
+) -> tuple[AcademicTaskRecord, ...]:
+    """Adjust task demand using work already represented by recorded outcomes."""
+    adjustments = await read_task_schedule_adjustments(
+        study_sessions,
+        account_id,
+        read_only=read_only,
+    )
+    return tuple(
+        replace(task, planned_duration_minutes=remaining_minutes)
+        for task in tasks
+        if (remaining_minutes := task.planned_duration_minutes - adjustments.get(task.id, 0)) > 0
+    )
+
+
+DEFAULT_PLANNING_LEAD_TIME = timedelta(minutes=15)
+
+
 class ScheduleGenerationService:
     def __init__(
         self,
@@ -120,16 +154,20 @@ class ScheduleGenerationService:
         preferences: AccountPreferences,
         proposals: ScheduleProposalRepository,
         *,
+        study_sessions: StudySessions | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         solver: Callable[[FeasibilityProblem], OverloadResult] = solve_with_overload,
+        planning_lead_time: timedelta = DEFAULT_PLANNING_LEAD_TIME,
     ) -> None:
         self._tasks = tasks
         self._availability_windows = availability_windows
         self._unavailable_periods = unavailable_periods
         self._preferences = preferences
         self._proposals = proposals
+        self._study_sessions = study_sessions
         self._clock = clock
         self._solver = solver
+        self._planning_lead_time = planning_lead_time
 
     async def generate(
         self,
@@ -164,14 +202,26 @@ class ScheduleGenerationService:
         preferences = await self._preferences.get(account_id)
         if preferences is None:
             return None
-        tasks, windows, unavailable = await asyncio.gather(
-            self._tasks.list(account_id),
+        task_records = (
+            self._tasks.list(account_id) if persist else list_task_snapshot(self._tasks, account_id)
+        )
+        raw_tasks, windows, unavailable = await asyncio.gather(
+            task_records,
             self._availability_windows.list_windows(account_id),
             self._unavailable_periods.list_periods(account_id),
         )
+        tasks: Sequence[AcademicTaskRecord] = raw_tasks
+        if self._study_sessions is not None:
+            tasks = await tasks_for_schedule(
+                account_id,
+                tasks,
+                self._study_sessions,
+                read_only=not persist,
+            )
         normalized_scenario = (scenario or ScheduleScenario()).normalized()
-        planning_start = self._clock()
-        effective_tasks = self._apply_deadline_overrides(tasks, normalized_scenario, planning_start)
+        now = self._clock()
+        planning_start = now + self._planning_lead_time
+        effective_tasks = self._apply_deadline_overrides(tasks, normalized_scenario, now)
         fingerprint = schedule_input_fingerprint(
             tasks,
             windows,
@@ -189,6 +239,11 @@ class ScheduleGenerationService:
             temporary_blocked_periods=normalized_scenario.temporary_blocked_periods,
         )
         result = await asyncio.to_thread(self._solver, problem)
+        result = self._include_overdue_work(
+            result,
+            effective_tasks,
+            planning_start,
+        )
         draft = self._proposal_draft(
             result,
             effective_tasks,
@@ -199,13 +254,48 @@ class ScheduleGenerationService:
         )
         if persist:
             return await self._proposals.replace(account_id, draft)
-        return self._preview_record(account_id, draft, self._clock())
+        return self._preview_record(account_id, draft, now)
+
+    @staticmethod
+    def _include_overdue_work(
+        result: OverloadResult,
+        tasks: Sequence[AcademicTaskRecord],
+        planning_start: datetime,
+    ) -> OverloadResult:
+        overdue = tuple(
+            task
+            for task in tasks
+            if task.status is not TaskStatus.COMPLETED
+            and task.deadline_at <= planning_start.astimezone(UTC)
+        )
+        if not overdue or result.status not in (KernelStatus.FEASIBLE, KernelStatus.OVERLOAD):
+            return result
+        overdue_allocations = tuple(
+            TaskAllocation(
+                task_id=str(task.id),
+                deadline_minute=0,
+                required_minutes=task.planned_duration_minutes,
+                scheduled_minutes=0,
+                unscheduled_minutes=task.planned_duration_minutes,
+                raw_calendar_capacity_minutes=0,
+                available_minutes_before_deadline=0,
+                shortfall_minutes=task.planned_duration_minutes,
+            )
+            for task in overdue
+        )
+        return OverloadResult(
+            KernelStatus.OVERLOAD,
+            result.sessions,
+            (*result.allocations, *overdue_allocations),
+            result.diagnostics,
+            result.detail,
+        )
 
     @staticmethod
     def _apply_deadline_overrides(
         tasks: Sequence[AcademicTaskRecord],
         scenario: ScheduleScenario,
-        planning_start: datetime,
+        now: datetime,
     ) -> tuple[AcademicTaskRecord, ...]:
         task_by_id = {task.id: task for task in tasks}
         overrides = {item.task_id: item.deadline_at for item in scenario.deadline_overrides}
@@ -213,7 +303,7 @@ class ScheduleGenerationService:
         if unknown:
             raise ScenarioValidationError(f"Scenario contains unknown task id {unknown[0]}")
         for task_id, deadline_at in overrides.items():
-            if deadline_at <= planning_start.astimezone(UTC):
+            if deadline_at <= now.astimezone(UTC):
                 raise ScenarioValidationError(
                     f"Deadline override for task {task_id} must be in the future"
                 )

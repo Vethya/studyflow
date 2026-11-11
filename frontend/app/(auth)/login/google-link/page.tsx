@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertCircle, ArrowLeft, Loader2, Link2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, Loader2, Link2 } from "@/components/icons";
 import { ApiError, auth } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
 import { useSession } from "@/hooks/use-session";
@@ -25,6 +25,28 @@ export default function GoogleLinkPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCheckingChallenge, setIsCheckingChallenge] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    auth
+      .checkGoogleLinkChallenge()
+      .then(() => {
+        if (active) setIsCheckingChallenge(false);
+      })
+      .catch((cause) => {
+        if (!active) return;
+        if (cause instanceof ApiError && cause.isUnauthenticated) {
+          router.replace("/login");
+          return;
+        }
+        setError(describeError(cause));
+        setIsCheckingChallenge(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [router]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -75,9 +97,8 @@ export default function GoogleLinkPage() {
           <Label htmlFor="password" className="text-xs font-medium">
             Your StudyFlow password
           </Label>
-          <Input
+          <PasswordInput
             id="password"
-            type="password"
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -87,8 +108,12 @@ export default function GoogleLinkPage() {
           />
         </div>
 
-        <Button type="submit" className="w-full font-medium" disabled={isSubmitting}>
-          {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+        <Button
+          type="submit"
+          className="w-full font-medium"
+          disabled={isSubmitting || isCheckingChallenge}
+        >
+          {(isSubmitting || isCheckingChallenge) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Connect and sign in
         </Button>
       </form>

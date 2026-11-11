@@ -31,6 +31,7 @@ from studyflow.scheduling.proposals import (
     StudySessionRecord,
 )
 from studyflow.scheduling.service import (
+    DEFAULT_PLANNING_LEAD_TIME,
     ScheduleGenerationFailedError,
     ScheduleGenerationService,
     _utc_text,
@@ -38,7 +39,9 @@ from studyflow.scheduling.service import (
 )
 from studyflow.tasks.service import AcademicTaskRecord, AcademicTasks, TaskStatus
 
-MISSED_REVISION_REASON = "Missed study session"
+RECOVERY_REVISION_REASON = "Study session recovery"
+# Kept as a compatibility alias for callers that imported the old constant.
+MISSED_REVISION_REASON = RECOVERY_REVISION_REASON
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +163,7 @@ class ScheduleRecoveryService:
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         solver: Callable[..., OverloadResult] = solve_with_overload,
+        planning_lead_time: timedelta = DEFAULT_PLANNING_LEAD_TIME,
     ) -> None:
         self._tasks = tasks
         self._availability_windows = availability_windows
@@ -169,6 +173,7 @@ class ScheduleRecoveryService:
         self._proposals = proposals
         self._clock = clock
         self._solver = solver
+        self._planning_lead_time = planning_lead_time
 
     async def propose(
         self, account_id: UUID, missed_session_id: UUID
@@ -196,11 +201,12 @@ class ScheduleRecoveryService:
             for task in tasks
             if task.id in work
         )
-        current = tuple(task for task in recovery_tasks if task.deadline_at > now)
+        planning_start = now + self._planning_lead_time
+        current = tuple(task for task in recovery_tasks if task.deadline_at > planning_start)
         overdue = tuple(
             task
             for task in recovery_tasks
-            if task.status is not TaskStatus.COMPLETED and task.deadline_at <= now
+            if task.status is not TaskStatus.COMPLETED and task.deadline_at <= planning_start
         )
         preserved_work = tuple(
             UnavailablePeriodDraft(
@@ -215,7 +221,7 @@ class ScheduleRecoveryService:
             windows,
             (*unavailable, *preserved_work),
             preferences,
-            planning_start=now,
+            planning_start=planning_start,
         )
         result = await asyncio.to_thread(self._solver, problem)
         result = self._include_overdue(result, overdue)
@@ -224,7 +230,7 @@ class ScheduleRecoveryService:
             result,
             recovery_tasks,
             kind=ProposalKind.REVISION,
-            revision_reason=MISSED_REVISION_REASON,
+            revision_reason=RECOVERY_REVISION_REASON,
             fingerprint=fingerprint,
         )
         proposal = await self._proposals.replace(account_id, draft)

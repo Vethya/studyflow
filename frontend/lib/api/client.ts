@@ -8,6 +8,11 @@
  * each caller.
  */
 
+import {
+  notifyStudyFlowDataChanged,
+  notifyStudyFlowSessionInvalidated,
+} from "@/lib/data-events";
+
 export const API_BASE = "/api/v1";
 
 /** Dev cookie names; production adds the `__Host-` prefix. */
@@ -19,13 +24,24 @@ export class ApiError extends Error {
   readonly status: number;
   readonly detail: string;
   readonly retryAfterSeconds: number | null;
+  readonly code: string | null;
+  /** Validation messages keyed by request field name, from a 422 `loc`. */
+  readonly fieldErrors: Record<string, string>;
 
-  constructor(status: number, detail: string, retryAfterSeconds: number | null = null) {
+  constructor(
+    status: number,
+    detail: string,
+    retryAfterSeconds: number | null = null,
+    code: string | null = null,
+    fieldErrors: Record<string, string> = {},
+  ) {
     super(detail);
     this.name = "ApiError";
     this.status = status;
     this.detail = detail;
     this.retryAfterSeconds = retryAfterSeconds;
+    this.code = code;
+    this.fieldErrors = fieldErrors;
   }
 
   /** No session, or the session expired. Callers usually redirect to /login. */
@@ -74,29 +90,52 @@ export function buildQuery(params: Record<string, QueryValue>): string {
   return encoded ? `?${encoded}` : "";
 }
 
+export const UNREADABLE_REPLY_MESSAGE =
+  "StudyFlow got a reply it couldn't read. Please try again in a moment.";
+export const OFFLINE_MESSAGE = "Can't reach StudyFlow. Check your connection and try again.";
+
+/** Plain wording for an error whose body carries no message we can show. */
+function fallbackMessage(status: number): string {
+  if (status >= 500) return "StudyFlow's server had a problem. Please try again in a moment.";
+  return `Something went wrong (error ${status}). Please try again.`;
+}
+
 /**
  * FastAPI returns `{ detail: string }` for handled errors and
  * `{ detail: [{ loc, msg, ... }] }` for Pydantic validation failures.
  */
-async function extractDetail(response: Response): Promise<string> {
+async function extractDetail(
+  response: Response,
+): Promise<{ message: string; code?: string; fieldErrors?: Record<string, string> }> {
   let body: unknown;
   try {
     body = await response.json();
   } catch {
-    return response.statusText || `Request failed with status ${response.status}`;
+    return { message: fallbackMessage(response.status) };
   }
 
   const detail = (body as { detail?: unknown })?.detail;
-  if (typeof detail === "string") return detail;
-
-  if (Array.isArray(detail)) {
-    const messages = detail
-      .map((item) => (item as { msg?: unknown })?.msg)
-      .filter((msg): msg is string => typeof msg === "string");
-    if (messages.length > 0) return messages.join(". ");
+  if (typeof detail === "string") return { message: detail };
+  if (detail && typeof detail === "object" && "message" in detail && typeof detail.message === "string") {
+    return { message: detail.message, code: "code" in detail && typeof detail.code === "string" ? detail.code : undefined };
   }
 
-  return response.statusText || `Request failed with status ${response.status}`;
+  if (Array.isArray(detail)) {
+    const messages: string[] = [];
+    const fieldErrors: Record<string, string> = {};
+    for (const item of detail as { loc?: unknown; msg?: unknown }[]) {
+      if (typeof item?.msg !== "string") continue;
+      messages.push(item.msg);
+      // `loc` is e.g. ["body", "password"]; the last string names the field.
+      const field = Array.isArray(item.loc)
+        ? [...item.loc].reverse().find((part): part is string => typeof part === "string")
+        : undefined;
+      if (field && field !== "body" && !(field in fieldErrors)) fieldErrors[field] = item.msg;
+    }
+    if (messages.length > 0) return { message: messages.join(". "), fieldErrors };
+  }
+
+  return { message: fallbackMessage(response.status) };
 }
 
 interface RequestOptions {
@@ -105,6 +144,15 @@ interface RequestOptions {
   /** Set false for endpoints that must not carry the CSRF header (login, register). */
   csrf?: boolean;
   signal?: AbortSignal;
+  /** Set false for POST endpoints that only calculate a non-persisted result. */
+  notifyDataChanged?: boolean;
+}
+
+let keepalive = false;
+
+/** While on, requests are sent with `keepalive` so they finish after the page unloads. */
+export function setRequestKeepalive(on: boolean): void {
+  keepalive = on;
 }
 
 async function request(path: string, options: RequestOptions = {}): Promise<Response> {
@@ -121,32 +169,73 @@ async function request(path: string, options: RequestOptions = {}): Promise<Resp
     if (token) headers["X-CSRF-Token"] = token;
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers,
-    // Required: the session and CSRF cookies ride along on every call.
-    credentials: "include",
-    cache: "no-store",
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    signal: options.signal,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers,
+      // Required: the session and CSRF cookies ride along on every call.
+      credentials: "include",
+      cache: "no-store",
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      signal: options.signal,
+      ...(keepalive ? { keepalive: true } : {}),
+    });
+  } catch (cause) {
+    // Callers rely on aborts staying aborts; only a failed connection is reworded.
+    if (cause instanceof TypeError) throw new ApiError(0, OFFLINE_MESSAGE);
+    throw cause;
+  }
 
   if (!response.ok) {
+    // Authentication endpoints have their own error state. Only protected
+    // application requests should expire the mounted app session.
+    if (response.status === 401 && !path.startsWith("/auth/")) {
+      notifyStudyFlowSessionInvalidated();
+    }
     const retryAfter = response.headers.get("Retry-After");
+    const detail = await extractDetail(response);
     throw new ApiError(
       response.status,
-      await extractDetail(response),
+      detail.message,
       retryAfter ? Number(retryAfter) : null,
+      detail.code,
+      detail.fieldErrors,
     );
+  }
+
+  if (
+    MUTATING_METHODS.has(method) &&
+    !path.startsWith("/auth/") &&
+    options.notifyDataChanged !== false
+  ) {
+    notifyStudyFlowDataChanged(path, method);
   }
 
   return response;
 }
 
+async function readJson<T>(response: Response): Promise<T> {
+  try {
+    return (await response.json()) as T;
+  } catch (cause) {
+    if (cause instanceof SyntaxError) throw new ApiError(response.status, UNREADABLE_REPLY_MESSAGE);
+    throw cause;
+  }
+}
+
 /** Perform a request whose response body is JSON. */
 export async function apiJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  return readJson<T>(await request(path, options));
+}
+
+/** Like `apiJson`, but also hands back the response headers. */
+export async function apiJsonWithHeaders<T>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<{ data: T; headers: Headers }> {
   const response = await request(path, options);
-  return (await response.json()) as T;
+  return { data: await readJson<T>(response), headers: response.headers };
 }
 
 /** Perform a request that returns 204 No Content. */

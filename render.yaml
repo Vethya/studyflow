@@ -1,115 +1,117 @@
-services:
-  - type: web
-    name: studyflow-api
-    branch: master
-    runtime: docker
-    plan: free
-    region: singapore
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
-    healthCheckPath: /api/v1/ready
-    envVars:
-      - key: STUDYFLOW_ENVIRONMENT
-        value: production
-      - key: FORWARDED_ALLOW_IPS
-        value: 0.0.0.0/0
-      - key: STUDYFLOW_DATABASE_URL
-        sync: false
-      - key: STUDYFLOW_PUBLIC_APP_URL
-        value: https://studyflow.vercel.app
-      - key: STUDYFLOW_CORS_ORIGINS
-        sync: false
-      - key: STUDYFLOW_SMTP_HOST
-        value: smtp.resend.com
-      - key: STUDYFLOW_SMTP_PORT
-        value: "587"
-      - key: STUDYFLOW_SMTP_USERNAME
-        value: resend
-      - key: STUDYFLOW_SMTP_PASSWORD
-        sync: false
-      - key: STUDYFLOW_SMTP_START_TLS
-        value: "true"
-      - key: STUDYFLOW_EMAIL_FROM_ADDRESS
-        sync: false
-      - key: STUDYFLOW_GOOGLE_OIDC_CLIENT_ID
-        sync: false
-      - key: STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET
-        sync: false
-      - key: STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI
-        sync: false
-  - type: web
-    name: studyflow-api-staging
-    branch: staging
-    runtime: docker
-    plan: free
-    region: singapore
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
-    healthCheckPath: /api/v1/ready
-    envVars:
-      - key: STUDYFLOW_ENVIRONMENT
-        value: production
-      - key: FORWARDED_ALLOW_IPS
-        value: 0.0.0.0/0
-      - key: STUDYFLOW_DATABASE_URL
-        sync: false
-      - key: STUDYFLOW_PUBLIC_APP_URL
-        value: https://studyflow.vercel.app
-      - key: STUDYFLOW_CORS_ORIGINS
-        sync: false
-      - key: STUDYFLOW_SMTP_HOST
-        value: smtp.resend.com
-      - key: STUDYFLOW_SMTP_PORT
-        value: "587"
-      - key: STUDYFLOW_SMTP_USERNAME
-        value: resend
-      - key: STUDYFLOW_SMTP_PASSWORD
-        sync: false
-      - key: STUDYFLOW_SMTP_START_TLS
-        value: "true"
-      - key: STUDYFLOW_EMAIL_FROM_ADDRESS
-        sync: false
-      - key: STUDYFLOW_GOOGLE_OIDC_CLIENT_ID
-        sync: false
-      - key: STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET
-        sync: false
-      - key: STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI
-        sync: false
-  - type: web
-    name: studyflow-api-dev
-    branch: dev
-    runtime: docker
-    plan: free
-    region: singapore
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
-    healthCheckPath: /api/v1/ready
-    envVars:
-      - key: STUDYFLOW_ENVIRONMENT
-        value: production
-      - key: FORWARDED_ALLOW_IPS
-        value: 0.0.0.0/0
-      - key: STUDYFLOW_DATABASE_URL
-        sync: false
-      - key: STUDYFLOW_PUBLIC_APP_URL
-        value: https://studyflow.vercel.app
-      - key: STUDYFLOW_CORS_ORIGINS
-        value: https://studyflow.vercel.app
-      - key: STUDYFLOW_SMTP_HOST
-        value: smtp.resend.com
-      - key: STUDYFLOW_SMTP_PORT
-        value: "587"
-      - key: STUDYFLOW_SMTP_USERNAME
-        value: resend
-      - key: STUDYFLOW_SMTP_PASSWORD
-        sync: false
-      - key: STUDYFLOW_SMTP_START_TLS
-        value: "true"
-      - key: STUDYFLOW_EMAIL_FROM_ADDRESS
-        sync: false
-      - key: STUDYFLOW_GOOGLE_OIDC_CLIENT_ID
-        sync: false
-      - key: STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET
-        sync: false
-      - key: STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI
-        sync: false
+projects:
+  - name: StudyFlow
+    environments:
+      - name: dev
+        services:
+          - type: web
+            name: studyflow-api-dev
+            branch: dev
+            runtime: docker
+            plan: free
+            region: singapore
+            dockerfilePath: ./backend/Dockerfile
+            dockerContext: ./backend
+            healthCheckPath: /api/v1/health
+            envVars:
+              - key: STUDYFLOW_ENVIRONMENT
+                value: production
+              - key: STUDYFLOW_TRUSTED_PROXY_HOPS
+                value: "3"
+              # Neon is far from Render, so a cold connection takes over the 2 s default
+              # and /api/v1/ready would never recover (the attempt is cancelled each time).
+              - key: STUDYFLOW_DATABASE_READINESS_TIMEOUT_SECONDS
+                value: "8"
+              - key: STUDYFLOW_FRONTEND_PROXY_SECRET
+                sync: false
+              - key: STUDYFLOW_DATABASE_URL
+                sync: false
+              # Dev gets its own frontend origin (see docs/deployment.md, "Separate dev and
+              # production frontends"); enter it in the Render Dashboard.
+              - key: STUDYFLOW_PUBLIC_APP_URL
+                sync: false
+              - key: STUDYFLOW_CORS_ORIGINS
+                sync: false
+              - key: STUDYFLOW_SMTP_HOST
+                value: smtp.resend.com
+              - key: STUDYFLOW_SMTP_PORT
+                value: "2587"
+              - key: STUDYFLOW_SMTP_USERNAME
+                value: resend
+              - key: STUDYFLOW_SMTP_PASSWORD
+                sync: false
+              - key: STUDYFLOW_SMTP_START_TLS
+                value: "true"
+              - key: STUDYFLOW_EMAIL_FROM_ADDRESS
+                sync: false
+              - key: STUDYFLOW_GOOGLE_OIDC_CLIENT_ID
+                sync: false
+              - key: STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET
+                sync: false
+              - key: STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI
+                sync: false
+              - key: STUDYFLOW_GOOGLE_IMPORT_REDIRECT_URI
+                sync: false
+              - key: STUDYFLOW_REMINDER_DISPATCH_TOKEN
+                sync: false
+              # Dev keeps applying migrations at start so every push to dev rehearses them.
+              - key: STUDYFLOW_MIGRATE_ON_START
+                value: "true"
+      - name: Production
+        services:
+          - type: web
+            name: studyflow-api
+            branch: master
+            runtime: docker
+            plan: free
+            region: singapore
+            dockerfilePath: ./backend/Dockerfile
+            dockerContext: ./backend
+            healthCheckPath: /api/v1/health
+            # Production deploys are started by hand after the release runbook
+            # (docs/release.md) has backed up and migrated the database. A Blueprint
+            # auto-sync still redeploys services whose render.yaml entry changed, so the
+            # Blueprint's Auto Sync must also be off (docs/release.md); the boot gate
+            # refuses to start on an unmigrated schema if a sync deploy slips through.
+            autoDeployTrigger: "off"
+            envVars:
+              - key: STUDYFLOW_ENVIRONMENT
+                value: production
+              - key: STUDYFLOW_TRUSTED_PROXY_HOPS
+                value: "3"
+              # Neon is far from Render, so a cold connection takes over the 2 s default
+              # and /api/v1/ready would never recover (the attempt is cancelled each time).
+              - key: STUDYFLOW_DATABASE_READINESS_TIMEOUT_SECONDS
+                value: "8"
+              - key: STUDYFLOW_FRONTEND_PROXY_SECRET
+                sync: false
+              - key: STUDYFLOW_DATABASE_URL
+                sync: false
+              - key: STUDYFLOW_PUBLIC_APP_URL
+                value: https://studyflow.vercel.app
+              - key: STUDYFLOW_CORS_ORIGINS
+                sync: false
+              - key: STUDYFLOW_SMTP_HOST
+                value: smtp.resend.com
+              - key: STUDYFLOW_SMTP_PORT
+                value: "2587"
+              - key: STUDYFLOW_SMTP_USERNAME
+                value: resend
+              - key: STUDYFLOW_SMTP_PASSWORD
+                sync: false
+              - key: STUDYFLOW_SMTP_START_TLS
+                value: "true"
+              - key: STUDYFLOW_EMAIL_FROM_ADDRESS
+                sync: false
+              - key: STUDYFLOW_GOOGLE_OIDC_CLIENT_ID
+                sync: false
+              - key: STUDYFLOW_GOOGLE_OIDC_CLIENT_SECRET
+                sync: false
+              - key: STUDYFLOW_GOOGLE_OIDC_REDIRECT_URI
+                sync: false
+              - key: STUDYFLOW_GOOGLE_IMPORT_REDIRECT_URI
+                sync: false
+              - key: STUDYFLOW_REMINDER_DISPATCH_TOKEN
+                sync: false
+              # A Blueprint sync resets any dashboard override of this value.
+              - key: STUDYFLOW_MIGRATE_ON_START
+                value: "false"

@@ -6,10 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertCircle, ArrowLeft, CheckCircle2, Loader2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, CheckCircle2, Loader2 } from "@/components/icons";
 import { ApiError, auth } from "@/lib/api";
 import { describeError } from "@/hooks/use-api";
 import { detectTimezone } from "@/lib/timezones";
+import { FieldError } from "@/components/ui/field-error";
+import { GuestOnly } from "@/components/auth/guest-only";
+import { rememberSignupEmail } from "@/lib/signup-email";
 
 const GoogleIcon = () => (
   <svg className="h-4 w-4" viewBox="0 0 48 48" aria-hidden="true">
@@ -29,19 +32,35 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+    const trimmed = email.trim();
+    if (!trimmed) {
+      setEmailError("Enter your email address.");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setEmailError("Enter a valid email address, like name@university.edu.");
+      return;
+    }
+    setEmailError(null);
     setIsSubmitting(true);
     try {
       await auth.register(email);
+      rememberSignupEmail(trimmed);
       setSent(true);
     } catch (cause) {
       if (cause instanceof ApiError && cause.isRateLimited) {
         setError("Too many registration attempts. Please try again later.");
+      } else if (cause instanceof ApiError && cause.isValidation) {
+        // Duplicate emails are deliberately not revealed (SPEC §6.4), so the
+        // only field-level error here is an address the API cannot accept.
+        setEmailError(cause.fieldErrors.email ?? "Enter a valid email address.");
       } else {
         setError(describeError(cause));
       }
@@ -64,7 +83,8 @@ export default function RegisterPage() {
 
   if (sent) {
     return (
-      <div className="space-y-6">
+      <GuestOnly>
+        <div className="space-y-6">
         <div className="flex flex-col items-center text-center space-y-4 py-6">
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-surplus-soft">
             <CheckCircle2 className="h-7 w-7 text-surplus" />
@@ -89,14 +109,16 @@ export default function RegisterPage() {
           <ArrowLeft className="h-3.5 w-3.5" />
           Back to sign in
         </Link>
-      </div>
+        </div>
+      </GuestOnly>
     );
   }
 
   const isBusy = isSubmitting || isRedirecting;
 
   return (
-    <div className="space-y-6">
+    <GuestOnly>
+      <div className="space-y-6">
       <div className="space-y-1">
         <h1 className="text-2xl font-bold tracking-tight">Create your account</h1>
         <p className="text-sm text-muted-foreground">
@@ -132,7 +154,7 @@ export default function RegisterPage() {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
         <div className="space-y-1.5">
           <Label htmlFor="email" className="text-xs font-medium">Email</Label>
           <Input
@@ -144,17 +166,20 @@ export default function RegisterPage() {
             onChange={(e) => setEmail(e.target.value)}
             disabled={isBusy}
             required
+            aria-invalid={emailError ? true : undefined}
+            aria-describedby={emailError ? "email-error email-hint" : "email-hint"}
           />
-          <p className="text-[11px] text-muted-foreground">
+          <FieldError id="email-error" message={emailError} />
+          <p id="email-hint" className="text-[11px] text-muted-foreground">
             We&apos;ll email you a link to choose a name and password.
           </p>
         </div>
 
         <p className="text-[11px] text-muted-foreground">
           By creating an account, you agree to our{" "}
-          <Link href="#" className="underline hover:text-foreground">Terms of Service</Link>
+          <Link href="/terms" className="underline hover:text-foreground">Terms of Service</Link>
           {" "}and{" "}
-          <Link href="#" className="underline hover:text-foreground">Privacy Policy</Link>.
+          <Link href="/privacy" className="underline hover:text-foreground">Privacy Policy</Link>.
         </p>
 
         <Button type="submit" className="w-full font-medium" disabled={isBusy}>
@@ -169,6 +194,7 @@ export default function RegisterPage() {
           Sign in
         </Link>
       </p>
-    </div>
+      </div>
+    </GuestOnly>
   );
 }

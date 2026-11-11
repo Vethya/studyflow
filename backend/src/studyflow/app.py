@@ -8,10 +8,16 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from studyflow import __version__
+from studyflow.accounts.deletion import (
+    AccountDeletion,
+    AccountDeletionService,
+    AccountPasswordVerifier,
+)
 from studyflow.accounts.password import AccountPasswords, PasswordChangeService
 from studyflow.accounts.preferences import AccountPreferences, StudyPreferencesService
 from studyflow.accounts.profile import AccountProfiles, AccountProfileService
 from studyflow.accounts.repositories import (
+    SqlAlchemyAccountDeletionRepository,
     SqlAlchemyAccountProfileRepository,
     SqlAlchemyPasswordChangeRepository,
     SqlAlchemyStudyPreferencesRepository,
@@ -35,9 +41,12 @@ from studyflow.auth.oidc import (
 )
 from studyflow.auth.passwords import PasswordService
 from studyflow.auth.rate_limits import (
+    AccountDeletionRateLimit,
     AccountPasswordChangeRateLimit,
+    DatabaseAccountDeletionRateLimiter,
     DatabaseAccountPasswordChangeRateLimiter,
     DatabaseEmailVerificationRateLimiter,
+    DatabaseGoogleImportStartRateLimiter,
     DatabaseLoginRateLimiter,
     DatabaseOIDCLinkRateLimiter,
     DatabaseOIDCStartRateLimiter,
@@ -47,6 +56,7 @@ from studyflow.auth.rate_limits import (
     DatabaseRegistrationRateLimiter,
     DatabaseVerificationResendRateLimiter,
     EmailVerificationRateLimit,
+    GoogleImportStartRateLimit,
     LoginRateLimit,
     OIDCLinkRateLimit,
     OIDCStartRateLimit,
@@ -88,6 +98,22 @@ from studyflow.availability.unavailable import (
 )
 from studyflow.availability.windows import AvailabilityWindows, AvailabilityWindowService
 from studyflow.database import Database, DatabaseRuntime
+from studyflow.estimation import AdaptiveEstimator
+from studyflow.estimation.repositories import SqlAlchemyAdaptivePredictionRepository
+from studyflow.integrations.google_client import HttpGoogleImportClient
+from studyflow.integrations.google_import import (
+    GoogleImports,
+    GoogleImportService,
+    UnconfiguredGoogleImports,
+)
+from studyflow.integrations.repositories import SqlAlchemyGoogleImportRepository
+from studyflow.reminders.email import SmtpReminderEmailSender
+from studyflow.reminders.preferences import ReminderPreferencesService, ReminderSettings
+from studyflow.reminders.repositories import (
+    SqlAlchemyReminderDispatchRepository,
+    SqlAlchemyReminderPreferencesRepository,
+)
+from studyflow.reminders.service import ReminderDispatch, ReminderDispatchService
 from studyflow.scheduling.acceptance import ScheduleAcceptance, ScheduleAcceptanceService
 from studyflow.scheduling.outcome_repositories import SqlAlchemyStudySessionOutcomeRepository
 from studyflow.scheduling.outcomes import StudySessions, StudySessionService
@@ -99,7 +125,7 @@ from studyflow.scheduling.recovery_repositories import (
 )
 from studyflow.scheduling.repositories import SqlAlchemyScheduleProposalRepository
 from studyflow.scheduling.service import ScheduleGeneration, ScheduleGenerationService
-from studyflow.settings import Settings
+from studyflow.settings import Environment, Settings
 from studyflow.tasks.repositories import (
     SqlAlchemyAcademicTaskRepository,
     SqlAlchemyTaskDeadlineSessionInvalidator,
@@ -122,6 +148,11 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             )
             if authentication_http_client is not None:
                 await authentication_http_client.aclose()
+            google_import_http_client: httpx.AsyncClient | None = (
+                application.state.google_import_http_client
+            )
+            if google_import_http_client is not None:
+                await google_import_http_client.aclose()
 
 
 def create_app(
@@ -143,8 +174,11 @@ def create_app(
     account_profiles: AccountProfiles | None = None,
     account_preferences: AccountPreferences | None = None,
     account_passwords: AccountPasswords | None = None,
+    account_deletion: AccountDeletion | None = None,
     account_password_change_rate_limiter: AccountPasswordChangeRateLimit | None = None,
+    account_deletion_rate_limiter: AccountDeletionRateLimit | None = None,
     academic_tasks: AcademicTasks | None = None,
+    adaptive_estimator: AdaptiveEstimator | None = None,
     availability_windows: AvailabilityWindows | None = None,
     unavailable_periods: UnavailablePeriods | None = None,
     schedule_generation: ScheduleGeneration | None = None,
@@ -157,8 +191,13 @@ def create_app(
     oidc_account_linking: OIDCAccountLinking | None = None,
     oidc_link_rate_limiter: OIDCLinkRateLimit | None = None,
     study_time_updates: StudyTimeUpdates | None = None,
+    google_imports: GoogleImports | None = None,
+    google_import_start_rate_limiter: GoogleImportStartRateLimit | None = None,
+    reminder_settings: ReminderSettings | None = None,
+    reminder_dispatch: ReminderDispatch | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
+    hide_api_docs = resolved_settings.environment is Environment.PRODUCTION
     resolved_database = database or Database(resolved_settings.database_url.get_secret_value())
     transactions = cast(SessionTransactions, resolved_database)
     authentication_http_client: httpx.AsyncClient | None = None
@@ -259,10 +298,14 @@ def create_app(
         version=__version__,
         debug=resolved_settings.debug,
         lifespan=lifespan,
-        docs_url=f"{API_V1_PREFIX}/docs",
-        openapi_url=f"{API_V1_PREFIX}/openapi.json",
+        # Production serves no interactive docs or schema; the contract stays available in
+        # development and test and through `create_app().openapi()`.
+        docs_url=None if hide_api_docs else f"{API_V1_PREFIX}/docs",
+        openapi_url=None if hide_api_docs else f"{API_V1_PREFIX}/openapi.json",
         redoc_url=None,
-        swagger_ui_oauth2_redirect_url=f"{API_V1_PREFIX}/docs/oauth2-redirect",
+        swagger_ui_oauth2_redirect_url=(
+            None if hide_api_docs else f"{API_V1_PREFIX}/docs/oauth2-redirect"
+        ),
     )
     application.add_exception_handler(
         RequestValidationError, handle_google_callback_validation_error
@@ -278,17 +321,22 @@ def create_app(
     resolved_account_preferences = account_preferences or StudyPreferencesService(
         SqlAlchemyStudyPreferencesRepository(transactions)
     )
+    task_deadline_invalidator = SqlAlchemyTaskDeadlineSessionInvalidator()
+    adaptive_predictions = SqlAlchemyAdaptivePredictionRepository(transactions)
+    resolved_adaptive_estimator = adaptive_estimator or AdaptiveEstimator(adaptive_predictions)
     resolved_academic_tasks = academic_tasks or AcademicTaskService(
         SqlAlchemyAcademicTaskRepository(
             transactions,
-            SqlAlchemyTaskDeadlineSessionInvalidator(),
+            task_deadline_invalidator,
             recovery_invalidator=SqlAlchemyTaskRecoveryProposalInvalidator(),
+            estimator=resolved_adaptive_estimator,
+            prediction_repository=adaptive_predictions,
         )
     )
-    resolved_availability_windows = availability_windows or AvailabilityWindowService(
-        SqlAlchemyAvailabilityWindowRepository(transactions)
-    )
     future_session_invalidator = SqlAlchemyFutureSessionInvalidator()
+    resolved_availability_windows = availability_windows or AvailabilityWindowService(
+        SqlAlchemyAvailabilityWindowRepository(transactions, future_session_invalidator)
+    )
     resolved_unavailable_periods = unavailable_periods or UnavailablePeriodService(
         SqlAlchemyUnavailablePeriodRepository(
             transactions,
@@ -303,12 +351,20 @@ def create_app(
         transactions
     )
     resolved_recovery_snapshots = SqlAlchemyRecoverySnapshotRepository(transactions)
+    resolved_study_sessions = study_sessions or StudySessionService(
+        SqlAlchemyStudySessionOutcomeRepository(
+            transactions,
+            SqlAlchemyTaskRecoveryProposalInvalidator(),
+            overdue_remediator=task_deadline_invalidator,
+        )
+    )
     resolved_schedule_generation = schedule_generation or ScheduleGenerationService(
         resolved_academic_tasks,
         resolved_availability_windows,
         resolved_unavailable_periods,
         resolved_account_preferences,
         resolved_schedule_proposals,
+        study_sessions=resolved_study_sessions,
     )
     resolved_schedule_acceptance = schedule_acceptance or ScheduleAcceptanceService(
         resolved_academic_tasks,
@@ -317,9 +373,7 @@ def create_app(
         resolved_account_preferences,
         resolved_schedule_proposals,
         resolved_recovery_snapshots,
-    )
-    resolved_study_sessions = study_sessions or StudySessionService(
-        SqlAlchemyStudySessionOutcomeRepository(transactions)
+        study_sessions=resolved_study_sessions,
     )
     resolved_schedule_recovery = schedule_recovery or ScheduleRecoveryService(
         resolved_academic_tasks,
@@ -329,6 +383,29 @@ def create_app(
         resolved_recovery_snapshots,
         resolved_schedule_proposals,
     )
+    google_import_http_client: httpx.AsyncClient | None = None
+    resolved_google_imports = google_imports
+    if resolved_google_imports is None:
+        if (
+            resolved_settings.google_oidc_client_id is not None
+            and resolved_settings.google_oidc_client_secret is not None
+            and resolved_settings.google_import_redirect_uri is not None
+        ):
+            google_import_http_client = httpx.AsyncClient(timeout=10.0)
+            resolved_google_imports = GoogleImportService(
+                SqlAlchemyGoogleImportRepository(transactions, future_session_invalidator),
+                HttpGoogleImportClient(
+                    google_import_http_client,
+                    resolved_settings.google_oidc_client_id,
+                    resolved_settings.google_oidc_client_secret.get_secret_value(),
+                    resolved_settings.google_import_redirect_uri,
+                ),
+                resolved_academic_tasks,
+                resolved_settings.google_oidc_client_id,
+                resolved_settings.google_import_redirect_uri,
+            )
+        else:
+            resolved_google_imports = UnconfiguredGoogleImports()
     application.state.settings = resolved_settings
     application.state.cookie_policy = CookiePolicy.for_environment(resolved_settings.environment)
     application.state.database = resolved_database
@@ -378,11 +455,19 @@ def create_app(
     )
     application.state.account_preferences = resolved_account_preferences
     application.state.account_passwords = resolved_account_passwords
+    application.state.account_deletion = account_deletion or AccountDeletionService(
+        SqlAlchemyAccountDeletionRepository(transactions),
+        cast(AccountPasswordVerifier, resolved_account_passwords),
+    )
     application.state.account_password_change_rate_limiter = (
         account_password_change_rate_limiter
         or DatabaseAccountPasswordChangeRateLimiter(transactions)
     )
+    application.state.account_deletion_rate_limiter = (
+        account_deletion_rate_limiter or DatabaseAccountDeletionRateLimiter(transactions)
+    )
     application.state.academic_tasks = resolved_academic_tasks
+    application.state.adaptive_estimator = resolved_adaptive_estimator
     application.state.availability_windows = resolved_availability_windows
     application.state.unavailable_periods = resolved_unavailable_periods
     application.state.study_time_updates = resolved_study_time_updates
@@ -391,9 +476,40 @@ def create_app(
     application.state.schedule_acceptance = resolved_schedule_acceptance
     application.state.study_sessions = resolved_study_sessions
     application.state.schedule_recovery = resolved_schedule_recovery
+    application.state.google_imports = resolved_google_imports
+    application.state.google_import_http_client = google_import_http_client
+    application.state.google_import_start_rate_limiter = (
+        google_import_start_rate_limiter or DatabaseGoogleImportStartRateLimiter(transactions)
+    )
+    application.state.reminder_settings = reminder_settings or ReminderPreferencesService(
+        SqlAlchemyReminderPreferencesRepository(transactions)
+    )
+    application.state.reminder_dispatch = reminder_dispatch or _reminder_dispatch(
+        resolved_settings, transactions
+    )
     application.include_router(api_router)
 
     return application
+
+
+def _reminder_dispatch(settings: Settings, transactions: SessionTransactions) -> ReminderDispatch:
+    smtp_password = (
+        settings.smtp_password.get_secret_value() if settings.smtp_password is not None else None
+    )
+    return ReminderDispatchService(
+        SqlAlchemyReminderDispatchRepository(transactions),
+        SmtpReminderEmailSender(
+            transport=AiosmtplibEmailTransport(
+                hostname=settings.smtp_host,
+                port=settings.smtp_port,
+                username=settings.smtp_username,
+                password=smtp_password,
+                start_tls=settings.smtp_start_tls,
+            ),
+            from_address=str(settings.email_from_address),
+            public_app_url=settings.public_app_url,
+        ),
+    )
 
 
 app = create_app()

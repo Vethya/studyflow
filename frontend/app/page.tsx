@@ -1,120 +1,68 @@
-"use client";
-
-import { useRef } from "react";
+import type { CSSProperties } from "react";
 import Link from "next/link";
-import Image from "next/image";
-import { Calendar, BarChart3, Clock, Sparkles, BookOpen, Target, GraduationCap, Pencil, NotebookPen } from "lucide-react";
-import gsap from "gsap";
-import { useGSAP } from "@gsap/react";
-import { ScrollTrigger } from "gsap/dist/ScrollTrigger";
+import { Calendar, BarChart3, BookOpen, Check } from "@/components/icons";
+import { BrandIcon } from "@/components/brand-icon";
+import { CapacityBar } from "@/components/capacity-bar";
+import { WeekLoad } from "@/components/week-load";
+import { WeekGrid } from "@/components/week-grid";
+import { NavAuth } from "@/components/landing/nav-auth";
+import { ProductPreview } from "@/components/landing/product-preview";
+import { demoCapacity, demoColumns, demoBlocks, demoDays, demoTasks } from "@/components/landing/demo-data";
 
-if (typeof window !== "undefined") {
-  gsap.registerPlugin(ScrollTrigger, useGSAP);
-}
+const PLANS = [
+  {
+    name: "Free",
+    tagline: "Everything you need to plan a term.",
+    price: "$0",
+    period: "forever",
+    note: "No card needed.",
+    features: [
+      "Unlimited tasks and deadlines",
+      "Weekly study hours and blocked days",
+      "Automatic study schedule",
+      "Warnings when a week doesn’t fit",
+      "Progress on every task",
+    ],
+    cta: "Start for free",
+    href: "/register",
+    highlighted: false,
+    badge: null,
+  },
+  {
+    name: "Pro",
+    tagline: "For a heavier term.",
+    price: "$2.50",
+    period: "per month",
+    note: "Or $24 a year, two months free.",
+    features: [
+      "Everything in Free",
+      "Sync sessions to Google Calendar",
+      "End-of-term reports as PDF",
+      "Compare past terms",
+      "Priority email support",
+    ],
+    cta: "Start free, upgrade later",
+    href: "/register",
+    highlighted: true,
+    badge: "Coming soon",
+  },
+];
 
-/* ─── Floating Student Elements ─── */
-function FloatingElements() {
-  const elRef = useRef<HTMLDivElement>(null);
-
-  useGSAP(() => {
-    if (!elRef.current) return;
-    const items = elRef.current.querySelectorAll(".float-item");
-    items.forEach((item) => {
-      gsap.to(item, {
-        y: gsap.utils.random(-25, 25),
-        x: gsap.utils.random(-15, 15),
-        rotation: gsap.utils.random(-10, 10),
-        duration: gsap.utils.random(4, 8),
-        repeat: -1,
-        yoyo: true,
-        ease: "sine.inOut",
-        delay: gsap.utils.random(0, 3),
-      });
-    });
-    // Also animate small dots
-    const dots = elRef.current.querySelectorAll(".dot");
-    dots.forEach((dot) => {
-      gsap.to(dot, {
-        y: gsap.utils.random(-15, 15),
-        opacity: gsap.utils.random(0.2, 0.7),
-        duration: gsap.utils.random(3, 6),
-        repeat: -1,
-        yoyo: true,
-        ease: "sine.inOut",
-        delay: gsap.utils.random(0, 3),
-      });
-    });
-  }, { scope: elRef });
-
-  const floatingIcons = [
-    { Icon: BookOpen, left: "8%", top: "20%", size: "w-5 h-5" },
-    { Icon: GraduationCap, left: "85%", top: "15%", size: "w-6 h-6" },
-    { Icon: Pencil, left: "12%", top: "65%", size: "w-4 h-4" },
-    { Icon: NotebookPen, left: "90%", top: "55%", size: "w-5 h-5" },
-    { Icon: BookOpen, left: "25%", top: "80%", size: "w-4 h-4" },
-    { Icon: GraduationCap, left: "75%", top: "75%", size: "w-4 h-4" },
-  ];
-
-  return (
-    <div ref={elRef} className="absolute inset-0 pointer-events-none overflow-hidden">
-      {/* Floating student icons */}
-      {floatingIcons.map((item, i) => (
-        <div
-          key={`icon-${i}`}
-          className={`float-item absolute ${item.size} text-white/15`}
-          style={{ left: item.left, top: item.top }}
-        >
-          <item.Icon className="w-full h-full" />
-        </div>
-      ))}
-      {/* Small dots */}
-      {Array.from({ length: 15 }).map((_, i) => (
-        <div
-          key={`dot-${i}`}
-          className="dot absolute w-1 h-1 rounded-full bg-white/30"
-          style={{
-            left: `${5 + (i * 6.3)}%`,
-            top: `${10 + ((i * 17) % 75)}%`,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-/* ─── Navigation (transparent over gradient) ─── */
 function Navigation() {
-  const navRef = useRef(null);
-
-  useGSAP(() => {
-    gsap.from(navRef.current, {
-      y: -20,
-      opacity: 0,
-      duration: 0.8,
-      ease: "power2.out",
-      delay: 0.1,
-    });
-  }, { scope: navRef });
-
   return (
-    <nav ref={navRef} className="absolute top-0 left-0 right-0 z-50 w-full">
-      <div className="max-w-[1200px] mx-auto px-6 flex items-center justify-between h-16">
+    <nav className="absolute top-0 left-0 right-0 z-50 w-full">
+      <div className="max-w-[1200px] mx-auto px-4 md:px-6 flex items-center justify-between h-16">
         {/* Logo */}
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-md bg-white/20 backdrop-blur-sm flex items-center justify-center">
-            <BookOpen className="w-3.5 h-3.5 text-white" />
-          </div>
+        <Link href="/" aria-label="StudyFlow home" className="flex items-center gap-2 rounded-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">
+          <BrandIcon className="size-8 text-white" />
           <span className="font-[family-name:var(--font-display)] font-bold text-[16px] tracking-[-0.01em] text-white">
-            Studyflow
+            StudyFlow
           </span>
-        </div>
+        </Link>
 
         {/* Center nav */}
         <div className="hidden md:flex items-center gap-8">
           <Link href="#features" className="text-[14px] font-medium tracking-[-0.01em] text-white/90 hover:text-white transition-colors">
-            Features
-          </Link>
-          <Link href="#how-it-works" className="text-[14px] font-medium tracking-[-0.01em] text-white/90 hover:text-white transition-colors">
             How it works
           </Link>
           <Link href="#pricing" className="text-[14px] font-medium tracking-[-0.01em] text-white/90 hover:text-white transition-colors">
@@ -122,471 +70,219 @@ function Navigation() {
           </Link>
         </div>
 
-        {/* Right auth */}
-        <div className="flex items-center gap-4">
-          <Link href="/login" className="text-[14px] font-medium tracking-[-0.01em] text-white hover:text-white/80 transition-colors">
-            Login
-          </Link>
-          <Link href="/register">
-            <button className="px-5 py-2 rounded-full bg-white text-[#070709] text-[14px] font-medium tracking-[-0.01em] hover:bg-white/90 transition-colors shadow-[rgba(36,36,40,0.1)_0px_1px_2px_0px]">
-              Sign up
-            </button>
-          </Link>
-        </div>
+        <NavAuth />
       </div>
     </nav>
   );
 }
 
-/* ─── Main Page ─── */
 export default function LandingPage() {
-  const container = useRef(null);
-
-  useGSAP(() => {
-    // ═══ HERO ANIMATIONS ═══
-    // Cards show immediately — no waiting
-    gsap.set(".hero-cards-wrapper", { opacity: 1 });
-    gsap.from(".before-card", {
-      x: -20, rotation: -5, opacity: 0, duration: 0.6, ease: "power2.out", delay: 0.1,
-    });
-    gsap.from(".after-card", {
-      x: 20, rotation: 5, opacity: 0, duration: 0.6, ease: "power2.out", delay: 0.2,
-    });
-
-    const heroTl = gsap.timeline({ defaults: { ease: "power3.out" } });
-    heroTl
-      .from(".hero-headline", {
-        y: 50,
-        opacity: 0,
-        duration: 1,
-        delay: 0.15,
-      })
-      .from(".hero-sub", {
-        y: 25,
-        opacity: 0,
-        duration: 0.8,
-      }, "-=0.6")
-      .from(".hero-cta", {
-        y: 15,
-        opacity: 0,
-        scale: 0.95,
-        duration: 0.6,
-      }, "-=0.4");
-
-    // Parallax on hero cards as user scrolls
-    gsap.to(".hero-cards-wrapper", {
-      scrollTrigger: {
-        trigger: ".hero-section",
-        start: "top top",
-        end: "bottom top",
-        scrub: 1,
-      },
-      y: -60,
-      ease: "none",
-    });
-
-    // ═══ BOOK FLIP ANIMATION on feature cards ═══
-    gsap.utils.toArray<HTMLElement>(".feature-card").forEach((card) => {
-      gsap.from(card, {
-        scrollTrigger: { trigger: card, start: "top 85%" },
-        rotationY: 8,
-        opacity: 0,
-        y: 40,
-        duration: 1,
-        ease: "power3.out",
-        transformPerspective: 800,
-        transformOrigin: "left center",
-      });
-    });
-
-    // ═══ BOOK PAGE TURN on step cards ═══
-    gsap.from(".step-card", {
-      scrollTrigger: { trigger: ".steps-grid", start: "top 80%" },
-      rotationY: -15,
-      opacity: 0,
-      x: -30,
-      duration: 0.9,
-      stagger: 0.2,
-      ease: "power3.out",
-      transformPerspective: 1000,
-      transformOrigin: "right center",
-    });
-
-    // ═══ STATS ANIMATIONS ═══
-    gsap.from(".stat-item", {
-      scrollTrigger: { trigger: ".stats-section", start: "top 85%" },
-      y: 40,
-      opacity: 0,
-      duration: 0.7,
-      stagger: 0.12,
-      ease: "power2.out",
-    });
-
-    // Animate stat numbers counting up
-    document.querySelectorAll<HTMLElement>(".stat-number").forEach((el) => {
-      const target = parseFloat(el.dataset.value || "0");
-      const obj = { val: 0 };
-      ScrollTrigger.create({
-        trigger: el,
-        start: "top 85%",
-        onEnter: () => {
-          gsap.to(obj, {
-            val: target,
-            duration: 1.5,
-            ease: "power2.out",
-            onUpdate: () => {
-              el.textContent = (el.dataset.suffix === "%" ? Math.round(obj.val) + "%" : (obj.val % 1 === 0 ? Math.round(obj.val) : obj.val.toFixed(0)) + (el.dataset.suffix || ""));
-            },
-          });
-        },
-        once: true,
-      });
-    });
-
-    // ═══ SECTION HEADINGS — typewriter-like reveal ═══
-    gsap.utils.toArray<HTMLElement>(".section-heading").forEach((el) => {
-      gsap.from(el, {
-        scrollTrigger: { trigger: el, start: "top 85%" },
-        y: 40,
-        opacity: 0,
-        duration: 0.9,
-        ease: "power3.out",
-      });
-    });
-
-    // Feature card images scale in with a slight book-open effect
-    gsap.utils.toArray<HTMLElement>(".feature-img").forEach((el) => {
-      gsap.from(el, {
-        scrollTrigger: { trigger: el, start: "top 88%" },
-        scaleY: 0.85,
-        opacity: 0,
-        duration: 0.8,
-        ease: "power2.out",
-        transformOrigin: "bottom center",
-      });
-    });
-
-    // Step numbers pop like stamps
-    gsap.from(".step-number", {
-      scrollTrigger: { trigger: ".steps-grid", start: "top 80%" },
-      scale: 3,
-      opacity: 0,
-      duration: 0.5,
-      stagger: 0.2,
-      ease: "back.out(1.5)",
-      delay: 0.4,
-    });
-
-    // ═══ PRODUCT IMAGE ═══
-    gsap.from(".product-image", {
-      scrollTrigger: { trigger: ".product-image", start: "top 85%" },
-      y: 60,
-      opacity: 0,
-      scale: 0.96,
-      duration: 1.2,
-      ease: "power2.out",
-    });
-
-    // ═══ CTA BANNER ═══
-    const ctaTl = gsap.timeline({
-      scrollTrigger: { trigger: ".cta-section", start: "top 80%" },
-    });
-    ctaTl
-      .from(".cta-heading", { y: 40, opacity: 0, duration: 0.9, ease: "power3.out" })
-      .from(".cta-sub", { y: 30, opacity: 0, duration: 0.7, ease: "power2.out" }, "-=0.5")
-      .from(".cta-btn", { y: 20, opacity: 0, scale: 0.95, duration: 0.6, ease: "back.out(1.3)" }, "-=0.3");
-
-    // ═══ FOOTER ═══
-    gsap.from(".footer-content", {
-      scrollTrigger: { trigger: "footer", start: "top 90%" },
-      y: 30,
-      opacity: 0,
-      duration: 0.8,
-      ease: "power2.out",
-    });
-
-  }, { scope: container });
-
   return (
-    <div ref={container} className="min-h-screen bg-white overflow-x-hidden">
-
-      {/* ═══════ HERO: Sky Gradient with outer padding ═══════ */}
-      <div className="p-2 md:p-3 bg-white">
+    <div className="landing-page min-h-screen">
+      <div className="landing-surface p-2 md:p-3">
         <section
-          className="hero-section relative w-full min-h-[calc(100vh-24px)] flex flex-col items-center justify-center overflow-hidden rounded-[20px] md:rounded-[28px]"
-          style={{ background: "linear-gradient(180deg, #779bc1 0%, #9abfda 48%, #cbdcec 80%, #e4ecf3 100%)" }}
+          className="relative flex min-h-[720px] flex-col items-center overflow-hidden rounded-[20px] md:min-h-[800px] md:rounded-[28px]"
+          style={{ background: "var(--landing-hero)" }}
         >
           <Navigation />
-          <FloatingElements />
-
-        {/* Centered content */}
-        <div className="relative z-10 text-center px-6 pt-20 pb-0 flex-1 flex flex-col items-center justify-center">
-          <h1 className="hero-headline font-[family-name:var(--font-display)] text-white font-bold text-[52px] md:text-[72px] lg:text-[80px] leading-[0.92] tracking-[-0.04em] mb-6 max-w-[700px]">
-            Does it all<br />actually fit?
-          </h1>
-
-          <div className="hero-sub max-w-[520px] mx-auto mb-8">
-            <p className="font-[family-name:var(--font-display)] text-white/90 text-[16px] md:text-[17px] leading-[1.5] tracking-[-0.01em]">
-Add your coursework and the hours you are free.<br />
-              StudyFlow weighs one against the other and tells you<br />
-              <strong className="text-white font-semibold">how many hours short you are</strong> — while you can still act on it.
+          <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-6 pb-12 pt-32 text-center md:pt-36">
+            <h1 className="landing-rise mb-6 max-w-[700px] text-balance font-[family-name:var(--font-display)] text-[52px] font-bold leading-[0.95] tracking-[-0.04em] text-white md:text-[72px] lg:text-[80px]">
+              Know if your week fits
+            </h1>
+            <p className="landing-rise mb-8 max-w-[600px] font-[family-name:var(--font-display)] text-[16px] leading-[1.5] tracking-[-0.01em] text-white/90 md:text-[18px]" style={{ "--landing-delay": "120ms" } as CSSProperties}>
+              Add your coursework and the hours you’re free. StudyFlow tells you how many hours short you are, weeks before anything is due.
             </p>
-          </div>
-
-          <div className="hero-cta">
-            <Link href="/register">
-              <button className="px-8 py-3.5 rounded-full bg-[#070709] text-white text-[15px] font-semibold tracking-[-0.01em] shadow-[rgba(36,36,40,0.1)_0px_1px_2px_0px,rgba(36,36,40,0.09)_0px_3px_3px_0px,rgba(36,36,40,0.05)_0px_6px_4px_0px,rgba(36,36,40,0.01)_0px_11px_4px_0px] hover:bg-[#1a1a1c] transition-all duration-300 hover:shadow-[rgba(36,36,40,0.15)_0px_2px_4px_0px,rgba(36,36,40,0.12)_0px_6px_6px_0px,rgba(36,36,40,0.08)_0px_12px_8px_0px]">
+            <div className="landing-rise flex flex-wrap items-center justify-center gap-x-6 gap-y-4" style={{ "--landing-delay": "240ms" } as CSSProperties}>
+              <Link href="/register" className="landing-ink-button rounded-full px-8 py-3.5 text-[15px] font-semibold tracking-[-0.01em] transition-colors">
                 Sign up for free
-              </button>
-            </Link>
-          </div>
-        </div>
-
-        {/* Before/After cards emerging from bottom */}
-        <div className="hero-cards-wrapper relative z-10 w-full flex items-end justify-center mt-auto pb-0">
-          {/* White "envelope" shape behind the cards */}
-          <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[500px] md:w-[700px] h-[250px]">
-            <svg viewBox="0 0 700 250" fill="none" className="w-full h-full" preserveAspectRatio="none">
-              <path d="M0 250 L100 60 L350 0 L600 60 L700 250 Z" fill="white" fillOpacity="0.15" />
-              <path d="M50 250 L150 80 L350 20 L550 80 L650 250 Z" fill="white" fillOpacity="0.25" />
-              <path d="M100 250 L200 100 L350 50 L500 100 L600 250 Z" fill="white" fillOpacity="0.5" />
-            </svg>
-          </div>
-
-          <div className="relative flex items-end justify-center gap-0 translate-y-[60px] md:translate-y-[80px]">
-            {/* "Before" card */}
-            <div className="before-card relative z-10 bg-white rounded-t-[14px] shadow-[rgba(16,55,132,0.06)_0px_10px_30px_0px] p-5 w-[200px] md:w-[250px] -rotate-3 -mr-6">
-              <div className="flex items-center gap-1.5 mb-3">
-                <div className="px-2.5 py-0.5 rounded-full border border-[#070709]/15 text-[11px] font-medium tracking-[-0.01em] text-[#070709] flex items-center gap-1">
-                  <span className="text-[#2597d0] text-[10px]">✎</span> Before
-                </div>
-              </div>
-              <div className="space-y-2">
-                <div className="h-2.5 bg-[#f5f5f5] rounded-full w-full"></div>
-                <div className="h-2.5 bg-[#f5f5f5] rounded-full w-[85%]"></div>
-                <div className="h-2.5 bg-red-50 rounded-full w-[70%]"></div>
-                <div className="h-2.5 bg-[#f5f5f5] rounded-full w-full"></div>
-                <div className="h-2.5 bg-red-50 rounded-full w-[60%]"></div>
-              </div>
-            </div>
-
-            {/* "After" card (overlapping, slightly above) */}
-            <div className="after-card relative z-20 bg-white rounded-t-[14px] shadow-[rgba(16,55,132,0.08)_0px_10px_30px_0px] p-5 w-[220px] md:w-[280px] rotate-1 -translate-y-4">
-              <div className="flex items-center gap-1.5 mb-3">
-                <div className="px-2.5 py-0.5 rounded-full border border-[#070709]/15 text-[11px] font-medium tracking-[-0.01em] text-[#070709] flex items-center gap-1">
-                  <span className="text-[#2597d0] text-[10px]">✓</span> After
-                </div>
-              </div>
-              <div className="space-y-1.5 text-[12px] text-[#070709] leading-[1.5] font-[family-name:var(--font-display)]">
-                <p className="text-[#8b8b8b] text-[11px]">Your weekly plan,</p>
-                <p>Monday — Data Structures (2h)</p>
-                <p>Tuesday — Linear Algebra (1.5h)</p>
-                <p>Wednesday — Essay Draft (2h)</p>
-                <p className="text-[#8b8b8b]">Thursday — Algorithms rev...</p>
-                <p className="text-[#8b8b8b]">Friday — Physics lab pre...</p>
-              </div>
+              </Link>
+              <Link href="#features" className="rounded-md text-[15px] font-medium text-white underline-offset-4 hover:underline">
+                See how it works
+              </Link>
             </div>
           </div>
-        </div>
+          <div className="landing-rise landing-surface landing-card-shadow relative mx-4 w-[calc(100%-2rem)] max-w-[680px] rounded-t-[24px] p-3 pb-0" style={{ "--landing-delay": "360ms" } as CSSProperties}>
+            <ProductPreview label="This week: 18 hours of coursework, 14 hours available, 4 hours short. Start the essay on Tuesday to catch up.">
+              <div className="space-y-5 p-5 md:p-7">
+                <div className="flex items-baseline justify-between gap-3">
+                  <h2 className="text-sm font-semibold">This week</h2>
+                  <span className="text-xs text-muted-foreground">28 Sep to 4 Oct</span>
+                </div>
+                <CapacityBar {...demoCapacity} />
+                <p className="text-sm text-muted-foreground"><strong className="font-semibold text-deficit">4h short this week.</strong> Start the essay on Tuesday to catch up.</p>
+              </div>
+            </ProductPreview>
+          </div>
         </section>
       </div>
 
-      {/* ═══════ Stats Row ═══════ */}
-      <section className="stats-section bg-white border-b border-[#f5f5f5]">
-        <div className="max-w-[1200px] mx-auto px-6 py-20 flex flex-wrap items-center justify-center gap-16 md:gap-24">
-          {[
-            { value: 5, suffix: "+", label: "Hours saved weekly" },
-            { value: 98, suffix: "%", label: "Schedule accuracy" },
-            { value: 0, suffix: "", label: "Conflicts generated" },
-          ].map((stat, i) => (
-            <div key={i} className="stat-item text-center">
-              <div
-                className="stat-number font-[family-name:var(--font-display)] text-[48px] font-bold tracking-[-0.04em] text-[#070709] leading-[1.1]"
-                data-value={stat.value}
-                data-suffix={stat.suffix}
-              >
-                0{stat.suffix}
-              </div>
-              <div className="text-[14px] text-[#60606c] tracking-[-0.01em] mt-1 font-medium">{stat.label}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ═══════ Section Heading ═══════ */}
-      <section className="bg-[#f5f5f5] pt-28 pb-8">
-        <div className="max-w-[1200px] mx-auto px-6 text-center">
-          <h2 className="section-heading font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] text-[#070709] leading-[1.1]">
-Most students find out too late
-          </h2>
-        </div>
-      </section>
-
-      {/* ═══════ Feature Cards (2-column) ═══════ */}
-      <section id="features" className="bg-[#f5f5f5] py-16">
-        <div className="feature-grid max-w-[1200px] mx-auto px-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Card 1: Scheduling */}
-          <div className="feature-card bg-white rounded-[18px] border border-[#f5f5f5] p-10 md:p-12 shadow-[rgba(16,55,132,0.03)_0px_17px_37px_0px,rgba(16,55,132,0.03)_0px_67px_67px_0px,rgba(16,55,132,0.02)_0px_150px_90px_0px] hover:shadow-[rgba(16,55,132,0.05)_0px_20px_40px_0px,rgba(16,55,132,0.04)_0px_70px_70px_0px] transition-shadow duration-500">
-            <div className="flex items-center gap-2 mb-6">
-              <div className="px-3 py-1 rounded-full border border-[#070709] text-[12px] font-medium tracking-[-0.01em] text-[#070709] flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-[#2597d0]" />
-                Schedule
-              </div>
-            </div>
-            <h3 className="font-[family-name:var(--font-display)] text-[24px] md:text-[28px] font-semibold tracking-[-0.04em] text-[#070709] leading-[1.2] mb-4">
-Your real hours, not an ideal week.
-            </h3>
-            <p className="text-[16px] text-[#60606c] leading-[1.5] tracking-[-0.01em] mb-8">
-Set the weekly windows you are genuinely free to study, then block out the trips, shifts and exam days that take them back. That, minus the interruptions, is your capacity.
+      <section id="features" className="landing-canvas py-20 md:py-28">
+        <div className="mx-auto max-w-[1200px] px-6">
+          <div className="landing-reveal mx-auto mb-16 max-w-[680px] text-center md:mb-24">
+            <h2 className="mb-6 font-[family-name:var(--font-display)] text-[36px] font-semibold leading-[1.1] tracking-[-0.04em] md:text-[44px]">
+              Stop finding out the night before
+            </h2>
+            <p className="landing-muted text-[16px] leading-[1.6] md:text-[18px]">
+              Add your free hours and your coursework. StudyFlow checks if it all fits, and tells you weeks ahead when it doesn’t.
             </p>
-            <div className="feature-img rounded-[12px] overflow-hidden border border-[#f5f5f5]">
-              <Image
-                src="/landing/feature-calendar.png"
-                alt="Schedule interface"
-                width={600}
-                height={400}
-                className="w-full h-auto"
-              />
-            </div>
           </div>
 
-          {/* Card 2: Progress */}
-          <div className="feature-card bg-white rounded-[18px] border border-[#f5f5f5] p-10 md:p-12 shadow-[rgba(16,55,132,0.03)_0px_17px_37px_0px,rgba(16,55,132,0.03)_0px_67px_67px_0px,rgba(16,55,132,0.02)_0px_150px_90px_0px] hover:shadow-[rgba(16,55,132,0.05)_0px_20px_40px_0px,rgba(16,55,132,0.04)_0px_70px_70px_0px] transition-shadow duration-500">
-            <div className="flex items-center gap-2 mb-6">
-              <div className="px-3 py-1 rounded-full border border-[#070709] text-[12px] font-medium tracking-[-0.01em] text-[#070709] flex items-center gap-1.5">
-                <BarChart3 className="w-3.5 h-3.5 text-[#2597d0]" />
-                Progress
+          <div className="space-y-16 md:space-y-24">
+            <div className="landing-reveal grid items-center gap-8 lg:grid-cols-2 lg:gap-16">
+              <div className="min-w-0">
+                <span className="landing-ink-border-soft mb-5 inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium"><Calendar className="landing-accent size-3.5" />Hours</span>
+                <h3 className="mb-4 font-[family-name:var(--font-display)] text-[28px] font-semibold leading-[1.15] tracking-[-0.04em] md:text-[32px]">Tell it when you’re free</h3>
+                <p className="landing-muted text-[16px] leading-[1.6]">Set the hours you can study each week. Block out shifts, trips and exam days, and StudyFlow works around them.</p>
               </div>
-            </div>
-            <h3 className="font-[family-name:var(--font-display)] text-[24px] md:text-[28px] font-semibold tracking-[-0.04em] text-[#070709] leading-[1.2] mb-4">
-Every deadline, weighed in hours.
-            </h3>
-            <p className="text-[16px] text-[#60606c] leading-[1.5] tracking-[-0.01em] mb-8">
-Each task carries an estimate, a priority and a due date. Add them up across the next week and you have the other half of the sum — the hours you owe.
-            </p>
-            <div className="feature-img rounded-[12px] overflow-hidden border border-[#f5f5f5]">
-              <Image
-                src="/landing/feature-progress.png"
-                alt="Progress tracking dashboard"
-                width={600}
-                height={400}
-                className="w-full h-auto"
-              />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ═══════ How It Works ═══════ */}
-    
-      <section id="how-it-works" className="bg-[#f5f5f5] py-28">
-        <div className="max-w-[1200px] mx-auto px-6">
-          <h2 className="section-heading font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] text-[#070709] leading-[1.1] text-center mb-16">
-            How Studyflow works
-          </h2>
-
-          <div className="steps-grid grid grid-cols-1 md:grid-cols-3 gap-8">
-            {[
-              {
-                icon: Target,
-                step: "01",
-                title: "Set your hours",
-                desc: "Add the weekly windows you can study, and block out the days you cannot.",
-              },
-              {
-                icon: Sparkles,
-                step: "02",
-                title: "Add your coursework",
-                desc: "Every task gets a deadline and an estimate of how long it will take you.",
-              },
-              {
-                icon: Clock,
-                step: "03",
-                title: "Read the balance",
-                desc: "One figure: the hours you are short, or the hours you have spare. Change something while it still helps.",
-              },
-            ].map((item, i) => (
-              <div key={i} className="step-card bg-white rounded-[18px] p-8 shadow-[rgba(16,55,132,0.03)_0px_17px_37px_0px,rgba(16,55,132,0.03)_0px_67px_67px_0px,rgba(16,55,132,0.02)_0px_150px_90px_0px] hover:-translate-y-1 transition-transform duration-300">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="w-10 h-10 rounded-lg bg-[#f5f5f5] flex items-center justify-center">
-                    <item.icon className="w-5 h-5 text-[#2597d0]" />
+              <ProductPreview label="Free hours for Monday to Friday, with Wednesday blocked for a midterm and two study sessions.">
+                <div className="p-3 md:p-4">
+                  <p className="mb-3 text-xs font-medium text-muted-foreground">28 September to 2 October</p>
+                  <div className="landing-week-grid">
+                    <WeekGrid columns={demoColumns} blocks={demoBlocks} hourStart={9} hourEnd={17} />
                   </div>
-                  <span className="step-number font-[family-name:var(--font-display)] text-[48px] font-bold text-[#f5f5f5] leading-none tracking-[-0.04em]">
-                    {item.step}
-                  </span>
+                  <p className="mt-3 text-xs text-muted-foreground">Free hours in green. Wednesday is blocked for your midterm.</p>
                 </div>
-                <h3 className="font-[family-name:var(--font-display)] text-[20px] font-semibold tracking-[-0.01em] text-[#070709] leading-[1.3] mb-3">
-                  {item.title}
+              </ProductPreview>
+            </div>
+
+            <div className="landing-reveal grid items-center gap-8 lg:grid-cols-2 lg:gap-16">
+              <div className="min-w-0 lg:col-start-2 lg:row-start-1">
+                <span className="landing-ink-border-soft mb-5 inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium"><BookOpen className="landing-accent size-3.5" />Tasks</span>
+                <h3 className="mb-4 font-[family-name:var(--font-display)] text-[28px] font-semibold leading-[1.15] tracking-[-0.04em] md:text-[32px]">Add your coursework</h3>
+                <p className="landing-muted text-[16px] leading-[1.6]">Give each task a due date and a rough estimate. StudyFlow spreads the hours across your week and shows which days are packed.</p>
+              </div>
+              <div className="min-w-0 lg:col-start-1 lg:row-start-1">
+                <ProductPreview label="Four tasks due this week totalling 18 hours, with daily workload and deadlines.">
+                  <div className="p-4 md:p-6">
+                    <h4 className="mb-3 text-sm font-semibold">Due this week</h4>
+                    <ul className="mb-5 divide-y divide-border">
+                      {demoTasks.map((task) => (
+                        <li key={task.name} className="flex items-start justify-between gap-3 py-3 text-xs">
+                          <div className="min-w-0"><p className="font-medium">{task.name}</p><p className="mt-1 text-muted-foreground">{task.course} · Due {task.due}</p></div>
+                          <span className="shrink-0 font-[family-name:var(--font-data)] tabular-nums">{task.estimate}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <WeekLoad days={demoDays} />
+                  </div>
+                </ProductPreview>
+              </div>
+            </div>
+
+            <div className="landing-reveal grid items-center gap-8 lg:grid-cols-2 lg:gap-16">
+              <div className="min-w-0">
+                <span className="landing-ink-border-soft mb-5 inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium"><BarChart3 className="landing-accent size-3.5" />Fit</span>
+                <h3 className="mb-4 font-[family-name:var(--font-display)] text-[28px] font-semibold leading-[1.15] tracking-[-0.04em] md:text-[32px]">Find the hours you’re short</h3>
+                <p className="landing-muted text-[16px] leading-[1.6]">StudyFlow compares the hours you need with the hours you have. If you’re 4 hours short this week, you’ll know on Monday, not Friday night.</p>
+              </div>
+              <ProductPreview label="This week: 18 hours of work against 14 hours of study time, with 4 hours short. Your Linear Algebra problem set needs 3 more hours than you have before Friday.">
+                <div className="space-y-6 p-5 md:p-7">
+                  <div><p className="mb-2 text-xs text-muted-foreground">This week</p><p className="font-[family-name:var(--font-display)] text-3xl font-semibold tracking-tight text-deficit">4h short</p></div>
+                  <CapacityBar {...demoCapacity} />
+                  <p className="border-t border-border pt-4 text-sm leading-relaxed text-muted-foreground">Your Linear Algebra problem set needs 3 more hours than you have before Friday.</p>
+                </div>
+              </ProductPreview>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ═══════ Pricing ═══════ */}
+      <section id="pricing" className="landing-surface py-28 scroll-mt-20">
+        <div className="max-w-[960px] mx-auto px-6">
+          <div className="text-center mb-14">
+            <h2 className="landing-reveal font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-[1.1] mb-4">
+              Pricing
+            </h2>
+            <p className="text-[16px] md:text-[18px] landing-muted leading-[1.5] tracking-[-0.01em] max-w-[520px] mx-auto">
+              Planning your term is free. Pro adds calendar sync and reports when it launches.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {PLANS.map((plan) => (
+              <div
+                key={plan.name}
+                className={`landing-reveal relative flex flex-col landing-surface landing-card-shadow rounded-[18px] border p-8 md:p-10 ${
+                  plan.highlighted ? "border-2 border-[var(--landing-accent)]" : "landing-border"
+                }`}
+              >
+                {plan.badge && (
+                  <span className="absolute -top-3 left-8 rounded-full landing-ink-button px-3 py-1 text-[12px] font-semibold tracking-[-0.01em]">
+                    {plan.badge}
+                  </span>
+                )}
+                <h3 className="font-[family-name:var(--font-display)] text-[20px] font-semibold tracking-[-0.01em] landing-ink">
+                  {plan.name}
                 </h3>
-                <p className="text-[14px] text-[#60606c] leading-[1.5] tracking-[-0.01em]">
-                  {item.desc}
+                <p className="mt-1 text-[14px] landing-muted leading-[1.5]">{plan.tagline}</p>
+
+                <p className="mt-6 flex items-baseline gap-1.5">
+                  <span className="font-[family-name:var(--font-display)] text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-none">
+                    {plan.price}
+                  </span>
+                  <span className="text-[14px] landing-muted">{plan.period}</span>
                 </p>
+                <p className="mt-2 min-h-[21px] text-[14px] landing-muted">{plan.note}</p>
+
+                <ul className="mt-8 mb-10 space-y-3" aria-label={`${plan.name} plan includes`}>
+                  {plan.features.map((feature) => (
+                    <li key={feature} className="flex items-start gap-2.5 text-[14px] landing-ink leading-[1.5]">
+                      <Check className="mt-0.5 h-4 w-4 shrink-0 landing-accent" aria-hidden="true" />
+                      {feature}
+                    </li>
+                  ))}
+                </ul>
+
+                <Link
+                  href={plan.href}
+                  className={`mt-auto block rounded-full px-6 py-3 text-center text-[15px] font-semibold tracking-[-0.01em] transition-all duration-300 ${
+                    plan.highlighted ? "landing-ink-button" : "border landing-ink-border landing-ink hover:bg-[var(--landing-canvas)]"
+                  }`}
+                >
+                  {plan.cta}
+                </Link>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ═══════ Full Width Product Image ═══════ */}
-      <section className="bg-white py-28">
-        <div className="max-w-[1200px] mx-auto px-6">
-          <div className="product-image rounded-[24px] overflow-hidden shadow-[rgba(16,55,132,0.03)_0px_17px_37px_0px,rgba(16,55,132,0.03)_0px_67px_67px_0px,rgba(16,55,132,0.02)_0px_150px_90px_0px]">
-            <Image
-              src="/landing/hero-study-app.png"
-              alt="Studyflow app interface"
-              width={1200}
-              height={600}
-              className="w-full h-auto"
-            />
-          </div>
-        </div>
-      </section>
-
       {/* ═══════ CTA Banner ═══════ */}
-      <section className="cta-section bg-white py-28">
+      <section className="landing-reveal landing-surface py-28">
         <div className="max-w-[700px] mx-auto px-6 text-center">
-          <h2 className="cta-heading font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] text-[#070709] leading-[1.1] mb-6">
-Know now, not in week nine.
+          <h2 className="font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-[1.1] mb-6">
+            Plan your first week
           </h2>
-          <p className="cta-sub text-[16px] md:text-[18px] text-[#60606c] leading-[1.5] tracking-[-0.01em] mb-10 max-w-[480px] mx-auto">
-It takes about five minutes to enter a term of coursework and the hours you have for it.
+          <p className="text-[16px] md:text-[18px] landing-muted leading-[1.5] tracking-[-0.01em] mb-10 max-w-[480px] mx-auto">
+            It takes about five minutes to add your coursework and the hours you’re free.
           </p>
-          <div className="cta-btn flex items-center justify-center gap-4">
-            <Link href="/register">
-              <button className="px-8 py-3.5 rounded-full bg-[#070709] text-white text-[16px] font-semibold tracking-[-0.01em] shadow-[rgba(36,36,40,0.1)_0px_1px_2px_0px,rgba(36,36,40,0.09)_0px_3px_3px_0px,rgba(36,36,40,0.05)_0px_6px_4px_0px,rgba(36,36,40,0.01)_0px_11px_4px_0px] hover:bg-[#1a1a1c] transition-all duration-300">
-                Get started for free
-              </button>
-            </Link>
-            <Link href="/dashboard">
-              <button className="px-6 py-3.5 rounded-full border border-[#070709] text-[#070709] text-[16px] font-medium tracking-[-0.01em] hover:bg-[#f5f5f5] transition-colors">
-                View demo
-              </button>
+          <div className="flex items-center justify-center gap-4">
+            <Link href="/register" className="landing-ink-button px-8 py-3.5 rounded-full text-[16px] font-semibold tracking-[-0.01em] transition-all duration-300">
+              Get started for free
             </Link>
           </div>
         </div>
       </section>
 
       {/* ═══════ Footer ═══════ */}
-      <footer className="bg-white border-t border-[#f5f5f5] py-16">
-        <div className="footer-content max-w-[1200px] mx-auto px-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-[#2597d0] flex items-center justify-center">
-              <BookOpen className="w-3.5 h-3.5 text-white" />
-            </div>
-            <span className="font-[family-name:var(--font-display)] font-bold text-[16px] tracking-[-0.01em] text-[#070709]">
-              Studyflow
+      <footer className="landing-surface border-t landing-border py-16">
+        <div className="max-w-[1200px] mx-auto px-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
+          <Link href="/" aria-label="StudyFlow home" className="flex items-center gap-2 rounded-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+            <BrandIcon className="size-8" />
+            <span className="font-[family-name:var(--font-display)] font-bold text-[16px] tracking-[-0.01em] landing-ink">
+              StudyFlow
             </span>
-          </div>
+          </Link>
 
           <div className="flex flex-wrap gap-8">
-            <Link href="#features" className="text-[14px] text-[#60606c] hover:text-[#070709] transition-colors">Features</Link>
-            <Link href="#how-it-works" className="text-[14px] text-[#60606c] hover:text-[#070709] transition-colors">How it works</Link>
-            <Link href="#pricing" className="text-[14px] text-[#60606c] hover:text-[#070709] transition-colors">Pricing</Link>
-            <span className="text-[14px] text-[#60606c] cursor-pointer hover:text-[#070709] transition-colors">Privacy</span>
-            <span className="text-[14px] text-[#60606c] cursor-pointer hover:text-[#070709] transition-colors">Terms</span>
+            <Link href="#features" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">How it works</Link>
+            <Link href="#pricing" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">Pricing</Link>
+            <Link href="/privacy" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">Privacy</Link>
+            <Link href="/terms" className="text-[14px] landing-muted hover:text-[var(--landing-ink)] transition-colors">Terms</Link>
           </div>
 
-          <p className="text-[12px] text-[#8b8b8b]">© 2026 Studyflow</p>
+          <p className="text-[12px] landing-subtle">© 2026 StudyFlow</p>
         </div>
       </footer>
     </div>

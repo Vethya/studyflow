@@ -1,0 +1,381 @@
+// @vitest-environment jsdom
+import React, { createContext, useContext } from "react";
+import MockDate from "mockdate";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const state = vi.hoisted(() => ({
+  mode: "normal" as "normal" | "loading" | "error",
+  tasks: [] as any[],
+  params: new URLSearchParams(),
+  api: { start: vi.fn(), finish: vi.fn(), remove: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn() },
+  savedId: "task-new",
+  setDataNull: false,
+}));
+
+const task = (overrides: Record<string, unknown> = {}) => ({
+  id: "task-1", title: "Read algorithms", category: "Reading", deadline: "2026-10-02T12:00:00Z", priority: "High",
+  originalEstimate: 120, plannedSource: "Original", plannedDuration: 120, actualDuration: 30, remainingDuration: 90,
+  course: "Algorithms", notes: "Notes", status: "In Progress", sessionsCompleted: 1, sessionsUpcoming: 1,
+  createdAt: "2026-09-01T00:00:00Z", updatedAt: "2026-09-20T00:00:00Z", ...overrides,
+});
+
+vi.mock("next/navigation", () => ({ useSearchParams: () => state.params }));
+vi.mock("next/link", () => ({ default: ({ children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a {...props}>{children}</a> }));
+vi.mock("@/hooks/use-account-timezone", () => ({ useAccountTimezone: () => "UTC" }));
+vi.mock("@/hooks/use-api", () => ({
+  describeError: (error: unknown) => error instanceof Error ? error.message : "Unknown error",
+  useApi: (_key: unknown, loader?: (signal: AbortSignal) => unknown) => {
+    if (loader) void loader(new AbortController().signal);
+    const setData = vi.fn((update: unknown) => typeof update === "function" ? (update as (current: any[] | undefined) => any[])(state.setDataNull ? undefined : state.tasks) : update);
+    if (state.mode === "loading") return { data: null, error: null, isLoading: true, isValidating: true, reload: vi.fn(), setData };
+    if (state.mode === "error") return { data: null, error: new Error("tasks failed"), isLoading: false, isValidating: false, reload: vi.fn(), setData };
+    return { data: state.tasks, error: null, isLoading: false, isValidating: false, reload: vi.fn(), setData };
+  },
+}));
+vi.mock("sonner", () => ({ toast: state.toast }));
+vi.mock("@/lib/api", () => {
+  class MockApiError extends Error { status: number; constructor(status: number) { super("api error"); this.status = status; } }
+  return { ApiError: MockApiError, tasks: { startTask: state.api.start, finishTaskEarly: state.api.finish, deleteTask: state.api.remove, listTasks: vi.fn() } };
+});
+vi.mock("@/components/page-kit", () => ({
+  CategoryTag: ({ category }: any) => <span>{category}</span>,
+  PageShell: ({ children }: any) => <main>{children}</main>,
+  PageHeader: ({ title, description, actions }: any) => <header><h1>{title}</h1><p>{description}</p>{actions}</header>,
+  EmptyState: ({ title, children, action }: any) => <div><h2>{title}</h2><p>{children}</p>{action}</div>,
+}));
+vi.mock("@/components/google-import-button", () => ({ GoogleImportButton: () => <button>Google import</button>, GoogleImportReminder: () => <div>Google reminder</div> }));
+vi.mock("@/components/task-form-dialog", () => ({ TaskFormDialog: ({ open, onSaved }: any) => open ? <button onClick={() => onSaved(task({ id: state.savedId, title: "New task" }))}>Save task</button> : null }));
+
+const SelectContext = createContext<{ value: string; change: (value: string) => void }>({ value: "", change: () => undefined });
+vi.mock("@/components/ui/select", () => ({
+  Select: ({ value, onValueChange, children }: any) => <SelectContext.Provider value={{ value, change: onValueChange }}><div data-select-value={value}>{children}{value === "deadline" && <button onClick={() => onValueChange("unknown-sort")}>Unknown sort</button>}</div></SelectContext.Provider>,
+  SelectTrigger: ({ children, ...props }: any) => <button {...props}>{children}</button>,
+  SelectValue: ({ children }: any) => { const context = useContext(SelectContext); return <span>{typeof children === "function" ? children(context.value) : children}</span>; },
+  SelectContent: ({ children }: any) => { const context = useContext(SelectContext); return <div>{children}<button onClick={() => context.change("")}>Select empty</button></div>; },
+  SelectItem: ({ value, children }: any) => { const context = useContext(SelectContext); return <button onClick={() => context.change(value)}>{children}</button>; },
+}));
+vi.mock("@/components/ui/popover", () => ({ Popover: ({ children }: any) => <div>{children}</div>, PopoverTrigger: ({ render }: any) => render, PopoverContent: ({ children }: any) => <div>{children}</div> }));
+vi.mock("@/components/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: any) => <div>{children}</div>,
+  DropdownMenuTrigger: ({ render }: any) => render,
+  DropdownMenuContent: ({ children }: any) => <div>{children}</div>,
+  DropdownMenuItem: ({ children, render, onClick }: any) => render ?? <button onClick={onClick}>{children}</button>,
+  DropdownMenuSeparator: () => <hr />,
+}));
+vi.mock("@/components/ui/confirm-dialog", () => ({ ConfirmDialog: ({ open, title, confirmLabel, onConfirm, onOpenChange }: any) => open ? <div role="dialog" aria-label={title}><button onClick={() => void onConfirm()}>{confirmLabel}</button><button onClick={() => onOpenChange?.(false)}>Cancel task dialog</button></div> : <button onClick={() => void onConfirm()}>Invoke {confirmLabel} with no target</button> }));
+
+import { ApiError } from "@/lib/api";
+import TasksPage from "./(app)/tasks/page";
+import { flushPendingActions, resetUndoState } from "@/lib/undo";
+
+/** Finish and delete wait out an undo window; tests commit them at once. */
+const commitPending = () => act(() => flushPendingActions());
+
+beforeEach(() => {
+  MockDate.set("2026-09-30T12:00:00Z");
+  state.mode = "normal";
+  state.params = new URLSearchParams();
+  state.tasks = [task({ id: "task-new", title: "New assignment", status: "Not Started", priority: "Low", course: undefined }), task(), task({ id: "task-done", title: "Finished task", status: "Completed", remainingDuration: 0, priority: "Medium" }), task({ id: "task-overdue", title: "Overdue task", status: "Overdue", priority: "High", deadline: "2026-09-20T12:00:00Z" })];
+  state.api.start.mockResolvedValue(undefined);
+  state.api.finish.mockResolvedValue(undefined);
+  state.api.remove.mockResolvedValue(undefined);
+  state.savedId = "task-new";
+  state.setDataNull = false;
+  vi.clearAllMocks();
+});
+afterEach(() => {
+  cleanup();
+  resetUndoState();
+  MockDate.reset();
+});
+
+describe("tasks page", () => {
+  it("filters, sorts, edits, starts, finishes, and deletes tasks", async () => {
+    render(<TasksPage />);
+    expect(screen.getByRole("heading", { name: "Tasks" })).toBeTruthy();
+    const search = screen.getByRole("searchbox", { name: "Search tasks by title or course" });
+    fireEvent.change(search, { target: { value: "read" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+    screen.getByRole("button", { name: "Remove “read” filter" }).click();
+    fireEvent.change(search, { target: { value: "read" } });
+    fireEvent.keyDown(search, { key: "Escape" });
+    fireEvent.change(search, { target: { value: "read" } });
+    screen.getByRole("button", { name: "Clear search" }).click();
+    for (const label of ["Latest first", "Most work left", "Priority", "Name (A–Z)", "Soonest first"]) screen.getByRole("button", { name: label }).click();
+    fireEvent.click(screen.getByRole("tab", { name: "To do" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "To do" }).getAttribute("aria-selected")).toBe("true"));
+    expect(screen.queryByText("Read algorithms")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "All" }));
+    screen.getByRole("button", { name: /Filters/ }).click();
+    screen.getAllByRole("button", { name: "Assignment" })[0].click();
+    screen.getAllByRole("button", { name: "High" })[0].click();
+    const course = screen.getByPlaceholderText("Any course");
+    fireEvent.change(course, { target: { value: "Algorithms" } });
+    fireEvent.blur(course);
+    fireEvent.keyDown(course, { key: "Enter" });
+    fireEvent.keyDown(course, { key: "Escape" });
+    fireEvent.change(screen.getByLabelText("Show tasks due before"), { target: { value: "2026-10-03T10:00" } });
+    for (const label of ["Remove Assignment filter", "Remove High priority filter", "Remove Algorithms filter", "Remove Due before set filter"]) {
+      screen.getByRole("button", { name: label }).click();
+    }
+    screen.getByRole("button", { name: "Clear all filters" }).click();
+    screen.getByRole("button", { name: "Unknown sort" }).click();
+    screen.getByRole("button", { name: "Add task" }).click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save task" })).toBeTruthy());
+    screen.getByRole("button", { name: "Save task" }).click();
+
+    const actionButtons = screen.getAllByRole("button", { name: /Actions for/ });
+    actionButtons[0].click();
+    screen.getAllByRole("button", { name: "Edit" })[0].click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save task" })).toBeTruthy());
+    state.savedId = "task-added";
+    screen.getByRole("button", { name: "Save task" }).click();
+    screen.getAllByRole("button", { name: /Actions for New assignment/ })[0].click();
+    screen.getAllByRole("button", { name: "Start" })[0].click();
+    await waitFor(() => expect(state.api.start).toHaveBeenCalled());
+    screen.getAllByRole("button", { name: /Actions for Read algorithms/ })[0].click();
+    screen.getAllByRole("button", { name: "Mark done" })[0].click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Mark it finished" })).toBeTruthy());
+    screen.getByRole("button", { name: "Cancel task dialog" }).click();
+    screen.getAllByRole("button", { name: /Actions for Read algorithms/ })[0].click();
+    screen.getByRole("button", { name: "Mark done" }).click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Mark it finished" })).toBeTruthy());
+    screen.getByRole("button", { name: "Mark it finished" }).click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invoke Mark it finished with no target" })).toBeTruthy());
+    screen.getByRole("button", { name: "Invoke Mark it finished with no target" }).click();
+    screen.getAllByRole("button", { name: /Actions for Finished task/ })[0].click();
+    const beforeDelete = Number(screen.getByText(/^\d+ tasks?$/).textContent?.split(" ")[0]);
+    screen.getAllByRole("button", { name: "Delete" }).at(-1)!.click();
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Delete “Overdue task”?" })).toBeTruthy());
+    screen.getByRole("button", { name: "Delete task" }).click();
+    // The mocked menus render every row's items, so the last Delete is the last row's.
+    await waitFor(() => expect(screen.queryByText("Overdue task")).toBeNull());
+    const afterDelete = beforeDelete - 1;
+    expect(screen.getByText(`${afterDelete} ${afterDelete === 1 ? "task" : "tasks"}`)).toBeTruthy();
+    expect(state.toast.success).toHaveBeenCalledWith("Task deleted", expect.objectContaining({ description: "Overdue task", action: expect.objectContaining({ label: "Undo" }) }));
+    expect(state.api.remove).not.toHaveBeenCalled();
+    await commitPending();
+    await waitFor(() => expect(state.api.remove).toHaveBeenCalled());
+  });
+
+  it("covers loading, error, empty/filter-empty, and action failures", async () => {
+    state.mode = "loading";
+    render(<TasksPage />);
+    expect(screen.getByText("Loading…")).toBeTruthy();
+    cleanup();
+    state.mode = "error";
+    render(<TasksPage />);
+    expect(screen.getByText("Could not load your tasks")).toBeTruthy();
+    cleanup();
+    state.tasks = [];
+    render(<TasksPage />);
+    expect(screen.getByText("No tasks yet")).toBeTruthy();
+    cleanup();
+    state.tasks = [task()];
+    state.params = new URLSearchParams("search=nomatch");
+    render(<TasksPage />);
+    expect(screen.getByText("No tasks match these filters")).toBeTruthy();
+    cleanup();
+  state.tasks = [task({ status: "In Progress" })];
+  state.params = new URLSearchParams();
+  state.mode = "normal";
+    state.api.finish.mockRejectedValueOnce(new ApiError(409, "conflict"));
+    render(<TasksPage />);
+    screen.getAllByRole("button", { name: /Actions for/ })[0].click();
+    screen.getByRole("button", { name: "Mark done" }).click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Mark it finished" })).toBeTruthy());
+    screen.getByRole("button", { name: "Mark it finished" }).click();
+    await commitPending();
+    await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("Start the task before marking it done."));
+  });
+
+  it("executes every sort comparator and restores optimistic actions on ordinary errors", async () => {
+    state.tasks = [
+      task({ id: "a", title: "Alpha", status: "Not Started", priority: "High", remainingDuration: 10, deadline: "2026-10-02T12:00:00Z" }),
+      task({ id: "b", title: "Beta", priority: "Low", remainingDuration: 50, deadline: "2026-10-01T12:00:00Z" }),
+      task({ id: "c", title: "Gamma", priority: "High", remainingDuration: 30, deadline: "2026-10-03T12:00:00Z" }),
+    ];
+    render(<TasksPage />);
+    const sort = screen.getByRole("button", { name: "Soonest first" });
+    for (const label of ["Latest first", "Most work left", "Priority", "Name (A–Z)", "Soonest first"]) {
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      await waitFor(() => expect(sort).toBeTruthy());
+    }
+
+    let resolveStart!: () => void;
+    state.api.start.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveStart = resolve; }));
+    screen.getAllByRole("button", { name: /Actions for Alpha/ })[0].click();
+    screen.getByRole("button", { name: "Start" }).click();
+    await waitFor(() => expect(state.api.start).toHaveBeenCalled());
+    screen.getByRole("button", { name: "Start" }).click();
+    resolveStart();
+    await waitFor(() => expect(state.toast.success).toHaveBeenCalledWith("Task started"));
+
+    state.api.start.mockRejectedValueOnce(new Error("start failed"));
+    screen.getAllByRole("button", { name: /Actions for Alpha/ })[0].click();
+    screen.getByRole("button", { name: "Start" }).click();
+    await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("start failed"));
+  });
+
+  it("covers filtered action removal branches and empty select values", async () => {
+    state.tasks = [task({ id: "active", title: "Active", status: "In Progress" }), task({ id: "pending", title: "Pending", status: "Not Started" })];
+    render(<TasksPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "In progress" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Actions for Pending/ })).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: /Actions for Active/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark done" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Mark it finished" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Mark it finished" }));
+    // A finished task leaves a list filtered to In progress straight away.
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Actions for Active/ })).toBeNull());
+    await commitPending();
+    await waitFor(() => expect(state.api.finish).toHaveBeenCalled());
+
+    cleanup();
+    state.tasks = [task({ id: "pending", title: "Pending", status: "Not Started" })];
+    render(<TasksPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "To do" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Actions for Pending/ })).toBeTruthy());
+    screen.getByRole("button", { name: /Actions for Pending/ }).click();
+    screen.getByRole("button", { name: "Start" }).click();
+    await waitFor(() => expect(state.api.start).toHaveBeenCalled());
+
+    screen.getByRole("button", { name: /Filters/ }).click();
+    for (const empty of screen.getAllByRole("button", { name: "Select empty" })) fireEvent.click(empty);
+    fireEvent.click(screen.getAllByRole("button", { name: "Any category" }).at(-1)!);
+  });
+
+  it("brings a deleted task back when the deletion is undone", async () => {
+    state.tasks = [task({ id: "keep", title: "Keep me", status: "Not Started" })];
+    render(<TasksPage />);
+    screen.getByRole("button", { name: /Actions for Keep me/ }).click();
+    screen.getAllByRole("button", { name: "Delete" }).at(-1)!.click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete task" })).toBeTruthy());
+    screen.getByRole("button", { name: "Delete task" }).click();
+    await waitFor(() => expect(screen.queryByText("Keep me")).toBeNull());
+
+    const options = state.toast.success.mock.calls.at(-1)![1] as { action: { onClick: () => void } };
+    act(() => options.action.onClick());
+    await waitFor(() => expect(screen.getByText("Keep me")).toBeTruthy());
+    await commitPending();
+    expect(state.api.remove).not.toHaveBeenCalled();
+  });
+
+  it("groups upcoming work by week and reports ordinary finish and delete failures", async () => {
+    const inDays = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString();
+    state.tasks = [
+      task({ id: "soon", title: "Soon task", status: "In Progress", deadline: inDays(2) }),
+      task({ id: "far", title: "Far task", status: "Not Started", deadline: inDays(30) }),
+    ];
+    state.api.finish.mockRejectedValueOnce(new Error("finish failed"));
+    state.api.remove.mockRejectedValueOnce(new Error("delete failed"));
+    render(<TasksPage />);
+    expect(screen.getByRole("region", { name: "Due in the next 7 days" }).textContent).toContain("Soon task");
+    expect(screen.getByRole("region", { name: "Later" }).textContent).toContain("Far task");
+
+    screen.getByRole("button", { name: /Actions for Soon task/ }).click();
+    screen.getAllByRole("button", { name: "Mark done" })[0].click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Mark it finished" })).toBeTruthy());
+    screen.getByRole("button", { name: "Mark it finished" }).click();
+    await commitPending();
+    await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("finish failed"));
+
+    screen.getByRole("button", { name: /Actions for Far task/ }).click();
+    screen.getAllByRole("button", { name: "Delete" }).at(-1)!.click();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete task" })).toBeTruthy());
+    screen.getByRole("button", { name: "Delete task" }).click();
+    await commitPending();
+    await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("delete failed"));
+  });
+
+  it("keeps a task when deletion is cancelled", async () => {
+    state.tasks = [task({ title: "Keep me" })];
+    render(<TasksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByRole("dialog", { name: "Delete “Keep me”?" })).toBeTruthy();
+    expect(screen.getByText("Keep me")).toBeTruthy();
+    await commitPending();
+    expect(state.api.remove).not.toHaveBeenCalled();
+    expect(state.toast.success).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel task dialog" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText("Keep me")).toBeTruthy();
+    await commitPending();
+    expect(state.api.remove).not.toHaveBeenCalled();
+    expect(state.toast.success).not.toHaveBeenCalled();
+  });
+
+  it("restores optimistic state when the cache callback has no current list", async () => {
+    state.tasks = [task({ id: "recoverable", title: "Recoverable", status: "Not Started" })];
+    state.api.start.mockRejectedValueOnce(new Error("start failed without a list"));
+    render(<TasksPage />);
+    state.setDataNull = true;
+    screen.getByRole("button", { name: /Actions for Recoverable/ }).click();
+    screen.getByRole("button", { name: "Start" }).click();
+    await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("start failed without a list"));
+
+    cleanup();
+    state.setDataNull = false;
+    state.tasks = [task({ id: "stale", title: "Stale row", status: "Not Started" })];
+    state.api.start.mockRejectedValueOnce(new Error("stale row failed"));
+    render(<TasksPage />);
+    state.tasks.splice(0);
+    screen.getByRole("button", { name: /Actions for Stale row/ }).click();
+    screen.getByRole("button", { name: "Start" }).click();
+    await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith("stale row failed"));
+  });
+
+  it("restores the tab, filters and order from the address bar and keeps them there", async () => {
+    window.history.replaceState(null, "", "/tasks?status=in-progress&category=reading&priority=high&course=Algorithms&due=2026-10-03T10:00&sort=title&unknown=1");
+    state.params = new URLSearchParams(window.location.search);
+    state.tasks = [task(), task({ id: "other", title: "Essay", course: "History" })];
+    render(<TasksPage />);
+    expect(screen.getByRole("tab", { name: "In progress" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("button", { name: "Remove Reading filter" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove High priority filter" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove Algorithms filter" })).toBeTruthy();
+    expect(screen.getByText("2 tasks match")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: "All" }));
+    await waitFor(() => expect(window.location.search).not.toContain("status="));
+    expect(window.location.search).toContain("sort=title");
+    expect(window.location.search).toContain("unknown=1");
+
+    // Search covers the course as well as the title.
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search tasks by title or course" }), { target: { value: "history" } });
+    await waitFor(() => expect(screen.getByText("1 task matches")).toBeTruthy());
+    expect(screen.getByText("Essay")).toBeTruthy();
+    expect(screen.queryByText("Read algorithms")).toBeNull();
+
+    screen.getByRole("button", { name: "Clear all filters" }).click();
+    fireEvent.click(screen.getByRole("button", { name: "Soonest first" }));
+    await waitFor(() => expect(window.location.search).toBe("?unknown=1"));
+
+    cleanup();
+    window.history.replaceState(null, "", "/tasks?status=nope&sort=nope");
+    state.params = new URLSearchParams(window.location.search);
+    render(<TasksPage />);
+    expect(screen.getByRole("tab", { name: "All" }).getAttribute("aria-selected")).toBe("true");
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("follows a link to a filtered list opened while already on Tasks", () => {
+    state.params = new URLSearchParams();
+    const view = render(<TasksPage />);
+    expect(screen.getByRole("tab", { name: "All" }).getAttribute("aria-selected")).toBe("true");
+
+    state.params = new URLSearchParams("status=overdue&priority=high");
+    view.rerender(<TasksPage />);
+    expect(screen.getByRole("tab", { name: "Overdue" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("button", { name: "Remove High priority filter" })).toBeTruthy();
+
+    // The page writing its own state back to the address bar changes nothing.
+    fireEvent.click(screen.getByRole("tab", { name: "Done" }));
+    state.params = new URLSearchParams("status=done&priority=high");
+    view.rerender(<TasksPage />);
+    expect(screen.getByRole("tab", { name: "Done" }).getAttribute("aria-selected")).toBe("true");
+    window.history.replaceState(null, "", "/");
+  });
+});

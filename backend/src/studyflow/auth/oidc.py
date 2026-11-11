@@ -7,8 +7,8 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, Protocol
-from urllib.parse import urlencode
+from typing import Any, Protocol, cast
+from urllib.parse import urlencode, urlsplit
 from uuid import UUID
 
 import httpx
@@ -24,6 +24,8 @@ GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"  # noqa: S105
 GOOGLE_JWKS_ENDPOINT = "https://www.googleapis.com/oauth2/v3/certs"
 GOOGLE_ISSUERS = {"accounts.google.com", "https://accounts.google.com"}
 OIDC_SCOPES = "openid email profile"
+DELETION_AUTH_MAX_AGE = timedelta(minutes=5)
+AUTH_TIME_CLOCK_SKEW = timedelta(minutes=1)
 
 
 class InvalidOIDCResponseError(ValueError):
@@ -48,6 +50,13 @@ class InvalidLinkChallengeError(ValueError):
     """A link challenge or password is invalid without revealing which."""
 
 
+class AccountDeletionReadyError(ValueError):
+    """Google reauthentication completed for account deletion."""
+
+    def __init__(self, challenge: str) -> None:
+        self.challenge = challenge
+
+
 class OIDCNotConfiguredError(RuntimeError):
     """Google OIDC credentials have not been configured."""
 
@@ -57,6 +66,8 @@ class GoogleClaims:
     subject: str
     email: str
     name: str
+    auth_time: int | None = None
+    picture_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +75,7 @@ class OIDCAccount:
     id: UUID
     email: str
     name: str
+    avatar_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,12 +91,16 @@ class OIDCLoginResult:
     name: str
     session_token: str
     csrf_token: str
+    link_completed: bool = False
+    avatar_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class OIDCStateRecord:
     nonce_hash: str
     timezone: str
+    link_account_id: UUID | None = None
+    deletion_account_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +110,7 @@ class OIDCLinkChallenge:
     subject: str
     email: str
     password_hash: str
+    picture_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,15 +122,41 @@ class LinkedIdentity:
 
 class OIDCRepository(Protocol):
     async def store_state(
-        self, state_hash: str, nonce_hash: str, timezone: str, expires_at: datetime
+        self,
+        state_hash: str,
+        nonce_hash: str,
+        timezone: str,
+        expires_at: datetime,
+        link_account_id: UUID | None = None,
     ) -> None: ...
     async def consume_state(self, state_hash: str, now: datetime) -> OIDCStateRecord | None: ...
     async def restore_state(
         self, state_hash: str, consumed_at: datetime, now: datetime
     ) -> bool: ...
     async def resolve_identity(self, claims: GoogleClaims, timezone: str) -> OIDCAccount | None: ...
+    async def link_identity(self, account_id: UUID, claims: GoogleClaims) -> OIDCAccount | None: ...
     async def create_link_challenge(
         self, claims: GoogleClaims, token_hash: str, expires_at: datetime
+    ) -> bool: ...
+
+
+class OIDCDeletionRepository(Protocol):
+    async def store_state(
+        self,
+        state_hash: str,
+        nonce_hash: str,
+        timezone: str,
+        expires_at: datetime,
+        link_account_id: UUID | None = None,
+        deletion_account_id: UUID | None = None,
+    ) -> None: ...
+
+    async def create_deletion_challenge(
+        self,
+        account_id: UUID,
+        claims: GoogleClaims,
+        token_hash: str,
+        expires_at: datetime,
     ) -> bool: ...
 
 
@@ -129,7 +172,12 @@ class SessionIssuer(Protocol):
 
 class OIDCLogin(Protocol):
     async def start(self, timezone: str) -> OIDCStart: ...
+    async def start_link(self, account_id: UUID, timezone: str) -> OIDCStart: ...
     async def complete(self, code: str, state: str, state_cookie: str) -> OIDCLoginResult: ...
+
+
+class AccountDeletionOIDC(Protocol):
+    async def start_account_deletion(self, account_id: UUID, timezone: str) -> OIDCStart: ...
 
 
 def hash_oidc_secret(value: str) -> str:
@@ -155,15 +203,32 @@ class OIDCLoginService:
         self._token_factory = token_factory
         self._clock = clock
 
-    async def start(self, timezone: str) -> OIDCStart:
+    async def _start(
+        self,
+        timezone: str,
+        link_account_id: UUID | None = None,
+        deletion_account_id: UUID | None = None,
+    ) -> OIDCStart:
         state = self._token_factory()
         nonce = self._token_factory()
-        await self._repository.store_state(
-            hash_oidc_secret(state),
-            hash_oidc_secret(nonce),
-            timezone,
-            self._clock() + timedelta(minutes=10),
-        )
+        if deletion_account_id is None:
+            await self._repository.store_state(
+                hash_oidc_secret(state),
+                hash_oidc_secret(nonce),
+                timezone,
+                self._clock() + timedelta(minutes=10),
+                link_account_id,
+            )
+        else:
+            deletion_repository = cast(OIDCDeletionRepository, self._repository)
+            await deletion_repository.store_state(
+                hash_oidc_secret(state),
+                hash_oidc_secret(nonce),
+                timezone,
+                self._clock() + timedelta(minutes=10),
+                link_account_id,
+                deletion_account_id,
+            )
         query = urlencode(
             {
                 "client_id": self._client_id,
@@ -172,9 +237,30 @@ class OIDCLoginService:
                 "scope": OIDC_SCOPES,
                 "state": state,
                 "nonce": nonce,
+                **(
+                    {
+                        "prompt": "login",
+                        "max_age": 0,
+                        "claims": json.dumps(
+                            {"id_token": {"auth_time": {"essential": True}}},
+                            separators=(",", ":"),
+                        ),
+                    }
+                    if deletion_account_id is not None
+                    else {}
+                ),
             }
         )
         return OIDCStart(f"{GOOGLE_AUTHORIZATION_ENDPOINT}?{query}", state)
+
+    async def start(self, timezone: str) -> OIDCStart:
+        return await self._start(timezone)
+
+    async def start_link(self, account_id: UUID, timezone: str) -> OIDCStart:
+        return await self._start(timezone, account_id)
+
+    async def start_account_deletion(self, account_id: UUID, timezone: str) -> OIDCStart:
+        return await self._start(timezone, deletion_account_id=account_id)
 
     async def complete(self, code: str, state: str, state_cookie: str) -> OIDCLoginResult:
         if not hmac.compare_digest(state, state_cookie):
@@ -192,6 +278,35 @@ class OIDCLoginService:
                     state_hash, consumed_at, self._clock()
                 )
             raise
+        if state_record.deletion_account_id is not None:
+            if not _has_recent_authentication(claims.auth_time, self._clock()):
+                raise InvalidOIDCResponseError
+            challenge = self._token_factory()
+            deletion_repository = cast(OIDCDeletionRepository, self._repository)
+            if not await deletion_repository.create_deletion_challenge(
+                state_record.deletion_account_id,
+                claims,
+                hash_oidc_secret(challenge),
+                self._clock() + timedelta(minutes=10),
+            ):
+                raise InvalidOIDCResponseError
+            raise AccountDeletionReadyError(challenge)
+        if state_record.link_account_id is not None:
+            account = await self._repository.link_identity(state_record.link_account_id, claims)
+            if account is None:
+                raise InvalidOIDCResponseError
+            credentials = await self._sessions.create(account.id)
+            if credentials is None:
+                raise InvalidOIDCResponseError
+            return OIDCLoginResult(
+                account.id,
+                account.email,
+                account.name,
+                credentials.session_token,
+                credentials.csrf_token,
+                link_completed=True,
+                avatar_url=account.avatar_url,
+            )
         account = await self._repository.resolve_identity(claims, state_record.timezone)
         if account is None:
             challenge = self._token_factory()
@@ -211,6 +326,7 @@ class OIDCLoginService:
             account.name,
             credentials.session_token,
             credentials.csrf_token,
+            avatar_url=account.avatar_url,
         )
 
 
@@ -327,11 +443,53 @@ class GoogleOIDCProvider:
             raise InvalidOIDCResponseError from error
         raw_name = claims.get("name")
         name = raw_name.strip()[:200] if isinstance(raw_name, str) else ""
-        return GoogleClaims(subject, email, name or email.partition("@")[0])
+        picture_url = _validated_picture_url(claims.get("picture"))
+        raw_auth_time = claims.get("auth_time")
+        auth_time = (
+            raw_auth_time
+            if isinstance(raw_auth_time, int) and not isinstance(raw_auth_time, bool)
+            else None
+        )
+        return GoogleClaims(
+            subject,
+            email,
+            name or email.partition("@")[0],
+            auth_time=auth_time,
+            picture_url=picture_url,
+        )
+
+
+def _validated_picture_url(raw_picture: Any) -> str | None:
+    if not isinstance(raw_picture, str):
+        return None
+    picture_url = raw_picture.strip()
+    if not picture_url or len(picture_url) > 2048:
+        return None
+    parsed = urlsplit(picture_url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        return None
+    return picture_url
+
+
+def _has_recent_authentication(auth_time: int | None, now: datetime) -> bool:
+    if auth_time is None:
+        return False
+    try:
+        authenticated_at = datetime.fromtimestamp(auth_time, tz=UTC)
+    except (OSError, OverflowError, ValueError):
+        return False
+    age = now - authenticated_at
+    return -AUTH_TIME_CLOCK_SKEW <= age <= DELETION_AUTH_MAX_AGE
 
 
 class UnconfiguredOIDCLogin:
     async def start(self, timezone: str) -> OIDCStart:
+        raise OIDCNotConfiguredError
+
+    async def start_link(self, account_id: UUID, timezone: str) -> OIDCStart:
+        raise OIDCNotConfiguredError
+
+    async def start_account_deletion(self, account_id: UUID, timezone: str) -> OIDCStart:
         raise OIDCNotConfiguredError
 
     async def complete(self, code: str, state: str, state_cookie: str) -> OIDCLoginResult:

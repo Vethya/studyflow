@@ -50,6 +50,7 @@ async def test_timezone_change_requires_availability_confirmation_and_scopes_upd
         other = await repository.get(other_id)
         assert other is not None and other.timezone == "Europe/Paris"
         assert await repository.get(uuid4()) is None
+        assert await repository.update(uuid4(), "UTC", 60, 15) is None
     finally:
         await database.stop()
 

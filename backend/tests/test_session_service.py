@@ -48,3 +48,41 @@ async def test_session_service_issues_opaque_credentials_and_persists_only_hashe
             absolute_expires_at=now + timedelta(days=7),
         )
     ]
+
+
+@pytest.mark.anyio
+async def test_session_service_default_token_factory_and_clock() -> None:
+    repository = SessionRepositoryStub()
+    service = SessionService(repository)
+    account_id = uuid4()
+
+    credentials = await service.create(account_id)
+
+    assert credentials is not None
+    assert len(credentials.session_token) >= 32
+    assert len(credentials.csrf_token) >= 32
+    assert len(repository.sessions) == 1
+    assert repository.sessions[0].account_id == account_id
+
+
+@dataclass
+class FailingSessionRepositoryStub:
+    async def create(
+        self,
+        session: PendingSession,
+        expected_password_hash: str | None = None,
+        *,
+        now: datetime,
+    ) -> bool:
+        return False
+
+
+@pytest.mark.anyio
+async def test_session_service_returns_none_when_creation_fails() -> None:
+    repository = FailingSessionRepositoryStub()
+    service = SessionService(repository)
+    account_id = uuid4()
+
+    credentials = await service.create(account_id)
+
+    assert credentials is None

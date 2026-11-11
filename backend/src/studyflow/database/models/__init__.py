@@ -1,6 +1,7 @@
 """Persistent domain models."""
 
 from studyflow.database.models.authentication import (
+    AuthenticationAccountDeletionChallenge,
     AuthenticationEmailToken,
     AuthenticationIdentity,
     AuthenticationOIDCLinkChallenge,
@@ -11,6 +12,12 @@ from studyflow.database.models.authentication import (
     StudentAccount,
 )
 from studyflow.database.models.availability import AvailabilityWindow, UnavailablePeriod
+from studyflow.database.models.integrations import (
+    GoogleImportCheck,
+    GoogleImportSnapshot,
+    GoogleImportState,
+)
+from studyflow.database.models.reminders import ReminderDelivery, ReminderPreference
 from studyflow.database.models.scheduling import (
     ProposalTaskAllocation,
     RecoverySnapshotOutcome,
@@ -20,10 +27,18 @@ from studyflow.database.models.scheduling import (
     StudySession,
     StudySessionOutcome,
 )
-from studyflow.database.models.tasks import AcademicTask, TaskDeadlineHistory
+from studyflow.database.models.tasks import (
+    AcademicTask,
+    AdaptiveEstimationAcknowledgment,
+    AdaptiveEstimationPrediction,
+    TaskDeadlineHistory,
+)
 
 __all__ = [
     "AcademicTask",
+    "AdaptiveEstimationAcknowledgment",
+    "AdaptiveEstimationPrediction",
+    "AuthenticationAccountDeletionChallenge",
     "AuthenticationEmailToken",
     "AuthenticationIdentity",
     "AuthenticationOIDCLinkChallenge",
@@ -32,9 +47,14 @@ __all__ = [
     "AuthenticationRegistration",
     "AuthenticationSession",
     "AvailabilityWindow",
+    "GoogleImportCheck",
+    "GoogleImportSnapshot",
+    "GoogleImportState",
     "ProposalTaskAllocation",
     "RecoverySnapshotOutcome",
     "RecoveryTaskWork",
+    "ReminderDelivery",
+    "ReminderPreference",
     "ScheduleProposal",
     "ScheduleRecoverySnapshot",
     "StudentAccount",

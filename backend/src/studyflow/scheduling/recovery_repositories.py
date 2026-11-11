@@ -52,12 +52,13 @@ class SqlAlchemyRecoverySnapshotRepository:
             if (
                 trigger.proposal_id is not None
                 or trigger_outcome is None
-                or trigger_outcome.kind != SessionOutcomeKind.MISSED.value
+                or trigger_outcome.kind
+                not in (SessionOutcomeKind.MISSED.value, SessionOutcomeKind.DELAYED.value)
                 or trigger_outcome.remaining_minutes <= 0
                 or trigger_outcome.rescheduled_at is not None
             ):
                 raise InvalidRecoveryTriggerError(
-                    "Recovery requires an unresolved missed-session outcome"
+                    "Recovery requires an unresolved missed or delayed-session outcome"
                 )
             now_utc = self._aware(now).astimezone(UTC)
             accepted = list(
@@ -135,6 +136,7 @@ class SqlAlchemyRecoverySnapshotRepository:
                     captured_at=snapshot.captured_at,
                 )
             )
+            await session.flush()
             session.add_all(
                 WorkRow(
                     proposal_id=proposal_id,
@@ -217,7 +219,7 @@ class SqlAlchemyTaskRecoveryProposalInvalidator:
         account_id: UUID,
         task_id: UUID,
     ) -> None:
-        proposal_ids = tuple(
+        recovery_proposal_ids = set(
             await session.scalars(
                 select(SnapshotRow.proposal_id)
                 .join(WorkRow, WorkRow.proposal_id == SnapshotRow.proposal_id)
@@ -228,6 +230,31 @@ class SqlAlchemyTaskRecoveryProposalInvalidator:
                 .with_for_update()
             )
         )
+        session_proposal_ids = {
+            proposal_id
+            for proposal_id in await session.scalars(
+                select(SessionRow.proposal_id)
+                .where(
+                    SessionRow.account_id == account_id,
+                    SessionRow.task_id == task_id,
+                    SessionRow.proposal_id.is_not(None),
+                )
+                .with_for_update()
+            )
+            if proposal_id is not None
+        }
+        allocation_proposal_ids = set(
+            await session.scalars(
+                select(AllocationRow.proposal_id)
+                .join(ProposalRow, ProposalRow.id == AllocationRow.proposal_id)
+                .where(
+                    ProposalRow.account_id == account_id,
+                    AllocationRow.task_id == task_id,
+                )
+                .with_for_update()
+            )
+        )
+        proposal_ids = tuple(recovery_proposal_ids | session_proposal_ids | allocation_proposal_ids)
         if not proposal_ids:
             return
         await session.execute(delete(WorkRow).where(WorkRow.proposal_id.in_(proposal_ids)))

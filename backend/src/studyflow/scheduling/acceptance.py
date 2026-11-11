@@ -2,13 +2,14 @@
 
 import asyncio
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from uuid import UUID
 
 from studyflow.accounts.preferences import AccountPreferences
 from studyflow.availability.unavailable import UnavailablePeriods
 from studyflow.availability.windows import AvailabilityWindows
+from studyflow.scheduling.outcomes import StudySessions
 from studyflow.scheduling.proposals import (
     ScheduleProposalRepository,
     StudySessionRecord,
@@ -18,7 +19,7 @@ from studyflow.scheduling.recovery import (
     RecoverySnapshotRepository,
     recovery_input_fingerprint,
 )
-from studyflow.scheduling.service import schedule_input_fingerprint
+from studyflow.scheduling.service import schedule_input_fingerprint, tasks_for_schedule
 from studyflow.tasks.service import AcademicTasks
 
 
@@ -34,6 +35,9 @@ class ScheduleAcceptance(Protocol):
     async def reject(self, account_id: UUID, proposal_id: UUID) -> bool: ...
 
 
+DEFAULT_ACCEPTANCE_GRACE_PERIOD = timedelta(minutes=2)
+
+
 class ScheduleAcceptanceService:
     def __init__(
         self,
@@ -44,7 +48,9 @@ class ScheduleAcceptanceService:
         proposals: ScheduleProposalRepository,
         recovery_snapshots: RecoverySnapshotRepository | None = None,
         *,
+        study_sessions: StudySessions | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        acceptance_grace_period: timedelta = DEFAULT_ACCEPTANCE_GRACE_PERIOD,
     ) -> None:
         self._tasks = tasks
         self._availability_windows = availability_windows
@@ -52,7 +58,9 @@ class ScheduleAcceptanceService:
         self._preferences = preferences
         self._proposals = proposals
         self._recovery_snapshots = recovery_snapshots
+        self._study_sessions = study_sessions
         self._clock = clock
+        self._acceptance_grace_period = acceptance_grace_period
 
     async def accept(
         self, account_id: UUID, proposal_id: UUID
@@ -64,11 +72,12 @@ class ScheduleAcceptanceService:
         if preferences is None:
             return None
         now = self._clock()
-        tasks, windows, unavailable = await asyncio.gather(
+        raw_tasks, windows, unavailable = await asyncio.gather(
             self._tasks.list(account_id),
             self._availability_windows.list_windows(account_id),
             self._unavailable_periods.list_periods(account_id),
         )
+        tasks = tuple(raw_tasks)
         if proposal.scenario is not None:
             task_by_id = {task.id: task for task in tasks}
             if any(
@@ -99,6 +108,8 @@ class ScheduleAcceptanceService:
                 tasks, windows, unavailable, preferences, current_snapshot
             )
         else:
+            if self._study_sessions is not None:
+                tasks = await tasks_for_schedule(account_id, tasks, self._study_sessions)
             current_fingerprint = schedule_input_fingerprint(
                 tasks, windows, unavailable, preferences, scenario=proposal.scenario
             )
@@ -110,6 +121,7 @@ class ScheduleAcceptanceService:
             proposal_id,
             mutation_now,
             preferences.minimum_break_minutes,
+            grace_period=self._acceptance_grace_period,
         )
 
     async def reject(self, account_id: UUID, proposal_id: UUID) -> bool:

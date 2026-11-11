@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, Clock, Loader2, XCircle } from "lucide-react";
+import { CheckCircle2, Clock, Loader2, XCircle } from "@/components/icons";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -18,34 +18,30 @@ import { Callout } from "@/components/ui/callout";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { formatDuration } from "@/lib/constants";
 import { formatClock } from "@/lib/datetime";
+import { isPositiveWholeMinute, outcomeSuccessCopy } from "@/lib/outcome-ui";
 import { cn } from "@/lib/utils";
 import { scheduling } from "@/lib/api";
+import { withLargeActualConfirmation } from "@/lib/api/outcome-contract";
 import { describeError } from "@/hooks/use-api";
-import { LARGE_ENTRY_FACTOR, type SessionOutcome, type StudySession } from "@/types/session";
+import {
+  LARGE_ENTRY_FACTOR,
+  type OutcomeFormData,
+  type SessionOutcome,
+  type StudySession,
+} from "@/types/session";
 import type { OutcomeResult } from "@/lib/api";
+import { useAccountTimezone } from "@/hooks/use-account-timezone";
 
-/**
- * SPEC §12 defines three outcomes, but the API's RecordSessionOutcomeRequest
- * currently accepts `outcome: "missed"` only — Completed and Delayed exist in
- * the domain enum with no route behind them.
- *
- * They stay visible and disabled rather than hidden: the student can see the
- * choice exists and is coming, instead of picking one, filling in the minutes
- * and hitting a 422 on save.
- */
 const OPTIONS: {
   value: SessionOutcome;
   label: string;
   hint: string;
   icon: React.ElementType;
-  available: boolean;
 }[] = [
-  { value: "Completed", label: "Finished it", hint: "The work for this session is done", icon: CheckCircle2, available: false },
-  { value: "Delayed", label: "Partly done", hint: "I worked, but there is more left", icon: Clock, available: false },
-  { value: "Missed", label: "Didn’t study", hint: "This session didn’t happen", icon: XCircle, available: true },
+  { value: "Completed", label: "Finished it", hint: "The work for this session is done", icon: CheckCircle2 },
+  { value: "Delayed", label: "Partly done", hint: "I worked, but there is more left", icon: Clock },
+  { value: "Missed", label: "Didn’t study", hint: "This session didn’t happen", icon: XCircle },
 ];
-
-const UNAVAILABLE = OPTIONS.filter((o) => !o.available).length > 0;
 
 /**
  * Records what actually happened in a past session (SPEC §12).
@@ -58,8 +54,9 @@ const UNAVAILABLE = OPTIONS.filter((o) => !o.available).length > 0;
  *               (SPEC §12.3).
  *   Missed    — nothing worked; the full planned work stands.
  *
- * Saving Delayed or Missed produces a proposed Schedule Revision, which the
- * caller is handed so it can show the preview (SPEC §14.1).
+ * A Missed outcome can produce a proposed Schedule Revision. Every outcome
+ * returns the same nullable revision field, which callers preview only when
+ * the backend actually created a recovery proposal (SPEC §14.1).
  */
 export function RecordOutcomeDialog({
   session,
@@ -72,12 +69,15 @@ export function RecordOutcomeDialog({
   onOpenChange: (open: boolean) => void;
   onRecorded: (result: OutcomeResult) => void;
 }) {
+  const timeZone = useAccountTimezone();
   const [outcome, setOutcome] = React.useState<SessionOutcome>("Missed");
   const [worked, setWorked] = React.useState("");
   const [remaining, setRemaining] = React.useState("");
   const [remainingTouched, setRemainingTouched] = React.useState(false);
+  const [workedTouched, setWorkedTouched] = React.useState(false);
   const [isSaving, setSaving] = React.useState(false);
   const [confirmLarge, setConfirmLarge] = React.useState(false);
+  const saveButtonRef = React.useRef<HTMLButtonElement>(null);
 
   const planned = session?.plannedDuration ?? 0;
 
@@ -90,46 +90,95 @@ export function RecordOutcomeDialog({
    * about. This is the sanctioned "adjust state when a prop changes" pattern.
    */
   const [lastSessionId, setLastSessionId] = React.useState<string | null>(null);
+  const [discardOpen, setDiscardOpen] = React.useState(false);
   if (open && session && session.id !== lastSessionId) {
     setLastSessionId(session.id);
     setOutcome("Missed");
     setWorked(String(session.plannedDuration));
     setRemaining("");
     setRemainingTouched(false);
+    setWorkedTouched(false);
+    setDiscardOpen(false);
+  } else if (!open && lastSessionId !== null) {
+    setLastSessionId(null);
+  }
+
+  function resetForm() {
+    setLastSessionId(null);
+    setOutcome("Missed");
+    /* c8 ignore next -- the dialog returns null before resetForm can run without a session. */
+    if (session) {
+      setWorked(String(session.plannedDuration));
+    }
+    setRemaining("");
+    setRemainingTouched(false);
+    setWorkedTouched(false);
+  }
+
+  /**
+   * "Partly done" with the full planned time worked would leave nothing to
+   * guess as remaining, so until the student types their own figure the
+   * worked default follows the outcome: all of it, or half of it.
+   */
+  function chooseOutcome(next: SessionOutcome) {
+    setOutcome(next);
+    if (workedTouched) return;
+    setWorked(String(next === "Delayed" ? Math.max(1, Math.round(planned / 2)) : planned));
   }
 
   const workedNumber = Number(worked);
-  const hasWorked = worked.trim() !== "" && Number.isFinite(workedNumber);
+  const hasWorked = isPositiveWholeMinute(worked);
 
   // SPEC §12.3's default, recomputed until the student edits it themselves.
   const defaultRemaining = Math.max(0, planned - (hasWorked ? workedNumber : 0));
   const remainingValue = remainingTouched ? remaining : String(defaultRemaining || "");
   const remainingNumber = Number(remainingValue);
 
-  const workedInvalid = outcome !== "Missed" && (!hasWorked || workedNumber <= 0);
+  const workedInvalid = outcome !== "Missed" && !hasWorked;
   const remainingInvalid =
-    outcome === "Delayed" && (!Number.isFinite(remainingNumber) || remainingNumber <= 0);
+    outcome === "Delayed" && !isPositiveWholeMinute(remainingValue);
   const canSave = !workedInvalid && !remainingInvalid && !isSaving;
+
+  const isDirty =
+    Boolean(session) &&
+    (outcome !== "Missed" ||
+      worked !== String(session?.plannedDuration) ||
+      remainingTouched);
+
+  function requestClose() {
+    if (isSaving || confirmLarge || discardOpen) return false;
+    if (isDirty) {
+      setDiscardOpen(true);
+      return false;
+    }
+    onOpenChange(false);
+    return true;
+  }
 
   /** An entry far above what was planned is more often a typo than a marathon. */
   const isLargeEntry =
     outcome !== "Missed" && hasWorked && workedNumber > planned * LARGE_ENTRY_FACTOR;
 
-  async function save() {
+  async function save(largeActualConfirmed = false) {
+    /* c8 ignore next -- save is only reachable while the dialog has a session. */
     if (!session) return;
     setSaving(true);
     try {
-      const result = await scheduling.recordOutcome(session.id, {
+      const data: OutcomeFormData = {
         outcome,
         actualMinutes: outcome === "Missed" ? 0 : workedNumber,
         revisedRemainingMinutes: outcome === "Delayed" ? remainingNumber : undefined,
-      });
-      toast.success(
-        outcome === "Completed"
-          ? "Session recorded"
-          : "Recorded — StudyFlow has a new plan for you to review",
+        largeActualConfirmed,
+      };
+      const result = await scheduling.recordOutcome(
+        session.id,
+        largeActualConfirmed ? withLargeActualConfirmation(data) : data,
+        undefined,
+        { title: session.taskTitle, category: session.category },
       );
+      toast.success(outcomeSuccessCopy(outcome, result.revision));
       onRecorded(result);
+      resetForm();
       onOpenChange(false);
     } catch (cause) {
       toast.error(describeError(cause));
@@ -150,36 +199,45 @@ export function RecordOutcomeDialog({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-lg">
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen, details) => {
+          if (nextOpen) onOpenChange(true);
+          else if (!requestClose()) details?.cancel?.();
+        }}
+      >
+        <DialogContent className="sm:max-w-lg" initialFocus={saveButtonRef}>
           <DialogHeader>
             <DialogTitle>How did it go?</DialogTitle>
             <DialogDescription>
-              {session.taskTitle} · {formatClock(session.startTime)}–
-              {formatClock(session.endTime)} · {formatDuration(planned)} planned
+              {session.taskTitle} · {formatClock(session.startTime, timeZone)}–
+              {formatClock(session.endTime, timeZone)} · {formatDuration(planned)} planned
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
+          <form
+            noValidate
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (canSave) handleSave();
+            }}
+            className="space-y-4"
+          >
             <fieldset className="space-y-2">
               <legend className="eyebrow mb-2">What happened</legend>
               <div className="grid gap-2">
                 {OPTIONS.map((option) => {
                   const selected = outcome === option.value;
                   return (
-                    <button
+                    <Button
                       key={option.value}
                       type="button"
-                      onClick={() => option.available && setOutcome(option.value)}
+                      variant="outline"
+                      onClick={() => chooseOutcome(option.value)}
                       aria-pressed={selected}
-                      disabled={!option.available}
-                      title={option.available ? undefined : "Not available yet"}
                       className={cn(
-                        "flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                        !option.available && "cursor-not-allowed opacity-50",
-                        selected
-                          ? "border-foreground bg-muted"
-                          : "border-border hover:bg-muted/50",
+                        "h-auto w-full justify-start gap-3 whitespace-normal rounded-lg px-3 py-2.5 text-left font-normal",
+                        selected && "border-primary bg-primary/5 hover:bg-primary/5",
                       )}
                     >
                       <option.icon
@@ -195,16 +253,10 @@ export function RecordOutcomeDialog({
                           {option.hint}
                         </span>
                       </span>
-                    </button>
+                    </Button>
                   );
                 })}
               </div>
-              {UNAVAILABLE && (
-                <p className="pt-1 text-xs text-muted-foreground">
-                  Recording finished and partly-done sessions is still being built.
-                  For now you can only report a session you missed.
-                </p>
-              )}
             </fieldset>
 
             {outcome !== "Missed" && (
@@ -218,13 +270,19 @@ export function RecordOutcomeDialog({
                     type="number"
                     inputMode="numeric"
                     min={1}
+                    step={1}
                     max={1440}
                     value={worked}
-                    onChange={(event) => setWorked(event.target.value)}
+                    onChange={(event) => {
+                      setWorkedTouched(true);
+                      setWorked(event.target.value);
+                    }}
                     aria-invalid={workedInvalid || undefined}
                   />
                   {workedInvalid && (
-                    <p className="text-xs text-deficit">Enter more than 0 minutes.</p>
+                    <p className="text-xs text-deficit">
+                      Enter a whole number of minutes greater than 0.
+                    </p>
                   )}
                 </div>
 
@@ -238,6 +296,7 @@ export function RecordOutcomeDialog({
                       type="number"
                       inputMode="numeric"
                       min={1}
+                      step={1}
                       max={10_000}
                       value={remainingValue}
                       onChange={(event) => {
@@ -249,10 +308,14 @@ export function RecordOutcomeDialog({
                     <p className="text-xs text-muted-foreground">
                       {remainingTouched
                         ? "Your estimate of what is left."
-                        : "Our guess — change it if you know better."}
+                        : remainingValue
+                          ? "Our guess — change it if you know better."
+                          : "How many minutes of work are still left?"}
                     </p>
-                    {remainingInvalid && (
-                      <p className="text-xs text-deficit">Enter more than 0 minutes.</p>
+                    {remainingInvalid && remainingTouched && (
+                      <p className="text-xs text-deficit">
+                        Enter a whole number of minutes greater than 0.
+                      </p>
                     )}
                   </div>
                 )}
@@ -265,19 +328,39 @@ export function RecordOutcomeDialog({
                 StudyFlow will look for a new slot.
               </Callout>
             )}
-          </div>
-
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isSaving}>
-              Cancel
-            </Button>
-            <Button onClick={handleSave} disabled={!canSave}>
-              {isSaving && <Loader2 className="animate-spin" />}
-              Save
-            </Button>
-          </DialogFooter>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={requestClose}
+                disabled={isSaving}
+              >
+                Cancel
+              </Button>
+              <Button ref={saveButtonRef} type="submit" disabled={!canSave}>
+                {isSaving && <Loader2 className="animate-spin" />}
+                Save
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={open && discardOpen}
+        onOpenChange={setDiscardOpen}
+        title="Discard changes?"
+        description="Your unsaved changes will be lost."
+        cancelLabel="Keep editing"
+        confirmLabel="Discard changes"
+        destructive
+        focusCancel
+        onConfirm={() => {
+          setDiscardOpen(false);
+          resetForm();
+          onOpenChange(false);
+        }}
+      />
 
       {/* SPEC §12.2: prompt on an unusually large entry, but always allow it. */}
       <ConfirmDialog
@@ -289,7 +372,7 @@ export function RecordOutcomeDialog({
         )}. Is that right?`}
         confirmLabel="Yes, save it"
         cancelLabel="Let me check"
-        onConfirm={save}
+        onConfirm={() => save(true)}
       />
     </>
   );

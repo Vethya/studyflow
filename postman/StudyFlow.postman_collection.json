@@ -133,7 +133,7 @@
                 "openapi.json"
               ]
             },
-            "description": "Fetches the generated API contract used by Swagger UI and client tooling."
+            "description": "Fetches the generated API contract on local instances. Deployed services return 404."
           },
           "response": [],
           "event": [
@@ -142,14 +142,19 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('returns HTTP 200', () => pm.response.to.have.status(200));",
-                  "pm.test('returns the StudyFlow OpenAPI contract', () => {",
-                  "  const body = pm.response.json();",
-                  "  pm.expect(body.openapi).to.match(/^3\\./);",
-                  "  pm.expect(body.info.title).to.eql('StudyFlow API');",
-                  "  pm.expect(body.paths).to.have.property('/api/v1/health');",
-                  "  pm.expect(body.paths).to.have.property('/api/v1/ready');",
-                  "});"
+                  "const isLocal = /^https?:\\/\\/(localhost|127\\.0\\.0\\.1|\\[::1\\])(:|\\/|$)/.test(pm.variables.get('base_url'));",
+                  "if (isLocal) {",
+                  "  pm.test('returns HTTP 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('returns the StudyFlow OpenAPI contract', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.openapi).to.match(/^3\\./);",
+                  "    pm.expect(body.info.title).to.eql('StudyFlow API');",
+                  "    pm.expect(body.paths).to.have.property('/api/v1/health');",
+                  "    pm.expect(body.paths).to.have.property('/api/v1/ready');",
+                  "  });",
+                  "} else {",
+                  "  pm.test('hides the OpenAPI schema', () => pm.response.to.have.status(404));",
+                  "}"
                 ]
               }
             }
@@ -158,13 +163,38 @@
         {
           "name": "Start Google OIDC",
           "request": {
-            "method": "GET",
+            "method": "POST",
             "header": [{ "key": "Accept", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/auth/google/start?timezone=Asia%2FPhnom_Penh", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "google", "start"], "query": [{ "key": "timezone", "value": "Asia/Phnom_Penh" }] },
+            "body": { "mode": "raw", "raw": "{\n  \"timezone\": \"Asia/Phnom_Penh\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/auth/google/start", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "google", "start"] },
             "description": "Creates one-time state and nonce values and returns Google's authorization URL with only openid, email, and profile scopes."
           },
           "response": [],
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) { const url = new URL(pm.response.json().authorization_url); pm.collectionVariables.set('google_oidc_state', url.searchParams.get('state')); }"] } }]
+        },
+        {
+          "name": "Start Google Account Link",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"timezone\": \"Asia/Phnom_Penh\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/auth/google/link/start", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "google", "link", "start"] },
+            "description": "Creates a one-time Google link state bound to the currently authenticated StudyFlow account."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200 or unauthenticated', () => pm.expect([200, 401, 403]).to.include(pm.response.code));"] } }]
+        },
+        {
+          "name": "Start Google Account Deletion Reauthentication",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }, { "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"timezone\": \"Asia/Phnom_Penh\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/auth/google/account-deletion/start", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "google", "account-deletion", "start"] },
+            "description": "Starts fresh Google reauthentication for a passwordless account deletion request."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200 or unauthenticated', () => pm.expect([200, 401, 403, 429, 503]).to.include(pm.response.code));"] } }]
         },
         {
           "name": "Complete Google OIDC",
@@ -200,6 +230,17 @@
           },
           "response": [],
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200 or expired challenge 401', () => pm.expect([200, 401]).to.include(pm.response.code));", "if (pm.response.code === 200) pm.collectionVariables.set('csrf_token', pm.response.json().csrf_token);"] } }]
+        },
+        {
+          "name": "Check Browser Google Link Challenge",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/auth/google/link/browser", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "google", "link", "browser"] },
+            "description": "Checks that the browser has the short-lived HttpOnly Google link challenge before showing the password confirmation form."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204 or missing challenge 401', () => pm.expect([204, 401]).to.include(pm.response.code));"] } }]
         }
       ]
     },
@@ -591,6 +632,114 @@
           },
           "response": [],
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
+        },
+        {
+          "name": "Prepare Account Deletion",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"current_password\": \"correct horse battery staple\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/account/deletion/prepare",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "account", "deletion", "prepare"]
+            },
+            "description": "Verifies the current password and creates a short-lived account deletion challenge."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204 or expected account state error', () => pm.expect([204, 400, 401, 403, 429]).to.include(pm.response.code));"] } }]
+        },
+        {
+          "name": "Account Deletion Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/account/deletion/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "account", "deletion", "status"]
+            }
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+        },
+        {
+          "name": "Confirm Account Deletion",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"confirmation\": \"DELETE\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/account/deletion/confirm",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "account", "deletion", "confirm"]
+            },
+            "description": "Permanently deletes the authenticated account after a valid deletion challenge and clears authentication cookies."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204 or expected account state error', () => pm.expect([204, 400, 401, 403]).to.include(pm.response.code));"] } }]
+        }
+      ]
+    },
+    {
+      "name": "Adaptive Estimates",
+      "description": "Preview the authenticated student's evidence-gated estimate and acknowledge a large adjustment. Preview never exposes accuracy metrics or historical prediction rows.",
+      "item": [
+        {
+          "name": "Preview Adaptive Estimate",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/adaptive-estimates/preview?category=reading&original_minutes=90",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "adaptive-estimates", "preview"],
+              "query": [
+                { "key": "category", "value": "reading" },
+                { "key": "original_minutes", "value": "90" }
+              ]
+            },
+            "description": "Returns only the student-safe current estimate, its source history count and scope, and whether an acknowledgment is required. It never includes MAE or hidden prediction records."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) pm.expect(pm.response.json()).to.include.keys('category', 'original_minutes', 'adaptive_minutes', 'planned_minutes', 'available', 'planned_source', 'acknowledgment_required');"] } }]
+        },
+        {
+          "name": "Acknowledge Adaptive Estimate",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"reading\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/adaptive-estimates/acknowledgments",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "adaptive-estimates", "acknowledgments"]
+            },
+            "description": "Acknowledges the server-calculated current correction for one category. The request intentionally contains no factor and requires the session-bound CSRF token."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
         }
       ]
     },
@@ -625,7 +774,7 @@
               "options": { "raw": { "language": "json" } }
             },
             "url": { "raw": "{{base_url}}/api/v1/tasks", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks"] },
-            "description": "Creates a task owned by the authenticated student. Planned duration initially equals the original estimate."
+            "description": "Creates an owned task with server-computed adaptive minutes. Optional planned_source selects original or adaptive. Returns estimate_frozen with the saved snapshot. Stale/unavailable/unacknowledged Adaptive selection returns 409 detail {code: adaptive_estimate_conflict, message: actionable refresh/retry guidance}; refresh the preview before retrying."
           },
           "response": [],
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 201', () => pm.response.to.have.status(201));", "pm.test('generated task deadline is a valid future instant', () => {", "  const deadline = Date.parse(pm.collectionVariables.get('task_deadline_at'));", "  pm.expect(Number.isNaN(deadline)).to.be.false;", "  pm.expect(deadline).to.be.above(Date.now());", "});", "if (pm.response.code === 201) pm.collectionVariables.set('task_id', pm.response.json().id);"] } }]
@@ -635,8 +784,8 @@
           "request": {
             "method": "GET",
             "header": [{ "key": "Accept", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/tasks?course=Algorithms&category=reading&priority=medium&status=not_started", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks"], "query": [{ "key": "course", "value": "Algorithms" }, { "key": "category", "value": "reading" }, { "key": "priority", "value": "medium" }, { "key": "status", "value": "not_started" }] },
-            "description": "Lists only owned tasks, ordered by deadline. Supports Course, Category, Priority, and deadline-range filters; Task Status is added with lifecycle derivation."
+            "url": { "raw": "{{base_url}}/api/v1/tasks?course=Algorithms&category=reading&priority=medium&status=not_started", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks"], "query": [{ "key": "course", "value": "Algorithms" }, { "key": "category", "value": "reading" }, { "key": "priority", "value": "medium" }, { "key": "status", "value": "not_started" }, { "key": "limit", "value": "50", "disabled": true }, { "key": "offset", "value": "0", "disabled": true }] },
+            "description": "Lists only owned tasks, ordered by deadline then id. Supports Course, Category, Priority, and deadline-range filters; Task Status is added with lifecycle derivation. Optional limit (1-100) and offset (>= 0) page the result; the X-Total-Count response header reports the number of matching tasks before paging."
           },
           "response": [],
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
@@ -659,7 +808,7 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
             "body": { "mode": "raw", "raw": "{\n  \"title\": \"Updated task\",\n  \"category\": \"assignment\",\n  \"priority\": \"high\",\n  \"deadline_at\": \"{{task_deadline_at}}\",\n  \"original_estimate_minutes\": 120\n}", "options": { "raw": { "language": "json" } } },
             "url": { "raw": "{{base_url}}/api/v1/tasks/{{task_id}}", "host": ["{{base_url}}"], "path": ["api", "v1", "tasks", "{{task_id}}"] },
-            "description": "Replaces editable fields, preserves deadline history, and rejects estimate changes after work starts."
+            "description": "Replaces editable fields and preserves deadline history. estimate_frozen reports the persisted lock independently of task status. Unrelated edits preserve frozen original/adaptive/planned fields without live qualification or acknowledgment. Frozen estimate changes return 409 string detail; stale/unavailable/unacknowledged Adaptive selection returns 409 detail {code: adaptive_estimate_conflict, message: refresh/retry guidance}."
           },
           "response": [],
           "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
@@ -757,7 +906,7 @@
             "description": "Accepts the complete feasible proposal and atomically replaces the active future schedule."
           },
           "response": [],
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) {", "  const sessions = pm.response.json().sessions;", "  if (sessions.length > 0) pm.collectionVariables.set('session_id', sessions[0].id);", "}"] } }]
         },
         {
           "name": "Reject Schedule Proposal",
@@ -794,10 +943,10 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
             "body": { "mode": "raw", "raw": "{\n  \"windows\": [\n    {\"weekday\": 0, \"start_time\": \"18:00\", \"end_time\": \"22:00\"},\n    {\"weekday\": 2, \"start_time\": \"18:00\", \"end_time\": \"22:00\"}\n  ]\n}", "options": { "raw": { "language": "json" } } },
             "url": { "raw": "{{base_url}}/api/v1/availability/windows", "host": ["{{base_url}}"], "path": ["api", "v1", "availability", "windows"] },
-            "description": "Atomically creates, updates, or deletes the complete owned weekly availability set and merges touching windows."
+            "description": "Atomically replaces the complete owned weekly availability set, merges touching windows, and reports future sessions invalidated by the change."
           },
           "response": [],
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"] } }]
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) {", "  const body = pm.response.json();", "  pm.expect(body.windows).to.be.an('array');", "  pm.expect(body.invalidated_future_session_ids).to.be.an('array');", "}"] } }]
         },
         {
           "name": "Confirm Availability Timezone",
@@ -806,10 +955,10 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
             "body": { "mode": "raw", "raw": "{\n  \"confirmed\": true\n}", "options": { "raw": { "language": "json" } } },
             "url": { "raw": "{{base_url}}/api/v1/availability/confirm-timezone", "host": ["{{base_url}}"], "path": ["api", "v1", "availability", "confirm-timezone"] },
-            "description": "Confirms that local-time availability remains correct after a timezone change."
+            "description": "Confirms that local-time availability remains correct after a timezone change and reports future sessions invalidated by the conversion."
           },
           "response": [],
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 204', () => pm.response.to.have.status(204));"] } }]
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) pm.expect(pm.response.json().invalidated_future_session_ids).to.be.an('array');"] } }]
         },
         {
           "name": "Update Study Time",
@@ -872,56 +1021,403 @@
       ]
     },
     {
-      "name": "Scheduling",
-      "description": "Generate, inspect, accept, and recover study schedules.",
+      "name": "Google Import",
+      "description": "One-time, read-only imports from Google Calendar (blocked time) and Google Classroom (tasks). StudyFlow stores no Google tokens.",
       "item": [
         {
-          "name": "Generate Schedule Proposal",
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
-            "url": { "raw": "{{base_url}}/api/v1/schedule-proposals", "host": ["{{base_url}}"], "path": ["api", "v1", "schedule-proposals"] }
-          },
-          "response": []
-        },
-        {
-          "name": "Get Current Schedule Proposal",
+          "name": "Get Google Import Status",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Accept", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/schedule-proposals/current", "host": ["{{base_url}}"], "path": ["api", "v1", "schedule-proposals", "current"] }
-          },
-          "response": []
-        },
-        {
-          "name": "Accept Schedule Proposal",
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
-            "url": { "raw": "{{base_url}}/api/v1/schedule-proposals/{{proposal_id}}/accept", "host": ["{{base_url}}"], "path": ["api", "v1", "schedule-proposals", "{{proposal_id}}", "accept"] }
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/integrations/google/status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "google",
+                "status"
+              ]
+            },
+            "description": "Reports whether one-time Google Calendar and Classroom imports are configured on this server."
           },
           "response": [],
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) {", "  const sessions = pm.response.json().sessions;", "  if (sessions.length > 0) pm.collectionVariables.set('session_id', sessions[0].id);", "}"] } }]
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
-          "name": "Reject Schedule Proposal",
+          "name": "Start Google Calendar Import",
           "request": {
             "method": "POST",
-            "header": [{ "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
-            "url": { "raw": "{{base_url}}/api/v1/schedule-proposals/{{proposal_id}}/reject", "host": ["{{base_url}}"], "path": ["api", "v1", "schedule-proposals", "{{proposal_id}}", "reject"] }
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/integrations/google/calendar/start",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "google",
+                "calendar",
+                "start"
+              ]
+            },
+            "description": "Starts a read-only Google Calendar import for the next horizon_days days. Open authorization_url in a browser; Google redirects back to the callback, which stores a 30-minute preview.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"horizon_days\": 28\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
-          "response": []
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200 or 503 when not configured', () => pm.expect([200, 503]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
         },
+        {
+          "name": "Start Google Classroom Import",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/integrations/google/classroom/start",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "google",
+                "classroom",
+                "start"
+              ]
+            },
+            "description": "Starts a read-only Google Classroom import of unfinished coursework with a future due date.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200 or 503 when not configured', () => pm.expect([200, 503]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Complete Google Import (browser callback)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/integrations/google/callback?state={{google_import_state}}&code={{google_import_code}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "google",
+                "callback"
+              ],
+              "query": [
+                {
+                  "key": "state",
+                  "value": "{{google_import_state}}"
+                },
+                {
+                  "key": "code",
+                  "value": "{{google_import_code}}"
+                }
+              ]
+            },
+            "description": "Browser-only OAuth callback. Requires the HttpOnly import state cookie set by a start request, so it cannot be completed from Postman. Always answers with a 303 redirect to the frontend."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('redirects to the frontend', () => pm.response.to.have.status(303));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Google Import Preview",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/integrations/google/imports/{{import_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "google",
+                "imports",
+                "{{import_id}}"
+              ]
+            },
+            "description": "Returns the items of an unexpired, unused import with a status for each: new, changed, unchanged, or already_imported."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200 or 404', () => pm.expect([200, 404]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Import Google Calendar Items",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/integrations/google/imports/{{import_id}}/calendar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "google",
+                "imports",
+                "{{import_id}}",
+                "calendar"
+              ]
+            },
+            "description": "Creates or updates blocked periods for the selected Google Calendar events and reports invalidated future sessions. Single use.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"item_ids\": [\"{{google_import_item_id}}\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200, 404, or 422', () => pm.expect([200, 404, 422]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Import Google Classroom Items",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/integrations/google/imports/{{import_id}}/classroom",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "google",
+                "imports",
+                "{{import_id}}",
+                "classroom"
+              ]
+            },
+            "description": "Creates academic tasks for the selected Classroom coursework with the student's category, priority, and estimate. Single use.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\"id\": \"{{google_import_item_id}}\", \"category\": \"assignment\", \"priority\": \"medium\", \"estimate_minutes\": 90}\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200, 404, or 422', () => pm.expect([200, 404, 422]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Discard Google Import",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/integrations/google/imports/{{import_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "google",
+                "imports",
+                "{{import_id}}"
+              ]
+            },
+            "description": "Deletes an import preview without importing anything."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 204 or 404', () => pm.expect([204, 404]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Study Sessions & Outcomes",
+      "description": "Inspect accepted study sessions and record one immutable outcome for an ended session.",
+      "item": [
         {
           "name": "List Study Sessions",
           "request": {
             "method": "GET",
             "header": [{ "key": "Accept", "value": "application/json" }],
-            "url": { "raw": "{{base_url}}/api/v1/study-sessions", "host": ["{{base_url}}"], "path": ["api", "v1", "study-sessions"] },
-            "description": "Lists the authenticated student's accepted, non-invalidated Study Sessions. Optional from and to timestamps use an inclusive-start, exclusive-end overlap range; task_id narrows the result to one Academic Task."
+            "url": { "raw": "{{base_url}}/api/v1/study-sessions", "host": ["{{base_url}}"], "path": ["api", "v1", "study-sessions"], "query": [{ "key": "from", "value": "2026-08-24T00:00:00Z", "disabled": true }, { "key": "to", "value": "2026-08-31T00:00:00Z", "disabled": true }, { "key": "task_id", "value": "{{task_id}}", "disabled": true }, { "key": "awaiting_outcome", "value": "true", "disabled": true }] },
+            "description": "Lists the authenticated student's accepted, non-invalidated Study Sessions with their task_title and task_category. Optional from and to timestamps use an inclusive-start, exclusive-end overlap range; task_id narrows the result to one Academic Task; awaiting_outcome=true keeps only ended sessions without an outcome and awaiting_outcome=false keeps every other session."
           },
           "response": [],
-          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) {", "  const sessions = pm.response.json();", "  if (sessions.length > 0) pm.collectionVariables.set('session_id', sessions[0].id);", "}"] } }]
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) {", "  const sessions = pm.response.json();", "  const eligible = sessions.find((session) => session.outcome === null && new Date(session.ends_at) <= new Date());", "  pm.collectionVariables.unset('session_id');", "  pm.collectionVariables.unset('planned_minutes');", "  if (eligible) {", "    pm.collectionVariables.set('session_id', eligible.id);", "    pm.collectionVariables.set('planned_minutes', String(eligible.planned_duration_minutes));", "    console.log(`Selected ended session ${eligible.id} for outcome recording.`);", "  } else {", "    console.warn('No ended session without an outcome was found; set session_id and planned_minutes manually before recording an outcome.');", "  }", "}"] } }]
         },
         {
           "name": "Get Study Session",
@@ -933,15 +1429,208 @@
           "response": []
         },
         {
-          "name": "Mark Study Session Missed",
+          "name": "Record Completed Study Session Outcome",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"outcome\": \"completed\",\n  \"actual_minutes\": {{actual_minutes}},\n  \"large_actual_confirmed\": false\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/study-sessions/{{session_id}}/outcomes", "host": ["{{base_url}}"], "path": ["api", "v1", "study-sessions", "{{session_id}}", "outcomes"] },
+            "description": "Records a Completed outcome for an ended accepted session with no existing outcome. The sample uses a safe actual duration; unusually large durations require large_actual_confirmed=true. Outcomes are immutable, so use one outcome request per session."
+          },
+          "response": [],
+          "event": [
+            { "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["const planned = Number(pm.collectionVariables.get('planned_minutes'));", "if (!Number.isInteger(planned) || planned <= 0) throw new Error('Run List Study Sessions or set planned_minutes manually before recording an outcome.');", "pm.variables.set('actual_minutes', Math.max(1, Math.floor(planned / 2)));"] } },
+            { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 201', () => pm.response.to.have.status(201));", "if (pm.response.code === 201) {", "  const body = pm.response.json();", "  pm.test('returns a completed outcome without recovery revision', () => {", "    pm.expect(body).to.have.property('session');", "    pm.expect(body).to.have.property('outcome');", "    pm.expect(body).to.have.property('revision');", "    pm.expect(body.outcome.kind).to.eql('completed');", "    pm.expect(body.revision).to.eql(null);", "  });", "}"] } }
+          ]
+        },
+        {
+          "name": "Record Delayed Study Session Outcome",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"outcome\": \"delayed\",\n  \"actual_minutes\": {{actual_minutes}},\n  \"remaining_minutes\": {{remaining_minutes}},\n  \"large_actual_confirmed\": false\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{base_url}}/api/v1/study-sessions/{{session_id}}/outcomes", "host": ["{{base_url}}"], "path": ["api", "v1", "study-sessions", "{{session_id}}", "outcomes"] },
+            "description": "Records a Delayed outcome for an ended accepted session with no existing outcome. remaining_minutes is optional in the API; this sample supplies it explicitly. The endpoint returns an inactive recovery revision preview. Outcomes are immutable, so use one outcome request per session."
+          },
+          "response": [],
+          "event": [
+            { "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["const planned = Number(pm.collectionVariables.get('planned_minutes'));", "if (!Number.isInteger(planned) || planned <= 0) throw new Error('Run List Study Sessions or set planned_minutes manually before recording an outcome.');", "const actual = Math.max(1, Math.floor(planned / 2));", "pm.variables.set('actual_minutes', actual);", "pm.variables.set('remaining_minutes', Math.max(1, planned - actual));"] } },
+            { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 201', () => pm.response.to.have.status(201));", "if (pm.response.code === 201) {", "  const body = pm.response.json();", "  pm.test('returns a delayed outcome with recovery revision', () => {", "    pm.expect(body).to.have.property('session');", "    pm.expect(body).to.have.property('outcome');", "    pm.expect(body).to.have.property('revision');", "    pm.expect(body.outcome.kind).to.eql('delayed');", "    pm.expect(body.revision).to.not.eql(null);", "  });", "}"] } }
+          ]
+        },
+        {
+          "name": "Record Missed Study Session Outcome",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Accept", "value": "application/json" }, { "key": "X-CSRF-Token", "value": "{{csrf_token}}" }],
             "body": { "mode": "raw", "raw": "{\n  \"outcome\": \"missed\"\n}", "options": { "raw": { "language": "json" } } },
             "url": { "raw": "{{base_url}}/api/v1/study-sessions/{{session_id}}/outcomes", "host": ["{{base_url}}"], "path": ["api", "v1", "study-sessions", "{{session_id}}", "outcomes"] },
-            "description": "Records Missed and returns the inactive recovery revision preview. Repeating this request retries recovery for an unresolved Missed outcome without duplicating it; a no-longer-valid trigger returns 409 and oversized recovery input returns 422. A solver failure returns 503 after preserving the outcome."
+            "description": "Records a Missed outcome for an ended accepted session with no existing outcome and returns the inactive recovery revision preview. Repeating this request retries recovery for an unresolved Missed outcome; a no-longer-valid trigger returns 409, oversized recovery input returns 422, and solver failure returns 503 after preserving the outcome. Outcomes are immutable, so use one outcome request per session."
           },
-          "response": []
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 201', () => pm.response.to.have.status(201));", "if (pm.response.code === 201) {", "  const body = pm.response.json();", "  pm.test('returns a missed outcome with recovery revision', () => {", "    pm.expect(body).to.have.property('session');", "    pm.expect(body).to.have.property('outcome');", "    pm.expect(body).to.have.property('revision');", "    pm.expect(body.outcome.kind).to.eql('missed');", "    pm.expect(body.revision).to.not.eql(null);", "  });", "}"] } }]
+        }
+      ]
+    },
+    {
+      "name": "Progress",
+      "description": "Read task-level Effort Progress for the authenticated student.",
+      "item": [
+        {
+          "name": "List Effort Progress",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/v1/progress", "host": ["{{base_url}}"], "path": ["api", "v1", "progress"] },
+            "description": "Returns per-task effort consumed, estimated remaining minutes, progress percentage, session counts, and task status for the authenticated student."
+          },
+          "response": [],
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('returns HTTP 200', () => pm.response.to.have.status(200));", "if (pm.response.code === 200) {", "  const body = pm.response.json();", "  pm.expect(body).to.be.an('array');", "  if (body.length) pm.expect(body[0]).to.include.all.keys('task_id', 'task_title', 'actual_duration_minutes', 'estimated_remaining_minutes', 'effort_percent', 'sessions_completed', 'sessions_upcoming', 'status');", "}"] } }]
+        }
+      ]
+    },
+    {
+      "name": "Reminders",
+      "description": "Opt-in study reminder emails and the scheduler-only dispatch trigger.",
+      "item": [
+        {
+          "name": "Get reminder preferences",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/reminders/preferences",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reminders",
+                "preferences"
+              ]
+            },
+            "description": "Returns the signed-in student's reminder email preferences, whether their email is verified, and whether this server delivers reminders."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('matches the reminder preferences contract', () => {",
+                  "  pm.expect(pm.response.json()).to.have.all.keys('email_enabled', 'before_session_minutes', 'after_session', 'email_verified', 'delivery_available');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update reminder preferences",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrf_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email_enabled\": true,\n  \"before_session_minutes\": 30,\n  \"after_session\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/reminders/preferences",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reminders",
+                "preferences"
+              ]
+            },
+            "description": "Replaces the reminder preferences. before_session_minutes is 0 (off) or 30-120; reminders are only sent to verified email addresses."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dispatch Due Reminders",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{reminder_dispatch_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/internal/reminders/dispatch",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "internal",
+                "reminders",
+                "dispatch"
+              ]
+            },
+            "description": "Scheduler-only trigger that sends due study reminder emails. Requires the server's STUDYFLOW_REMINDER_DISPATCH_TOKEN as a bearer token and no session cookie; responds 404 when reminders are disabled. Repeated calls never send a reminder twice."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('returns a dispatch summary', () => {",
+                  "  pm.expect(pm.response.json()).to.have.all.keys('sent_before', 'sent_after', 'skipped', 'failed');",
+                  "});"
+                ]
+              }
+            }
+          ]
         }
       ]
     }
@@ -990,16 +1679,16 @@
       "description": "Automatically populated by the create unavailable period request."
     },
     {
-      "key": "proposal_id",
-      "value": "",
-      "type": "string",
-      "description": "Set from a generated schedule proposal."
-    },
-    {
       "key": "session_id",
       "value": "",
       "type": "string",
-      "description": "Set from an accepted study session."
+      "description": "Automatically selected only when List Study Sessions finds an ended accepted session without an outcome; otherwise set manually."
+    },
+    {
+      "key": "planned_minutes",
+      "value": "",
+      "type": "string",
+      "description": "Automatically populated with the selected session's planned duration for safe outcome examples."
     },
     {
       "key": "google_oidc_code",
@@ -1018,6 +1707,12 @@
       "value": "",
       "type": "string",
       "description": "Automatically populated when Google matches an existing password account."
+    },
+    {
+      "key": "reminder_dispatch_token",
+      "value": "",
+      "type": "string",
+      "description": "Paste the server's STUDYFLOW_REMINDER_DISPATCH_TOKEN to call the internal reminder dispatch request. Never commit a real value."
     }
   ]
 }

@@ -12,6 +12,8 @@
 
 # testing
 /coverage
+/test-results
+/playwright-report
 
 # next.js
 /.next/
@@ -19,6 +21,7 @@
 
 # production
 /build
+/storybook-static/
 
 # misc
 .DS_Store

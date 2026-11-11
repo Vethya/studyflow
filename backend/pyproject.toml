@@ -22,6 +22,7 @@ dependencies = [
   "sqlalchemy[asyncio]>=2.0.36,<3",
   "uvicorn[standard]>=0.34,<1",
   "pyjwt[crypto]>=2.10,<3",
+  "markupsafe>=2.1,<4",
 ]
 
 [dependency-groups]
@@ -52,6 +53,7 @@ select = ["ASYNC", "B", "C4", "E", "F", "I", "RUF", "S", "SIM", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S101", "S105", "S106"]
+"benchmarks/**/*.py" = ["S101", "S105", "S106", "S311"]
 
 [tool.mypy]
 python_version = "3.12"

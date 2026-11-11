@@ -26,6 +26,8 @@ export interface OutcomeFormData {
   actualMinutes: number;
   /** Delayed only, and must be greater than zero. */
   revisedRemainingMinutes?: number;
+  /** Confirms an unusually large completed or delayed duration. */
+  largeActualConfirmed?: boolean;
 }
 
 /**

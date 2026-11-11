@@ -1,7 +1,9 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 
 from studyflow.app import create_app
+from studyflow.settings import Environment, Settings
 
 
 @pytest.mark.anyio
@@ -34,6 +36,53 @@ async def test_documentation_routes_stay_under_the_versioned_api_prefix() -> Non
     assert versioned_oauth_redirect.status_code == 200
     assert unversioned_redoc.status_code == 404
     assert unversioned_oauth_redirect.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_production_hides_the_documentation_and_schema() -> None:
+    settings = Settings(
+        environment=Environment.PRODUCTION,
+        database_url=SecretStr(
+            "postgresql+psycopg://studyflow:secret@db.example.com/studyflow?sslmode=require"
+        ),
+        public_app_url="https://studyflow.example.com",
+        smtp_start_tls=True,
+    )
+    transport = ASGITransport(app=create_app(settings))
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        responses = [
+            await client.get(path)
+            for path in (
+                "/api/v1/docs",
+                "/api/v1/docs/oauth2-redirect",
+                "/api/v1/openapi.json",
+                "/docs",
+                "/openapi.json",
+                "/redoc",
+            )
+        ]
+        health = await client.get("/api/v1/health")
+
+    assert [response.status_code for response in responses] == [404] * 6
+    assert health.status_code == 200
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "environment", [Environment.DEVELOPMENT, Environment.EVALUATION, Environment.TEST]
+)
+async def test_non_production_environments_keep_the_documentation(
+    environment: Environment,
+) -> None:
+    transport = ASGITransport(app=create_app(Settings(environment=environment)))
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        docs = await client.get("/api/v1/docs")
+        schema = await client.get("/api/v1/openapi.json")
+
+    assert docs.status_code == 200
+    assert schema.status_code == 200
 
 
 @pytest.mark.anyio
@@ -207,8 +256,57 @@ def test_openapi_documents_study_session_list_filters() -> None:
     operation = schema["paths"]["/api/v1/study-sessions"]["get"]
     parameters = {parameter["name"]: parameter for parameter in operation["parameters"]}
 
-    assert set(parameters) == {"from", "to", "task_id"}
+    assert set(parameters) == {"from", "to", "task_id", "awaiting_outcome"}
     assert parameters["from"]["required"] is False
     assert parameters["to"]["required"] is False
     assert parameters["task_id"]["required"] is False
+    assert parameters["awaiting_outcome"]["required"] is False
     assert set(operation["responses"]) >= {"200", "401", "422"}
+    session_schema = schema["components"]["schemas"]["StudySessionResponse"]
+    assert {"task_title", "task_category"} <= set(session_schema["required"])
+
+
+def test_openapi_documents_task_list_pagination() -> None:
+    schema = create_app().openapi()
+    operation = schema["paths"]["/api/v1/tasks"]["get"]
+    parameters = {parameter["name"]: parameter for parameter in operation["parameters"]}
+
+    assert parameters["offset"]["required"] is False
+    assert parameters["offset"]["schema"]["minimum"] == 0
+    assert parameters["offset"]["schema"]["default"] == 0
+    assert parameters["limit"]["schema"]["anyOf"][0]["maximum"] == 100
+    assert "X-Total-Count" in operation["responses"]["200"]["headers"]
+
+
+def test_openapi_documents_student_safe_adaptive_estimate_operations() -> None:
+    schema = create_app().openapi()
+    preview = schema["paths"]["/api/v1/adaptive-estimates/preview"]["get"]
+    acknowledgment = schema["paths"]["/api/v1/adaptive-estimates/acknowledgments"]["post"]
+    parameters = {parameter["name"]: parameter for parameter in preview["parameters"]}
+
+    assert set(parameters) == {"category", "original_minutes"}
+    assert parameters["original_minutes"]["schema"] == {
+        "type": "integer",
+        "maximum": 2_147_483_647,
+        "exclusiveMinimum": 0,
+        "title": "Original Minutes",
+    }
+    assert set(preview["responses"]) >= {"200", "401", "422"}
+    assert set(acknowledgment["responses"]) >= {"204", "401", "403", "422"}
+    preview_schema = schema["components"]["schemas"]["AdaptiveEstimatePreviewResponse"]
+    assert set(preview_schema["properties"]) == {
+        "category",
+        "original_minutes",
+        "adaptive_minutes",
+        "planned_minutes",
+        "correction_factor",
+        "history_scope",
+        "history_count",
+        "available",
+        "planned_source",
+        "acknowledgment_required",
+        "low_minutes",
+        "high_minutes",
+        "sample_size",
+        "basis",
+    }

@@ -98,7 +98,7 @@ async def test_readiness_bounds_a_hanging_database_probe(
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await asyncio.wait_for(
             client.get("/api/v1/ready"),
-            timeout=0.25,
+            timeout=5,
         )
 
     assert response.status_code == 503

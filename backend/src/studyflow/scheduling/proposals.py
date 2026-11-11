@@ -176,6 +176,7 @@ class ScheduleProposalRepository(Protocol):
         proposal_id: UUID,
         now: datetime,
         minimum_break_minutes: int,
+        grace_period: timedelta = timedelta(seconds=0),
     ) -> tuple[StudySessionRecord, ...] | None: ...
 
     async def reject(self, account_id: UUID, proposal_id: UUID) -> bool: ...

@@ -10,9 +10,11 @@ class Environment(StrEnum):
     DEVELOPMENT = "development"
     TEST = "test"
     PRODUCTION = "production"
+    EVALUATION = "evaluation"
 
 
 DEFAULT_DATABASE_URL = "postgresql+psycopg://studyflow:studyflow@localhost:5432/studyflow"
+MIN_FRONTEND_PROXY_SECRET_LENGTH = 32
 
 
 class Settings(BaseSettings):
@@ -22,6 +24,7 @@ class Settings(BaseSettings):
         env_prefix="STUDYFLOW_",
         extra="ignore",
         frozen=True,
+        hide_input_in_errors=True,
     )
 
     environment: Environment = Environment.DEVELOPMENT
@@ -36,11 +39,17 @@ class Settings(BaseSettings):
     smtp_password: SecretStr | None = None
     smtp_start_tls: bool = False
     email_from_address: EmailStr = "no-reply@example.com"
-    public_app_url: str = "http://localhost:5173"
+    public_app_url: str = "http://localhost:3000"
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    trusted_proxy_hops: Annotated[int, Field(ge=0, le=5)] = 0
+    frontend_proxy_secret: SecretStr | None = None
+    migrate_on_start: bool = False
+    accepted_newer_schema_revisions: Annotated[list[str], NoDecode] = Field(default_factory=list)
     google_oidc_client_id: str | None = None
     google_oidc_client_secret: SecretStr | None = None
     google_oidc_redirect_uri: str | None = None
+    google_import_redirect_uri: str | None = None
+    reminder_dispatch_token: SecretStr | None = None
 
     @field_validator("database_url")
     @classmethod
@@ -62,6 +71,13 @@ class Settings(BaseSettings):
             raise ValueError("Public app URL must not include a query or fragment")
         return value.rstrip("/")
 
+    @field_validator("accepted_newer_schema_revisions", mode="before")
+    @classmethod
+    def split_schema_revisions(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [revision.strip() for revision in value.split(",") if revision.strip()]
+        return value
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def split_cors_origins(cls, value: object) -> object:
@@ -81,7 +97,7 @@ class Settings(BaseSettings):
                 raise ValueError("CORS origins must not include a query or fragment")
             if parsed_url.path not in {"", "/"}:
                 raise ValueError("CORS origins must not include a path")
-            normalized.append(origin.rstrip("/"))
+            normalized.append(_origin(origin))
         if len(set(normalized)) != len(normalized):
             raise ValueError("CORS origins must not contain duplicates")
         return normalized
@@ -98,16 +114,51 @@ class Settings(BaseSettings):
             return None
         return value
 
+    @field_validator("frontend_proxy_secret", mode="before")
+    @classmethod
+    def normalize_blank_frontend_proxy_secret(cls, value: object) -> object:
+        if value == "" or (isinstance(value, SecretStr) and value.get_secret_value() == ""):
+            return None
+        return value
+
+    @field_validator("frontend_proxy_secret")
+    @classmethod
+    def require_a_strong_frontend_proxy_secret(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and len(value.get_secret_value()) < MIN_FRONTEND_PROXY_SECRET_LENGTH:
+            raise ValueError(
+                "Frontend proxy secret must be at least "
+                f"{MIN_FRONTEND_PROXY_SECRET_LENGTH} characters"
+            )
+        return value
+
     @field_validator(
         "google_oidc_client_id",
         "google_oidc_client_secret",
         "google_oidc_redirect_uri",
+        "google_import_redirect_uri",
         mode="before",
     )
     @classmethod
     def normalize_blank_oidc_setting(cls, value: object) -> object:
         if value == "" or (isinstance(value, SecretStr) and value.get_secret_value() == ""):
             return None
+        return value
+
+    @field_validator("reminder_dispatch_token", mode="before")
+    @classmethod
+    def normalize_blank_reminder_dispatch_token(cls, value: object) -> object:
+        if isinstance(value, SecretStr):
+            value = value.get_secret_value()
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        return None if stripped == "" else stripped
+
+    @field_validator("reminder_dispatch_token")
+    @classmethod
+    def require_strong_reminder_dispatch_token(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and len(value.get_secret_value()) < 32:
+            raise ValueError("Reminder dispatch token must be at least 32 characters")
         return value
 
     @field_validator("google_oidc_redirect_uri")
@@ -122,6 +173,18 @@ class Settings(BaseSettings):
             raise ValueError("Google OIDC redirect URI must not include a query or fragment")
         return value
 
+    @field_validator("google_import_redirect_uri")
+    @classmethod
+    def require_http_import_redirect_uri(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed_url = urlsplit(value)
+        if parsed_url.scheme not in {"http", "https"} or parsed_url.hostname is None:
+            raise ValueError("Google import redirect URI must use HTTP or HTTPS and include a host")
+        if parsed_url.query or parsed_url.fragment:
+            raise ValueError("Google import redirect URI must not include a query or fragment")
+        return value
+
     @model_validator(mode="after")
     def reject_debug_in_production(self) -> Self:
         configured_oidc_values = (
@@ -132,6 +195,10 @@ class Settings(BaseSettings):
         if any(configured_oidc_values) and not all(configured_oidc_values):
             raise ValueError(
                 "Google OIDC client ID, secret, and redirect URI must be configured together"
+            )
+        if self.google_import_redirect_uri is not None and not all(configured_oidc_values):
+            raise ValueError(
+                "Google import requires the Google OIDC client ID, secret, and redirect URI"
             )
         if self.environment is Environment.PRODUCTION and self.debug:
             raise ValueError("Debug mode must be disabled in production")
@@ -156,4 +223,34 @@ class Settings(BaseSettings):
                 and urlsplit(self.google_oidc_redirect_uri).scheme != "https"
             ):
                 raise ValueError("Production Google OIDC redirect URI must use HTTPS")
+            if (
+                self.google_import_redirect_uri is not None
+                and urlsplit(self.google_import_redirect_uri).scheme != "https"
+            ):
+                raise ValueError("Production Google import redirect URI must use HTTPS")
+            app_origin = _origin(self.public_app_url)
+            for origin in self.cors_origins:
+                if urlsplit(origin).scheme != "https":
+                    raise ValueError("Production CORS origins must use HTTPS")
+                if _origin(origin) != app_origin:
+                    raise ValueError("Production CORS origins must match the public app URL")
         return self
+
+
+DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _origin(url: str) -> str:
+    """Return a URL's origin serialized the way browsers send the ``Origin`` header.
+
+    The scheme and host are lowercased and the scheme's default port is omitted, so
+    ``https://Example.com:443/`` and ``https://example.com`` are the same origin.
+    """
+    parsed_url = urlsplit(url)
+    scheme = parsed_url.scheme.lower()
+    host = parsed_url.hostname or ""
+    if ":" in host:
+        host = f"[{host}]"
+    port = parsed_url.port
+    explicit_port = f":{port}" if port is not None and port != DEFAULT_PORTS.get(scheme) else ""
+    return f"{scheme}://{host}{explicit_port}"

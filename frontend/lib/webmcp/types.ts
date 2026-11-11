@@ -7,6 +7,8 @@ export interface WebMcpToolAnnotations {
 
 export interface WebMcpToolExecutionOptions {
   signal: AbortSignal;
+  /** WebMCP client hook used while the page asks the user to confirm. */
+  requestUserInteraction?: <T>(callback: () => Promise<T>) => Promise<T>;
 }
 
 export interface WebMcpTool {

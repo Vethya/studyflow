@@ -22,7 +22,18 @@ from studyflow.scheduling import (
     TaskAllocation,
     schedule_input_fingerprint,
 )
-from studyflow.scheduling.proposals import NewScheduleProposal, ScheduleProposalRepository
+from studyflow.scheduling.proposals import (
+    NewProposedSession,
+    NewScheduleProposal,
+    NewTaskAllocation,
+    ScheduleProposalRepository,
+)
+from studyflow.scheduling.scenarios import (
+    ScenarioDeadlineOverride,
+    ScenarioValidationError,
+    ScheduleScenario,
+)
+from studyflow.scheduling.service import _utc_text
 from studyflow.tasks.service import (
     AcademicTaskRecord,
     AcademicTasks,
@@ -251,3 +262,284 @@ def test_app_exposes_injected_schedule_generation_service() -> None:
     application = create_app(schedule_generation=injected)
 
     assert application.state.schedule_generation is injected
+
+
+def test_utc_text_validates_timezone() -> None:
+    naive_dt = datetime(2026, 8, 25, 10, 0)
+    with pytest.raises(ValueError, match="timezone-aware"):
+        _utc_text(naive_dt)
+
+
+def test_preview_record_unit_and_simulate() -> None:
+    session = NewProposedSession(
+        task_id=TASK_ID,
+        starts_at=datetime(2026, 8, 25, 9, 0, tzinfo=UTC),
+        ends_at=datetime(2026, 8, 25, 10, 0, tzinfo=UTC),
+        planned_duration_minutes=60,
+    )
+    allocation = NewTaskAllocation(
+        task_id=TASK_ID,
+        deadline_at=datetime(2026, 8, 26, 12, 0, tzinfo=UTC),
+        required_minutes=60,
+        scheduled_minutes=60,
+        unscheduled_minutes=0,
+        raw_calendar_capacity_minutes=180,
+        available_minutes_before_deadline=180,
+        shortfall_minutes=0,
+    )
+    proposal = NewScheduleProposal(
+        kind=ProposalKind.GENERATION,
+        revision_reason=None,
+        status=ProposalStatus.FEASIBLE,
+        input_fingerprint="f" * 64,
+        sessions=(session,),
+        allocations=(allocation,),
+    )
+    created_at = datetime(2026, 8, 24, 12, 0, tzinfo=UTC)
+    preview = ScheduleGenerationService._preview_record(ACCOUNT_ID, proposal, created_at)
+
+    assert isinstance(preview.id, UUID)
+    assert preview.account_id == ACCOUNT_ID
+    assert preview.kind is ProposalKind.GENERATION
+    assert preview.status is ProposalStatus.FEASIBLE
+    assert preview.created_at == created_at
+    assert len(preview.sessions) == 1
+    assert preview.sessions[0].proposal_id == preview.id
+    assert preview.sessions[0].task_id == TASK_ID
+    assert len(preview.allocations) == 1
+    assert preview.allocations[0].proposal_id == preview.id
+    assert preview.allocations[0].task_id == TASK_ID
+
+
+@pytest.mark.anyio
+async def test_simulate_does_not_persist_proposal() -> None:
+    tasks, windows, periods, preferences = _inputs()
+    repository = ProposalsStub([])
+    result = OverloadResult(
+        KernelStatus.FEASIBLE,
+        (ScheduledSession("0", str(TASK_ID), 0, 60),),
+        (TaskAllocation(str(TASK_ID), 100, 60, 60, 0, 180, 180, 0),),
+        SolverDiagnostics("OPTIMAL", 0.1, 10, 5),
+        None,
+    )
+    service = ScheduleGenerationService(
+        cast(AcademicTasks, TasksStub(tasks)),
+        cast(AvailabilityWindows, WindowsStub(windows)),
+        cast(UnavailablePeriods, PeriodsStub(periods)),
+        cast(AccountPreferences, PreferencesStub(preferences)),
+        cast(ScheduleProposalRepository, repository),
+        clock=lambda: datetime(2026, 8, 24, tzinfo=UTC),
+        solver=lambda problem: result,
+    )
+
+    scenario = ScheduleScenario()
+    preview = await service.simulate(ACCOUNT_ID, scenario)
+    assert preview is not None
+    assert preview.status is ProposalStatus.FEASIBLE
+    assert repository.replacements == []  # not persisted!
+
+
+@pytest.mark.anyio
+async def test_apply_deadline_overrides_validation() -> None:
+    tasks, windows, periods, preferences = _inputs()
+    repository = ProposalsStub([])
+    service = ScheduleGenerationService(
+        cast(AcademicTasks, TasksStub(tasks)),
+        cast(AvailabilityWindows, WindowsStub(windows)),
+        cast(UnavailablePeriods, PeriodsStub(periods)),
+        cast(AccountPreferences, PreferencesStub(preferences)),
+        cast(ScheduleProposalRepository, repository),
+        clock=lambda: datetime(2026, 8, 24, tzinfo=UTC),
+    )
+
+    # 1. Unknown task id
+    unknown_id = uuid4()
+    scenario_unknown = ScheduleScenario(
+        deadline_overrides=(
+            ScenarioDeadlineOverride(unknown_id, datetime(2026, 8, 28, tzinfo=UTC)),
+        )
+    )
+    with pytest.raises(ScenarioValidationError, match="Scenario contains unknown task id"):
+        await service.generate(ACCOUNT_ID, scenario=scenario_unknown)
+
+    # 2. Past deadline override
+    scenario_past = ScheduleScenario(
+        deadline_overrides=(ScenarioDeadlineOverride(TASK_ID, datetime(2026, 8, 20, tzinfo=UTC)),)
+    )
+    with pytest.raises(ScenarioValidationError, match="must be in the future"):
+        await service.generate(ACCOUNT_ID, scenario=scenario_past)
+
+    # 3. Valid future deadline override
+    new_deadline = datetime(2026, 8, 28, 12, 0, tzinfo=UTC)
+    scenario_valid = ScheduleScenario(
+        deadline_overrides=(ScenarioDeadlineOverride(TASK_ID, new_deadline),)
+    )
+    result = OverloadResult(
+        KernelStatus.FEASIBLE,
+        (ScheduledSession("0", str(TASK_ID), 0, 60),),
+        (TaskAllocation(str(TASK_ID), 100, 60, 60, 0, 180, 180, 0),),
+        SolverDiagnostics("OPTIMAL", 0.1, 10, 5),
+        None,
+    )
+    service_valid = ScheduleGenerationService(
+        cast(AcademicTasks, TasksStub(tasks)),
+        cast(AvailabilityWindows, WindowsStub(windows)),
+        cast(UnavailablePeriods, PeriodsStub(periods)),
+        cast(AccountPreferences, PreferencesStub(preferences)),
+        cast(ScheduleProposalRepository, repository),
+        clock=lambda: datetime(2026, 8, 24, tzinfo=UTC),
+        solver=lambda problem: result,
+    )
+    await service_valid.generate(ACCOUNT_ID, scenario=scenario_valid)
+    proposal = repository.replacements[-1][1]
+    assert proposal.allocations[0].deadline_at == new_deadline
+
+
+@pytest.mark.anyio
+async def test_overdue_work_converts_feasible_to_overload() -> None:
+    future_task = _task(datetime(2026, 8, 26, 12, tzinfo=UTC))
+    overdue_task_id = uuid4()
+    overdue_task = replace(
+        future_task,
+        id=overdue_task_id,
+        deadline_at=datetime(2026, 8, 20, tzinfo=UTC),  # past deadline
+        planned_duration_minutes=45,
+    )
+    tasks = [future_task, overdue_task]
+    _, windows, periods, preferences = _inputs()
+    repository = ProposalsStub([])
+
+    result = OverloadResult(
+        KernelStatus.FEASIBLE,
+        (ScheduledSession("0", str(future_task.id), 0, 60),),
+        (TaskAllocation(str(future_task.id), 100, 60, 60, 0, 180, 180, 0),),
+        SolverDiagnostics("OPTIMAL", 0.1, 10, 5),
+        None,
+    )
+    service = ScheduleGenerationService(
+        cast(AcademicTasks, TasksStub(tasks)),
+        cast(AvailabilityWindows, WindowsStub(windows)),
+        cast(UnavailablePeriods, PeriodsStub(periods)),
+        cast(AccountPreferences, PreferencesStub(preferences)),
+        cast(ScheduleProposalRepository, repository),
+        clock=lambda: datetime(2026, 8, 24, tzinfo=UTC),
+        solver=lambda problem: result,
+    )
+
+    await service.generate(ACCOUNT_ID)
+    proposal = repository.replacements[0][1]
+    assert proposal.status is ProposalStatus.OVERLOAD
+    allocations_by_task = {a.task_id: a for a in proposal.allocations}
+    assert overdue_task_id in allocations_by_task
+    overdue_alloc = allocations_by_task[overdue_task_id]
+    assert overdue_alloc.required_minutes == 45
+    assert overdue_alloc.scheduled_minutes == 0
+    assert overdue_alloc.unscheduled_minutes == 45
+    assert overdue_alloc.shortfall_minutes == 45
+
+
+@pytest.mark.anyio
+async def test_overdue_work_ignored_if_completed_or_overridden() -> None:
+    future_task = _task(datetime(2026, 8, 26, 12, tzinfo=UTC))
+    completed_overdue_id = uuid4()
+    completed_overdue = replace(
+        future_task,
+        id=completed_overdue_id,
+        deadline_at=datetime(2026, 8, 20, tzinfo=UTC),
+        status=TaskStatus.COMPLETED,
+    )
+    tasks = [future_task, completed_overdue]
+    _, windows, periods, preferences = _inputs()
+    repository = ProposalsStub([])
+
+    result = OverloadResult(
+        KernelStatus.FEASIBLE,
+        (ScheduledSession("0", str(future_task.id), 0, 60),),
+        (TaskAllocation(str(future_task.id), 100, 60, 60, 0, 180, 180, 0),),
+        SolverDiagnostics("OPTIMAL", 0.1, 10, 5),
+        None,
+    )
+    service = ScheduleGenerationService(
+        cast(AcademicTasks, TasksStub(tasks)),
+        cast(AvailabilityWindows, WindowsStub(windows)),
+        cast(UnavailablePeriods, PeriodsStub(periods)),
+        cast(AccountPreferences, PreferencesStub(preferences)),
+        cast(ScheduleProposalRepository, repository),
+        clock=lambda: datetime(2026, 8, 24, tzinfo=UTC),
+        solver=lambda problem: result,
+    )
+
+    await service.generate(ACCOUNT_ID)
+    proposal = repository.replacements[0][1]
+    assert proposal.status is ProposalStatus.FEASIBLE
+    assert len(proposal.allocations) == 1
+    assert proposal.allocations[0].task_id == future_task.id
+
+
+@pytest.mark.anyio
+async def test_proposal_draft_rejects_unknown_task_from_solver() -> None:
+    tasks, windows, periods, preferences = _inputs()
+    repository = ProposalsStub([])
+    unknown_task_id = str(uuid4())
+    result = OverloadResult(
+        KernelStatus.FEASIBLE,
+        (ScheduledSession("0", unknown_task_id, 0, 60),),
+        (TaskAllocation(unknown_task_id, 100, 60, 60, 0, 180, 180, 0),),
+        SolverDiagnostics("OPTIMAL", 0.1, 10, 5),
+        None,
+    )
+    service = ScheduleGenerationService(
+        cast(AcademicTasks, TasksStub(tasks)),
+        cast(AvailabilityWindows, WindowsStub(windows)),
+        cast(UnavailablePeriods, PeriodsStub(periods)),
+        cast(AccountPreferences, PreferencesStub(preferences)),
+        cast(ScheduleProposalRepository, repository),
+        clock=lambda: datetime(2026, 8, 24, tzinfo=UTC),
+        solver=lambda problem: result,
+    )
+
+    with pytest.raises(ScheduleGenerationFailedError, match="unknown task"):
+        await service.generate(ACCOUNT_ID)
+
+
+@pytest.mark.anyio
+async def test_generate_with_study_sessions_and_scenario() -> None:
+    from studyflow.scheduling.outcomes import StudySessions
+    from studyflow.scheduling.scenarios import ScenarioAvailabilityWindow
+
+    class StudySessionsStub:
+        async def task_schedule_adjustments(self, account_id: UUID) -> dict[UUID, int]:
+            return {TASK_ID: 15}
+
+    tasks, windows, periods, preferences = _inputs()
+    repository = ProposalsStub([])
+    result = OverloadResult(
+        KernelStatus.FEASIBLE,
+        (ScheduledSession("0", str(TASK_ID), 0, 45),),
+        (TaskAllocation(str(TASK_ID), 100, 45, 45, 0, 180, 180, 0),),
+        SolverDiagnostics("OPTIMAL", 0.1, 10, 5),
+        None,
+    )
+    service = ScheduleGenerationService(
+        cast(AcademicTasks, TasksStub(tasks)),
+        cast(AvailabilityWindows, WindowsStub(windows)),
+        cast(UnavailablePeriods, PeriodsStub(periods)),
+        cast(AccountPreferences, PreferencesStub(preferences)),
+        cast(ScheduleProposalRepository, repository),
+        study_sessions=cast(StudySessions, StudySessionsStub()),
+        clock=lambda: datetime(2026, 8, 24, tzinfo=UTC),
+        solver=lambda problem: result,
+    )
+
+    scenario = ScheduleScenario(
+        temporary_availability=(
+            ScenarioAvailabilityWindow(
+                datetime(2026, 8, 25, 14, 0, tzinfo=UTC),
+                datetime(2026, 8, 25, 16, 0, tzinfo=UTC),
+            ),
+        )
+    )
+    await service.generate(ACCOUNT_ID, scenario=scenario)
+    proposal = repository.replacements[0][1]
+    assert proposal.scenario is not None
+    assert proposal.allocations[0].required_minutes == 45
