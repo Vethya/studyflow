@@ -6,12 +6,13 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from studyflow.reminders.email import SmtpReminderEmailSender, to_local_time
+from studyflow.reminders.email import SmtpReminderEmailSender
 from studyflow.reminders.service import (
     ReminderCandidate,
     ReminderDispatchService,
     ReminderKind,
 )
+from studyflow.timezones import to_local_time
 
 NOW = datetime(2026, 10, 20, 8, 0, tzinfo=UTC)
 

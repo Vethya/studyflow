@@ -1,8 +1,5 @@
 """Plain-text and HTML study reminder emails."""
 
-from datetime import UTC, datetime, tzinfo
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
 from markupsafe import Markup
 
 from studyflow.auth.email_delivery import EmailTransport
@@ -17,6 +14,7 @@ from studyflow.mail.layout import (
 )
 from studyflow.mail.message import build_message
 from studyflow.reminders.service import ReminderCandidate
+from studyflow.timezones import to_local_time
 
 MAX_SUBJECT_TITLE_LENGTH = 120
 OUTCOMES = (
@@ -24,19 +22,6 @@ OUTCOMES = (
     ("Partly done", "I worked, but there is more left."),
     ("Didn't study", "This session didn't happen."),
 )
-
-
-def _zone(timezone: str) -> tzinfo:
-    try:
-        return ZoneInfo(timezone)
-    except (ZoneInfoNotFoundError, ValueError):
-        return UTC
-
-
-def to_local_time(value: datetime, timezone: str) -> datetime:
-    """Convert an instant to the account timezone; naive values are treated as UTC."""
-    aware = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-    return aware.astimezone(_zone(timezone))
 
 
 def _single_line(value: str, limit: int) -> str:

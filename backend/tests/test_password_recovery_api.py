@@ -237,7 +237,9 @@ class RecoveryPasswordsStub:
 
 @dataclass
 class RecoveryEmailSenderStub:
-    async def send_password_reset(self, email: str, token: str) -> None:
+    async def send_password_reset(
+        self, email: str, token: str, requested_at: datetime, timezone: str
+    ) -> None:
         return None
 
 
@@ -285,8 +287,11 @@ async def test_password_reset_recovers_shared_login_lockout_only_after_success(
                 )
             )
         repository = SqlAlchemyPasswordRecoveryRepository(database)
-        assert await repository.create_reset_token(
-            email, hash_verification_token(token), now + timedelta(hours=1)
+        assert (
+            await repository.create_reset_token(
+                email, hash_verification_token(token), now + timedelta(hours=1)
+            )
+            == "UTC"
         )
         app = create_app(
             database=database,

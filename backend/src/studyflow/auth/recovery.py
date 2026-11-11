@@ -19,7 +19,7 @@ class InvalidPasswordResetTokenError(ValueError):
 class PasswordRecoveryRepository(Protocol):
     async def create_reset_token(
         self, email: str, token_hash: str, expires_at: datetime
-    ) -> bool: ...
+    ) -> str | None: ...
 
     async def reset_password(
         self, token_hash: str, password_hash: str, now: datetime
@@ -27,7 +27,9 @@ class PasswordRecoveryRepository(Protocol):
 
 
 class PasswordRecoveryEmailSender(Protocol):
-    async def send_password_reset(self, email: str, token: str) -> None: ...
+    async def send_password_reset(
+        self, email: str, token: str, requested_at: datetime, timezone: str
+    ) -> None: ...
 
 
 class PasswordHashing(Protocol):
@@ -58,12 +60,20 @@ class PasswordRecoveryService:
     async def request_reset(self, email: str, deferred_tasks: DeferredTasks) -> None:
         canonical_email = canonicalize_email(email)
         token = self._token_factory()
-        if await self._repository.create_reset_token(
+        requested_at = self._clock()
+        timezone = await self._repository.create_reset_token(
             canonical_email,
             hash_verification_token(token),
-            self._clock() + timedelta(hours=1),
-        ):
-            deferred_tasks.add_task(self._email_sender.send_password_reset, canonical_email, token)
+            requested_at + timedelta(hours=1),
+        )
+        if timezone is not None:
+            deferred_tasks.add_task(
+                self._email_sender.send_password_reset,
+                canonical_email,
+                token,
+                requested_at,
+                timezone,
+            )
 
     async def reset_password(self, token: str, password: str) -> str:
         password_hash = await self._passwords.hash_password(password)

@@ -1,5 +1,6 @@
 """Replaceable delivery for authentication-only emails."""
 
+from datetime import datetime
 from email.message import EmailMessage
 from typing import Protocol
 from urllib.parse import urlencode
@@ -9,6 +10,7 @@ from markupsafe import Markup
 
 from studyflow.mail.layout import LIGHT, button, fallback_link, heading, paragraph, render_layout
 from studyflow.mail.message import build_message
+from studyflow.timezones import to_local_time
 
 
 class EmailTransport(Protocol):
@@ -81,9 +83,15 @@ class SmtpAuthenticationEmailSender:
             "If it wasn't you, ignore this email and no account will be activated.",
         )
 
-    async def send_password_reset(self, email: str, token: str) -> None:
+    async def send_password_reset(
+        self, email: str, token: str, requested_at: datetime, timezone: str
+    ) -> None:
         query = urlencode({"token": token})
         url = f"{self._public_app_url}/reset-password?{query}"
+        local = to_local_time(requested_at, timezone)
+        requested = (
+            f"Requested at {local:%H:%M} on {local:%A} {local.day} {local:%B} ({local.tzinfo})."
+        )
         await self._send(
             email,
             subject="Reset your StudyFlow password",
@@ -97,6 +105,7 @@ class SmtpAuthenticationEmailSender:
             )
             + button("Choose a new password", url)
             + paragraph("The link works for 1 hour.", size=14)
+            + paragraph(requested, size=14)
             + paragraph(
                 Markup(
                     '<strong class="sf-ink" style="color:{};">Didn\'t ask for this?</strong> '
@@ -108,6 +117,7 @@ class SmtpAuthenticationEmailSender:
             + fallback_link(url),
             text="Reset your password\n\nSomeone asked to reset the password for your StudyFlow "
             f"account.\n\nChoose a new password:\n{url}\n\nThis link expires in one hour.\n\n"
+            f"{requested}\n\n"
             "Didn't ask for this? Ignore this email. Your password stays the same.",
             reason=f"Sent to {email} because a password reset was requested for this account. "
             "StudyFlow will never ask for your password by email.",

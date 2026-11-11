@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from unittest.mock import Mock
 
 import pytest
 
@@ -9,12 +10,14 @@ from studyflow.auth.registration import DeferredTasks
 
 @dataclass
 class RecoveryRepositoryStub:
-    eligible: bool = True
+    timezone: str | None = "Asia/Phnom_Penh"
     requests: list[tuple[str, str, datetime]] = field(default_factory=list)
 
-    async def create_reset_token(self, email: str, token_hash: str, expires_at: datetime) -> bool:
+    async def create_reset_token(
+        self, email: str, token_hash: str, expires_at: datetime
+    ) -> str | None:
         self.requests.append((email, token_hash, expires_at))
-        return self.eligible
+        return self.timezone
 
     async def reset_password(
         self, token_hash: str, password_hash: str, now: datetime
@@ -33,7 +36,9 @@ class PasswordHasherStub:
 
 @dataclass
 class RecoveryEmailSenderStub:
-    async def send_password_reset(self, email: str, token: str) -> None:
+    async def send_password_reset(
+        self, email: str, token: str, requested_at: datetime, timezone: str
+    ) -> None:
         return None
 
 
@@ -48,6 +53,7 @@ class DeferredTasksStub(DeferredTasks):
 @pytest.mark.anyio
 async def test_password_recovery_request_creates_one_hour_token_and_defers_email() -> None:
     now = datetime(2026, 7, 29, 12, tzinfo=UTC)
+    clock = Mock(return_value=now)
     repository = RecoveryRepositoryStub()
     sender = RecoveryEmailSenderStub()
     deferred = DeferredTasksStub()
@@ -56,7 +62,7 @@ async def test_password_recovery_request_creates_one_hour_token_and_defers_email
         sender,
         passwords=PasswordHasherStub(),
         token_factory=lambda: "single-use-reset-token",
-        clock=lambda: now,
+        clock=clock,
     )
 
     await service.request_reset(" STUDENT@example.com ", deferred)
@@ -64,11 +70,15 @@ async def test_password_recovery_request_creates_one_hour_token_and_defers_email
     assert repository.requests[0][0] == "student@example.com"
     assert len(repository.requests[0][1]) == 64
     assert repository.requests[0][2] == now + timedelta(hours=1)
+    clock.assert_called_once_with()
     assert deferred.calls == [
-        (sender.send_password_reset, ("student@example.com", "single-use-reset-token"))
+        (
+            sender.send_password_reset,
+            ("student@example.com", "single-use-reset-token", now, "Asia/Phnom_Penh"),
+        )
     ]
 
-    repository.eligible = False
+    repository.timezone = None
     await service.request_reset("missing@example.com", deferred)
     assert len(deferred.calls) == 1
 

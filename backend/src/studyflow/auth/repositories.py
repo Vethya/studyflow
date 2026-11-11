@@ -400,13 +400,16 @@ class SqlAlchemyPasswordRecoveryRepository:
     def __init__(self, database: SessionTransactions) -> None:
         self._database = database
 
-    async def create_reset_token(self, email: str, token_hash: str, expires_at: datetime) -> bool:
+    async def create_reset_token(
+        self, email: str, token_hash: str, expires_at: datetime
+    ) -> str | None:
         async with self._database.transaction() as session:
             account = await session.scalar(
                 select(StudentAccount).where(StudentAccount.email == email).with_for_update()
             )
             if account is None or account.email_verified_at is None:
-                return False
+                return None
+            timezone = account.timezone
             await session.execute(
                 delete(AuthenticationEmailToken).where(
                     AuthenticationEmailToken.account_id == account.id,
@@ -422,7 +425,7 @@ class SqlAlchemyPasswordRecoveryRepository:
                     expires_at=expires_at,
                 )
             )
-        return True
+        return timezone
 
     async def reset_password(
         self, token_hash: str, password_hash: str, now: datetime

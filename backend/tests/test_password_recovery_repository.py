@@ -40,7 +40,7 @@ async def test_password_reset_is_single_use_and_revokes_all_sessions() -> None:
                     name="Student Name",
                     password_hash="$argon2id$old-hash",
                     email_verified_at=now,
-                    timezone="UTC",
+                    timezone="Asia/Phnom_Penh",
                 )
             )
             session.add(
@@ -53,8 +53,11 @@ async def test_password_reset_is_single_use_and_revokes_all_sessions() -> None:
                 )
             )
         repository = SqlAlchemyPasswordRecoveryRepository(database)
-        assert await repository.create_reset_token(
-            "student@example.com", hash_verification_token(token), now + timedelta(hours=1)
+        assert (
+            await repository.create_reset_token(
+                "student@example.com", hash_verification_token(token), now + timedelta(hours=1)
+            )
+            == "Asia/Phnom_Penh"
         )
 
         assert (
@@ -102,12 +105,20 @@ async def test_password_reset_request_ignores_ineligible_accounts() -> None:
             )
         repository = SqlAlchemyPasswordRecoveryRepository(database)
 
-        assert not await repository.create_reset_token(
-            "student@example.com", "a" * 64, now + timedelta(hours=1)
+        assert (
+            await repository.create_reset_token(
+                "student@example.com", "a" * 64, now + timedelta(hours=1)
+            )
+            is None
         )
-        assert not await repository.create_reset_token(
-            "missing@example.com", "b" * 64, now + timedelta(hours=1)
+        assert (
+            await repository.create_reset_token(
+                "missing@example.com", "b" * 64, now + timedelta(hours=1)
+            )
+            is None
         )
+        async with database.transaction() as session:
+            assert list(await session.scalars(select(AuthenticationEmailToken))) == []
     finally:
         await database.stop()
 
@@ -129,8 +140,11 @@ async def test_password_reset_can_set_password_for_google_only_account() -> None
         assert account is not None
 
         repository = SqlAlchemyPasswordRecoveryRepository(database)
-        assert await repository.create_reset_token(
-            "student@example.com", hash_verification_token(token), now + timedelta(hours=1)
+        assert (
+            await repository.create_reset_token(
+                "student@example.com", hash_verification_token(token), now + timedelta(hours=1)
+            )
+            == "UTC"
         )
         assert (
             await repository.reset_password(
@@ -170,11 +184,17 @@ async def test_password_reset_tokens_expire_and_replacement_invalidates_prior_to
                 )
             )
         repository = SqlAlchemyPasswordRecoveryRepository(database)
-        assert await repository.create_reset_token(
-            "student@example.com", first_token_hash, now + timedelta(hours=1)
+        assert (
+            await repository.create_reset_token(
+                "student@example.com", first_token_hash, now + timedelta(hours=1)
+            )
+            == "UTC"
         )
-        assert await repository.create_reset_token(
-            "student@example.com", replacement_token_hash, now + timedelta(hours=1)
+        assert (
+            await repository.create_reset_token(
+                "student@example.com", replacement_token_hash, now + timedelta(hours=1)
+            )
+            == "UTC"
         )
 
         assert (

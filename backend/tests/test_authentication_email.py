@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from email.message import EmailMessage
 from html import unescape
 
@@ -52,7 +53,9 @@ async def test_authentication_email_contains_multipart_link_and_expiry(
     if path == "verify-email":
         await sender.send_verification("student@example.com", "a+b/=")
     else:
-        await sender.send_password_reset("student@example.com", "a+b/=")
+        await sender.send_password_reset(
+            "student@example.com", "a+b/=", datetime(2026, 11, 11, 3, 25, tzinfo=UTC), "UTC"
+        )
 
     [message] = transport.messages
     assert message["To"] == "student@example.com"
@@ -85,6 +88,32 @@ async def test_authentication_email_contains_multipart_link_and_expiry(
         assert ledger_label not in plain.get_content()
     for ledger_label in (">Account<", ">Link expires<", ">Requested<", ">Can be used<"):
         assert ledger_label not in html_body
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("timezone", "expected"),
+    [
+        ("Asia/Phnom_Penh", "10:25 on Wednesday 11 November (Asia/Phnom_Penh)"),
+        ("America/New_York", "22:25 on Tuesday 10 November (America/New_York)"),
+        ("not/a-timezone", "03:25 on Wednesday 11 November (UTC)"),
+    ],
+)
+async def test_password_reset_email_shows_local_request_time_in_both_parts(
+    timezone: str, expected: str
+) -> None:
+    transport = EmailTransportStub()
+    sender = SmtpAuthenticationEmailSender(
+        transport, "no-reply@studyflow.test", "https://studyflow.test"
+    )
+
+    await sender.send_password_reset(
+        "student@example.com", "reset-token", datetime(2026, 11, 11, 3, 25, tzinfo=UTC), timezone
+    )
+
+    [message] = transport.messages
+    for part in message.iter_parts():
+        assert f"Requested at {expected}." in part.get_content()
 
 
 def test_layout_components_escape_text_and_urls_without_escaping_composed_markup() -> None:
