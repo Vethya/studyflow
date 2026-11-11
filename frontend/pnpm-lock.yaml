@@ -14,9 +14,6 @@ importers:
       '@date-fns/tz':
         specifier: ^1.5.0
         version: 1.5.0
-      '@gsap/react':
-        specifier: ^2.1.2
-        version: 2.1.2(gsap@3.15.0)(react@19.2.4)
       '@hugeicons/core-free-icons':
         specifier: ^4.3.5
         version: 4.3.5
@@ -35,9 +32,6 @@ importers:
       date-fns:
         specifier: ^4.4.0
         version: 4.4.0
-      gsap:
-        specifier: ^3.15.0
-        version: 3.15.0
       next:
         specifier: 16.3.5
         version: 16.3.5(@babel/core@7.29.7)(@playwright/test@1.63.0)(@types/node@20.19.43)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -655,12 +649,6 @@ packages:
 
   '@fontsource/inter@5.3.0':
     resolution: {integrity: sha512-RofMylZmjlJEfELXeNHFWBRcSs75rGU/6bV2S2jfnvv/3rPXPGe0LgUJTklcHZ9lM4OZmAVFhcJPnACfb91A3g==}
-
-  '@gsap/react@2.1.2':
-    resolution: {integrity: sha512-JqliybO1837UcgH2hVOM4VO+38APk3ECNrsuSM4MuXp+rbf+/2IG2K1YJiqfTcXQHH7XlA0m3ykniFYstfq0Iw==}
-    peerDependencies:
-      gsap: ^3.12.5
-      react: '>=17'
 
   '@hono/node-server@2.1.1':
     resolution: {integrity: sha512-ELuehkj5VCBdgEw9zs+ivkKwyzzUCSQuE96YmiPvn1ECBoZCczbFXJLeEGMTYjphP6gydh4pHMqEYPVMYUVgQg==}
@@ -3082,9 +3070,6 @@ packages:
   graphql@16.14.2:
     resolution: {integrity: sha512-Chq1s4CY7jmh8gO2qvLIJyfCDIN+EHLFW/9iShnp1z8FjBQMoodWP1kDC36VAMXXIvAjj4ARa7ntfAV2BrjsbA==}
     engines: {node: ^12.22.0 || ^14.16.0 || ^16.0.0 || >=17.0.0}
-
-  gsap@3.15.0:
-    resolution: {integrity: sha512-dMW4CWBTUK1AEEDeZc1g4xpPGIrSf9fJF960qbTZmN/QwZIWY5wgliS6JWl9/25fpTGJrMRtSjGtOmPnfjZB+A==}
 
   has-bigints@1.1.0:
     resolution: {integrity: sha512-R3pbpkcIqv2Pm3dUwgjclDRVmWpTJW2DcMzcIhEXEx1oh/CEMObMm3KLmRJOdvhM7o4uQBnwr8pzRK2sJWIqfg==}
@@ -5530,11 +5515,6 @@ snapshots:
 
   '@fontsource/inter@5.3.0': {}
 
-  '@gsap/react@2.1.2(gsap@3.15.0)(react@19.2.4)':
-    dependencies:
-      gsap: 3.15.0
-      react: 19.2.4
-
   '@hono/node-server@2.1.1(hono@4.13.7)':
     dependencies:
       hono: 4.13.7
@@ -7947,8 +7927,6 @@ snapshots:
   graceful-fs@4.2.11: {}
 
   graphql@16.14.2: {}
-
-  gsap@3.15.0: {}
 
   has-bigints@1.1.0: {}
 

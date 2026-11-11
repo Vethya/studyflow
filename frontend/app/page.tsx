@@ -1,18 +1,10 @@
 "use client";
 
-import { useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { Calendar, BarChart3, Clock, Sparkles, BookOpen, Target, GraduationCap, Pencil, NotebookPen, Check } from "@/components/icons";
-import gsap from "gsap";
-import { useGSAP } from "@gsap/react";
-import { ScrollTrigger } from "gsap/dist/ScrollTrigger";
+import { Calendar, BarChart3, Clock, Sparkles, Target, Check } from "@/components/icons";
 import { useSession } from "@/hooks/use-session";
 import { BrandIcon } from "@/components/brand-icon";
-
-if (typeof window !== "undefined") {
-  gsap.registerPlugin(ScrollTrigger, useGSAP);
-}
 
 const PLANS = [
   {
@@ -53,102 +45,12 @@ const PLANS = [
   },
 ];
 
-/**
- * Students who ask for reduced motion get the finished page straight away.
- * This also keeps fade-ins from being read mid-animation by contrast checks.
- */
-function prefersReducedMotion(): boolean {
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
-
-/* ─── Floating Student Elements ─── */
-function FloatingElements() {
-  const elRef = useRef<HTMLDivElement>(null);
-
-  useGSAP(() => {
-    if (!elRef.current || prefersReducedMotion()) return;
-    const items = elRef.current.querySelectorAll(".float-item");
-    items.forEach((item) => {
-      gsap.to(item, {
-        y: gsap.utils.random(-25, 25),
-        x: gsap.utils.random(-15, 15),
-        rotation: gsap.utils.random(-10, 10),
-        duration: gsap.utils.random(4, 8),
-        repeat: -1,
-        yoyo: true,
-        ease: "sine.inOut",
-        delay: gsap.utils.random(0, 3),
-      });
-    });
-    // Also animate small dots
-    const dots = elRef.current.querySelectorAll(".dot");
-    dots.forEach((dot) => {
-      gsap.to(dot, {
-        y: gsap.utils.random(-15, 15),
-        opacity: gsap.utils.random(0.2, 0.7),
-        duration: gsap.utils.random(3, 6),
-        repeat: -1,
-        yoyo: true,
-        ease: "sine.inOut",
-        delay: gsap.utils.random(0, 3),
-      });
-    });
-  }, { scope: elRef });
-
-  const floatingIcons = [
-    { Icon: BookOpen, left: "8%", top: "20%", size: "w-5 h-5" },
-    { Icon: GraduationCap, left: "85%", top: "15%", size: "w-6 h-6" },
-    { Icon: Pencil, left: "12%", top: "65%", size: "w-4 h-4" },
-    { Icon: NotebookPen, left: "90%", top: "55%", size: "w-5 h-5" },
-    { Icon: BookOpen, left: "25%", top: "80%", size: "w-4 h-4" },
-    { Icon: GraduationCap, left: "75%", top: "75%", size: "w-4 h-4" },
-  ];
-
-  return (
-    <div ref={elRef} className="absolute inset-0 pointer-events-none overflow-hidden">
-      {/* Floating student icons */}
-      {floatingIcons.map((item, i) => (
-        <div
-          key={`icon-${i}`}
-          className={`float-item absolute ${item.size} text-white/15`}
-          style={{ left: item.left, top: item.top }}
-        >
-          <item.Icon className="w-full h-full" />
-        </div>
-      ))}
-      {/* Small dots */}
-      {Array.from({ length: 15 }).map((_, i) => (
-        <div
-          key={`dot-${i}`}
-          className="dot absolute w-1 h-1 rounded-full bg-white/30"
-          style={{
-            left: `${5 + (i * 6.3)}%`,
-            top: `${10 + ((i * 17) % 75)}%`,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
 /* ─── Navigation (transparent over gradient) ─── */
 function Navigation() {
-  const navRef = useRef(null);
   const { status } = useSession();
 
-  useGSAP(() => {
-    if (prefersReducedMotion()) return;
-    gsap.from(navRef.current, {
-      y: -20,
-      opacity: 0,
-      duration: 0.8,
-      ease: "power2.out",
-      delay: 0.1,
-    });
-  }, { scope: navRef });
-
   return (
-    <nav ref={navRef} className="absolute top-0 left-0 right-0 z-50 w-full">
+    <nav className="absolute top-0 left-0 right-0 z-50 w-full">
       <div className="max-w-[1200px] mx-auto px-6 flex items-center justify-between h-16">
         {/* Logo */}
         <Link href="/" aria-label="StudyFlow home" className="flex items-center gap-2 rounded-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">
@@ -201,176 +103,8 @@ function Navigation() {
 
 /* ─── Main Page ─── */
 export default function LandingPage() {
-  const container = useRef(null);
-
-  useGSAP(() => {
-    // ═══ HERO ANIMATIONS ═══
-    // Cards show immediately — no waiting
-    gsap.set(".hero-cards-wrapper", { opacity: 1 });
-    if (prefersReducedMotion()) return;
-    gsap.from(".before-card", {
-      x: -20, rotation: -5, opacity: 0, duration: 0.6, ease: "power2.out", delay: 0.1,
-    });
-    gsap.from(".after-card", {
-      x: 20, rotation: 5, opacity: 0, duration: 0.6, ease: "power2.out", delay: 0.2,
-    });
-
-    const heroTl = gsap.timeline({ defaults: { ease: "power3.out" } });
-    heroTl
-      .from(".hero-headline", {
-        y: 50,
-        opacity: 0,
-        duration: 1,
-        delay: 0.15,
-      })
-      .from(".hero-sub", {
-        y: 25,
-        opacity: 0,
-        duration: 0.8,
-      }, "-=0.6")
-      .from(".hero-cta", {
-        y: 15,
-        opacity: 0,
-        scale: 0.95,
-        duration: 0.6,
-      }, "-=0.4");
-
-    // Parallax on hero cards as user scrolls
-    gsap.to(".hero-cards-wrapper", {
-      scrollTrigger: {
-        trigger: ".hero-section",
-        start: "top top",
-        end: "bottom top",
-        scrub: 1,
-      },
-      y: -60,
-      ease: "none",
-    });
-
-    // ═══ BOOK FLIP ANIMATION on feature cards ═══
-    gsap.utils.toArray<HTMLElement>(".feature-card").forEach((card) => {
-      gsap.from(card, {
-        scrollTrigger: { trigger: card, start: "top 85%" },
-        rotationY: 8,
-        opacity: 0,
-        y: 40,
-        duration: 1,
-        ease: "power3.out",
-        transformPerspective: 800,
-        transformOrigin: "left center",
-      });
-    });
-
-    // ═══ BOOK PAGE TURN on step cards ═══
-    gsap.from(".step-card", {
-      scrollTrigger: { trigger: ".steps-grid", start: "top 80%" },
-      rotationY: -15,
-      opacity: 0,
-      x: -30,
-      duration: 0.9,
-      stagger: 0.2,
-      ease: "power3.out",
-      transformPerspective: 1000,
-      transformOrigin: "right center",
-    });
-
-    // ═══ STATS ANIMATIONS ═══
-    gsap.from(".stat-item", {
-      scrollTrigger: { trigger: ".stats-section", start: "top 85%" },
-      y: 40,
-      opacity: 0,
-      duration: 0.7,
-      stagger: 0.12,
-      ease: "power2.out",
-    });
-
-    // Animate stat numbers counting up
-    document.querySelectorAll<HTMLElement>(".stat-number").forEach((el) => {
-      const target = parseFloat(el.dataset.value || "0");
-      const obj = { val: 0 };
-      ScrollTrigger.create({
-        trigger: el,
-        start: "top 85%",
-        onEnter: () => {
-          gsap.to(obj, {
-            val: target,
-            duration: 1.5,
-            ease: "power2.out",
-            onUpdate: () => {
-              el.textContent = (el.dataset.prefix || "") + (el.dataset.suffix === "%" ? Math.round(obj.val) + "%" : (obj.val % 1 === 0 ? Math.round(obj.val) : obj.val.toFixed(0)) + (el.dataset.suffix || ""));
-            },
-          });
-        },
-        once: true,
-      });
-    });
-
-    // ═══ SECTION HEADINGS — typewriter-like reveal ═══
-    gsap.utils.toArray<HTMLElement>(".section-heading").forEach((el) => {
-      gsap.from(el, {
-        scrollTrigger: { trigger: el, start: "top 85%" },
-        y: 40,
-        opacity: 0,
-        duration: 0.9,
-        ease: "power3.out",
-      });
-    });
-
-    // Feature card images scale in with a slight book-open effect
-    gsap.utils.toArray<HTMLElement>(".feature-img").forEach((el) => {
-      gsap.from(el, {
-        scrollTrigger: { trigger: el, start: "top 88%" },
-        scaleY: 0.85,
-        opacity: 0,
-        duration: 0.8,
-        ease: "power2.out",
-        transformOrigin: "bottom center",
-      });
-    });
-
-    // Step numbers pop like stamps
-    gsap.from(".step-number", {
-      scrollTrigger: { trigger: ".steps-grid", start: "top 80%" },
-      scale: 3,
-      opacity: 0,
-      duration: 0.5,
-      stagger: 0.2,
-      ease: "back.out(1.5)",
-      delay: 0.4,
-    });
-
-    // ═══ PRODUCT IMAGE ═══
-    gsap.from(".product-image", {
-      scrollTrigger: { trigger: ".product-image", start: "top 85%" },
-      y: 60,
-      opacity: 0,
-      scale: 0.96,
-      duration: 1.2,
-      ease: "power2.out",
-    });
-
-    // ═══ CTA BANNER ═══
-    const ctaTl = gsap.timeline({
-      scrollTrigger: { trigger: ".cta-section", start: "top 80%" },
-    });
-    ctaTl
-      .from(".cta-heading", { y: 40, opacity: 0, duration: 0.9, ease: "power3.out" })
-      .from(".cta-sub", { y: 30, opacity: 0, duration: 0.7, ease: "power2.out" }, "-=0.5")
-      .from(".cta-btn", { y: 20, opacity: 0, scale: 0.95, duration: 0.6, ease: "back.out(1.3)" }, "-=0.3");
-
-    // ═══ FOOTER ═══
-    gsap.from(".footer-content", {
-      scrollTrigger: { trigger: "footer", start: "top 90%" },
-      y: 30,
-      opacity: 0,
-      duration: 0.8,
-      ease: "power2.out",
-    });
-
-  }, { scope: container });
-
   return (
-    <div ref={container} className="landing-page min-h-screen overflow-x-hidden">
+    <div className="landing-page min-h-screen overflow-x-hidden">
 
       {/* ═══════ HERO: Sky Gradient with outer padding ═══════ */}
       <div className="landing-surface p-2 md:p-3">
@@ -379,7 +113,6 @@ export default function LandingPage() {
           style={{ background: "var(--landing-hero)" }}
         >
           <Navigation />
-          <FloatingElements />
 
         {/* Centered content */}
         <div className="relative z-10 text-center px-6 pt-20 pb-0 flex-1 flex flex-col items-center justify-center">
