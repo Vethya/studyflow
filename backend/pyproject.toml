@@ -22,6 +22,7 @@ dependencies = [
   "sqlalchemy[asyncio]>=2.0.36,<3",
   "uvicorn[standard]>=0.34,<1",
   "pyjwt[crypto]>=2.10,<3",
+  "markupsafe>=2.1,<4",
 ]
 
 [dependency-groups]

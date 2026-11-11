@@ -1,10 +1,14 @@
 """Replaceable delivery for authentication-only emails."""
 
 from email.message import EmailMessage
+from email.utils import formataddr
 from typing import Protocol
 from urllib.parse import urlencode
 
 import aiosmtplib
+from markupsafe import Markup
+
+from studyflow.mail.layout import LIGHT, button, fallback_link, heading, paragraph, render_layout
 
 
 class EmailTransport(Protocol):
@@ -54,28 +58,85 @@ class SmtpAuthenticationEmailSender:
 
     async def send_verification(self, email: str, token: str) -> None:
         query = urlencode({"token": token})
-        verification_url = f"{self._public_app_url}/verify-email?{query}"
-        message = EmailMessage()
-        message["To"] = email
-        message["From"] = self._from_address
-        message["Subject"] = "Verify your StudyFlow email"
-        message.set_content(
-            "Verify your StudyFlow email using this single-use link:\n\n"
-            f"{verification_url}\n\n"
-            "This link expires in eight hours."
+        url = f"{self._public_app_url}/verify-email?{query}"
+        await self._send(
+            email,
+            subject="Confirm your email for StudyFlow",
+            title="Confirm your email",
+            preheader="One click to finish setting up your account. The link works for 8 hours.",
+            body=heading("Confirm your email")
+            + paragraph(
+                "Confirm this address and you can start adding coursework. StudyFlow will plan "
+                "your study sessions around the hours you're free.",
+                top=14,
+            )
+            + button("Confirm email", url)
+            + paragraph("The link works for 8 hours.", size=14)
+            + fallback_link(url),
+            text="Confirm your email\n\nConfirm this address and you can start adding coursework."
+            f"\n\nConfirm email:\n{url}\n\nThe link works for 8 hours.\n\n"
+            "If you didn't sign up for StudyFlow, ignore this email "
+            "and no account will be activated.",
+            reason=f"You're getting this because someone signed up for StudyFlow with {email}. "
+            "If it wasn't you, ignore this email and no account will be activated.",
         )
-        await self._transport.send(message)
 
     async def send_password_reset(self, email: str, token: str) -> None:
         query = urlencode({"token": token})
-        reset_url = f"{self._public_app_url}/reset-password?{query}"
+        url = f"{self._public_app_url}/reset-password?{query}"
+        await self._send(
+            email,
+            subject="Reset your StudyFlow password",
+            title="Reset your password",
+            preheader="Use this link within the hour. If you didn't ask for it, nothing changes.",
+            body=heading("Reset your password")
+            + paragraph(
+                "Someone asked to reset the password for your StudyFlow account. "
+                "Choose a new one with the button below.",
+                top=14,
+            )
+            + button("Choose a new password", url)
+            + paragraph("The link works for 1 hour.", size=14)
+            + paragraph(
+                Markup(
+                    '<strong class="sf-ink" style="color:{};">Didn\'t ask for this?</strong> '
+                ).format(LIGHT["ink"])
+                + "Ignore this email. Your password stays the same.",
+                size=14,
+                top=24,
+            )
+            + fallback_link(url),
+            text="Reset your password\n\nSomeone asked to reset the password for your StudyFlow "
+            f"account.\n\nChoose a new password:\n{url}\n\nThis link expires in one hour.\n\n"
+            "Didn't ask for this? Ignore this email. Your password stays the same.",
+            reason=f"Sent to {email} because a password reset was requested for this account. "
+            "StudyFlow will never ask for your password by email.",
+        )
+
+    async def _send(
+        self,
+        email: str,
+        *,
+        subject: str,
+        title: str,
+        preheader: str,
+        body: Markup,
+        text: str,
+        reason: str,
+    ) -> None:
         message = EmailMessage()
         message["To"] = email
-        message["From"] = self._from_address
-        message["Subject"] = "Reset your StudyFlow password"
-        message.set_content(
-            "Reset your StudyFlow password using this single-use link:\n\n"
-            f"{reset_url}\n\n"
-            "This link expires in one hour. Ignore this email if you did not request it."
+        message["From"] = formataddr(("StudyFlow", self._from_address))
+        message["Subject"] = subject
+        message.set_content(text)
+        message.add_alternative(
+            render_layout(
+                title=title,
+                preheader=preheader,
+                body=body,
+                reason=reason,
+                public_app_url=self._public_app_url,
+            ),
+            subtype="html",
         )
         await self._transport.send(message)
