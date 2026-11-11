@@ -1,18 +1,13 @@
 // @vitest-environment jsdom
-import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({ status: "loading" }));
-
 vi.mock("@/hooks/use-session", () => ({ useSession: () => ({ status: state.status }) }));
-vi.mock("next/image", () => ({ default: (props: React.ImgHTMLAttributes<HTMLImageElement>) => {
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img alt="" {...props} />;
-} }));
 
 import LandingPage from "./page";
 import { NavAuth } from "@/components/landing/nav-auth";
+import { demoCapacity, demoDays } from "@/components/landing/demo-data";
 
 beforeEach(() => { state.status = "loading"; });
 afterEach(cleanup);
@@ -23,7 +18,11 @@ describe("landing page", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Know if your week fits" })).toBeTruthy();
     expect(screen.getAllByText("Get started for free").length).toBeGreaterThan(0);
     expect(screen.getByText("Coming soon")).toBeTruthy();
-    expect(screen.getByText("Your real hours, not an ideal week.")).toBeTruthy();
+    const features = within(container.querySelector<HTMLElement>("#features")!);
+    for (const name of ["Tell it when you’re free", "Add your coursework", "Find the hours you’re short"]) {
+      expect(features.getByRole("heading", { level: 3, name })).toBeTruthy();
+    }
+    expect(screen.getByRole("heading", { name: "Stop finding out the night before" })).toBeTruthy();
     expect(screen.getByText("How StudyFlow works")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Sign up for free" }).getAttribute("href")).toBe("/register");
     for (const [name, href] of [["Features", "#features"], ["How it works", "#how-it-works"], ["Pricing", "#pricing"]]) {
@@ -34,26 +33,37 @@ describe("landing page", () => {
     }
     expect(container.querySelector("a button")).toBeNull();
     expect(screen.getByRole("link", { name: "See how it works" }).getAttribute("href")).toBe("#features");
-    expect(container.querySelectorAll("img")).toHaveLength(3);
+    expect(container.querySelector("img")).toBeNull();
   });
 
-  it("describes the hero product preview with inert visual content", () => {
+  it("describes each product preview with inert visual content", () => {
     const { container } = render(<LandingPage />);
-    const label = "This week: 18 hours of coursework, 14 hours available, 4 hours short. Start the essay on Tuesday to catch up.";
-    const preview = screen.getByRole("img", { name: label });
-    expect(container.querySelectorAll('[role="img"] > div[inert]')).toHaveLength(1);
-    expect(preview.hasAttribute("inert")).toBe(false);
-    expect(preview.firstElementChild?.hasAttribute("inert")).toBe(true);
-    expect(screen.getByText("18h")).toBeTruthy();
-    expect(screen.getByText("14h")).toBeTruthy();
-    expect(screen.getByText("4h short this week.")).toBeTruthy();
+    const labels = [
+      "This week: 18 hours of coursework, 14 hours available, 4 hours short. Start the essay on Tuesday to catch up.",
+      "Free hours for Monday to Friday, with Wednesday blocked for a midterm and two study sessions.",
+      "Four tasks due this week totalling 18 hours, with daily workload and deadlines.",
+      "This week: 18 hours of work against 14 hours of study time, with 4 hours short. Your Linear Algebra problem set needs 3 more hours than you have before Friday.",
+    ];
+    expect(container.querySelectorAll('[role="img"]')).toHaveLength(4);
+    expect(container.querySelectorAll('[role="img"] > div[inert]')).toHaveLength(4);
+    for (const label of labels) {
+      const preview = screen.getByRole("img", { name: label });
+      expect(preview.hasAttribute("inert")).toBe(false);
+      expect(preview.firstElementChild?.hasAttribute("inert")).toBe(true);
+    }
+    expect(demoDays.reduce((sum, day) => sum + day.free, 0)).toBe(demoCapacity.available);
+    expect(demoDays.reduce((sum, day) => sum + day.planned, 0)).toBe(demoCapacity.committed);
+    const hero = within(screen.getByRole("img", { name: labels[0] }));
+    expect(hero.getByText("18h")).toBeTruthy();
+    expect(hero.getByText("14h")).toBeTruthy();
+    expect(hero.getByText("4h short this week.")).toBeTruthy();
   });
 
   it("applies staggered hero motion and section reveals", () => {
     const { container } = render(<LandingPage />);
     const heroElements = container.querySelectorAll<HTMLElement>(".landing-rise");
     expect(Array.from(heroElements, (element) => element.style.getPropertyValue("--landing-delay"))).toEqual(["", "120ms", "240ms", "360ms"]);
-    expect(container.querySelectorAll(".landing-reveal")).toHaveLength(9);
+    expect(container.querySelectorAll(".landing-reveal")).toHaveLength(12);
   });
 
   it("keeps the landing wrapper from becoming a scroll container", () => {

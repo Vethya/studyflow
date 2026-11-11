@@ -578,6 +578,20 @@ html.amoled {
     box-shadow: var(--landing-shadow-hover);
   }
 
+  /* Scale the complete timetable without measuring the app's main element. */
+  .landing-week-grid {
+    zoom: 0.75;
+  }
+
+  .landing-week-grid [role="region"] {
+    max-height: none;
+    overflow: clip;
+  }
+
+  .landing-week-grid [role="region"] > div {
+    min-width: 0 !important;
+  }
+
   /* Content is visible by default, including when motion is unsupported. */
   @media (prefers-reduced-motion: no-preference) {
     @keyframes landing-rise {

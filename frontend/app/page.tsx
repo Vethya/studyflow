@@ -1,12 +1,13 @@
 import type { CSSProperties } from "react";
 import Link from "next/link";
-import Image from "next/image";
-import { Calendar, BarChart3, Clock, Sparkles, Target, Check } from "@/components/icons";
+import { Calendar, BarChart3, BookOpen, Clock, Sparkles, Target, Check } from "@/components/icons";
 import { BrandIcon } from "@/components/brand-icon";
 import { CapacityBar } from "@/components/capacity-bar";
+import { WeekLoad } from "@/components/week-load";
+import { WeekGrid } from "@/components/week-grid";
 import { NavAuth } from "@/components/landing/nav-auth";
 import { ProductPreview } from "@/components/landing/product-preview";
-import { demoCapacity } from "@/components/landing/demo-data";
+import { demoCapacity, demoColumns, demoBlocks, demoDays, demoTasks } from "@/components/landing/demo-data";
 
 const PLANS = [
   {
@@ -120,65 +121,72 @@ export default function LandingPage() {
         </section>
       </div>
 
-      {/* ═══════ Section Heading ═══════ */}
-      <section className="landing-canvas pt-28 pb-8">
-        <div className="max-w-[1200px] mx-auto px-6 text-center">
-          <h2 className="landing-reveal font-[family-name:var(--font-display)] text-[36px] md:text-[44px] font-semibold tracking-[-0.04em] landing-ink leading-[1.1]">
-Most students find out too late
-          </h2>
-        </div>
-      </section>
-
-      {/* ═══════ Feature Cards (2-column) ═══════ */}
-      <section id="features" className="landing-canvas py-16">
-        <div className="feature-grid max-w-[1200px] mx-auto px-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Card 1: Scheduling */}
-          <div className="feature-card landing-surface landing-card-shadow rounded-[18px] border landing-border p-10 md:p-12 transition-shadow duration-500">
-            <div className="flex items-center gap-2 mb-6">
-              <div className="px-3 py-1 rounded-full border landing-ink-border text-[12px] font-medium tracking-[-0.01em] landing-ink flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 landing-accent" />
-                Schedule
-              </div>
-            </div>
-            <h3 className="font-[family-name:var(--font-display)] text-[24px] md:text-[28px] font-semibold tracking-[-0.04em] landing-ink leading-[1.2] mb-4">
-Your real hours, not an ideal week.
-            </h3>
-            <p className="text-[16px] landing-muted leading-[1.5] tracking-[-0.01em] mb-8">
-Set the weekly windows you are genuinely free to study, then block out the trips, shifts and exam days that take them back. That, minus the interruptions, is your capacity.
+      <section id="features" className="landing-canvas py-20 md:py-28">
+        <div className="mx-auto max-w-[1200px] px-6">
+          <div className="landing-reveal mx-auto mb-16 max-w-[680px] text-center md:mb-24">
+            <h2 className="mb-6 font-[family-name:var(--font-display)] text-[36px] font-semibold leading-[1.1] tracking-[-0.04em] md:text-[44px]">
+              Stop finding out the night before
+            </h2>
+            <p className="landing-muted text-[16px] leading-[1.6] md:text-[18px]">
+              Add your free hours and your coursework. StudyFlow checks if it all fits, and tells you weeks ahead when it doesn’t.
             </p>
-            <div className="feature-img rounded-[12px] overflow-hidden border landing-border">
-              <Image
-                src="/landing/feature-calendar.png"
-                alt="Schedule interface"
-                width={600}
-                height={400}
-                className="w-full h-auto"
-              />
-            </div>
           </div>
 
-          {/* Card 2: Progress */}
-          <div className="feature-card landing-surface landing-card-shadow rounded-[18px] border landing-border p-10 md:p-12 transition-shadow duration-500">
-            <div className="flex items-center gap-2 mb-6">
-              <div className="px-3 py-1 rounded-full border landing-ink-border text-[12px] font-medium tracking-[-0.01em] landing-ink flex items-center gap-1.5">
-                <BarChart3 className="w-3.5 h-3.5 landing-accent" />
-                Progress
+          <div className="space-y-16 md:space-y-24">
+            <div className="landing-reveal grid items-center gap-8 lg:grid-cols-2 lg:gap-16">
+              <div className="min-w-0">
+                <span className="landing-ink-border-soft mb-5 inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium"><Calendar className="landing-accent size-3.5" />Hours</span>
+                <h3 className="mb-4 font-[family-name:var(--font-display)] text-[28px] font-semibold leading-[1.15] tracking-[-0.04em] md:text-[32px]">Tell it when you’re free</h3>
+                <p className="landing-muted text-[16px] leading-[1.6]">Set the hours you can study each week. Block out shifts, trips and exam days, and StudyFlow works around them.</p>
+              </div>
+              <ProductPreview label="Free hours for Monday to Friday, with Wednesday blocked for a midterm and two study sessions.">
+                <div className="p-3 md:p-4">
+                  <p className="mb-3 text-xs font-medium text-muted-foreground">28 September to 2 October</p>
+                  <div className="landing-week-grid">
+                    <WeekGrid columns={demoColumns} blocks={demoBlocks} hourStart={9} hourEnd={17} />
+                  </div>
+                  <p className="mt-3 text-xs text-muted-foreground">Free hours in green. Wednesday is blocked for your midterm.</p>
+                </div>
+              </ProductPreview>
+            </div>
+
+            <div className="landing-reveal grid items-center gap-8 lg:grid-cols-2 lg:gap-16">
+              <div className="min-w-0 lg:col-start-2 lg:row-start-1">
+                <span className="landing-ink-border-soft mb-5 inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium"><BookOpen className="landing-accent size-3.5" />Tasks</span>
+                <h3 className="mb-4 font-[family-name:var(--font-display)] text-[28px] font-semibold leading-[1.15] tracking-[-0.04em] md:text-[32px]">Add your coursework</h3>
+                <p className="landing-muted text-[16px] leading-[1.6]">Give each task a due date and a rough estimate. StudyFlow spreads the hours across your week and shows which days are packed.</p>
+              </div>
+              <div className="min-w-0 lg:col-start-1 lg:row-start-1">
+                <ProductPreview label="Four tasks due this week totalling 18 hours, with daily workload and deadlines.">
+                  <div className="p-4 md:p-6">
+                    <h4 className="mb-3 text-sm font-semibold">Due this week</h4>
+                    <ul className="mb-5 divide-y divide-border">
+                      {demoTasks.map((task) => (
+                        <li key={task.name} className="flex items-start justify-between gap-3 py-3 text-xs">
+                          <div className="min-w-0"><p className="font-medium">{task.name}</p><p className="mt-1 text-muted-foreground">{task.course} · Due {task.due}</p></div>
+                          <span className="shrink-0 font-[family-name:var(--font-data)] tabular-nums">{task.estimate}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <WeekLoad days={demoDays} />
+                  </div>
+                </ProductPreview>
               </div>
             </div>
-            <h3 className="font-[family-name:var(--font-display)] text-[24px] md:text-[28px] font-semibold tracking-[-0.04em] landing-ink leading-[1.2] mb-4">
-Every deadline, weighed in hours.
-            </h3>
-            <p className="text-[16px] landing-muted leading-[1.5] tracking-[-0.01em] mb-8">
-Each task carries an estimate, a priority and a due date. Add them up across the next week and you have the other half of the sum — the hours you owe.
-            </p>
-            <div className="feature-img rounded-[12px] overflow-hidden border landing-border">
-              <Image
-                src="/landing/feature-progress.png"
-                alt="Progress tracking dashboard"
-                width={600}
-                height={400}
-                className="w-full h-auto"
-              />
+
+            <div className="landing-reveal grid items-center gap-8 lg:grid-cols-2 lg:gap-16">
+              <div className="min-w-0">
+                <span className="landing-ink-border-soft mb-5 inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium"><BarChart3 className="landing-accent size-3.5" />Fit</span>
+                <h3 className="mb-4 font-[family-name:var(--font-display)] text-[28px] font-semibold leading-[1.15] tracking-[-0.04em] md:text-[32px]">Find the hours you’re short</h3>
+                <p className="landing-muted text-[16px] leading-[1.6]">StudyFlow compares the hours you need with the hours you have. If you’re 4 hours short this week, you’ll know on Monday, not Friday night.</p>
+              </div>
+              <ProductPreview label="This week: 18 hours of work against 14 hours of study time, with 4 hours short. Your Linear Algebra problem set needs 3 more hours than you have before Friday.">
+                <div className="space-y-6 p-5 md:p-7">
+                  <div><p className="mb-2 text-xs text-muted-foreground">This week</p><p className="font-[family-name:var(--font-display)] text-3xl font-semibold tracking-tight text-deficit">4h short</p></div>
+                  <CapacityBar {...demoCapacity} />
+                  <p className="border-t border-border pt-4 text-sm leading-relaxed text-muted-foreground">Your Linear Algebra problem set needs 3 more hours than you have before Friday.</p>
+                </div>
+              </ProductPreview>
             </div>
           </div>
         </div>
@@ -291,21 +299,6 @@ Each task carries an estimate, a priority and a due date. Add them up across the
                 </Link>
               </div>
             ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ═══════ Full Width Product Image ═══════ */}
-      <section className="landing-surface py-28">
-        <div className="max-w-[1200px] mx-auto px-6">
-          <div className="product-image landing-card-shadow rounded-[24px] overflow-hidden">
-            <Image
-              src="/landing/hero-study-app.png"
-              alt="StudyFlow app interface"
-              width={1200}
-              height={600}
-              className="w-full h-auto"
-            />
           </div>
         </div>
       </section>

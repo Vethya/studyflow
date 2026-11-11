@@ -18,7 +18,11 @@ describe("landing page server module", () => {
     expect(preview).not.toContain(" inert");
     expect(html).toContain(`${preview}<div inert="">`);
     expect(html).toContain("4h short this week.");
-    expect(html).toContain("Your real hours, not an ideal week.");
+    expect(html).toContain("Tell it when you’re free");
+    expect(html).toContain("Add your coursework");
+    expect(html).toContain("Find the hours you’re short");
+    expect(html).toContain("Stop finding out the night before");
+    expect(html.match(/role="img"/g)).toHaveLength(4);
     expect(html).toContain("How StudyFlow works");
     expect(html).toContain("Simple pricing for students");
     expect(html).toContain("Know now, not in week nine.");
